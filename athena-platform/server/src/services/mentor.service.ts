@@ -88,7 +88,31 @@ export interface MentorFilters {
   maxRate?: number;
   available?: boolean;
   search?: string;
+  sort?: MentorSort;
 }
+
+/**
+ * The orders the directory offers, each one a fact the platform records.
+ *
+ * The page offered "Highest Rated" as its default and three other orders, and
+ * this service read none of them, so all four showed the same list. Rating is
+ * not among these because nothing writes a rating: there is no review model,
+ * no review endpoint and no review form.
+ */
+export const MENTOR_SORTS = ['sessions', 'newest', 'price_low', 'price_high'] as const;
+export type MentorSort = (typeof MENTOR_SORTS)[number];
+
+const MENTOR_ORDER: Record<MentorSort, Prisma.MentorProfileOrderByWithRelationInput[]> = {
+  // Sessions completed is a fact the platform records (see
+  // `updateSessionStatus`), and a mentor with none is newest-first rather than
+  // buried, so a woman who joined this morning is findable.
+  sessions: [{ sessionCount: 'desc' }, { createdAt: 'desc' }],
+  newest: [{ createdAt: 'desc' }],
+  // A mentor who has not set a rate cannot be booked, so she sorts last either
+  // way rather than first as "cheapest".
+  price_low: [{ hourlyRate: { sort: 'asc', nulls: 'last' } }, { sessionCount: 'desc' }],
+  price_high: [{ hourlyRate: { sort: 'desc', nulls: 'last' } }, { sessionCount: 'desc' }],
+};
 
 /**
  * The columns a mentor profile is served with.
@@ -111,8 +135,10 @@ const PUBLIC_MENTOR_PROFILE_SELECT = {
   hourlyRate: true,
   isAvailable: true,
   sessionCount: true,
-  rating: true,
-  reviewCount: true,
+  // `rating` and `reviewCount` are no longer served. Nothing writes either —
+  // there is no review model, endpoint or form — so every card showed a filled
+  // star beside "New (0)", presenting a review system the platform does not
+  // have.
   isMonetized: true,
   stripeAccountId: true,
   createdAt: true,
@@ -222,11 +248,8 @@ export async function getMentors(
       // endpoint and no review form, so the column is null for every mentor
       // who has ever existed. Ordering by it sorted the directory by nothing
       // at all while looking like it ranked by quality, which is worse than an
-      // arbitrary order because it invites the reader to trust it. Sessions
-      // completed is a fact the platform actually records (see
-      // `updateSessionStatus`), and a mentor with none is newest-first rather
-      // than buried, so a woman who joined this morning is findable.
-      orderBy: [{ sessionCount: 'desc' }, { createdAt: 'desc' }],
+      // arbitrary order because it invites the reader to trust it.
+      orderBy: MENTOR_ORDER[filters.sort ?? 'sessions'],
     }),
     prisma.mentorProfile.count({ where }),
   ]);
@@ -289,6 +312,26 @@ export async function hasMentorProfile(userId: string): Promise<boolean> {
 }
 
 /**
+ * Pause or resume new requests on an existing mentor profile.
+ *
+ * The become-a-mentor wizard promised "you can stop taking new requests at any
+ * moment from your mentor dashboard", and nothing on the client could write
+ * `isAvailable = false`: the only writer was the wizard itself, which always
+ * sent `true`, so running it again to change a rate quietly re-listed a mentor
+ * who had gone dark. Pausing stops new bookings and the free slots; sessions
+ * already requested or confirmed are hers to keep or cancel as before.
+ */
+export async function setMentorAvailability(userId: string, isAvailable: boolean) {
+  const existing = await prisma.mentorProfile.findUnique({ where: { userId }, select: { id: true } });
+  if (!existing) {
+    throw new ApiError(404, 'You do not have a mentor profile yet');
+  }
+
+  await prisma.mentorProfile.update({ where: { userId }, data: { isAvailable } });
+  return getMentorProfile(userId);
+}
+
+/**
  * Create or update mentor profile
  */
 export async function updateMentorProfile(
@@ -317,9 +360,19 @@ export async function updateMentorProfile(
     },
   });
 
-  // Ensure user has MENTOR role
-  await prisma.user.update({
-    where: { id: userId },
+  // A plain member becomes a MENTOR. Nobody else's role is touched.
+  //
+  // This used to set role: 'MENTOR' for whoever called it, whatever she was
+  // before. `User.role` is a single value, not a set, so an ADMIN who
+  // published a mentor profile silently stopped being an admin, a MODERATOR
+  // lost the report queue, and a CREATOR, EMPLOYER or EDUCATION_PROVIDER lost
+  // whatever that role opened for her — and re-saving her rate did it again
+  // after anyone had put it back. Nothing on the platform gates on MENTOR
+  // (the profile row is what makes a mentor), so leaving a higher role alone
+  // costs nothing. updateMany with the USER condition makes the change and
+  // the check one statement.
+  await prisma.user.updateMany({
+    where: { id: userId, role: 'USER' },
     data: { role: 'MENTOR' },
   });
 
@@ -637,7 +690,7 @@ async function captureSessionHold(paymentIntentId: string): Promise<{ capturedAt
 async function cancelSessionHold(paymentIntentId: string): Promise<void> {
   const escrow = await prisma.escrowPayment.findUnique({
     where: { paymentIntentId },
-    select: { id: true },
+    select: { id: true, status: true },
   });
 
   if (!escrow) {
@@ -645,7 +698,63 @@ async function cancelSessionHold(paymentIntentId: string): Promise<void> {
     return;
   }
 
+  // Already given back — by the expiry sweep, the webhook, or an earlier
+  // attempt at this same cancellation whose session write failed. The escrow
+  // service refuses a second release with a 400, which used to land in the
+  // catch below and be reported as a hold that could not be released, when
+  // the money was already back on her card.
+  if (escrow.status === 'CANCELED' || escrow.status === 'REFUNDED') {
+    return;
+  }
+
   await cancelEscrowPayment(paymentIntentId, PLATFORM_ESCROW_ACTOR, 'Session canceled');
+}
+
+/**
+ * Tells the mentee, and the people who can release it by hand, that a
+ * cancelled session's hold on her card is still in place.
+ *
+ * The cancel path used to log this at warn and carry on. The session read
+ * CANCELED, its payment status was left at AUTHORIZED, the escrow row stayed
+ * held, and nobody was told — while the expiry sweep, which captures held rows
+ * before they lapse, could go on to take the money for a session that was
+ * called off. Best effort around each write for the same reason as
+ * notifyUncollectedSession: the cancellation itself has to land.
+ */
+async function notifyUnreleasedHold(menteeId: string, sessionId: string): Promise<void> {
+  await bestEffort('notification.mentor-cancel-release-failed', () =>
+    notificationService.notify({
+      userId: menteeId,
+      type: 'MENTOR_SESSION',
+      title: 'Your session is cancelled, but the card hold is still in place',
+      message:
+        'We could not release the hold on your card automatically. Our team has been told and will release it. You have not been charged for this session.',
+      link: `/dashboard/mentors/sessions?session=${sessionId}`,
+      channels: ['in-app', 'email'],
+    })
+  );
+
+  const admins = await bestEffort(
+    'mentor-cancel-release-failed.admin-lookup',
+    () => prisma.user.findMany({ where: { role: 'ADMIN' }, select: { id: true }, take: 5 }),
+    []
+  );
+
+  await Promise.all(
+    admins.map((admin) =>
+      bestEffort('notification.mentor-cancel-release-failed-admins', () =>
+        prisma.notification.create({
+          data: {
+            userId: admin.id,
+            type: 'SYSTEM',
+            title: 'A cancelled mentor session still holds the mentee’s money',
+            message: `Session ${sessionId} was cancelled but its card authorisation could not be released. Release it in Stripe before the expiry sweep captures it.`,
+            link: '/admin',
+          },
+        })
+      )
+    )
+  );
 }
 
 /**
@@ -795,7 +904,8 @@ export async function updateSessionStatus(
     );
   }
 
-  let paymentUpdates: Record<string, any> = {};
+  let paymentUpdates: Prisma.MentorSessionUpdateInput = {};
+  let holdStillInPlace = false;
 
   // Both branches go through the escrow service rather than calling Stripe
   // directly, so the EscrowPayment row moves with the session instead of being
@@ -813,9 +923,16 @@ export async function updateSessionStatus(
         paymentCanceledAt: new Date(),
       };
     } catch (error) {
-      // Left as a warning: an uncancelled hold expires on its own in days and
-      // the mentee is never charged, so nobody is out of pocket while it does.
-      logger.warn('Failed to cancel mentor session payment intent', {
+      // This used to be a warning on the grounds that an uncancelled hold
+      // expires on its own and the mentee is never charged. Neither half was
+      // safe to rely on: until it lapses the money is held against her card,
+      // and the expiry sweep captures held rows early rather than let them
+      // lapse. The session is still cancelled — the hour is off and the slot
+      // is free — but the payment status stays where it is, because the money
+      // has not moved, and the people who can move it are told.
+      holdStillInPlace = true;
+      recordFailure('mentor.session.cancel-release', error);
+      logger.error('Could not release a cancelled mentor session’s hold; the mentee’s card is still held', {
         sessionId,
         paymentIntentId: session.stripePaymentIntentId,
         error: (error as Error).message,
@@ -876,14 +993,32 @@ export async function updateSessionStatus(
       : []),
   ]);
 
+  if (holdStillInPlace) {
+    await notifyUnreleasedHold(session.menteeId, sessionId);
+  }
+
+  // When the mentor closes a paid session, the mentee's card is charged at that
+  // moment, and the notice she got said only that her session's status was now
+  // COMPLETED. She is told what was taken, and where to go if the hour did not
+  // happen. (A mentee-side confirmation step before the charge needs somewhere
+  // to record a dispute, which MentorSession does not have yet.)
+  const chargedAmount = Number(session.sessionAmount);
+  const menteeWasCharged =
+    actionBy === 'mentor' &&
+    status === 'COMPLETED' &&
+    paymentUpdates.paymentStatus === 'CAPTURED' &&
+    chargedAmount > 0;
+
   // Send notification to other party
   const recipientId = actionBy === 'mentor' ? session.menteeId : session.mentorProfile.userId;
   await notificationService.notify({
     userId: recipientId,
     type: 'MENTOR_SESSION',
-    title: 'Session Updated',
-    message: `Your mentorship session status has been updated to ${status}`,
-    link: `/dashboard/mentors/sessions?session=${sessionId}`,
+    title: menteeWasCharged ? 'Your session was marked complete and paid' : 'Session Updated',
+    message: menteeWasCharged
+      ? `Your mentor marked your session on ${session.scheduledAt?.toLocaleDateString() ?? 'its booked date'} as complete, and ${chargedAmount.toFixed(2)} ${session.currency} was charged to your card. If the session did not take place, tell our support team from Help & Support so it can be refunded.`
+      : `Your mentorship session status has been updated to ${status}`,
+    link: menteeWasCharged ? '/dashboard/support' : `/dashboard/mentors/sessions?session=${sessionId}`,
     channels: ['in-app', 'email'], // Less urgent than new request?
     emailTemplate: {
         subject: `Session ${

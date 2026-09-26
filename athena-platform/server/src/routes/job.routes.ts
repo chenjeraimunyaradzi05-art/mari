@@ -3,119 +3,78 @@ import { body, query, validationResult } from 'express-validator';
 import { JobType, Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
-import { authenticate, optionalAuth, requireRole, AuthRequest } from '../middleware/auth';
+import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
-import { v4 as uuidv4 } from 'uuid';
 import { parsePagination } from '../utils/pagination';
-import { indexDocument, deleteDocument, IndexNames } from '../utils/opensearch';
 import { getRecommendedJobs, search as searchService } from '../services/search.service';
-import { notificationService } from '../services/notification.service';
-import {
-  EMPLOYER_SETTABLE_STATUSES,
-  assertEmployerStatusMove,
-} from '../services/application-status.service';
+import { notificationService, type NotificationChannel } from '../services/notification.service';
+import { assertOwnResumeUpload, hiringStaffUserIds } from '../services/hiring-access.service';
+import { claimJobView } from '../services/job-view-count.service';
+import { bestEffort } from '../utils/best-effort';
 
 const router = Router();
 
 /**
- * The columns an employer may write on her own listing.
+ * ## The employer-side job routes are gone from this file
  *
- * Both the create and the update handler used to spread the request body
- * straight into Prisma. `Job` carries two placement columns the schema is
- * explicit about — isSponsored means the employer paid and the placement has
- * to be labelled as advertising, isFeatured is editorial curation with no
- * money attached, and conflating the two "is how a marketplace loses trust" —
- * so any employer could hand herself both by adding them to the PATCH body.
- * The same spread let her set `organizationId` to any other organisation's id,
- * which republishes her listing under that company's name, logo and safety
- * score, and let her write `viewCount`, `applicationCount` and `publishedAt`,
- * which are the platform's own counters and the employer analytics page reads
- * them back as fact.
+ * POST /api/jobs, PATCH /api/jobs/:id, POST /api/jobs/:id/publish,
+ * GET /api/jobs/:id/applications and PATCH /api/jobs/:jobId/applications/:id
+ * used to live here as a second employer API beside the console's
+ * (employer.routes.ts). Nothing on the web or in the app called any of them,
+ * and they had drifted from the console's rules: the applicant list and the
+ * status route authorised on `postedById` alone, a fact that never changes,
+ * so a recruiter taken off a company's team — or whose posting rights were
+ * turned off — could still read the cover letters and résumé links of every
+ * candidate for every job she had ever posted, and could still move those
+ * candidates through the pipeline in the company's name. Two copies of a
+ * permission rule is how one of them ends up wrong, so the copy nobody used
+ * was removed rather than patched. The employer console is the one door:
+ * GET /api/employer/organizations/:orgId/applications,
+ * PATCH /api/employer/applications/:applicationId/status and the job routes
+ * beside them, all behind hiring-access.service.
  *
- * The twin route in employer.routes.ts has had an allowlist since it was
- * written; this is the same list, kept deliberately in the same order so the
- * two can be read against each other. `deadline` and `skills` are handled
- * separately below because they need converting rather than copying.
+ * What remains here is the candidate's side: search, a listing, applying,
+ * her own applications, saved jobs and recommendations.
  */
-const EMPLOYER_WRITABLE_JOB_FIELDS = [
-  'title', 'description', 'type', 'status', 'city', 'state', 'country',
-  'isRemote', 'salaryMin', 'salaryMax', 'salaryType', 'showSalary',
-  'experienceMin', 'experienceMax',
-] as const;
 
 /**
- * Copy across only what the employer is allowed to write. An unknown key is
- * dropped rather than refused, because a client sending back a whole job
- * object it just fetched — which the edit form does — would otherwise have
- * every save rejected over fields it never asked to change.
- */
-function pickWritableJobFields(body: Record<string, unknown>): Record<string, unknown> {
-  const data: Record<string, unknown> = {};
-  for (const field of EMPLOYER_WRITABLE_JOB_FIELDS) {
-    if (body[field] !== undefined) {
-      data[field] = body[field];
-    }
-  }
-  return data;
-}
-
-/**
- * Throws unless the caller may still post on this organisation's behalf.
+ * Tells the people hiring for a job that something happened to one of its
+ * applications.
  *
- * `Job.postedById` records who created the row and never changes, so a check
- * on it alone is a permission that cannot be taken away: a recruiter who left
- * the company, or whose canPostJobs flag was turned off, kept the ability to
- * edit and publish every listing she had ever posted under the company's name.
- * The employer console has always asked this question before creating a job
- * (employer.routes.ts, POST /organizations/:orgId/jobs); it now gets asked
- * again on every write that follows.
- */
-/**
- * A résumé on an application has to be a file this platform is holding for the
- * woman who applied.
+ * These notices used to go to `postedById`, the person who happened to create
+ * the listing, and linked to /jobs/:id/applications and
+ * /dashboard/jobs/:id/applications, neither of which has ever been a page. A
+ * listing under an organisation belongs to its hiring team, so the team is told
+ * and sent to the console's applicant board. A listing with no organisation
+ * (only the removed POST /api/jobs ever made those) has nobody but its poster,
+ * and no applicant board; the notice sends her to the listing itself.
  *
- * `resumeUrl` was validated as "any http(s) URL" and the validator was never
- * read, so the column would take anything at all. Two things go wrong with an
- * arbitrary link. The employer's download button hands an off-platform URL
- * straight to the browser, which turns a hiring team's click into a request to
- * a server somebody else controls, with the referrer and the timing of every
- * shortlisting decision in it. And a link to someone else's upload key would
- * attach another member's résumé to an application in her name — the media
- * download route authorises the reader, not whose file it is.
- *
- * The upload endpoint writes `resumes/<userId>/<file>`, and both the S3 and
- * the local URL end with that path, so requiring the applicant's own id in it
- * is the whole check.
+ * Best effort per recipient: the candidate's action has already been saved,
+ * and one undeliverable notice must not turn it into an error for her.
  */
-function assertOwnResumeUpload(resumeUrl: string | undefined, userId: string): void {
-  if (!resumeUrl) return;
+async function notifyHiringTeam(
+  job: { id: string; organizationId: string | null; postedById: string },
+  notice: { title: string; message: string; channels?: NotificationChannel[] }
+): Promise<void> {
+  const recipients = job.organizationId ? await hiringStaffUserIds([job.organizationId]) : [job.postedById];
+  const link = job.organizationId
+    ? `/employer/organizations/${job.organizationId}/applications`
+    : `/dashboard/jobs/${job.id}`;
 
-  const segments = resumeUrl.split(/[?#]/)[0].split('/');
-  const fileName = segments.pop();
-  const owner = segments.pop();
-  const folder = segments.pop();
-
-  if (folder !== 'resumes' || owner !== userId || !fileName) {
-    throw new ApiError(
-      400,
-      'Attach a résumé by uploading it here rather than linking to one elsewhere.'
-    );
-  }
-}
-
-async function assertCanPostForOrganization(organizationId: string, userId: string) {
-  const membership = await prisma.organizationMember.findUnique({
-    where: { organizationId_userId: { organizationId, userId } },
-    select: { role: true, canPostJobs: true },
-  });
-
-  if (!membership) {
-    throw new ApiError(403, 'You are no longer a member of the organisation that posted this job');
-  }
-
-  if (!membership.canPostJobs && membership.role !== 'OWNER' && membership.role !== 'ADMIN') {
-    throw new ApiError(403, 'You do not have permission to post jobs for this organisation');
-  }
+  await Promise.all(
+    recipients.map((userId) =>
+      bestEffort('notification.job-hiring-team', () =>
+        notificationService.notify({
+          userId,
+          type: 'APPLICATION_UPDATE',
+          title: notice.title,
+          message: notice.message,
+          link,
+          channels: notice.channels ?? ['in-app'],
+        })
+      )
+    )
+  );
 }
 
 // ===========================================
@@ -399,11 +358,40 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
       throw new ApiError(404, 'Job not found');
     }
 
-    // Increment view count
-    await prisma.job.update({
-      where: { id },
-      data: { viewCount: { increment: 1 } },
+    // Counted once per viewer per day, for a live listing, and not for the
+    // company looking at its own ad. See job-view-count.service for what this
+    // figure feeds and why every request used to move it.
+    const viewerIsStaff = req.user
+      ? job.postedById === req.user.id ||
+        (job.organizationId
+          ? Boolean(
+              await prisma.organizationMember.findFirst({
+                where: { organizationId: job.organizationId, userId: req.user.id },
+                select: { id: true },
+              })
+            )
+          : false)
+      : false;
+
+    const counts = await claimJobView({
+      jobId: id,
+      jobStatus: job.status,
+      viewerId: req.user?.id,
+      viewerIsStaff,
+      ip: req.ip,
+      userAgent: req.get('user-agent'),
     });
+
+    if (counts) {
+      // The listing is already in hand, so a failed counter write is a lost
+      // view, not a failed page.
+      await bestEffort('job.view-count', () =>
+        prisma.job.update({
+          where: { id },
+          data: { viewCount: { increment: 1 } },
+        })
+      );
+    }
 
     // Check if user has applied
     let hasApplied = false;
@@ -417,7 +405,11 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
           },
         },
       });
-      hasApplied = !!application;
+      // A withdrawn application can be reopened (see the apply route), so it
+      // does not count as having applied: the page draws its Apply button from
+      // this, and "Applied" on a job she withdrew from would be a door shut
+      // that is in fact open.
+      hasApplied = !!application && application.status !== 'WITHDRAWN';
     }
 
     res.json({
@@ -427,282 +419,6 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
         hasApplied,
         application,
       },
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// ===========================================
-// CREATE JOB (Employers Only)
-// ===========================================
-router.post(
-  '/',
-  authenticate,
-  requireRole('EMPLOYER', 'ADMIN'),
-  [
-    body('title').notEmpty().trim(),
-    body('description').notEmpty(),
-    body('type').isIn(['FULL_TIME', 'PART_TIME', 'CONTRACT', 'CASUAL', 'INTERNSHIP', 'APPRENTICESHIP']),
-    body('city').optional().trim(),
-    body('state').optional().trim(),
-    body('isRemote').optional().isBoolean(),
-    body('salaryMin').optional().isInt({ min: 0 }),
-    body('salaryMax').optional().isInt({ min: 0 }),
-    body('experienceMin').optional().isInt({ min: 0 }),
-    body('experienceMax').optional().isInt({ min: 0 }),
-    body('skills').optional().isArray(),
-    body('deadline').optional().isISO8601(),
-  ],
-  async (req: AuthRequest, res: Response, next: NextFunction) => {
-    try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        throw new ApiError(400, errors.array()[0].msg);
-      }
-
-      const {
-        skills, title, description, type, city, state, country, isRemote,
-        salaryMin, salaryMax, salaryType, showSalary,
-        experienceMin, experienceMax, deadline,
-      } = req.body;
-
-      // Generate slug
-      const slug = `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${uuidv4().slice(0, 8)}`;
-
-      const job = await prisma.job.create({
-        data: {
-          title,
-          description,
-          type,
-          city,
-          state,
-          country: country || 'Australia',
-          isRemote: isRemote ?? false,
-          salaryMin,
-          salaryMax,
-          salaryType,
-          showSalary: showSalary ?? true,
-          experienceMin,
-          experienceMax,
-          slug,
-          postedById: req.user!.id,
-          // A listing starts as a draft whatever the body says, so the publish
-          // route below — and the organisation permission check in it — cannot
-          // be skipped by posting `status: 'ACTIVE'` at creation time.
-          status: 'DRAFT',
-          deadline: deadline ? new Date(deadline) : null,
-        },
-      });
-
-      // Add skills if provided - batch operation to avoid N+1 queries
-      if (skills && skills.length > 0) {
-        const normalizedSkills = skills.map((s: string) => s.toLowerCase());
-        
-        // Find existing skills in one query
-        const existingSkills = await prisma.skill.findMany({
-          where: { name: { in: normalizedSkills } },
-        });
-        const existingSkillNames = new Set(existingSkills.map(s => s.name));
-        
-        // Create missing skills in batch
-        const missingSkillNames = normalizedSkills.filter((name: string) => !existingSkillNames.has(name));
-        if (missingSkillNames.length > 0) {
-          await prisma.skill.createMany({
-            data: missingSkillNames.map((name: string) => ({ name })),
-            skipDuplicates: true,
-          });
-        }
-        
-        // Fetch all skills (including newly created ones)
-        const allSkills = await prisma.skill.findMany({
-          where: { name: { in: normalizedSkills } },
-        });
-        
-        // Create job-skill associations in batch
-        await prisma.jobSkill.createMany({
-          data: allSkills.map(skill => ({
-            jobId: job.id,
-            skillId: skill.id,
-          })),
-          skipDuplicates: true,
-        });
-      }
-
-      // Index in OpenSearch
-      await indexDocument(IndexNames.JOBS, job.id, {
-        title: job.title,
-        description: job.description,
-        jobType: job.type,
-        salaryMin: job.salaryMin,
-        salaryMax: job.salaryMax,
-        isRemote: job.isRemote,
-        isDraft: true,
-        companyName: null, // Need to fetch or pass this if available
-        city: job.city,
-        state: job.state,
-        skills: skills || [],
-        createdAt: job.createdAt,
-      });
-
-      res.status(201).json({
-        success: true,
-        message: 'Job created as draft',
-        data: job,
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-);
-
-// ===========================================
-// UPDATE JOB
-// ===========================================
-router.patch(
-  '/:id',
-  authenticate,
-  [
-    body('title').optional().notEmpty().trim(),
-    body('description').optional().notEmpty(),
-    body('type').optional().isIn(['FULL_TIME', 'PART_TIME', 'CONTRACT', 'CASUAL', 'INTERNSHIP', 'APPRENTICESHIP']),
-    body('status').optional().isIn(['DRAFT', 'ACTIVE', 'PAUSED', 'CLOSED', 'EXPIRED']),
-    body('isRemote').optional().isBoolean(),
-    body('showSalary').optional().isBoolean(),
-    body('salaryMin').optional({ nullable: true }).isInt({ min: 0 }),
-    body('salaryMax').optional({ nullable: true }).isInt({ min: 0 }),
-    body('experienceMin').optional({ nullable: true }).isInt({ min: 0 }),
-    body('experienceMax').optional({ nullable: true }).isInt({ min: 0 }),
-  ],
-  async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      throw new ApiError(400, errors.array()[0].msg);
-    }
-
-    const { id } = req.params;
-
-    // Check ownership
-    const existingJob = await prisma.job.findUnique({
-      where: { id },
-      select: { postedById: true, organizationId: true, status: true },
-    });
-
-    if (!existingJob) {
-      throw new ApiError(404, 'Job not found');
-    }
-
-    if (existingJob.postedById !== req.user!.id && req.user!.role !== 'ADMIN') {
-      throw new ApiError(403, 'Not authorized to update this job');
-    }
-
-    // Posting rights belong to the organisation, not to whoever happened to
-    // create the row. A recruiter whose canPostJobs was revoked, or who was
-    // taken off the team entirely, kept full edit rights over every listing
-    // she had ever posted because this route only ever asked about postedById.
-    if (existingJob.organizationId && req.user!.role !== 'ADMIN') {
-      await assertCanPostForOrganization(existingJob.organizationId, req.user!.id);
-    }
-
-    const updateData = pickWritableJobFields(req.body);
-
-    // Taking a draft live through the generic update has to record the same
-    // publication timestamp the publish route does, or the listing sorts to
-    // the bottom of "most recent" forever.
-    if (updateData.status === 'ACTIVE' && existingJob.status !== 'ACTIVE') {
-      updateData.publishedAt = new Date();
-    }
-
-    const job = await prisma.job.update({
-      where: { id },
-      data: updateData,
-      include: { organization: true, skills: { include: { skill: true } } }
-    });
-
-    // Update index
-    await indexDocument(IndexNames.JOBS, job.id, {
-      title: job.title,
-      description: job.description,
-      jobType: job.type,
-      salaryMin: job.salaryMin,
-      salaryMax: job.salaryMax,
-      isRemote: job.isRemote,
-      isDraft: job.status === 'DRAFT',
-      companyName: job.organization?.name,
-      city: job.city,
-      state: job.state,
-      skills: job.skills.map(js => js.skill.name),
-      createdAt: job.createdAt,
-    });
-
-    res.json({
-      success: true,
-      message: 'Job updated',
-      data: job,
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// ===========================================
-// PUBLISH JOB
-// ===========================================
-router.post('/:id/publish', authenticate, async (req: AuthRequest, res, next) => {
-  try {
-    const { id } = req.params;
-
-    const existingJob = await prisma.job.findUnique({
-      where: { id },
-    });
-
-    if (!existingJob) {
-      throw new ApiError(404, 'Job not found');
-    }
-
-    if (existingJob.postedById !== req.user!.id && req.user!.role !== 'ADMIN') {
-      throw new ApiError(403, 'Not authorized');
-    }
-
-    // Publishing under an organisation's name needs the organisation's
-    // permission, the same check that gated the listing's creation. Without
-    // it, a recruiter who had been removed from the company could still take
-    // her old drafts live under that company's name and logo.
-    if (existingJob.organizationId && req.user!.role !== 'ADMIN') {
-      await assertCanPostForOrganization(existingJob.organizationId, req.user!.id);
-    }
-
-    const job = await prisma.job.update({
-      where: { id },
-      data: {
-        status: 'ACTIVE',
-        publishedAt: new Date(),
-      },
-      include: { organization: true, skills: { include: { skill: true } } }
-    });
-
-    // Update index to mark as active
-    await indexDocument(IndexNames.JOBS, job.id, {
-      title: job.title,
-      description: job.description,
-      jobType: job.type,
-      salaryMin: job.salaryMin,
-      salaryMax: job.salaryMax,
-      isRemote: job.isRemote,
-      isDraft: false,
-      publishedAt: job.publishedAt,
-      companyName: job.organization?.name,
-      city: job.city,
-      state: job.state,
-      skills: job.skills.map(js => js.skill.name),
-      createdAt: job.createdAt,
-    });
-
-    res.json({
-      success: true,
-      message: 'Job published',
-      data: job,
     });
   } catch (error) {
     next(error);
@@ -766,35 +482,55 @@ router.post(
         },
       });
 
-      if (existingApplication) {
+      // One application per person per job is a database constraint, and
+      // withdrawing keeps the row so the employer's pipeline keeps its history.
+      // Together those used to make a withdrawal final: a woman who pulled out
+      // by mistake, or who applied with the wrong résumé and withdrew to fix
+      // it, was told she had "already applied" for ever. A withdrawn
+      // application is reopened in place, with what she sends now, as a fresh
+      // application. Anything else is still an application in progress.
+      if (existingApplication && existingApplication.status !== 'WITHDRAWN') {
         throw new ApiError(400, 'You have already applied to this job');
       }
 
-      // Create application
-      const application = await prisma.jobApplication.create({
-        data: {
-          jobId: id,
-          userId: req.user!.id,
-          coverLetter,
-          resumeUrl,
-        },
-      });
+      const application = existingApplication
+        ? await prisma.jobApplication.update({
+            where: { id: existingApplication.id },
+            data: {
+              status: 'PENDING',
+              coverLetter: coverLetter ?? null,
+              resumeUrl: resumeUrl ?? null,
+              appliedAt: new Date(),
+            },
+          })
+        : await prisma.jobApplication.create({
+            data: {
+              jobId: id,
+              userId: req.user!.id,
+              coverLetter,
+              resumeUrl,
+            },
+          });
 
-      // Update application count
-      await prisma.job.update({
-        where: { id },
-        data: { applicationCount: { increment: 1 } },
-      });
+      // The count is of people who applied, and she was counted the first
+      // time.
+      if (!existingApplication) {
+        await prisma.job.update({
+          where: { id },
+          data: { applicationCount: { increment: 1 } },
+        });
+      }
 
-      // Create notification for job poster
-      await prisma.notification.create({
-        data: {
-          userId: job.postedById,
-          type: 'APPLICATION_UPDATE',
-          title: 'New application',
-          message: `Someone applied to ${job.title}`,
-          link: `/jobs/${id}/applications`,
-        },
+      // The hiring team hears about it, not whoever happened to create the
+      // listing: a recruiter who has since left the company should not keep
+      // receiving its candidates. The link used to be /jobs/:id/applications,
+      // a page that has never existed; the console's applicant board is where
+      // the team reads applications.
+      await notifyHiringTeam(job, {
+        title: existingApplication ? 'Application resubmitted' : 'New application',
+        message: existingApplication
+          ? `A candidate who had withdrawn has applied again to ${job.title}`
+          : `Someone applied to ${job.title}`,
       });
 
       res.status(201).json({
@@ -813,26 +549,58 @@ router.post(
 // ===========================================
 router.get('/me/applications', authenticate, async (req: AuthRequest, res, next) => {
   try {
-    const applications = await prisma.jobApplication.findMany({
-      where: { userId: req.user!.id },
-      include: {
-        job: {
-          include: {
-            organization: {
-              select: {
-                name: true,
-                logo: true,
+    // Paged. This returned every application she had ever made in one
+    // response, and the tracker reads `pagination.total` to say how many there
+    // are and to fetch the rest. With no limit asked for, a page is the
+    // ceiling of 100 rather than the platform default of 20: the dashboard
+    // home and the app both count this list's length today, and a default of
+    // 20 would have told a woman with thirty applications she had twenty.
+    const { page, limit } = parsePagination({
+      page: req.query.page as string | undefined,
+      limit: (req.query.limit as string | undefined) ?? '100',
+    });
+    const where = { userId: req.user!.id };
+
+    const [applications, total, byStatus] = await Promise.all([
+      prisma.jobApplication.findMany({
+        where,
+        include: {
+          job: {
+            include: {
+              organization: {
+                // `slug` because the tracker links to the company page, and
+                // without it every link resolved to /dashboard/organizations/undefined.
+                select: {
+                  name: true,
+                  logo: true,
+                  slug: true,
+                },
               },
             },
           },
         },
-      },
-      orderBy: { appliedAt: 'desc' },
-    });
+        orderBy: { appliedAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.jobApplication.count({ where }),
+      // The tracker's "Interviews" and "Offers" figures, over every
+      // application rather than the page in hand.
+      prisma.jobApplication.groupBy({ by: ['status'], where, _count: { _all: true } }),
+    ]);
 
     res.json({
       success: true,
       data: applications,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
+      summary: {
+        byStatus: Object.fromEntries(byStatus.map((row) => [row.status, row._count._all])),
+      },
     });
   } catch (error) {
     next(error);
@@ -872,7 +640,7 @@ router.patch(
 
       const application = await prisma.jobApplication.findUnique({
         where: { id: applicationId },
-        include: { job: { select: { id: true, title: true, postedById: true } } },
+        include: { job: { select: { id: true, title: true, postedById: true, organizationId: true } } },
       });
 
       // Someone else's application is reported as absent rather than forbidden.
@@ -899,183 +667,19 @@ router.patch(
 
       // The employer needs to know, the same way the candidate is notified when
       // the employer moves the application.
-      await notificationService.notify({
-        userId: application.job.postedById,
-        type: 'APPLICATION_UPDATE',
-        title: status === 'ACCEPTED' ? 'Offer accepted' : 'Application withdrawn',
-        message:
-          status === 'ACCEPTED'
-            ? `A candidate accepted your offer for ${application.job.title}.`
-            : `A candidate withdrew their application for ${application.job.title}.`,
-        link: `/dashboard/jobs/${application.job.id}/applications`,
-        channels: ['in-app', 'email'],
-      });
+      await notifyHiringTeam(
+        { ...application.job, organizationId: application.job.organizationId ?? null },
+        {
+          title: status === 'ACCEPTED' ? 'Offer accepted' : 'Application withdrawn',
+          message:
+            status === 'ACCEPTED'
+              ? `A candidate accepted your offer for ${application.job.title}.`
+              : `A candidate withdrew their application for ${application.job.title}.`,
+          channels: ['in-app', 'email'],
+        }
+      );
 
       res.json({ success: true, data: updated });
-    } catch (error) {
-      next(error);
-    }
-  }
-);
-
-// ===========================================
-// GET JOB APPLICATIONS (For Employers)
-// ===========================================
-router.get('/:id/applications', authenticate, async (req: AuthRequest, res, next) => {
-  try {
-    const { id } = req.params;
-
-    // Check ownership
-    const job = await prisma.job.findUnique({
-      where: { id },
-      select: { postedById: true },
-    });
-
-    if (!job) {
-      throw new ApiError(404, 'Job not found');
-    }
-
-    if (job.postedById !== req.user!.id && req.user!.role !== 'ADMIN') {
-      throw new ApiError(403, 'Not authorized');
-    }
-
-    // A listing that does well collects hundreds of applications, and this
-    // route used to load and serialise every one of them into a single
-    // response. The page is 50 rather than the platform-wide 20 of
-    // parsePagination because the employer screen is a long scrolling list.
-    const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10) || 50));
-
-    const [applications, total] = await Promise.all([
-      prisma.jobApplication.findMany({
-        where: { jobId: id },
-        include: {
-          user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              avatar: true,
-              headline: true,
-              currentJobTitle: true,
-              yearsExperience: true,
-            },
-          },
-        },
-        orderBy: { appliedAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      prisma.jobApplication.count({ where: { jobId: id } }),
-    ]);
-
-    // `data` is still the plain array of applications, so a caller that only
-    // reads it is unaffected; the counts it needs to page sit beside it.
-    res.json({
-      success: true,
-      data: applications,
-      pagination: {
-        page,
-        limit,
-        total,
-        pages: Math.ceil(total / limit),
-      },
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// ===========================================
-// UPDATE APPLICATION STATUS (For Employers)
-// ===========================================
-router.patch(
-  '/:jobId/applications/:applicationId',
-  authenticate,
-  [
-    body('status').isIn(EMPLOYER_SETTABLE_STATUSES),
-  ],
-  async (req: AuthRequest, res: Response, next: NextFunction) => {
-    try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        throw new ApiError(400, 'That is not a stage an employer can set');
-      }
-
-      const { jobId, applicationId } = req.params;
-      const { status } = req.body;
-
-      // Verify job ownership
-      const job = await prisma.job.findUnique({
-        where: { id: jobId },
-        select: { postedById: true, title: true },
-      });
-
-      if (!job) {
-        throw new ApiError(404, 'Job not found');
-      }
-
-      if (job.postedById !== req.user!.id && req.user!.role !== 'ADMIN') {
-        throw new ApiError(403, 'Not authorized');
-      }
-
-      // The ownership check above is about the job in the URL, and nothing tied
-      // the application to it: an employer who owned one listing could move a
-      // candidate through any other employer's pipeline — and tell her about
-      // it — simply by putting her own jobId in front of a foreign application
-      // id. A foreign application answers the same 404 a missing one does, so
-      // ids cannot be probed either.
-      const existing = await prisma.jobApplication.findUnique({
-        where: { id: applicationId },
-        select: { jobId: true, status: true },
-      });
-
-      if (!existing || existing.jobId !== jobId) {
-        throw new ApiError(404, 'Application not found');
-      }
-
-      const { changed } = assertEmployerStatusMove(existing.status, status);
-
-      if (!changed) {
-        const unchanged = await prisma.jobApplication.findUnique({ where: { id: applicationId } });
-        return res.json({
-          success: true,
-          message: 'Application already at that stage',
-          data: unchanged,
-        });
-      }
-
-      const application = await prisma.jobApplication.update({
-        where: { id: applicationId },
-        data: { status },
-        include: { user: { select: { id: true } } },
-      });
-
-      // Notify applicant
-      await notificationService.notify({
-        userId: application.user.id,
-        type: 'APPLICATION_UPDATE',
-        title: 'Application Status Updated',
-        message: `Your application for ${job.title} is now ${status}`,
-        link: `/dashboard/applications`,
-        channels: ['in-app', 'email'],
-        emailTemplate: {
-          subject: `Application Update: ${job.title}`,
-          html: `
-            <h2>Application Status Update</h2>
-            <p>Your application for <strong>${job.title}</strong> has moved to: <strong>${status}</strong>.</p>
-            <div style="margin: 20px 0;">
-              <a href="${process.env.CLIENT_URL}/dashboard/applications" style="background: #7c3aed; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Applications</a>
-            </div>
-          `
-        }
-      });
-
-      res.json({
-        success: true,
-        message: 'Application status updated',
-        data: application,
-      });
     } catch (error) {
       next(error);
     }

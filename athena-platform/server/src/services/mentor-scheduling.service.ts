@@ -64,6 +64,14 @@ const SUPPORTED_TIMEZONES = [
 const DAY_STARTS_AT_HOUR = 9;
 const DAY_ENDS_AT_HOUR = 17;
 
+/** The days of her week a mentor is offered on, as `Date#getUTCDay` numbers: Monday to Friday. */
+const MENTOR_WORKING_DAYS: ReadonlySet<number> = new Set([1, 2, 3, 4, 5]);
+
+/** Day of the week, 0 for Sunday, for a calendar date already resolved in some zone. */
+function dayOfWeek(date: { year: number; month: number; day: number }): number {
+  return new Date(Date.UTC(date.year, date.month - 1, date.day)).getUTCDay();
+}
+
 /** Matches the default on MentorSession.durationMinutes. */
 const DEFAULT_SESSION_MINUTES = 60;
 
@@ -256,6 +264,16 @@ export async function getAvailableSlots(
   for (const dayOffset of [-1, 0, 1]) {
     const anchor = new Date(windowStart.getTime() + dayOffset * 24 * 60 * 60 * 1000);
     const mentorDay = calendarDateIn(anchor, mentorTimezone);
+
+    // Monday to Friday in the mentor's own week. The become-a-mentor wizard
+    // tells her she will be offered "9am to 5pm in your timezone", and every
+    // day of the week used to be generated, so a woman who signed up expecting
+    // office hours found strangers booking her Saturday mornings. There is no
+    // per-mentor schedule to read yet, so the promise is kept by keeping the
+    // default to working days, and the wizard now says so in those words.
+    if (!MENTOR_WORKING_DAYS.has(dayOfWeek(mentorDay))) {
+      continue;
+    }
 
     for (let hour = DAY_STARTS_AT_HOUR; hour < DAY_ENDS_AT_HOUR; hour++) {
       const slotStart = instantForLocalTime(

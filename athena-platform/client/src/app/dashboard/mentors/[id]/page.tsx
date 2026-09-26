@@ -17,7 +17,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Award, CalendarDays, Clock, Loader2, Star, Users } from 'lucide-react';
+import { ArrowLeft, Award, CalendarDays, Clock, Loader2, Users } from 'lucide-react';
 import { useAuthStore, useBookMentor, useMentor } from '@/lib/hooks';
 import { mentorApi } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
@@ -62,7 +62,6 @@ export default function MentorProfilePage() {
   const [payment, setPayment] = useState<{ clientSecret: string; amount: number } | null>(null);
 
   const hourlyRate = mentor?.hourlyRate !== null && mentor?.hourlyRate !== undefined ? Number(mentor.hourlyRate) : null;
-  const rating = mentor?.rating !== null && mentor?.rating !== undefined ? Number(mentor.rating) : null;
   const specializations = useMemo(() => toStringArray(mentor?.specializations), [mentor?.specializations]);
   const name = mentor?.user?.displayName || 'ATHENA Mentor';
   const isOwnProfile = Boolean(user && mentor?.userId === user.id);
@@ -154,11 +153,8 @@ export default function MentorProfilePage() {
               <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{name}</h1>
               <p className="text-slate-500 dark:text-slate-400">{mentor.user?.headline || 'Career mentor'}</p>
               <div className="mt-2 flex flex-wrap items-center gap-4 text-sm">
-                <span className="flex items-center text-yellow-500">
-                  <Star className="mr-1 h-4 w-4 fill-current" />
-                  <span className="font-medium">{rating ? rating.toFixed(1) : 'New'}</span>
-                  <span className="ml-1 text-slate-400">({mentor.reviewCount || 0})</span>
-                </span>
+                {/* No star rating: nothing on the platform writes one, so every
+                    profile showed "New (0)" beside a filled star. */}
                 <span className="flex items-center text-slate-500 dark:text-slate-400">
                   <Users className="mr-1 h-4 w-4" /> {mentor.sessionCount || 0} sessions
                 </span>

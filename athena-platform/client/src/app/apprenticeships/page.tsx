@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import toast from 'react-hot-toast';
 import {
   ApprenticeshipCard,
   ApprenticeshipFiltersBar,
@@ -189,13 +190,23 @@ export default function ApprenticeshipsPage() {
   const handleApplicationSubmit = async (data: ApplicationData) => {
     if (!selectedApprenticeship) return;
     
-    await apprenticeshipApi.apply(selectedApprenticeship.id, {
-      coverLetter: data.coverLetter,
-      resumeUrl: data.resumeUrl,
-      portfolioUrl: data.portfolioUrl,
-      availableStartDate: data.availableStartDate,
-      answers: data.answers,
-    });
+    // The modal answers any failure with "Failed to submit application.
+    // Please try again", which is wrong for the refusals that will not change
+    // on a retry — a provider with nobody on ATHENA to receive it, a résumé
+    // link that is not a web address. The server's own words are shown too.
+    try {
+      await apprenticeshipApi.apply(selectedApprenticeship.id, {
+        coverLetter: data.coverLetter,
+        resumeUrl: data.resumeUrl,
+        portfolioUrl: data.portfolioUrl,
+        availableStartDate: data.availableStartDate,
+        answers: data.answers,
+      });
+    } catch (error) {
+      const message = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      if (message) toast.error(message);
+      throw error;
+    }
   };
 
   const handleViewDetails = (id: string) => {

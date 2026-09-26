@@ -14,10 +14,18 @@ import {
   Heart,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { mentorApi, userApi } from '@/lib/api';
+import { api, mentorApi, userApi } from '@/lib/api';
 import { useAuthStore } from '@/lib/store';
 
 const errorMessage = (e: unknown) => (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
+
+/** The fields of her published mentor profile this form starts from. */
+interface ExistingMentorProfile {
+  hourlyRate: number | string | null;
+  yearsExperience: number | null;
+  specializations: unknown;
+  isAvailable: boolean;
+}
 
 const benefits = [
   {
@@ -125,9 +133,52 @@ export default function BecomeMentorPage() {
     timezone: 'Australia/Brisbane',
   });
 
+  // Her published mentor profile, when she already has one. `undefined` while
+  // it is being read, `null` when she has none.
+  const [existing, setExisting] = useState<ExistingMentorProfile | null | undefined>(undefined);
+
   const updateFormData = (updates: Partial<FormData>) => {
     setFormData((prev) => ({ ...prev, ...updates }));
   };
+
+  // This page is also where a mentor comes back to change her rate or
+  // expertise, and it used to open blank every time, so saving it replaced
+  // what she had published with whatever she remembered to retype. It starts
+  // from her profile now. A failed read leaves the form as it was rather than
+  // pretending she has no profile; nothing below depends on knowing.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get('/mentors/me')
+      .then((response) => {
+        if (cancelled) return;
+        const profile = (response.data?.data ?? null) as ExistingMentorProfile | null;
+        setExisting(profile);
+        if (!profile) return;
+
+        const published = Array.isArray(profile.specializations)
+          ? profile.specializations.filter((item): item is string => typeof item === 'string')
+          : [];
+        const areas = published.filter((item) => expertiseOptions.includes(item));
+        const industry = published.find((item) => industryOptions.includes(item)) ?? '';
+        const rest = published.filter((item) => !areas.includes(item) && item !== industry);
+
+        setFormData((prev) => ({
+          ...prev,
+          hourlyRate: profile.hourlyRate !== null && profile.hourlyRate !== undefined ? String(Number(profile.hourlyRate)) : prev.hourlyRate,
+          yearsExperience: prev.yearsExperience || (profile.yearsExperience != null ? String(profile.yearsExperience) : ''),
+          expertiseAreas: areas.length ? areas : prev.expertiseAreas,
+          industry: industry || prev.industry,
+          specializations: rest.length ? rest : prev.specializations,
+        }));
+      })
+      .catch(() => {
+        // Left undefined: the form still works, it just starts empty.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Start from what the profile already says rather than an empty form.
   useEffect(() => {
@@ -173,11 +224,15 @@ export default function BecomeMentorPage() {
       if (formData.timezone) profile.timezone = formData.timezone;
       if (Object.keys(profile).length > 0) await userApi.updateProfile(profile);
 
+      // `isAvailable` is deliberately not sent. It used to be sent as `true`
+      // every time, so a mentor who had paused new requests and came back to
+      // change her rate was quietly re-listed as taking them. A new profile
+      // starts available on the server; an existing one keeps whatever she
+      // last chose with the pause switch on the Mentors page.
       await mentorApi.become({
-        specializations: Array.from(new Set([...formData.expertiseAreas, ...formData.specializations, ...(formData.industry ? [formData.industry] : [])])),
+        specializations: Array.from(new Set([...formData.expertiseAreas, ...formData.specializations.filter(Boolean), ...(formData.industry ? [formData.industry] : [])])),
         ...(Number.isNaN(years) ? {} : { yearsExperience: years }),
         ...(Number.isNaN(rate) ? {} : { hourlyRate: rate }),
-        isAvailable: true,
       });
       setIsSubmitted(true);
     } catch (error) {
@@ -195,10 +250,12 @@ export default function BecomeMentorPage() {
             <CheckCircle className="w-10 h-10 text-green-500" />
           </div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">
-            You&apos;re listed as a mentor
+            {existing ? 'Your mentor profile is updated' : <>You&apos;re listed as a mentor</>}
           </h1>
           <p className="text-slate-600 dark:text-slate-300 mb-6">
-            Your mentor profile is live now. People can find you on the mentors page and ask for a session; nothing waits on a review.
+            {existing && !existing.isAvailable
+              ? 'Your changes are saved. New requests are still paused; turn them back on from the Mentors page when you are ready.'
+              : 'Your mentor profile is live now. People can find you on the mentors page and ask for a session; nothing waits on a review.'}
           </p>
           <div className="flex flex-wrap justify-center gap-3">
             {/* The payouts step is the one that decides whether she can ever be
@@ -212,11 +269,11 @@ export default function BecomeMentorPage() {
               See the mentors page
             </Link>
             <Link href="/dashboard/mentors" className="btn-outline">
-              Mentor dashboard
+              Your mentor profile
             </Link>
           </div>
           <p className="mt-6 text-sm text-slate-500 dark:text-slate-400">
-            Until payouts are connected, nobody can pay for a session with you — it only takes a few minutes. You can change your rate, expertise and availability from the mentor dashboard at any time.
+            Until payouts are connected, nobody can pay for a session with you — it only takes a few minutes. Under &ldquo;Your mentor profile&rdquo; on the Mentors page you can pause new requests, and come back here to change your rate and expertise, at any time.
           </p>
         </div>
       </div>
@@ -228,7 +285,7 @@ export default function BecomeMentorPage() {
       {/* Header */}
       <div className="text-center">
         <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-4">
-          Become a Mentor
+          {existing ? 'Edit your mentor profile' : 'Become a Mentor'}
         </h1>
         <p className="text-lg text-slate-600 dark:text-slate-300 max-w-2xl mx-auto">
           Share your expertise and help other women advance their careers while
@@ -468,10 +525,15 @@ export default function BecomeMentorPage() {
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 Specializations (comma-separated)
               </label>
+              {/* Uncontrolled so a multi-word entry can be typed without its
+                  spaces being trimmed away mid-word; keyed on the loaded profile
+                  so her published specializations appear once they arrive. */}
               <input
+                key={existing ? 'published' : 'blank'}
                 type="text"
                 placeholder="e.g., FAANG interviews, Product strategy, Startup growth"
                 className="input-field"
+                defaultValue={formData.specializations.join(', ')}
                 onChange={(e) =>
                   updateFormData({
                     specializations: e.target.value.split(',').map((s) => s.trim()),
@@ -511,13 +573,15 @@ export default function BecomeMentorPage() {
               This step used to also collect a seven-day availability grid, a
               set of session lengths and a monthly mentee cap, and send none of
               them: MentorProfile has no column for any of the three, and the
-              slot generator offers every mentor the same nine-to-five, seven
-              days a week. A woman who ticked "Saturday only" was published as
-              bookable all week, including while she was at her actual job. The
-              controls are gone rather than quietened, and what the platform
-              really does is written out instead, because a mentor deciding
-              whether to be listed at all needs to know which hours she is
-              putting her name to.
+              slot generator offers every mentor the same nine-to-five. A woman
+              who ticked "Saturday only" was published as bookable all week,
+              including while she was at her actual job. The controls are gone
+              rather than quietened, and what the platform really does is
+              written out instead, because a mentor deciding whether to be
+              listed at all needs to know which hours she is putting her name
+              to. That text once said "9am to 5pm" while the generator offered
+              all seven days; the generator now keeps to Monday to Friday and
+              the text says so.
             */}
             <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-4 space-y-2">
               <h3 className="text-sm font-medium text-slate-900 dark:text-white flex items-center gap-2">
@@ -525,13 +589,14 @@ export default function BecomeMentorPage() {
                 When people can book you
               </h3>
               <p className="text-sm text-slate-600 dark:text-slate-300">
-                Your profile offers hourly slots between 9am and 5pm in your own timezone, and a
-                slot disappears as soon as someone books it.
+                Your profile offers hourly slots between 9am and 5pm, Monday to Friday, in your own
+                timezone. Weekends are never offered. A slot disappears as soon as someone books it.
               </p>
               <p className="text-sm text-slate-600 dark:text-slate-300">
                 Nothing is confirmed without you. Every request arrives as an invitation you accept
                 or decline, so a time that does not suit you is a decline, not an obligation. You
-                can stop taking new requests at any moment from your mentor dashboard.
+                can pause new requests at any moment with the switch under &ldquo;Your mentor
+                profile&rdquo; on the Mentors page, and turn them back on the same way.
               </p>
               <p className="text-sm text-slate-600 dark:text-slate-300">
                 Choosing specific days, session lengths and a monthly limit is not something ATHENA
@@ -641,8 +706,8 @@ export default function BecomeMentorPage() {
                 <div className="col-span-2">
                   <span className="text-slate-500">Bookable hours:</span>{' '}
                   <span className="text-slate-900 dark:text-white">
-                    9am to 5pm in your timezone, one hour at a time, every request yours to accept
-                    or decline.
+                    9am to 5pm, Monday to Friday, in your timezone, one hour at a time, every
+                    request yours to accept or decline.
                   </span>
                 </div>
               </div>
@@ -722,7 +787,7 @@ export default function BecomeMentorPage() {
                 </>
               ) : (
                 <>
-                  <span>Publish my mentor profile</span>
+                  <span>{existing ? 'Save my mentor profile' : 'Publish my mentor profile'}</span>
                   <CheckCircle className="w-4 h-4" />
                 </>
               )}

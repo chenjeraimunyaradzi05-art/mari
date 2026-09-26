@@ -1,6 +1,6 @@
 import { Router, Response, NextFunction } from 'express';
 import { body, query, validationResult } from 'express-validator';
-import { ApplicationStatus, type OrganizationMember } from '@prisma/client';
+import { ApplicationStatus, Prisma, type OrganizationMember } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
@@ -8,6 +8,15 @@ import {
   EMPLOYER_SETTABLE_STATUSES,
   assertEmployerStatusMove,
 } from '../services/application-status.service';
+import {
+  assertCanViewApplicants,
+  canManageJobApplicants,
+  canPostListings,
+  canViewApplicants,
+} from '../services/hiring-access.service';
+import { createRateLimiter } from '../middleware/rateLimiter';
+import { assertContentAllowed } from '../services/moderation.service';
+import { blockUser, getBlockedRelationshipIds } from '../utils/safety-store';
 
 const router = Router();
 
@@ -84,21 +93,13 @@ function callerMembership(req: AuthRequest): OrganizationMember {
  * been given posting rights, which is the closest thing the current schema has
  * to "this person works on hiring": the invite route only ever grants
  * canPostJobs to an ADMIN or a RECRUITER by default.
+ *
+ * The rule itself now lives in hiring-access.service. The apprenticeship, job
+ * and referee surfaces show the same applicants, and each of them used to ask a
+ * looser question of its own — any membership row at all, or only who had
+ * created the listing — so the console's care here protected nobody who was
+ * reached another way.
  */
-function canViewApplicants(membership: OrganizationMember): boolean {
-  return (
-    membership.role === 'OWNER' ||
-    membership.role === 'ADMIN' ||
-    membership.role === 'RECRUITER' ||
-    membership.canPostJobs
-  );
-}
-
-function assertCanViewApplicants(membership: OrganizationMember): void {
-  if (!canViewApplicants(membership)) {
-    throw new ApiError(403, 'You do not have permission to view applicants for this organisation');
-  }
-}
 
 // ============================================================================
 // GET MY ORGANIZATIONS
@@ -124,7 +125,10 @@ router.get('/organizations', authenticate, async (req: AuthRequest, res: Respons
             _count: {
               select: {
                 jobs: true,
-                members: true,
+                // Accepted members only: a count that moved when an
+                // invitation was sent would tell the inviter whether the
+                // address had an account, which the team route no longer does.
+                members: { where: { acceptedAt: { not: null } } },
               },
             },
           },
@@ -172,6 +176,12 @@ router.post(
 
       const userId = req.user!.id;
       const { name, type, description, website, city, state, country, industry, size, logo, brandColor } = req.body;
+
+      // An organisation's name and description are shown to strangers — in the
+      // public directory, on every listing it posts, and on the invitations
+      // page of anyone it asks to join — and anyone can create one. They are
+      // profile text and are screened as profile text.
+      await assertContentAllowed([name, description].filter(Boolean).join('\n'), { kind: 'profile', userId });
 
       // Generate slug
       const baseSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
@@ -256,7 +266,8 @@ router.get(
       ] = await Promise.all([
         prisma.organization.findUnique({
           where: { id: orgId },
-          include: { _count: { select: { jobs: true, members: true } } },
+          // Accepted members only, for the same reason as the team route.
+          include: { _count: { select: { jobs: true, members: { where: { acceptedAt: { not: null } } } } } },
         }),
         prisma.job.count({
           where: { organizationId: orgId, status: 'ACTIVE' },
@@ -478,9 +489,15 @@ router.post(
 /**
  * A job belongs to whoever runs the organisation that posted it, or — for a
  * listing posted outside any organisation — to the person who posted it.
- * Reading a draft and editing one answer to the same rule, so both ask here.
+ *
+ * Reading a draft is open to any accepted member of the organisation. Editing
+ * one — which includes taking it live under the company's name, since status is
+ * one of the fields — takes posting rights, the rule the create route beside
+ * this has always applied. It used to be the same accepted-membership check as
+ * reading, so a VIEWER who could not post a job could rewrite or publish any
+ * job the organisation had.
  */
-async function requireJobAccess(jobId: string, userId: string) {
+async function requireJobAccess(jobId: string, userId: string, access: 'read' | 'write') {
   const job = await prisma.job.findUnique({
     where: { id: jobId },
     include: {
@@ -502,6 +519,9 @@ async function requireJobAccess(jobId: string, userId: string) {
     if (!membership || !membership.acceptedAt) {
       throw new ApiError(403, 'Access denied');
     }
+    if (access === 'write' && !canPostListings(membership)) {
+      throw new ApiError(403, 'You do not have permission to edit jobs for this organisation');
+    }
   } else if (job.postedById !== userId) {
     throw new ApiError(403, 'Access denied');
   }
@@ -522,7 +542,7 @@ router.get(
   authenticate,
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
-      const job = await requireJobAccess(req.params.jobId, req.user!.id);
+      const job = await requireJobAccess(req.params.jobId, req.user!.id, 'read');
 
       res.json({
         success: true,
@@ -572,7 +592,7 @@ router.patch(
       const { jobId } = req.params;
       const userId = req.user!.id;
 
-      const job = await requireJobAccess(jobId, userId);
+      const job = await requireJobAccess(jobId, userId, 'write');
 
       // Job has no benefits, applicationUrl or applicationEmail column. They
       // were on this list, so an employer who filled any of them in had her
@@ -642,12 +662,16 @@ router.get(
       const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
       const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10) || 20));
 
-      const where: any = { job: { organizationId: orgId } };
-      if (jobId) where.jobId = jobId;
-      if (status) where.status = status;
+      const orgWhere: Prisma.JobApplicationWhereInput = { job: { organizationId: orgId } };
+      const jobWhere: Prisma.JobApplicationWhereInput =
+        typeof jobId === 'string' && jobId ? { ...orgWhere, jobId } : orgWhere;
+      const where: Prisma.JobApplicationWhereInput =
+        typeof status === 'string' && (Object.values(ApplicationStatus) as string[]).includes(status)
+          ? { ...jobWhere, status: status as ApplicationStatus }
+          : jobWhere;
 
       // The pipeline shows a face and a headline, not a bare name.
-      const [applications, total] = await Promise.all([
+      const [applications, total, byStatus, byJob] = await Promise.all([
         prisma.jobApplication.findMany({
           where,
           include: {
@@ -670,7 +694,23 @@ router.get(
           take: limit,
         }),
         prisma.jobApplication.count({ where }),
+        // The board's column counts and its job filter used to be worked out
+        // on the client from whichever page it had loaded, so an organisation
+        // past a hundred applicants saw stage counts that were silently too
+        // low and a job list missing every listing whose applicants had all
+        // fallen off the first page. Both come from the whole set now: stage
+        // counts for the job in view, the job list for the organisation.
+        prisma.jobApplication.groupBy({ by: ['status'], where: jobWhere, _count: { _all: true } }),
+        prisma.jobApplication.groupBy({ by: ['jobId'], where: orgWhere, _count: { _all: true } }),
       ]);
+
+      const jobTitles = byJob.length
+        ? await prisma.job.findMany({
+            where: { id: { in: byJob.map((row) => row.jobId) } },
+            select: { id: true, title: true },
+          })
+        : [];
+      const titleOf = new Map(jobTitles.map((job) => [job.id, job.title]));
 
       res.json({
         success: true,
@@ -680,6 +720,12 @@ router.get(
           limit,
           total,
           pages: Math.ceil(total / limit),
+        },
+        summary: {
+          byStatus: Object.fromEntries(byStatus.map((row) => [row.status, row._count._all])),
+          jobs: byJob
+            .map((row) => ({ id: row.jobId, title: titleOf.get(row.jobId) ?? 'Untitled job', count: row._count._all }))
+            .sort((a, b) => a.title.localeCompare(b.title)),
         },
       });
     } catch (error) {
@@ -735,17 +781,16 @@ router.patch(
       // on the platform could reject a candidate, shortlist her, or tell her
       // she had an offer, in the employer's name. The job-update handler above
       // has always had the else branch; this one did not.
-      if (application.job.organizationId) {
-        const membership = await prisma.organizationMember.findUnique({
-          where: {
-            organizationId_userId: { organizationId: application.job.organizationId, userId },
-          },
-        });
-        if (!membership) {
-          throw new ApiError(403, 'Access denied');
-        }
-        assertCanViewApplicants(membership);
-      } else if (application.job.postedById !== userId) {
+      //
+      // It then checked only that a membership row existed, and never asked
+      // whether she had accepted it. The invite route creates that row the
+      // moment an owner types an email address, with RECRUITER or ADMIN
+      // defaults, so a woman who had not yet agreed to join a company could
+      // already move its candidates through the pipeline, and the candidates
+      // were told the employer had done it. canManageJobApplicants asks the
+      // whole question: an accepted member with a hiring role, or the poster
+      // of a listing that belongs to no organisation.
+      if (!(await canManageJobApplicants(application.job, userId))) {
         throw new ApiError(403, 'Access denied');
       }
 
@@ -805,8 +850,14 @@ router.get(
       const { orgId } = req.params;
       const membership = callerMembership(req);
 
+      // Accepted members only. An unanswered invitation used to be listed here
+      // with the invitee's name and email address, which turned the invite
+      // route into an account lookup however carefully that route worded its
+      // own reply: type an address, press Invite, and see whether a row
+      // appears. Anyone can create an organisation, so anyone could ask. She
+      // appears on the roster when she has agreed to be on it.
       const members = await prisma.organizationMember.findMany({
-        where: { organizationId: orgId },
+        where: { organizationId: orgId, acceptedAt: { not: null } },
         include: {
           user: {
             select: {
@@ -839,10 +890,6 @@ router.get(
             role: member.role,
             createdAt: member.invitedAt,
             acceptedAt: member.acceptedAt,
-            // An invited person is on the roster but has not agreed to be
-            // there yet, and the console has to say so rather than presenting
-            // her as staff.
-            pending: member.acceptedAt === null,
             user: member.user,
             permissions: {
               canPostJobs: member.canPostJobs,
@@ -866,19 +913,88 @@ router.get(
 );
 
 /**
+ * What the inviter is told, whatever happened on the invitee's side. See the
+ * invite route for why it has to be the same words every time.
+ */
+const INVITATION_SENT_MESSAGE =
+  'If that email address belongs to an ATHENA member, she has been sent an invitation. She will appear on your team once she accepts it.';
+
+/**
+ * A ceiling on invitations per inviter. Anyone can create an organisation, so a
+ * per-organisation limit alone would be a limit per minute of effort; this one
+ * follows the person across every organisation she creates. Counted on every
+ * attempt, sent or not, so the ceiling itself cannot be used to tell which
+ * addresses have accounts.
+ */
+const inviteLimiter = createRateLimiter({
+  max: 20,
+  windowMs: 60 * 60 * 1000,
+  skip: () => process.env.NODE_ENV === 'test' || !process.env.REDIS_URL,
+  keyGenerator: (req) => `org-invite:${(req as AuthRequest).user?.id || req.ip}`,
+  handler: (_req, res) => {
+    res.status(429).json({
+      success: false,
+      message: 'You have sent a lot of invitations in the last hour. Try again later.',
+    });
+  },
+});
+
+/**
+ * Whether an invitation from this organisation must not reach this woman.
+ *
+ * True when she and the person sending it, or she and anyone who runs the
+ * organisation, are blocked in either direction — on the platform-wide list or
+ * on her DV safety page, which is written separately and read here as well so a
+ * block made there is not quietly bypassed. The people who run it are counted
+ * because the person pressing the button need not be the person she is
+ * avoiding.
+ */
+async function invitationIsUnwelcome(organizationId: string, senderId: string, inviteeId: string): Promise<boolean> {
+  const [managers, platformBlocks, dvProfile] = await Promise.all([
+    prisma.organizationMember.findMany({
+      where: {
+        organizationId,
+        acceptedAt: { not: null },
+        OR: [{ role: 'OWNER' }, { canManageTeam: true }],
+      },
+      select: { userId: true },
+    }),
+    getBlockedRelationshipIds(inviteeId),
+    prisma.dvSafetyProfile.findUnique({ where: { userId: inviteeId }, select: { blockedUserIds: true } }),
+  ]);
+
+  const blocked = new Set([...platformBlocks, ...(dvProfile?.blockedUserIds ?? [])]);
+  return [senderId, ...managers.map((m) => m.userId)].some((id) => blocked.has(id));
+}
+
+/**
  * POST /employer/organizations/:orgId/team/invite
  * Invite a team member
  */
 router.post(
   '/organizations/:orgId/team/invite',
   authenticate,
+  inviteLimiter,
   requireOrgAccess,
   [
-    body('email').isEmail().withMessage('Valid email required'),
+    // Normalised the way registration normalises it, so the lookup below finds
+    // the account the address actually belongs to.
+    body('email').isEmail().normalizeEmail().withMessage('Valid email required'),
     body('role').isIn(['ADMIN', 'RECRUITER', 'VIEWER']),
+    body('canPostJobs').optional().isBoolean().toBoolean(),
+    body('canManageTeam').optional().isBoolean().toBoolean(),
+    body('canViewAnalytics').optional().isBoolean().toBoolean(),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
+      // The validators above were declared and never read, so `role` reached
+      // Prisma as whatever the caller sent — OWNER included — and an
+      // invitation could hand a stranger the organisation outright.
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
       const membership = callerMembership(req);
       if (!membership.canManageTeam && membership.role !== 'OWNER') {
         throw new ApiError(403, 'You do not have permission to manage team');
@@ -886,25 +1002,55 @@ router.post(
 
       const { orgId } = req.params;
       const { email, role, canPostJobs, canManageTeam, canViewAnalytics } = req.body;
+      const callerId = req.user!.id;
 
-      // Find user by email
-      const user = await prisma.user.findUnique({ where: { email } });
+      // Every outcome that is about the invitee rather than about this team
+      // answers with the same words and the same status.
+      //
+      // This route used to answer 404 "User not found. They must have an
+      // ATHENA account first." for an address with no account and 201 for one
+      // with, and anyone can create an organisation in a minute. So any
+      // signed-in account could learn whether a given email address belongs to
+      // someone on ATHENA — on a platform whose members include women who have
+      // left violence, and whose former partner knows their email address.
+      // The same answer now covers "no account", "she has blocked you" and
+      // "she has been sent too many invitations lately", so none of them can
+      // be told apart from a sent invitation.
+      const sentOrNot = () =>
+        res.status(202).json({
+          success: true,
+          message: INVITATION_SENT_MESSAGE,
+          data: null,
+        });
+
+      const user = await prisma.user.findUnique({ where: { email }, select: { id: true } });
       if (!user) {
-        throw new ApiError(404, 'User not found. They must have an ATHENA account first.');
+        return sentOrNot();
       }
 
-      // Check if already a member
+      // An accepted member is on the roster the caller can already read, so
+      // saying so tells them nothing new. A pending invitation is not on it
+      // (see the team route), so "she already has an invitation" would be the
+      // same account lookup by another door; it gets the uniform answer.
       const existing = await prisma.organizationMember.findUnique({
         where: { organizationId_userId: { organizationId: orgId, userId: user.id } },
+        select: { acceptedAt: true },
       });
+      if (existing?.acceptedAt) {
+        throw new ApiError(400, 'User is already a member');
+      }
       if (existing) {
-        throw new ApiError(400, existing.acceptedAt ? 'User is already a member' : 'That person already has a pending invitation');
+        return sentOrNot();
       }
 
-      const organization = await prisma.organization.findUnique({
-        where: { id: orgId },
-        select: { name: true },
-      });
+      // Nothing reaches a woman from someone she has blocked, and an
+      // invitation is a message: it lands in her notifications carrying a
+      // name the sender chose. Declining used to delete the row and leave
+      // nothing behind, so the same person could ask again a second later;
+      // "Decline and block" on the invitations page now feeds this check.
+      if (await invitationIsUnwelcome(orgId, callerId, user.id)) {
+        return sentOrNot();
+      }
 
       // The row is created with acceptedAt left null, which is what makes it
       // an invitation rather than a membership.
@@ -921,7 +1067,7 @@ router.post(
       //
       // requireOrgAccess refuses a row with no acceptedAt, so the invitation
       // grants nothing until she answers it.
-      const member = await prisma.organizationMember.create({
+      await prisma.organizationMember.create({
         data: {
           organizationId: orgId,
           userId: user.id,
@@ -930,29 +1076,26 @@ router.post(
           canManageTeam: canManageTeam ?? (role === 'ADMIN'),
           canViewAnalytics: canViewAnalytics ?? true,
         },
-        include: {
-          user: {
-            select: { id: true, firstName: true, lastName: true, email: true },
-          },
-        },
       });
 
-      // Notify the invited user
+      // The notice carries no text the sender chose. It used to open with the
+      // organisation's name, and anyone can create an organisation called
+      // anything, so this was a way to put a line of one's own words into a
+      // woman's notifications without messaging her — a channel her blocks and
+      // message screening never saw. She reads the name on the invitations
+      // page, when she chooses to look, beside a button to decline and block.
       await prisma.notification.create({
         data: {
           userId: user.id,
           type: 'SYSTEM',
           title: 'You have been invited to a team',
-          message: `${organization?.name ?? 'An organisation'} has invited you to join their hiring team. You choose whether to accept.`,
+          message:
+            'An organisation on ATHENA has invited you to join its hiring team. Open your invitations to see which one, and choose whether to accept.',
           link: '/employer/invitations',
         },
       });
 
-      res.status(201).json({
-        success: true,
-        message: 'Invitation sent',
-        data: { ...member, pending: true },
-      });
+      return sentOrNot();
     } catch (error) {
       next(error);
     }
@@ -1036,11 +1179,28 @@ router.post('/invitations/:memberId/accept', authenticate, async (req: AuthReque
 
 /**
  * POST /employer/invitations/:memberId/decline
- * Say no. The row is removed rather than flagged, so the company can ask again
- * later and so declining leaves nothing on her record.
+ * Say no. The row is removed rather than flagged, so declining leaves nothing on
+ * her record.
+ *
+ * Removing the row also meant the same organisation could ask again a second
+ * later, as often as it liked. `{ block: true }` is her way to make the no
+ * stick: it blocks everyone who runs the organisation — its owners and anyone
+ * who can manage its team — on the platform-wide list, which the invite route
+ * checks before anything is sent. She is not told who those people are, because
+ * the roster of a company she has not joined is not hers to read; the blocks
+ * show in her Safety Centre like any other, where she can lift them.
  */
-router.post('/invitations/:memberId/decline', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post(
+  '/invitations/:memberId/decline',
+  authenticate,
+  [body('block').optional().isBoolean().toBoolean()],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      throw new ApiError(400, errors.array()[0].msg);
+    }
+
     const invitation = await prisma.organizationMember.findUnique({
       where: { id: req.params.memberId },
     });
@@ -1055,14 +1215,35 @@ router.post('/invitations/:memberId/decline', authenticate, async (req: AuthRequ
 
     await prisma.organizationMember.delete({ where: { id: invitation.id } });
 
+    let blocked = 0;
+    if (req.body.block === true) {
+      const managers = await prisma.organizationMember.findMany({
+        where: {
+          organizationId: invitation.organizationId,
+          acceptedAt: { not: null },
+          OR: [{ role: 'OWNER' }, { canManageTeam: true }],
+        },
+        select: { userId: true },
+      });
+      for (const manager of managers) {
+        if (manager.userId === req.user!.id) continue;
+        const { created } = await blockUser(req.user!.id, manager.userId);
+        if (created) blocked += 1;
+      }
+    }
+
     res.json({
       success: true,
-      message: 'Invitation declined',
+      message: req.body.block === true
+        ? 'Invitation declined, and the people who run this organisation are now blocked, so they cannot invite you again.'
+        : 'Invitation declined',
+      data: { blocked },
     });
   } catch (error) {
     next(error);
   }
-});
+  }
+);
 
 /**
  * DELETE /employer/organizations/:orgId/team/:memberId

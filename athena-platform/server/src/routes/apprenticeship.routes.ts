@@ -4,6 +4,15 @@ import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { notificationService } from '../services/notification.service';
+import {
+  ACCEPTED_MEMBER_WHERE,
+  HIRING_MEMBER_WHERE,
+  POSTING_MEMBER_WHERE,
+  assertOwnResumeUpload,
+  hiringStaff,
+  hiringStaffUserIds,
+} from '../services/hiring-access.service';
+import { bestEffort } from '../utils/best-effort';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -30,19 +39,37 @@ async function uniqueSlug(base: string): Promise<string> {
 
 type StaffUser = { id: string; role: string };
 
+/**
+ * What the caller is about to do with the listing, which decides which of the
+ * owning organisation's members may do it.
+ *
+ * `listing` is writing the listing itself — editing, publishing, defining its
+ * competencies — and needs posting rights. `applicants` is anything that shows
+ * or decides a person who applied, and needs a hiring role. Both need an
+ * accepted membership. See hiring-access.service for the rule and its history.
+ */
+type StaffAccess = 'listing' | 'applicants';
+
 // An apprenticeship belongs to the RTO and the host employer named on it, so
-// staff reach it through membership of one of those organizations. That
-// membership is the whole gate. The staff routes used to also require the
-// EMPLOYER or EDUCATION_PROVIDER account role, which nothing on the site ever
-// grants (registration stores a persona, and creating an organization makes
-// an OWNER membership, not a role), so every self-registered TAFE or host
-// employer got a 403 on her first listing. The role is no longer checked;
-// ADMIN still bypasses the membership test.
+// staff reach it through membership of one of those organizations. The staff
+// routes used to also require the EMPLOYER or EDUCATION_PROVIDER account role,
+// which nothing on the site ever grants (registration stores a persona, and
+// creating an organization makes an OWNER membership, not a role), so every
+// self-registered TAFE or host employer got a 403 on her first listing. The
+// role is no longer checked; ADMIN still bypasses the membership test.
+//
+// Membership then meant any OrganizationMember row at all: a VIEWER, and an
+// invitation the invitee had never answered, as well as the hiring team. The
+// applicant list behind this check returns every applicant's email address,
+// cover letter, résumé link and answers, and apprenticeship ids are public, so
+// anyone an RTO's owner had ever typed an email address for could read the
+// lot. The membership has to be accepted now, and has to carry the rights the
+// action needs.
 //
 // Returns null both for "no such apprenticeship" and "not yours", so callers
 // answer 404 either way: a 403 would confirm an unpublished listing exists to a
 // competitor who guessed its id.
-async function findApprenticeshipForStaff(apprenticeshipId: string, user: StaffUser) {
+async function findApprenticeshipForStaff(apprenticeshipId: string, user: StaffUser, access: StaffAccess) {
   const apprenticeship = await prisma.apprenticeship.findUnique({ where: { id: apprenticeshipId } });
 
   if (!apprenticeship) return null;
@@ -55,20 +82,45 @@ async function findApprenticeshipForStaff(apprenticeshipId: string, user: StaffU
   if (orgIds.length === 0) return null;
 
   const membership = await prisma.organizationMember.findFirst({
-    where: { userId: user.id, organizationId: { in: orgIds } },
+    where: {
+      userId: user.id,
+      organizationId: { in: orgIds },
+      ...(access === 'applicants' ? HIRING_MEMBER_WHERE : POSTING_MEMBER_WHERE),
+    },
     select: { id: true },
   });
 
   return membership ? apprenticeship : null;
 }
 
-/** Every organization this member is staff of, for scoping their own listings. */
+/**
+ * Every organization this member is staff of, for scoping their own listings.
+ * An invitation she has not accepted does not make her staff.
+ */
 async function staffOrganizationIds(userId: string): Promise<string[]> {
   const memberships = await prisma.organizationMember.findMany({
-    where: { userId },
+    where: { userId, ...ACCEPTED_MEMBER_WHERE },
     select: { organizationId: true },
   });
   return memberships.map((m) => m.organizationId);
+}
+
+/**
+ * Whether anyone can receive an application to this listing.
+ *
+ * The seeded catalogue names TAFE Queensland, TAFE NSW and RMIT as the RTO and
+ * no host employer, and nobody from those institutions has an account here.
+ * An application to one of those listings used to be accepted with a 201 and
+ * then seen by no one but a platform admin, while the applicant waited for an
+ * answer that could not come. A listing is open to applications through
+ * ATHENA only while someone on its hiring team can read them.
+ */
+async function listingHasHiringStaff(apprenticeship: { rtoId: string | null; hostEmployerId: string | null }) {
+  const orgIds = [apprenticeship.rtoId, apprenticeship.hostEmployerId].filter(
+    (orgId): orgId is string => Boolean(orgId)
+  );
+  const staff = await hiringStaffUserIds(orgIds, 1);
+  return staff.length > 0;
 }
 
 /**
@@ -92,11 +144,16 @@ async function withBookmarkState<T extends { id: string }>(items: T[], userId?: 
   return items.map((item) => ({ ...item, isBookmarked: bookmarked.has(item.id) }));
 }
 
+/**
+ * Listing in an organisation's name needs posting rights there, the same rule
+ * the employer console applies before a job is created: an accepted owner or
+ * admin, or a member given canPostJobs.
+ */
 async function requireOrgMembership(organizationIds: string[], user: StaffUser) {
   if (user.role === 'ADMIN' || organizationIds.length === 0) return;
 
   const memberships = await prisma.organizationMember.findMany({
-    where: { userId: user.id, organizationId: { in: organizationIds } },
+    where: { userId: user.id, organizationId: { in: organizationIds }, ...POSTING_MEMBER_WHERE },
     select: { organizationId: true },
   });
 
@@ -443,7 +500,12 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
       throw new ApiError(404, 'Apprenticeship not found');
     }
 
-    res.json({ success: true, data: apprenticeship });
+    // The page draws its Apply button from this, so a listing nobody can
+    // receive applications for says so before she writes a cover letter,
+    // rather than after. See listingHasHiringStaff.
+    const acceptsApplications = await listingHasHiringStaff(apprenticeship);
+
+    res.json({ success: true, data: { ...apprenticeship, acceptsApplications } });
   } catch (error) {
     next(error);
   }
@@ -563,7 +625,7 @@ router.patch(
       }
 
       const { id } = req.params;
-      const existing = await findApprenticeshipForStaff(id, req.user!);
+      const existing = await findApprenticeshipForStaff(id, req.user!, 'listing');
       if (!existing) {
         throw new ApiError(404, 'Apprenticeship not found');
       }
@@ -604,7 +666,7 @@ router.patch(
 router.post('/:id/publish', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
-    const existing = await findApprenticeshipForStaff(id, req.user!);
+    const existing = await findApprenticeshipForStaff(id, req.user!, 'listing');
     if (!existing) {
       throw new ApiError(404, 'Apprenticeship not found');
     }
@@ -626,13 +688,20 @@ router.post('/:id/publish', authenticate, async (req: AuthRequest, res, next) =>
 router.post(
   '/:id/apply',
   authenticate,
-  [body('coverLetter').optional().isString(), body('resumeUrl').optional().isString(), body('answers').optional()],
+  [
+    body('coverLetter').optional().isString().isLength({ max: 20000 }).withMessage('That cover letter is too long. Keep it under 20,000 characters.'),
+    body('resumeUrl').optional({ values: 'falsy' }).isString().isLength({ max: 2048 }),
+    body('answers').optional(),
+  ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
         throw new ApiError(400, errors.array()[0].msg);
       }
+
+      const resumeUrl: string | undefined = req.body.resumeUrl || undefined;
+      assertResumeLinkIsHers(resumeUrl, req.user!.id);
 
       const { id } = req.params;
       const apprenticeship = await prisma.apprenticeship.findUnique({ where: { id } });
@@ -642,6 +711,21 @@ router.post(
 
       if (apprenticeship.status !== 'OPEN') {
         throw new ApiError(400, 'Apprenticeship is not open');
+      }
+
+      const orgIds = [apprenticeship.rtoId, apprenticeship.hostEmployerId].filter(
+        (orgId): orgId is string => Boolean(orgId)
+      );
+      const staff = await hiringStaff(orgIds);
+
+      // Refused before anything is written, and said plainly. See
+      // listingHasHiringStaff: an application nobody can read is worse than no
+      // application, because she waits on it.
+      if (staff.length === 0) {
+        throw new ApiError(
+          409,
+          'This provider has not set up its ATHENA account yet, so an application sent here would not reach anyone. Contact the provider directly to apply.'
+        );
       }
 
       const existing = await prisma.apprenticeshipApplication.findUnique({
@@ -657,10 +741,41 @@ router.post(
           apprenticeshipId: id,
           userId: req.user!.id,
           coverLetter: req.body.coverLetter,
-          resumeUrl: req.body.resumeUrl,
+          resumeUrl,
           answers: req.body.answers,
         },
       });
+
+      // Nobody used to be told anything. The row was written and the 201
+      // returned, and the provider found out only if someone happened to open
+      // the applicant list; the applicant had no record beyond the toast.
+      // The application is already saved, so a notice that fails is logged
+      // and does not turn her successful application into an error.
+      await Promise.all(
+        staff.map((member) =>
+          bestEffort('notification.apprenticeship-application-staff', () =>
+            notificationService.notify({
+              userId: member.userId,
+              type: 'APPLICATION_UPDATE',
+              title: 'New apprenticeship application',
+              message: `Someone has applied for ${apprenticeship.title}.`,
+              link: `/employer/organizations/${member.organizationId}/apprenticeships`,
+              channels: ['in-app', 'email'],
+            })
+          )
+        )
+      );
+
+      await bestEffort('notification.apprenticeship-application-applicant', () =>
+        notificationService.notify({
+          userId: req.user!.id,
+          type: 'APPLICATION_UPDATE',
+          title: 'Application sent',
+          message: `Your application for ${apprenticeship.title} has been sent to the provider. You will be told here when they respond.`,
+          link: `/apprenticeships/${apprenticeship.id}`,
+          channels: ['in-app'],
+        })
+      );
 
       res.status(201).json({ success: true, data: created });
     } catch (error) {
@@ -668,6 +783,39 @@ router.post(
     }
   }
 );
+
+/**
+ * A résumé link on an apprenticeship application must not point at somebody
+ * else's upload.
+ *
+ * The job application route requires the résumé to be the applicant's own
+ * upload. This form still asks for a link to a document held elsewhere (Google
+ * Drive and the like), so requiring an upload here would refuse every
+ * application that followed the form's own instructions. What is refused is the
+ * part that did harm: a path into ATHENA's own résumé store that belongs to a
+ * different member, which would attach her résumé to an application in
+ * someone else's name. Anything else must be an https link, not an arbitrary
+ * string.
+ */
+function assertResumeLinkIsHers(resumeUrl: string | undefined, userId: string): void {
+  if (!resumeUrl) return;
+
+  const path = resumeUrl.split(/[?#]/)[0];
+  if (/(^|\/)resumes\//.test(path)) {
+    assertOwnResumeUpload(resumeUrl, userId);
+    return;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(resumeUrl);
+  } catch {
+    throw new ApiError(400, 'That résumé link is not a web address. Paste the full link, starting with https://.');
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new ApiError(400, 'That résumé link is not a web address. Paste the full link, starting with https://.');
+  }
+}
 
 // ===========================================
 // MY APPLICATIONS
@@ -718,7 +866,7 @@ router.get('/applications/:applicationId', authenticate, async (req: AuthRequest
     const isApplicant = application.userId === req.user!.id;
     const staffAccess = isApplicant
       ? null
-      : await findApprenticeshipForStaff(application.apprenticeshipId, req.user!);
+      : await findApprenticeshipForStaff(application.apprenticeshipId, req.user!, 'applicants');
 
     if (!isApplicant && !staffAccess) {
       throw new ApiError(404, 'Application not found');
@@ -799,7 +947,7 @@ router.patch(
       // The same gate the applicant list and the assessor review already use,
       // and it reports someone else's application as absent rather than
       // forbidden so ids cannot be probed.
-      const apprenticeship = await findApprenticeshipForStaff(application.apprenticeshipId, req.user!);
+      const apprenticeship = await findApprenticeshipForStaff(application.apprenticeshipId, req.user!, 'applicants');
       if (!apprenticeship) {
         throw new ApiError(404, 'Application not found');
       }
@@ -859,7 +1007,9 @@ router.patch(
         type: 'APPLICATION_UPDATE',
         title: notice.title,
         message: notice.message(apprenticeship.title),
-        link: '/dashboard/apprenticeships',
+        // There is no /dashboard/apprenticeships page for this to have pointed
+        // at; the listing is the one page she can open from here.
+        link: `/apprenticeships/${apprenticeship.id}`,
         channels: ['in-app', 'email'],
       });
 
@@ -915,20 +1065,36 @@ router.get('/:id/applications', authenticate, async (req: AuthRequest, res, next
   try {
     const { id } = req.params;
 
-    const apprenticeship = await findApprenticeshipForStaff(id, req.user!);
+    const apprenticeship = await findApprenticeshipForStaff(id, req.user!, 'applicants');
     if (!apprenticeship) {
       throw new ApiError(404, 'Apprenticeship not found');
     }
 
-    const applications = await prisma.apprenticeshipApplication.findMany({
-      where: { apprenticeshipId: id },
-      orderBy: { submittedAt: 'desc' },
-      include: {
-        user: { select: { id: true, displayName: true, email: true } },
-      },
-    });
+    // Paged, with the same ceiling of 100 as the employer console's applicant
+    // list. This returned every application the listing had ever received —
+    // email addresses, cover letters, résumés and answers — in one response.
+    const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+    const limit = parseLimit(req.query.limit, 50, 100);
+    const where = { apprenticeshipId: id };
 
-    res.json({ success: true, data: applications });
+    const [applications, total] = await Promise.all([
+      prisma.apprenticeshipApplication.findMany({
+        where,
+        orderBy: { submittedAt: 'desc' },
+        include: {
+          user: { select: { id: true, displayName: true, email: true } },
+        },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.apprenticeshipApplication.count({ where }),
+    ]);
+
+    res.json({
+      success: true,
+      data: applications,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    });
   } catch (error) {
     next(error);
   }
@@ -986,7 +1152,7 @@ router.post(
         throw new ApiError(400, errors.array()[0].msg);
       }
 
-      const apprenticeship = await findApprenticeshipForStaff(req.params.id, req.user!);
+      const apprenticeship = await findApprenticeshipForStaff(req.params.id, req.user!, 'listing');
       if (!apprenticeship) {
         throw new ApiError(404, 'Apprenticeship not found');
       }
@@ -1161,10 +1327,13 @@ router.patch(
         throw new ApiError(404, 'Submission not found');
       }
 
-      // Only the provider running the placement signs its competencies off.
+      // Only the provider running the placement signs its competencies off,
+      // and signing off is a decision about the apprentice, so it takes the
+      // same hiring role as reading her application.
       const apprenticeship = await findApprenticeshipForStaff(
         submission.milestone.apprenticeshipId,
-        req.user!
+        req.user!,
+        'applicants'
       );
       if (!apprenticeship) {
         throw new ApiError(404, 'Submission not found');

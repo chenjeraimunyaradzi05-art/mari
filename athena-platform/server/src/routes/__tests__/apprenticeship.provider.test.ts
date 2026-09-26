@@ -126,7 +126,19 @@ describe('Posting an apprenticeship', () => {
     const res = await request(app).post('/api/apprenticeships').set({ 'x-test-user': 'tafe-staff', 'x-test-role': 'USER' }).send(listing).expect(201);
 
     expect(res.body.data).toMatchObject({ id: 'a-new', title: 'Carpentry apprenticeship', rtoId: 'org1', status: 'DRAFT' });
-    expect(prisma.organizationMember.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { userId: 'tafe-staff', organizationId: { in: ['org1'] } } }));
+    // Membership still decides, but it has to be accepted and carry posting
+    // rights: an unanswered invitation or a VIEWER seat no longer lists in the
+    // organisation's name.
+    expect(prisma.organizationMember.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          userId: 'tafe-staff',
+          organizationId: { in: ['org1'] },
+          acceptedAt: { not: null },
+          OR: [{ role: { in: ['OWNER', 'ADMIN'] } }, { canPostJobs: true }],
+        },
+      })
+    );
   });
 
   it('still refuses a member who is not staff of the named organization', async () => {

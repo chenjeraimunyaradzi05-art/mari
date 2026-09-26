@@ -212,12 +212,11 @@ export const jobApi = {
 
   getById: (id: string) => api.get(`/jobs/${id}`),
 
-  create: (data: any) => api.post('/jobs', data),
-
-  update: (id: string, data: any) => api.patch(`/jobs/${id}`, data),
-
-  publish: (id: string) => api.post(`/jobs/${id}/publish`),
-
+  // Posting, editing and publishing a job, and deciding on its applicants, go
+  // through employerApi and /api/employer. The /api/jobs copies of those routes
+  // were a second, looser write path — no transition rule, no posting-rights
+  // check — and have been removed from the server, so the helpers that pointed
+  // at them are gone too rather than left to 404.
   apply: (id: string, data: any) => api.post(`/jobs/${id}/apply`, data),
 
   getMyApplications: () => api.get('/jobs/me/applications'),
@@ -226,11 +225,6 @@ export const jobApi = {
   // ownership and so 403s for the candidate.
   updateMyApplication: (applicationId: string, status: 'WITHDRAWN' | 'ACCEPTED') =>
     api.patch(`/jobs/me/applications/${applicationId}`, { status }),
-
-  getApplications: (jobId: string) => api.get(`/jobs/${jobId}/applications`),
-
-  updateApplication: (jobId: string, applicationId: string, data: any) =>
-    api.patch(`/jobs/${jobId}/applications/${applicationId}`, data),
 
   getRecommendations: () => api.get('/jobs/recommendations/for-me'),
 
@@ -1468,12 +1462,11 @@ export const aiAlgorithmsApi = {
   getCareerPrediction: () => api.get('/ai-algorithms/career-compass'),
   generateCareerPrediction: () => api.post('/ai-algorithms/career-compass/generate'),
 
-  // OpportunityScan - Opportunity Matching
-  getOpportunities: (params?: { type?: string; viewed?: boolean }) =>
-    api.get('/ai-algorithms/opportunity-scan', { params }),
-  markOpportunityViewed: (id: string) => api.patch(`/ai-algorithms/opportunity-scan/${id}/view`),
-  submitOpportunityFeedback: (id: string, data: { isInterested?: boolean; feedback?: string }) =>
-    api.patch(`/ai-algorithms/opportunity-scan/${id}/feedback`, data),
+  // OpportunityScan, MentorMatch and the trust-score table lived here too. Their
+  // server routes read tables nothing ever wrote — the audit found each one
+  // "scaffold-only" — so they answered every member with an empty list dressed
+  // as a result. Those routes are gone; the real, working versions are
+  // algorithmApi's opportunity scan and mentor match, and /api/trust-score.
 
   // SalaryEquity - Pay Gap Analysis
   submitSalaryData: (data: {
@@ -1499,14 +1492,7 @@ export const aiAlgorithmsApi = {
     api.get('/ai-algorithms/salary-equity/analyze', { params }),
   getMySalaryAnalyses: () => api.get('/ai-algorithms/salary-equity/my-analyses'),
 
-  // MentorMatch - AI Mentor Pairing
-  getMentorMatches: (params?: { skill?: string; industry?: string; minScore?: number }) =>
-    api.get('/ai-algorithms/mentor-match', { params }),
-  getMentorMatchDetails: (mentorId: string) => api.get(`/ai-algorithms/mentor-match/${mentorId}`),
-
   // SafetyScore - Trust & Verification
-  getMyTrustScore: () => api.get('/ai-algorithms/trust-score'),
-  getUserTrustScore: (userId: string) => api.get(`/ai-algorithms/trust-score/${userId}`),
   reportContent: (data: {
     contentType: string;
     contentId: string;

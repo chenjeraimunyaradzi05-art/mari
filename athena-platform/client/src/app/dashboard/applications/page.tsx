@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import {
   Briefcase,
   Building2,
@@ -18,7 +19,8 @@ import {
   Search,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useMyApplications, useUpdateMyApplication } from '@/lib/hooks';
+import { useUpdateMyApplication } from '@/lib/hooks';
+import { api } from '@/lib/api';
 import { ReferencesPanel } from '@/components/jobs/ReferencesPanel';
 import { downloadPrivateUpload } from '@/lib/private-files';
 import { formatRelativeTime, JOB_TYPE_LABELS } from '@/lib/utils';
@@ -45,11 +47,16 @@ const statusConfig = {
     color: 'text-teal-600 bg-teal-100 dark:bg-teal-900/30',
     description: 'You have been shortlisted for this role',
   },
+  // ATHENA has no interview behind this stage: no time, place or link is
+  // recorded, and nothing here lets her accept or propose one. So this says
+  // what the stage is and who acts next, rather than "you have been selected
+  // for an interview", which left her waiting for something to appear here.
   INTERVIEW: {
     label: 'Interview Stage',
     icon: Calendar,
     color: 'text-purple-600 bg-purple-100 dark:bg-purple-900/30',
-    description: 'You have been selected for an interview',
+    description:
+      'The employer has moved you to their interview stage. They arrange interviews directly with you, so look out for their email or call.',
   },
   OFFERED: {
     label: 'Offer Extended',
@@ -57,11 +64,14 @@ const statusConfig = {
     color: 'text-green-600 bg-green-100 dark:bg-green-900/30',
     description: 'Congratulations! You received an offer',
   },
+  // "The position has been filled" was a claim about the job that nothing
+  // recorded: an employer declining one candidate says nothing about whether
+  // anyone else was hired.
   REJECTED: {
     label: 'Not Selected',
     icon: XCircle,
     color: 'text-red-600 bg-red-100 dark:bg-red-900/30',
-    description: 'The position has been filled',
+    description: 'The employer did not take your application further.',
   },
   WITHDRAWN: {
     label: 'Withdrawn',
@@ -79,6 +89,26 @@ const statusConfig = {
 
 type ApplicationStatus = keyof typeof statusConfig;
 
+/** One page of GET /jobs/me/applications. */
+interface MyApplicationsPage {
+  data: any[];
+  pagination?: { page: number; limit: number; total: number; pages: number };
+  summary?: { byStatus: Record<string, number> };
+}
+
+const PAGE_SIZE = 50;
+
+/**
+ * Where the job is. Job has city, state, country and isRemote; this page used
+ * to print `job.location`, which is not a column, so every row showed an empty
+ * place beside a map pin.
+ */
+function jobPlace(job: { city?: string | null; state?: string | null; country?: string | null; isRemote?: boolean }): string {
+  const place = [job.city, job.state].filter(Boolean).join(', ') || job.country || '';
+  if (job.isRemote) return place ? `${place} · Remote` : 'Remote';
+  return place;
+}
+
 // A status this page does not know about should degrade to a plain row, not
 // take the whole list down with it.
 const FALLBACK_STATUS = {
@@ -92,7 +122,25 @@ export default function ApplicationsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [fetchingResumeFor, setFetchingResumeFor] = useState<string | null>(null);
-  const { data: applications, isLoading } = useMyApplications();
+  // Paged, with the totals from the server. The list used to arrive whole
+  // and the counts were its length; the route pages it now, and a count taken
+  // from one page would be a count of that page. The key sits under
+  // 'my-applications' so withdrawing or accepting refreshes it.
+  const applicationsQuery = useInfiniteQuery({
+    queryKey: ['my-applications', 'tracker'],
+    queryFn: async ({ pageParam }) =>
+      (await api.get('/jobs/me/applications', { params: { page: pageParam, limit: PAGE_SIZE } })).data as MyApplicationsPage,
+    initialPageParam: 1,
+    getNextPageParam: (last) =>
+      last.pagination && last.pagination.page < last.pagination.pages ? last.pagination.page + 1 : undefined,
+  });
+  const { isLoading, isError, refetch } = applicationsQuery;
+  const applications = useMemo(
+    () => (applicationsQuery.data?.pages ?? []).flatMap((page) => (Array.isArray(page.data) ? page.data : [])),
+    [applicationsQuery.data]
+  );
+  const firstPage = applicationsQuery.data?.pages[0];
+  const totalApplications = firstPage?.pagination?.total ?? applications.length;
   const updateApplication = useUpdateMyApplication();
 
   // Her résumé is a private upload, so the link on the application never
@@ -109,19 +157,24 @@ export default function ApplicationsPage() {
     }
   };
 
-  const filteredApplications = applications?.filter((app: any) => {
+  // A job posted outside any organisation has none, and reading `.name` off
+  // it threw, taking the search box and the whole list down with it.
+  const filteredApplications = applications.filter((app: any) => {
     const matchesStatus = statusFilter === 'all' || app.status === statusFilter;
+    const q = searchQuery.toLowerCase();
     const matchesSearch =
       !searchQuery ||
-      app.job.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      app.job.organization.name.toLowerCase().includes(searchQuery.toLowerCase());
+      app.job.title.toLowerCase().includes(q) ||
+      (app.job.organization?.name ?? '').toLowerCase().includes(q);
     return matchesStatus && matchesSearch;
   });
 
-  const statusCounts = applications?.reduce((acc: any, app: any) => {
-    acc[app.status] = (acc[app.status] || 0) + 1;
-    return acc;
-  }, {}) || {};
+  const statusCounts: Record<string, number> =
+    firstPage?.summary?.byStatus ??
+    applications.reduce((acc: Record<string, number>, app: any) => {
+      acc[app.status] = (acc[app.status] || 0) + 1;
+      return acc;
+    }, {});
 
   return (
     <div className="max-w-5xl mx-auto p-6 space-y-6">
@@ -148,7 +201,7 @@ export default function ApplicationsPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="card text-center">
           <div className="text-3xl font-bold text-slate-900 dark:text-white">
-            {applications?.length || 0}
+            {totalApplications}
           </div>
           <div className="text-sm text-slate-500 dark:text-slate-400">
             Total Applications
@@ -229,14 +282,28 @@ export default function ApplicationsPage() {
             </div>
           ))}
         </div>
-      ) : filteredApplications?.length === 0 ? (
+      ) : isError ? (
+        // A failed request used to fall through to "You haven't applied to any
+        // jobs yet", which is a claim about her, not about the connection.
+        <div className="card text-center py-12">
+          <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
+            We could not load your applications
+          </h3>
+          <p className="text-slate-500 dark:text-slate-400 mb-4">
+            This is a problem on our side or with the connection. Your applications are not lost.
+          </p>
+          <button type="button" onClick={() => refetch()} className="btn-outline inline-block px-4 py-2">
+            Try again
+          </button>
+        </div>
+      ) : filteredApplications.length === 0 ? (
         <div className="card text-center py-12">
           <Briefcase className="w-12 h-12 text-slate-400 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
             No applications found
           </h3>
           <p className="text-slate-500 dark:text-slate-400 mb-4">
-            {statusFilter !== 'all'
+            {statusFilter !== 'all' || searchQuery
               ? 'No applications match the selected filter'
               : "You haven't applied to any jobs yet"}
           </p>
@@ -246,10 +313,15 @@ export default function ApplicationsPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {filteredApplications?.map((application: any) => {
+          {filteredApplications.map((application: any) => {
             const status =
               statusConfig[application.status as ApplicationStatus] ?? FALLBACK_STATUS;
             const StatusIcon = status.icon;
+            const organization = application.job.organization as
+              | { name: string; logo: string | null; slug?: string }
+              | null
+              | undefined;
+            const place = jobPlace(application.job);
 
             return (
               <div
@@ -260,10 +332,10 @@ export default function ApplicationsPage() {
                   {/* Company Logo & Job Info */}
                   <div className="flex items-start space-x-4 flex-1">
                     <div className="w-12 h-12 rounded-lg bg-slate-100 dark:bg-slate-700 flex items-center justify-center overflow-hidden">
-                      {application.job.organization.logo ? (
+                      {organization?.logo ? (
                         <img
-                          src={application.job.organization.logo}
-                          alt={application.job.organization.name}
+                          src={organization.logo}
+                          alt={organization.name}
                           className="w-full h-full object-cover"
                         />
                       ) : (
@@ -278,18 +350,24 @@ export default function ApplicationsPage() {
                         {application.job.title}
                       </Link>
                       <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500 dark:text-slate-400 mt-1">
-                        <Link
-                          href={`/dashboard/organizations/${application.job.organization.slug}`}
-                          className="hover:text-primary-600 dark:hover:text-primary-400"
-                        >
-                          {application.job.organization.name}
-                        </Link>
-                        <span>•</span>
-                        <span className="flex items-center">
-                          <MapPin className="w-3.5 h-3.5 mr-1" />
-                          {application.job.location}
-                        </span>
-                        <span>•</span>
+                        {organization?.slug ? (
+                          <Link
+                            href={`/dashboard/organizations/${organization.slug}`}
+                            className="hover:text-primary-600 dark:hover:text-primary-400"
+                          >
+                            {organization.name}
+                          </Link>
+                        ) : organization ? (
+                          <span>{organization.name}</span>
+                        ) : null}
+                        {organization && place && <span>•</span>}
+                        {place && (
+                          <span className="flex items-center">
+                            <MapPin className="w-3.5 h-3.5 mr-1" />
+                            {place}
+                          </span>
+                        )}
+                        {(organization || place) && <span>•</span>}
                         <span>{JOB_TYPE_LABELS[application.job.type] || application.job.type}</span>
                       </div>
                     </div>
@@ -307,7 +385,9 @@ export default function ApplicationsPage() {
                     {/* Applied Date */}
                     <div className="flex items-center text-sm text-slate-500 dark:text-slate-400">
                       <Clock className="w-4 h-4 mr-1" />
-                      Applied {formatRelativeTime(application.createdAt)}
+                      {/* JobApplication has appliedAt and no createdAt, so
+                          this read "Applied Invalid Date" on every row. */}
+                      Applied {formatRelativeTime(application.appliedAt)}
                     </div>
                   </div>
                 </div>
@@ -347,7 +427,7 @@ export default function ApplicationsPage() {
                         className="text-red-600 hover:text-red-700 text-sm font-medium disabled:opacity-60"
                         disabled={updateApplication.isPending}
                         onClick={() => {
-                          if (!window.confirm('Withdraw this application? This cannot be undone.')) {
+                          if (!window.confirm('Withdraw this application? The employer will be told. You can apply again while the job is still open.')) {
                             return;
                           }
                           updateApplication.mutate({
@@ -398,6 +478,22 @@ export default function ApplicationsPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {!isLoading && !isError && applicationsQuery.hasNextPage && (
+        <div className="flex flex-col items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+          <p>
+            Showing your newest {applications.length} of {totalApplications} applications.
+          </p>
+          <button
+            type="button"
+            onClick={() => applicationsQuery.fetchNextPage()}
+            disabled={applicationsQuery.isFetchingNextPage}
+            className="btn-outline px-4 py-2 disabled:opacity-60"
+          >
+            {applicationsQuery.isFetchingNextPage ? 'Loading…' : 'Show older applications'}
+          </button>
         </div>
       )}
 

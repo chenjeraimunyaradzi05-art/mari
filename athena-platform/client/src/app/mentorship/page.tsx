@@ -24,7 +24,7 @@ export default function MentorshipPage() {
             <Users className="w-10 h-10 text-purple-500 mb-4" />
             <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">Find a Mentor</h3>
             <p className="text-slate-600 dark:text-slate-300 text-sm mb-4">
-              Browse our curated network of mentors matched to your career goals and industry.
+              Browse members who mentor, and search them by expertise, experience and rate.
             </p>
             <Link href="/mentors" className="text-purple-600 dark:text-purple-400 text-sm font-medium inline-flex items-center hover:underline">
               Browse Mentors <ArrowRight className="w-4 h-4 ml-1" />
@@ -46,10 +46,14 @@ export default function MentorshipPage() {
             <Star className="w-10 h-10 text-purple-500 mb-4" />
             <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">Become a Mentor</h3>
             <p className="text-slate-600 dark:text-slate-300 text-sm mb-4">
-              Share your expertise, earn income, and make a lasting impact on women&apos;s careers. Set your rate, connect payouts, and you are open for bookings.
+              Share your expertise and make a lasting impact on women&apos;s careers. Set a rate, or mentor for free; your profile goes live as soon as you publish it, and a paid rate needs payouts connected before anyone can book you.
             </p>
-            <Link href="/mentor-agreement" className="text-purple-600 dark:text-purple-400 text-sm font-medium inline-flex items-center hover:underline">
-              Apply Now <ArrowRight className="w-4 h-4 ml-1" />
+            {/* This went to /mentor-agreement, a static page with no way on to
+                the form and a description of an approval step that does not
+                exist. The form itself links the agreement beside the box she
+                ticks to publish. */}
+            <Link href="/dashboard/mentors/become-mentor" className="text-purple-600 dark:text-purple-400 text-sm font-medium inline-flex items-center hover:underline">
+              Become a mentor <ArrowRight className="w-4 h-4 ml-1" />
             </Link>
           </div>
         </div>

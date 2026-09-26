@@ -2,16 +2,22 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
 import {
   Search,
-  Star,
   Award,
   Clock,
   Users,
   ChevronDown,
   CheckCircle2,
+  PauseCircle,
+  PlayCircle,
+  Pencil,
 } from 'lucide-react';
 import { useMentors } from '@/lib/hooks';
+import { api } from '@/lib/api';
+import { useAuthStore } from '@/lib/store';
 import { formatCurrency, cn } from '@/lib/utils';
 import { CardSkeleton } from '@/components/ui/loading';
 
@@ -28,12 +34,108 @@ const specializations = [
   'Personal Branding',
 ];
 
+// "Highest Rated" was the default here, and nothing on the platform writes a
+// rating: there is no review model, endpoint or form. The server also ignored
+// the sort entirely, so all four options showed the same list. These are the
+// orders the server now applies, each from something it actually records.
 const sortOptions = [
-  { value: 'rating', label: 'Highest Rated' },
   { value: 'sessions', label: 'Most Sessions' },
+  { value: 'newest', label: 'Newest' },
   { value: 'price_low', label: 'Price: Low to High' },
   { value: 'price_high', label: 'Price: High to Low' },
 ];
+
+const errorMessage = (e: unknown) =>
+  (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
+
+interface OwnMentorProfile {
+  id: string;
+  isAvailable: boolean;
+  hourlyRate: number | string | null;
+  sessionCount: number;
+}
+
+/**
+ * The mentor's own controls: whether she is taking new requests, and a way
+ * back into the form that edits her rate and expertise.
+ *
+ * The become-a-mentor wizard has always told mentors they could "stop taking
+ * new requests at any moment" from here, and there was no control to do it:
+ * nothing on the client wrote `isAvailable = false`. Drawn only for a member
+ * who has a mentor profile.
+ */
+function YourMentorProfile() {
+  const user = useAuthStore((s) => s.user);
+  const queryClient = useQueryClient();
+
+  const profile = useQuery({
+    queryKey: ['mentor-me'],
+    queryFn: async () => (await api.get('/mentors/me')).data?.data as OwnMentorProfile | null,
+    enabled: Boolean(user),
+  });
+
+  const availability = useMutation({
+    mutationFn: async (isAvailable: boolean) =>
+      (await api.patch('/mentors/me/availability', { isAvailable })).data?.data as OwnMentorProfile,
+    onSuccess: (updated) => {
+      queryClient.setQueryData(['mentor-me'], updated);
+      queryClient.invalidateQueries({ queryKey: ['mentors'] });
+      toast.success(
+        updated.isAvailable
+          ? 'You are taking new requests again.'
+          : 'New requests are paused. Sessions already booked are unchanged.'
+      );
+    },
+    onError: (error) => toast.error(errorMessage(error) || 'That did not save. Try again.'),
+  });
+
+  if (!user || profile.isLoading) return null;
+
+  if (profile.isError) {
+    return (
+      <div className="card border border-amber-200 bg-amber-50 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+        We could not check whether you have a mentor profile, so its controls are not shown.{' '}
+        <button type="button" className="underline" onClick={() => profile.refetch()}>
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  const mine = profile.data;
+  if (!mine) return null;
+
+  return (
+    <div className="card flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+      <div>
+        <h2 className="font-semibold text-slate-900 dark:text-white">Your mentor profile</h2>
+        <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+          {mine.isAvailable
+            ? 'You are taking new requests. Mentees can see your free times and ask for a session.'
+            : 'New requests are paused. Your profile shows you as unavailable and offers no times; sessions already booked are unchanged.'}
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => availability.mutate(!mine.isAvailable)}
+          disabled={availability.isPending}
+          className={cn(
+            'inline-flex items-center gap-2 px-4 py-2 disabled:opacity-60',
+            mine.isAvailable ? 'btn-outline' : 'btn-primary'
+          )}
+        >
+          {mine.isAvailable ? <PauseCircle className="h-4 w-4" /> : <PlayCircle className="h-4 w-4" />}
+          {mine.isAvailable ? 'Pause new requests' : 'Take new requests'}
+        </button>
+        <Link href="/dashboard/mentors/become-mentor" className="btn-outline inline-flex items-center gap-2 px-4 py-2">
+          <Pencil className="h-4 w-4" />
+          Edit rate &amp; expertise
+        </Link>
+      </div>
+    </div>
+  );
+}
 
 function getDisplayName(mentor: any) {
   return mentor.user?.displayName || 'ATHENA Mentor';
@@ -67,9 +169,9 @@ function toStringArray(value: unknown): string[] {
 export default function MentorsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSpecialization, setSelectedSpecialization] = useState('All Specializations');
-  const [sortBy, setSortBy] = useState('rating');
+  const [sortBy, setSortBy] = useState('sessions');
 
-  const { data, isLoading } = useMentors({
+  const { data, isLoading, isError, refetch } = useMentors({
     search: searchQuery,
     specialization:
       selectedSpecialization !== 'All Specializations'
@@ -109,6 +211,8 @@ export default function MentorsPage() {
           </Link>
         </div>
       </div>
+
+      <YourMentorProfile />
 
       <div className="flex flex-col md:flex-row gap-4">
         <div className="flex-1 relative">
@@ -163,6 +267,20 @@ export default function MentorsPage() {
             <CardSkeleton />
             <CardSkeleton />
           </>
+        ) : isError ? (
+          // A failed request used to fall through to "No mentors found", which
+          // told her the directory was empty when it had not been read.
+          <div className="col-span-full card py-12 text-center">
+            <h3 className="mb-2 text-lg font-medium text-slate-900 dark:text-white">
+              We could not load the mentors
+            </h3>
+            <p className="mb-4 text-slate-500 dark:text-slate-400">
+              This is a problem on our side or with the connection, not an empty directory.
+            </p>
+            <button onClick={() => refetch()} className="btn-outline px-4 py-2">
+              Try again
+            </button>
+          </div>
         ) : mentors.length ? (
           mentors.map((mentor: any) => {
             const displayName = getDisplayName(mentor);
@@ -171,10 +289,6 @@ export default function MentorsPage() {
             const hourlyRate =
               mentor.hourlyRate !== null && mentor.hourlyRate !== undefined
                 ? Number(mentor.hourlyRate)
-                : null;
-            const rating =
-              mentor.rating !== null && mentor.rating !== undefined
-                ? Number(mentor.rating)
                 : null;
 
             return (
@@ -219,15 +333,6 @@ export default function MentorsPage() {
                 </div>
 
                 <div className="mb-4 flex flex-wrap items-center gap-4 text-sm">
-                  <div className="flex items-center text-yellow-500">
-                    <Star className="mr-1 h-4 w-4 fill-current" />
-                    <span className="font-medium">
-                      {rating ? rating.toFixed(1) : 'New'}
-                    </span>
-                    <span className="ml-1 text-slate-400">
-                      ({mentor.reviewCount || 0})
-                    </span>
-                  </div>
                   <div className="flex items-center text-slate-500 dark:text-slate-400">
                     <Users className="mr-1 h-4 w-4" />
                     <span>{mentor.sessionCount || 0} sessions</span>
@@ -268,7 +373,14 @@ export default function MentorsPage() {
                     <span>30 or 60 minute sessions</span>
                   </div>
                   <div className="font-semibold text-slate-900 dark:text-white">
-                    {hourlyRate ? `${formatCurrency(hourlyRate)}/hour` : 'Rate on request'}
+                    {/* Zero is a rate: she mentors for free, and "Rate on
+                        request" hid the one thing most likely to bring a
+                        mentee to her. Null is the rate she has not set. */}
+                    {hourlyRate === null
+                      ? 'Rate not set'
+                      : hourlyRate === 0
+                        ? 'Free'
+                        : `${formatCurrency(hourlyRate)}/hour`}
                   </div>
                 </div>
 
@@ -323,7 +435,7 @@ export default function MentorsPage() {
             href="/dashboard/mentors/become-mentor"
             className="btn flex-shrink-0 bg-white px-6 py-3 text-primary-600 hover:bg-slate-100"
           >
-            Apply to Mentor
+            Become a mentor
           </Link>
         </div>
       </div>

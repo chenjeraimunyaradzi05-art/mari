@@ -93,7 +93,7 @@ export default function TeamPage() {
   const [inviteRole, setInviteRole] = useState('RECRUITER');
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
 
-  const { data: teamData, isLoading } = useQuery<TeamResponse>({
+  const { data: teamData, isLoading, isError, refetch } = useQuery<TeamResponse>({
     queryKey: ['employer-team', orgId],
     queryFn: async () => {
       const response = await api.get(`/employer/organizations/${orgId}/team`);
@@ -106,9 +106,17 @@ export default function TeamPage() {
       const response = await api.post(`/employer/organizations/${orgId}/team/invite`, { email, role });
       return response.data;
     },
-    onSuccess: () => {
+    onSuccess: (result: { message?: string }) => {
       queryClient.invalidateQueries({ queryKey: ['employer-team', orgId] });
-      toast.success('Team member invited successfully!');
+      // The server answers every invitation with the same words, whether or
+      // not the address has an account, so that inviting cannot be used to
+      // find out who is on ATHENA. "Team member invited successfully!" was a
+      // claim about a person the page cannot know exists, and she is not on
+      // the team until she accepts.
+      toast.success(
+        result?.message ||
+          'If that email address belongs to an ATHENA member, she has been sent an invitation. She will appear on your team once she accepts it.'
+      );
       setShowInviteModal(false);
       setInviteEmail('');
       setInviteRole('RECRUITER');
@@ -199,6 +207,17 @@ export default function TeamPage() {
         {isLoading ? (
           <div className="p-12 text-center">
             <div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto"></div>
+          </div>
+        ) : isError ? (
+          // A failed read used to fall through to "No team members yet".
+          <div className="p-12 text-center">
+            <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
+              We could not load the team
+            </h3>
+            <p className="text-slate-500 mb-4">This is a problem on our side or with the connection.</p>
+            <Button variant="outline" onClick={() => refetch()}>
+              Try again
+            </Button>
           </div>
         ) : sortedMembers.length === 0 ? (
           <div className="p-12 text-center">
@@ -335,7 +354,8 @@ export default function TeamPage() {
                   required
                 />
                 <p className="text-xs text-slate-500 mt-1">
-                  They must have an existing ATHENA account
+                  Invitations reach people who already have an ATHENA account. She joins your team
+                  only if she accepts, and she is listed here once she has.
                 </p>
               </div>
 

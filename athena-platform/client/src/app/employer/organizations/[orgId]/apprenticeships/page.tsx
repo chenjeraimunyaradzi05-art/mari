@@ -105,15 +105,28 @@ export default function ProviderApprenticeshipsPage() {
     select: (r) => (r.data?.data ?? []) as Apprenticeship[],
   });
 
-  const applications = useQuery({
+  // The route pages its answer now — it used to return every applicant a
+  // listing had ever had, emails and cover letters included, in one response —
+  // so this asks for its largest page and says below when there are more.
+  const applicationsQuery = useQuery({
     queryKey: ['apprenticeship-applications', showApplications],
-    queryFn: () => apprenticeshipApi.getApplicationsFor(showApplications as string),
+    queryFn: () =>
+      api.get(`/apprenticeships/${showApplications}/applications`, { params: { limit: 100 } }),
     // The route selects `user` and orders by `submittedAt`; this used to read
     // `applicant` and `createdAt`, neither of which is in the payload, so every
     // applicant showed as "An applicant" with an unreadable date.
-    select: (r) => (r.data?.data ?? []) as ApplicationRow[],
+    select: (r) => ({
+      rows: (r.data?.data ?? []) as ApplicationRow[],
+      total: typeof r.data?.pagination?.total === 'number' ? (r.data.pagination.total as number) : null,
+    }),
     enabled: Boolean(showApplications),
   });
+  const applications = {
+    ...applicationsQuery,
+    data: applicationsQuery.data?.rows,
+  };
+  const applicantsNotShown =
+    applicationsQuery.data?.total != null ? applicationsQuery.data.total - applicationsQuery.data.rows.length : 0;
 
   // Moving an application along. There was no endpoint for this at all, so an
   // applicant sat at "submitted" for ever and the milestone, evidence and
@@ -287,6 +300,16 @@ export default function ProviderApprenticeshipsPage() {
                 <div className="mt-4 border-t border-slate-100 pt-4 dark:border-slate-700">
                   {applications.isLoading ? (
                     <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                  ) : applications.isError ? (
+                    // A refusal or a failed request used to fall through to
+                    // "Nobody has applied yet". Applicants are shown only to
+                    // this organisation's hiring team, so a member without a
+                    // hiring role is told that rather than told there are none.
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                      {apiMessage(applications.error, 'We could not load the applicants.') === 'Apprenticeship not found'
+                        ? 'Applicants are shown to owners, admins and recruiters of this organisation, and to anyone given posting rights.'
+                        : apiMessage(applications.error, 'We could not load the applicants. Try again in a moment.')}
+                    </p>
                   ) : (applications.data?.length ?? 0) === 0 ? (
                     <p className="text-sm text-slate-500 dark:text-slate-400">Nobody has applied yet.</p>
                   ) : (
@@ -324,6 +347,12 @@ export default function ProviderApprenticeshipsPage() {
                           )}
                         </li>
                       ))}
+                      {applicantsNotShown > 0 && (
+                        <li className="pt-2 text-xs text-slate-500">
+                          Showing the newest {applications.data!.length}. {applicantsNotShown} earlier{' '}
+                          {applicantsNotShown === 1 ? 'applicant is' : 'applicants are'} not listed here.
+                        </li>
+                      )}
                     </ul>
                   )}
                 </div>

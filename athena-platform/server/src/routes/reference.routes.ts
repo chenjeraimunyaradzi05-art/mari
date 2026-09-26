@@ -10,6 +10,7 @@ import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
 import { publicFormLimiter } from '../middleware/socialLimits';
+import { canManageJobApplicants } from '../services/hiring-access.service';
 
 const router = Router();
 
@@ -47,9 +48,15 @@ async function requireOwnApplication(applicationId: string, userId: string): Pro
 }
 
 /**
- * Referee feedback is readable by the candidate it is about and by the employer
- * hiring for the job, which means the person who posted it or the staff of the
- * organization behind it.
+ * Referee feedback is readable by the candidate it is about and by the people
+ * hiring for the job.
+ *
+ * "The people hiring" used to mean the person who created the listing, for
+ * ever, or any member row of the organisation behind it — a VIEWER, or someone
+ * who had been sent an invitation and never answered it. What a former manager
+ * says about a woman is among the most sensitive things on her application, so
+ * it takes the same rule as the applicant board: an accepted member with a
+ * hiring role, or the poster of a listing that belongs to no organisation.
  */
 async function canReadApplicationReferences(
   applicationId: string,
@@ -65,20 +72,8 @@ async function canReadApplicationReferences(
 
   if (!application) return false;
   if (application.userId === user.id || user.role === 'ADMIN') return true;
-  if (application.job.postedById === user.id) return true;
-  if (!application.job.organizationId) return false;
 
-  const membership = await prisma.organizationMember.findUnique({
-    where: {
-      organizationId_userId: {
-        organizationId: application.job.organizationId,
-        userId: user.id,
-      },
-    },
-    select: { id: true },
-  });
-
-  return Boolean(membership);
+  return canManageJobApplicants(application.job, user.id);
 }
 
 // ==========================================

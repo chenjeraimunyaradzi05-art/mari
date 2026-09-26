@@ -14,7 +14,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { formatDistanceToNow } from 'date-fns';
 import { ArrowLeft, Briefcase, Download, Eye, FileText, LayoutGrid, List, Loader2, Mail, Search, Star, User, UserCheck, X } from 'lucide-react';
@@ -65,6 +65,20 @@ const BOARD_COLUMNS: Stage[] = ['PENDING', 'REVIEWED', 'SHORTLISTED', 'INTERVIEW
 const EMPLOYER_STAGES: Stage[] = ['PENDING', 'REVIEWED', 'SHORTLISTED', 'INTERVIEW', 'OFFERED', 'REJECTED'];
 const CLOSED: Stage[] = ['ACCEPTED', 'REJECTED', 'WITHDRAWN'];
 
+/** One page of the applicant list, as the console route sends it. */
+interface ApplicationsPage {
+  data: Application[];
+  pagination: { page: number; limit: number; total: number; pages: number };
+  summary?: {
+    byStatus: Partial<Record<Stage, number>>;
+    jobs: { id: string; title: string; count: number }[];
+  };
+}
+
+// The route's ceiling. The board loads the newest hundred first and the rest
+// on request; see the load-more control under the board.
+const PAGE_SIZE = 100;
+
 const errorMessage = (error: unknown) =>
   (error as { response?: { data?: { message?: string; error?: string } } })?.response?.data?.message ??
   (error as { response?: { data?: { message?: string; error?: string } } })?.response?.data?.error;
@@ -86,12 +100,35 @@ export default function ApplicationsPage() {
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<Stage | null>(null);
 
-  const { data: applications = [], isLoading, isError } = useQuery({
-    queryKey: ['employer-applications', orgId],
-    queryFn: () => api.get(`/employer/organizations/${orgId}/applications`, { params: { limit: 100 } }),
+  // This asked once for a hundred and treated the answer as everything. An
+  // organisation past a hundred applicants lost its oldest ones from the board
+  // without a word — newest first, so the women who had waited longest were
+  // the ones who vanished — and the header, the column counts and the job
+  // filter were all worked out from that cut-down list. Pages are loaded on
+  // request now, the totals come from the server, and the job filter is asked
+  // of the server rather than applied to whatever happened to be loaded.
+  const applicationsQuery = useInfiniteQuery({
+    queryKey: ['employer-applications', orgId, jobFilter],
+    queryFn: async ({ pageParam }) => {
+      const response = await api.get(`/employer/organizations/${orgId}/applications`, {
+        params: { limit: PAGE_SIZE, page: pageParam, ...(jobFilter !== 'all' ? { jobId: jobFilter } : {}) },
+      });
+      return response.data as ApplicationsPage;
+    },
+    initialPageParam: 1,
+    getNextPageParam: (last) =>
+      last.pagination && last.pagination.page < last.pagination.pages ? last.pagination.page + 1 : undefined,
     enabled: Boolean(orgId),
-    select: (response) => (Array.isArray(response.data?.data) ? (response.data.data as Application[]) : []),
   });
+  const { isLoading, isError } = applicationsQuery;
+
+  const applications = useMemo(
+    () => (applicationsQuery.data?.pages ?? []).flatMap((page) => (Array.isArray(page.data) ? page.data : [])),
+    [applicationsQuery.data]
+  );
+  const firstPage = applicationsQuery.data?.pages[0];
+  const total = firstPage?.pagination?.total ?? applications.length;
+  const summary = firstPage?.summary;
 
   const move = useMutation({
     mutationFn: ({ applicationId, status }: { applicationId: string; status: Stage }) =>
@@ -103,7 +140,10 @@ export default function ApplicationsPage() {
     onError: (error) => toast.error(errorMessage(error) || 'Could not move the application'),
   });
 
-  const jobs = useMemo(() => Array.from(new Map(applications.map((a) => [a.job.id, a.job])).values()), [applications]);
+  const jobs = useMemo(
+    () => summary?.jobs ?? Array.from(new Map(applications.map((a) => [a.job.id, a.job])).values()),
+    [summary, applications]
+  );
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -116,9 +156,12 @@ export default function ApplicationsPage() {
   }, [applications, jobFilter, stageFilter, search]);
 
   const counts = useMemo(
-    () => applications.reduce((acc, a) => ({ ...acc, [a.status]: (acc[a.status] ?? 0) + 1 }), {} as Partial<Record<Stage, number>>),
-    [applications]
+    () =>
+      summary?.byStatus ??
+      applications.reduce((acc, a) => ({ ...acc, [a.status]: (acc[a.status] ?? 0) + 1 }), {} as Partial<Record<Stage, number>>),
+    [summary, applications]
   );
+  const allLoaded = applications.length >= total;
 
   const selected = applications.find((a) => a.id === selectedId) ?? null;
 
@@ -196,7 +239,9 @@ export default function ApplicationsPage() {
             <FileText className="h-7 w-7 text-blue-600" /> Applications
           </h1>
           <p className="mt-1 text-slate-600 dark:text-slate-400">
-            {applications.length} {applications.length === 1 ? 'candidate' : 'candidates'} across {jobs.length} {jobs.length === 1 ? 'job' : 'jobs'}
+            {total} {total === 1 ? 'candidate' : 'candidates'}
+            {jobFilter === 'all' ? ` across ${jobs.length} ${jobs.length === 1 ? 'job' : 'jobs'}` : ''}
+            {!allLoaded && ` · showing the newest ${applications.length}`}
           </p>
         </div>
         <div className="flex gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800" role="tablist" aria-label="View">
@@ -254,6 +299,10 @@ export default function ApplicationsPage() {
         </div>
       ) : isError ? (
         <div className="rounded-xl border border-slate-200 bg-white p-12 text-center text-slate-500 dark:border-slate-700 dark:bg-slate-800">Could not load applications.</div>
+      ) : applications.length === 0 && jobFilter !== 'all' ? (
+        <div className="rounded-xl border border-slate-200 bg-white p-12 text-center text-slate-500 dark:border-slate-700 dark:bg-slate-800">
+          Nobody has applied to this job yet.
+        </div>
       ) : applications.length === 0 ? (
         <div className="rounded-xl border border-slate-200 bg-white p-12 text-center dark:border-slate-700 dark:bg-slate-800">
           <FileText className="mx-auto mb-4 h-12 w-12 text-slate-400" />
@@ -284,7 +333,11 @@ export default function ApplicationsPage() {
                     >
                       <header className="mb-2 flex items-center justify-between px-1">
                         <span className={cn('rounded-full px-2 py-0.5 text-xs font-semibold', STAGES[stage].tone)}>{STAGES[stage].label}</span>
-                        <span className="text-xs text-slate-500">{cards.length}</span>
+                        <span className="text-xs text-slate-500">
+                          {/* The loaded cards against the true count, so a
+                              column is never read as complete when it is not. */}
+                          {allLoaded || (counts[stage] ?? 0) === cards.length ? cards.length : `${cards.length} of ${counts[stage] ?? 0}`}
+                        </span>
                       </header>
                       <div className="space-y-2">
                         {cards.length === 0 ? (
@@ -350,6 +403,23 @@ export default function ApplicationsPage() {
               moving={move.isPending}
             />
           )}
+        </div>
+      )}
+
+      {!isLoading && !isError && applicationsQuery.hasNextPage && (
+        <div className="mt-6 flex flex-col items-center gap-2 text-sm text-slate-500">
+          <p>
+            Showing the newest {applications.length} of {total}. Older applicants are not on the board until you load them.
+          </p>
+          <button
+            type="button"
+            onClick={() => applicationsQuery.fetchNextPage()}
+            disabled={applicationsQuery.isFetchingNextPage}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+          >
+            {applicationsQuery.isFetchingNextPage && <Loader2 className="h-4 w-4 animate-spin" />}
+            Load older applicants
+          </button>
         </div>
       )}
     </div>

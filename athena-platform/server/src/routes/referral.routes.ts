@@ -1,9 +1,19 @@
 import { Router, Response, NextFunction } from 'express';
 import { prisma } from '../utils/prisma';
 import { authenticate, requireRole, AuthRequest, optionalAuth } from '../middleware/auth';
+import { hiddenMemberWhere, viewerContextFor } from '../services/search.service';
 import crypto from 'crypto';
 
 const router = Router();
+
+/** The chosen display name, or a first name and an initial — never a full legal name. */
+function leaderboardName(user: { displayName: string | null; firstName: string | null; lastName: string | null }): string {
+  if (user.displayName?.trim()) return user.displayName.trim();
+  const first = user.firstName?.trim();
+  const initial = user.lastName?.trim().charAt(0);
+  if (first && initial) return `${first} ${initial}.`;
+  return first || 'An ATHENA member';
+}
 
 // ============================================================================
 // REFERRAL CODE GENERATION
@@ -226,8 +236,11 @@ router.post('/:id/complete', authenticate, requireRole('ADMIN'), async (req: Aut
       return res.status(400).json({ error: 'Referral already completed' });
     }
 
-    // Update referral and grant credits to both users
-    const REFERRAL_CREDITS = 100; // Credits for each party
+    // The referrer's reward. The referred member is not paid here: she was
+    // credited when she registered with the code (auth.routes.ts), and this
+    // route used to credit her a second time on top of that, so every referral
+    // an admin completed by hand paid her twice for the same signup.
+    const REFERRAL_CREDITS = 100;
 
     const granted = await prisma.$transaction(async (tx) => {
       // Moving the row out of PENDING is the claim on the reward. A replay, or
@@ -245,27 +258,19 @@ router.post('/:id/complete', authenticate, requireRole('ADMIN'), async (req: Aut
         return false;
       }
 
-      // Grant credits to referrer
       await tx.user.update({
         where: { id: referral.referrerId },
         data: {
           referralCredits: { increment: REFERRAL_CREDITS },
         },
       });
-      // Grant credits to referred user
-      await tx.user.update({
-        where: { id: referral.referredId },
-        data: {
-          referralCredits: { increment: REFERRAL_CREDITS },
-        },
-      });
-      // Notify referrer
       await tx.notification.create({
         data: {
           userId: referral.referrerId,
           type: 'SYSTEM',
           title: 'Referral Completed!',
-          message: `${referral.referred.firstName} completed signup! You both earned ${REFERRAL_CREDITS} credits.`,
+          message: `${referral.referred.firstName} completed signup. You earned ${REFERRAL_CREDITS} credits.`,
+          link: '/dashboard/referrals',
         },
       });
 
@@ -289,19 +294,36 @@ router.post('/:id/complete', authenticate, requireRole('ADMIN'), async (req: Aut
 /**
  * GET /referrals/leaderboard
  * Get top referrers
+ *
+ * This was open to anyone, signed in or not, and published each top
+ * referrer's full first and last name and photo, with no regard for "hide me
+ * from search". A woman who had hidden herself in the Safety Centre, and who
+ * had shared her link with friends, could be found by name on a public page
+ * by the person she was hiding from. It now needs a signed-in member, leaves
+ * out anyone who asked to be hidden or who is blocked in either direction with
+ * the viewer, and names people the way the rest of the platform does: by the
+ * display name they chose, or a first name and an initial.
  */
-router.get('/leaderboard', async (_req, res: Response, next: NextFunction) => {
+router.get('/leaderboard', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    const viewer = await viewerContextFor(req.user!.id);
+
     const topReferrers = await prisma.user.findMany({
       where: {
-        referralsMade: {
-          some: {
-            status: 'COMPLETED',
+        AND: [
+          {
+            referralsMade: {
+              some: {
+                status: 'COMPLETED',
+              },
+            },
           },
-        },
+          hiddenMemberWhere(viewer),
+        ],
       },
       select: {
         id: true,
+        displayName: true,
         firstName: true,
         lastName: true,
         avatar: true,
@@ -324,7 +346,7 @@ router.get('/leaderboard', async (_req, res: Response, next: NextFunction) => {
     const leaderboard = topReferrers.map((user, index) => ({
       rank: index + 1,
       id: user.id,
-      name: `${user.firstName} ${user.lastName}`,
+      name: leaderboardName(user),
       avatar: user.avatar,
       referrals: user._count.referralsMade,
       credits: user.referralCredits,

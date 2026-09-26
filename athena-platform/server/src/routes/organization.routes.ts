@@ -27,6 +27,7 @@ import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { v4 as uuidv4 } from 'uuid';
 import { parsePagination } from '../utils/pagination';
+import { assertContentAllowed } from '../services/moderation.service';
 
 const router = Router();
 
@@ -154,6 +155,12 @@ router.post(
       const { name, type, description, website, city, state, country, industry, size } = req.body;
       const userId = req.user!.id;
 
+      // An organisation's name and description are shown to strangers — in the
+      // directory, on every listing it posts, and on the invitations page of
+      // anyone it asks to join — and anyone can create one, so they are
+      // screened as profile text before they are published.
+      await assertContentAllowed([name, description].filter(Boolean).join('\n'), { kind: 'profile', userId });
+
       // Generate slug
       const slug = `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${uuidv4().slice(0, 6)}`;
 
@@ -278,12 +285,17 @@ router.patch('/:id', authenticate, async (req: AuthRequest, res, next) => {
       },
     });
     
-    const isOrgOwnerOrAdmin = membership && ['OWNER', 'ADMIN'].includes(membership.role);
-    
+    // An invitation she has not accepted is not a membership. The invite route
+    // creates the row with its role the moment an owner types an address, so
+    // a pending ADMIN invitee — someone who had not agreed to have anything to
+    // do with the organisation — could already rewrite its public profile.
+    const isOrgOwnerOrAdmin =
+      Boolean(membership?.acceptedAt) && ['OWNER', 'ADMIN'].includes(membership!.role);
+
     if (!isSystemAdmin && !isOrgOwnerOrAdmin) {
       throw new ApiError(403, 'Not authorized to update this organization');
     }
-    
+
     const allowedFields = ['name', 'description', 'logo', 'banner', 'website', 'city', 'state', 'country', 'industry', 'size'];
 
     const updateData: Record<string, any> = {};
@@ -291,6 +303,14 @@ router.patch('/:id', authenticate, async (req: AuthRequest, res, next) => {
       if (req.body[field] !== undefined) {
         updateData[field] = req.body[field];
       }
+    }
+
+    // Screened as profile text, as at creation: see POST / below.
+    const screened = [updateData.name, updateData.description].filter(
+      (value): value is string => typeof value === 'string' && value.length > 0
+    );
+    if (screened.length > 0) {
+      await assertContentAllowed(screened.join('\n'), { kind: 'profile', userId: req.user!.id });
     }
 
     const updatedOrganization = await prisma.organization.update({

@@ -31,6 +31,7 @@ import {
 } from '@/components/apprenticeships/types';
 import { apprenticeshipApi } from '@/lib/api-extensions';
 import { BackToHome } from '@/components/layout/PageShell';
+import toast from 'react-hot-toast';
 import { cn } from '@/lib/utils';
 
 /**
@@ -154,13 +155,23 @@ export default function ApprenticeshipDetailPage() {
 
   const handleApplicationSubmit = async (data: ApplicationData) => {
     if (!apprenticeship) return;
-    await apprenticeshipApi.apply(apprenticeship.id, {
-      coverLetter: data.coverLetter,
-      resumeUrl: data.resumeUrl,
-      portfolioUrl: data.portfolioUrl,
-      availableStartDate: data.availableStartDate,
-      answers: data.answers,
-    });
+    // The modal answers any failure with "Failed to submit application.
+    // Please try again", which is wrong for the refusals that will not change
+    // on a retry — a provider with nobody on ATHENA to receive it, a résumé
+    // link that is not a web address. The server's own words are shown too.
+    try {
+      await apprenticeshipApi.apply(apprenticeship.id, {
+        coverLetter: data.coverLetter,
+        resumeUrl: data.resumeUrl,
+        portfolioUrl: data.portfolioUrl,
+        availableStartDate: data.availableStartDate,
+        answers: data.answers,
+      });
+    } catch (error) {
+      const message = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      if (message) toast.error(message);
+      throw error;
+    }
   };
 
   if (loading) {
@@ -191,6 +202,12 @@ export default function ApprenticeshipDetailPage() {
   const closed = deadlineDays !== null && deadlineDays <= 0;
   const left = positionsLeft(apprenticeship);
   const wage = wageLabel(apprenticeship);
+  // False when nobody at the provider has an ATHENA account to receive an
+  // application. The seeded TAFE and university listings are like this until
+  // the institution claims its page; the button used to take the application
+  // anyway, and nobody ever read it.
+  const noOneToReceive =
+    (apprenticeship as Apprenticeship & { acceptsApplications?: boolean }).acceptsApplications === false;
   const competencies = readCompetencies(apprenticeship.competencies);
 
   return (
@@ -366,11 +383,23 @@ export default function ApprenticeshipDetailPage() {
               <div className="mt-6 space-y-2">
                 <Button
                   className="w-full"
-                  disabled={closed || left === 0}
+                  disabled={closed || left === 0 || noOneToReceive}
                   onClick={() => setShowApply(true)}
                 >
-                  {closed ? 'Applications closed' : left === 0 ? 'All places filled' : 'Apply now'}
+                  {closed
+                    ? 'Applications closed'
+                    : left === 0
+                      ? 'All places filled'
+                      : noOneToReceive
+                        ? 'Apply through the provider'
+                        : 'Apply now'}
                 </Button>
+                {noOneToReceive && !closed && left !== 0 && (
+                  <p className="text-sm text-slate-600 dark:text-slate-300">
+                    {org?.name ?? 'This provider'} has not set up its ATHENA account yet, so an
+                    application sent here would not reach anyone. Contact them directly to apply.
+                  </p>
+                )}
 
                 <div className="flex gap-2">
                   <Button variant="outline" className="flex-1" onClick={handleBookmark}>

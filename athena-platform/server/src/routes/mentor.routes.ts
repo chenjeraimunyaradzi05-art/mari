@@ -32,15 +32,25 @@ router.get(
     query('limit').optional().isInt({ min: 1, max: 100 }),
     query('minRate').optional().isFloat({ min: 0 }),
     query('maxRate').optional().isFloat({ min: 0 }),
+    query('sortBy').optional().isIn(mentorService.MENTOR_SORTS),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
+      // The validators were declared and never read.
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, 'Validation failed: ' + errors.array().map(e => e.msg).join(', '));
+      }
+
       const filters: mentorService.MentorFilters = {
         specialization: req.query.specialization as string,
         minRate: req.query.minRate ? parseFloat(req.query.minRate as string) : undefined,
         maxRate: req.query.maxRate ? parseFloat(req.query.maxRate as string) : undefined,
         available: req.query.available === 'true',
         search: req.query.search as string,
+        // The directory's sort control sends `sortBy`, and nothing read it, so
+        // every option on it showed the same order.
+        sort: req.query.sortBy as mentorService.MentorSort | undefined,
       };
 
       const page = parseInt(req.query.page as string) || 1;
@@ -79,6 +89,47 @@ router.get('/profile/:userId', async (req: Request, res: Response, next: NextFun
 router.get('/timezones', (_req: Request, res: Response) => {
   res.json({ timezones: mentorScheduling.getSupportedTimezones() });
 });
+
+/**
+ * GET /api/mentors/me
+ * The caller's own mentor profile, or null when she has none.
+ *
+ * Declared before `/:mentorId` so "me" is not read as a profile id. There was
+ * no way for a mentor to read her own profile back, so the wizard could not
+ * start from what she had already published, and the dashboard could not show
+ * whether she was taking requests.
+ */
+router.get('/me', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const profile = await mentorService.getMentorProfile(req.user!.id);
+    res.json({ success: true, data: profile });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PATCH /api/mentors/me/availability
+ * Pause or resume new requests. See `setMentorAvailability`.
+ */
+router.patch(
+  '/me/availability',
+  authenticate,
+  [body('isAvailable').isBoolean().toBoolean()],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, 'Say whether you are taking new requests (isAvailable: true or false).');
+      }
+
+      const profile = await mentorService.setMentorAvailability(req.user!.id, req.body.isAvailable);
+      res.json({ success: true, data: profile });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 /**
  * GET /api/mentors/:mentorId/slots
