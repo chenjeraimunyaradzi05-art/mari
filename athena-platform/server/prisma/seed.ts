@@ -648,6 +648,11 @@ async function main() {
     // The links are gone. Three pointed at athena.com, which is not this
     // platform, and one at a Zoom room that was never booked. A fixture with no
     // link degrades correctly — the card falls back to the member's calendar.
+    //
+    // The times are 24-hour HH:MM, the only shape POST /api/events accepts
+    // from a member. These used to be "9:00 AM", so the catalogue showed two
+    // time formats side by side and anything that parsed a start time broke
+    // on the seeded rows and nowhere else.
     await prisma.event.createMany({
       data: [
         {
@@ -655,7 +660,7 @@ async function main() {
           description: 'A demo conference listing. Sessions on navigating career growth, building teams and driving innovation. Used to demonstrate the events page; no such conference is scheduled.',
           type: 'CONFERENCE', format: 'HYBRID',
           date: new Date(Date.now() + 14 * 86400000),
-          startTime: '9:00 AM', endTime: '5:00 PM',
+          startTime: '09:00', endTime: '17:00',
           location: 'Brisbane',
           image: 'https://images.unsplash.com/photo-1475721027785-f74eccf877e2?w=600',
           hostName: 'ATHENA Events', hostTitle: 'Community Team', hostAvatar: '',
@@ -667,7 +672,7 @@ async function main() {
           description: 'A demo workshop listing. Researching market rates, framing your value and negotiating a package. Used to demonstrate the events page; no such workshop is scheduled.',
           type: 'WORKSHOP', format: 'VIRTUAL',
           date: new Date(Date.now() + 5 * 86400000),
-          startTime: '12:00 PM', endTime: '1:30 PM',
+          startTime: '12:00', endTime: '13:30',
           image: 'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=600',
           hostName: 'ATHENA Events', hostTitle: 'Community Team', hostAvatar: '',
           baseAttendees: 0, maxAttendees: 100, price: 29,
@@ -678,7 +683,7 @@ async function main() {
           description: 'A demo networking listing. Engineers, designers, product people and founders, in person. Used to demonstrate the events page; no such evening is scheduled.',
           type: 'NETWORKING', format: 'IN_PERSON',
           date: new Date(Date.now() + 9 * 86400000),
-          startTime: '6:00 PM', endTime: '9:00 PM',
+          startTime: '18:00', endTime: '21:00',
           location: 'Brisbane',
           image: 'https://images.unsplash.com/photo-1511795409834-ef04bbd61622?w=600',
           hostName: 'ATHENA Brisbane', hostTitle: 'Local Chapter', hostAvatar: '',
@@ -690,7 +695,7 @@ async function main() {
           description: 'A demo workshop listing. Fifteen-minute one-to-one reviews with written feedback. Used to demonstrate the events page; no such session is scheduled.',
           type: 'WORKSHOP', format: 'VIRTUAL',
           date: new Date(Date.now() + 21 * 86400000),
-          startTime: '10:00 AM', endTime: '3:00 PM',
+          startTime: '10:00', endTime: '15:00',
           image: 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=600',
           hostName: 'ATHENA Events', hostTitle: 'Community Team', hostAvatar: '',
           baseAttendees: 0, maxAttendees: 150, price: 0,
@@ -701,7 +706,7 @@ async function main() {
           description: 'A demo webinar listing. Lessons on modernising public digital services at scale. Used to demonstrate the events page; no such forum is scheduled.',
           type: 'WEBINAR', format: 'VIRTUAL',
           date: new Date(Date.now() + 12 * 86400000),
-          startTime: '2:00 PM', endTime: '3:30 PM',
+          startTime: '14:00', endTime: '15:30',
           image: 'https://images.unsplash.com/photo-1542744173-8e7e53415bb0?w=600',
           hostName: 'ATHENA Events', hostTitle: 'Community Team', hostAvatar: '',
           baseAttendees: 0, price: 0,

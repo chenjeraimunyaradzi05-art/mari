@@ -113,6 +113,29 @@ export const PERSONAL_DATA_MODELS: PersonalDataModel[] = [
       'A safe chat holds what the other people in it said as well as what she said. Only the messages she sent are handed back, under dvSafeMessagesSent.',
   },
   { model: 'dvPanicAlert', section: 'dvPanicAlerts', keys: [], where: (userId) => ({ profile: { userId } }), erasure: 'delete' },
+  // A ban outlives the account it started from, or it is not a ban: erasing the
+  // account of someone banned for threatening a member must not let them sign
+  // up again the same afternoon. So the row is kept and only its link to the
+  // erased account goes — it holds a keyed hash of an address, never the
+  // address itself, and with the link gone it identifies nobody.
+  {
+    model: 'bannedIdentity',
+    section: 'bannedIdentity',
+    keys: ['userId'],
+    erasure: 'detach',
+    exportable: false,
+    reason:
+      'Kept to stop a banned person rejoining under the same address. Access is withheld under APP 12.3(b) and (e): the row links the ban to a report, and disclosing it could identify the member who made that report.',
+  },
+  {
+    model: 'bannedIdentity',
+    section: 'bansRecorded',
+    keys: ['createdById'],
+    erasure: 'pseudonymise',
+    exportable: false,
+    reason:
+      'A ban recorded by a member of staff stays in force when that staff account is erased; only the name of who recorded it is replaced.',
+  },
   {
     model: 'dvSafeChat',
     section: 'dvSafeChats',
@@ -832,6 +855,110 @@ function readRestrictionReason(requestDetails: string | null): string | null {
     return null;
   }
 }
+
+/**
+ * One line of the published retention schedule.
+ *
+ * `trigger` says what starts the clock: 'age' counts retentionDays from when
+ * the record was made, 'expiry' removes it once its own expiry has passed (and
+ * retentionDays is 0), and 'erasure' counts from a completed erasure request.
+ */
+export interface PublishedRetentionPolicy {
+  dataType: string;
+  description: string;
+  dataCategory: DataCategory;
+  retentionDays: number;
+  retentionReason: string;
+  legalBasis: 'CONSENT' | 'CONTRACT' | 'LEGAL_OBLIGATION' | 'LEGITIMATE_INTERESTS';
+  anonymizeInstead: boolean;
+  trigger: 'age' | 'expiry' | 'erasure';
+}
+
+/**
+ * What the nightly purge in scripts/data-retention.ts actually does, in the
+ * words a member is shown. Only what it really removes is listed: the job that
+ * asks the analytics pipeline to purge old events enqueues a request and cannot
+ * say whether anything was deleted, so it is not published as a promise.
+ *
+ * Every line here is held to the purge job it describes by
+ * gdpr.retention-schedule.test.ts. If a cut-off in data-retention.ts changes,
+ * that test fails until this list says the same thing. Anything covered by an
+ * active legal hold is kept until the hold is lifted, whatever this says.
+ */
+export const EXECUTED_RETENTION_SCHEDULE: readonly PublishedRetentionPolicy[] = [
+  {
+    dataType: 'direct_messages',
+    description: 'Direct messages between members are deleted three years after they were sent.',
+    dataCategory: DataCategory.UGC,
+    retentionDays: 1095,
+    retentionReason: 'Long enough to deal with a dispute or a safety report about a conversation.',
+    legalBasis: 'LEGITIMATE_INTERESTS',
+    anonymizeInstead: false,
+    trigger: 'age',
+  },
+  {
+    dataType: 'read_notifications',
+    description: 'Notifications you have already read are deleted 90 days after they were sent.',
+    dataCategory: DataCategory.UGC,
+    retentionDays: 90,
+    retentionReason: 'Kept briefly so you can look back at recent activity.',
+    legalBasis: 'LEGITIMATE_INTERESTS',
+    anonymizeInstead: false,
+    trigger: 'age',
+  },
+  {
+    dataType: 'audit_logs',
+    description:
+      'Records of account and staff actions have the IP address, device and details removed after one year. The anonymised record of what happened is kept.',
+    dataCategory: DataCategory.TECHNICAL,
+    retentionDays: 365,
+    retentionReason: 'Security, and being able to show who did what on the platform.',
+    legalBasis: 'LEGAL_OBLIGATION',
+    anonymizeInstead: true,
+    trigger: 'age',
+  },
+  {
+    dataType: 'erased_accounts',
+    description:
+      'Whatever remains of an account after its erasure request has completed is permanently deleted 30 days later.',
+    dataCategory: DataCategory.PII,
+    retentionDays: 30,
+    retentionReason: 'A short window in which an erasure made in error can still be caught.',
+    legalBasis: 'LEGAL_OBLIGATION',
+    anonymizeInstead: false,
+    trigger: 'erasure',
+  },
+  {
+    dataType: 'sessions',
+    description: 'Sign-in sessions are deleted once they expire.',
+    dataCategory: DataCategory.TECHNICAL,
+    retentionDays: 0,
+    retentionReason: 'Needed only while you are signed in.',
+    legalBasis: 'CONTRACT',
+    anonymizeInstead: false,
+    trigger: 'expiry',
+  },
+  {
+    dataType: 'verification_links',
+    description: 'Email verification and password-reset links are deleted once they expire.',
+    dataCategory: DataCategory.TECHNICAL,
+    retentionDays: 0,
+    retentionReason: 'Needed only until they are used or run out.',
+    legalBasis: 'CONTRACT',
+    anonymizeInstead: false,
+    trigger: 'expiry',
+  },
+  {
+    dataType: 'data_export_links',
+    description: 'The download link for a copy of your data is removed once it expires.',
+    dataCategory: DataCategory.PII,
+    retentionDays: 0,
+    retentionReason: 'A link to your whole data file should not outlive its use.',
+    legalBasis: 'LEGAL_OBLIGATION',
+    anonymizeInstead: false,
+    trigger: 'expiry',
+  },
+];
 
 export class GDPRService {
   /**
@@ -1594,36 +1721,24 @@ export class GDPRService {
   // ============================================
 
   /**
-   * The retention policies actually on record.
+   * The retention schedule the platform actually runs, for publication.
+   *
+   * This read the RetentionPolicy table, which nothing wrote: its only writer
+   * was a seeding function with no caller, so the published list was an empty
+   * array in every deployment while the privacy statement told members that
+   * deletion happens on a schedule. And even a populated table would not have
+   * been the truth, because the nightly purge never reads it — it runs on the
+   * constants in scripts/data-retention.ts. So the list is now the purge
+   * schedule itself: EXECUTED_RETENTION_SCHEDULE, which a test holds to the
+   * cut-offs the purge jobs really use, so the published policy and the one
+   * carried out cannot drift apart unnoticed.
    *
    * Published for transparency, so it carries the promise and its basis and not
-   * the operational columns — which purge job runs it, when it last ran — that
-   * say nothing to a data subject about their own data.
+   * the operational detail — which job runs it, when it last ran — that says
+   * nothing to a member about her own data.
    */
-  async getRetentionPolicies(): Promise<
-    Array<{
-      dataType: string;
-      description: string;
-      dataCategory: DataCategory;
-      retentionDays: number;
-      retentionReason: string;
-      legalBasis: string;
-      anonymizeInstead: boolean;
-    }>
-  > {
-    const policies = await prisma.retentionPolicy.findMany({
-      orderBy: { dataType: 'asc' },
-    });
-
-    return policies.map((policy) => ({
-      dataType: policy.dataType,
-      description: policy.description,
-      dataCategory: policy.dataCategory,
-      retentionDays: policy.retentionDays,
-      retentionReason: policy.retentionReason,
-      legalBasis: policy.legalBasis,
-      anonymizeInstead: policy.anonymizeInstead,
-    }));
+  async getRetentionPolicies(): Promise<PublishedRetentionPolicy[]> {
+    return EXECUTED_RETENTION_SCHEDULE.map((policy) => ({ ...policy }));
   }
 
   // ============================================
@@ -1665,6 +1780,15 @@ export class GDPRService {
 
     const status = granted ? ConsentStatus.GRANTED : ConsentStatus.DENIED;
 
+    // Marketing email is the one consent a sender reads from somewhere else —
+    // the newsletter switch in notification settings — so the two are moved
+    // together. Withdrawal turns the switch off before the ledger is written,
+    // so a failure in between leaves her opted out rather than opted in.
+    const marketingEmail = consentType === ConsentType.MARKETING_EMAIL;
+    if (marketingEmail && !granted) {
+      await consentService.syncMarketingEmailPreference(userId, false);
+    }
+
     const consent = await prisma.consentRecord.upsert({
       where: {
         userId_consentType: { userId, consentType },
@@ -1688,6 +1812,11 @@ export class GDPRService {
         region: context.region,
       },
     });
+
+    // A grant opens the switch only once the ledger holds the consent.
+    if (marketingEmail && granted) {
+      await consentService.syncMarketingEmailPreference(userId, true);
+    }
 
     await this.logPrivacyAction({
       userId,

@@ -200,6 +200,27 @@ enum AuditAction {
   ADMIN_APPEAL_DECISION
   USER_VERIFICATION_SUBMIT
   USER_APPEAL_SUBMIT
+
+  // Moderation decisions, each by name. Until these existed a moderator's
+  // decision on a report was recorded as DATA_ACCESS with the real verb tucked
+  // into metadata, so the audit log could not answer "who banned this account"
+  // without reading every row's JSON — and a regulator asking that question
+  // would be shown a log full of reads.
+  MODERATION_DISMISS
+  MODERATION_WARN
+  MODERATION_REMOVE
+  MODERATION_SUSPEND
+  MODERATION_BAN
+  MODERATION_ESCALATE
+
+  // Staff changes to the platform's own configuration and catalogues, which
+  // nine admin routers made with nothing written down at all.
+  ADMIN_CONFIG_UPDATE
+  ADMIN_CONTENT_UPDATE
+
+  // A member's own account security, and a staff decision on a safety report.
+  SIGN_IN_PROVIDER_LINKED
+  SAFETY_REPORT_DECIDED
 }
 
 enum VerificationBadgeType {
@@ -598,6 +619,18 @@ model User {
   isPublic                Boolean   @default(true)
   allowMessages           Boolean   @default(true)
   isSuspended             Boolean   @default(false)
+  // Why, when and by whom. isSuspended alone recorded that an account was shut
+  // and nothing else, so an appeal had nothing to answer and a reviewer could
+  // not tell a two-day cooling-off from a ban for threatening a member.
+  suspensionReason        String?
+  suspendedAt             DateTime?
+  suspendedById           String?
+  // A ban is a suspension with no way back. It is recorded separately because
+  // it also closes the door on the person rather than only the account — see
+  // BannedIdentity.
+  bannedAt                DateTime?
+  banReason               String?
+  bannedById              String?
   notificationPreferences Json?
   twoFactorEnabled        Boolean   @default(false)
   twoFactorSecret         String?
@@ -930,7 +963,13 @@ model PushToken {
   id        String   @id @default(uuid())
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  token     String
+  // One row per device token, whoever holds it now. With duplicates allowed, a
+  // phone that changed hands and was signed into a different account kept its
+  // old row active: the new holder went on receiving the previous member's
+  // notifications — message previews, safety alerts — on a platform where the
+  // person picking up her old phone may be the person she is hiding from.
+  // Unique, the registration upserts and moves the token to its current owner.
+  token     String   @unique
   platform  String // 'ios' | 'android' | 'web'
   deviceId  String?
   isActive  Boolean  @default(true)
@@ -938,7 +977,6 @@ model PushToken {
   updatedAt DateTime @updatedAt
 
   @@index([userId])
-  @@index([token])
 }
 
 model EscrowPayment {
@@ -1005,6 +1043,31 @@ model SafetyIncident {
   @@index([type])
   @@index([severity])
   @@index([verified])
+}
+
+// The people a ban was for, rather than the accounts.
+//
+// Banning an account suspended that row and nothing more, so the person who
+// had been banned for threatening a member could sign up again the same
+// afternoon with the same address and carry on. On a platform many women use
+// precisely to get away from someone, "banned" has to mean that person is not
+// coming back in.
+//
+// The address is stored as a keyed hash rather than in the clear: this table
+// must be checkable at every registration, and it must not become a list of
+// the email addresses of everyone ever banned sitting in plain text. userId
+// survives erasure of the account as a null, because the ban has to outlive
+// the account it started from.
+model BannedIdentity {
+  id          String   @id @default(uuid())
+  emailHash   String   @unique
+  userId      String?
+  reportId    String?
+  createdById String
+  reason      String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
 }
 
 model AdminFlag {
@@ -1836,40 +1899,46 @@ model GroupPost {
 }
 
 model Event {
-  id            String      @id @default(uuid())
-  title         String
-  description   String
-  type          EventType
-  format        EventFormat
-  isFeatured    Boolean     @default(false)
-  isPinned      Boolean     @default(false)
-  isHidden      Boolean     @default(false)
-  date          DateTime
-  startTime     String
-  endTime       String
-  location      String?
-  link          String?
-  image         String
-  hostName      String
-  hostTitle     String
-  hostAvatar    String
+  id              String      @id @default(uuid())
+  title           String
+  description     String
+  type            EventType
+  format          EventFormat
+  isFeatured      Boolean     @default(false)
+  isPinned        Boolean     @default(false)
+  isHidden        Boolean     @default(false)
+  date            DateTime
+  startTime       String
+  endTime         String
+  location        String?
+  link            String?
+  image           String
+  hostName        String
+  hostTitle       String
+  hostAvatar      String
   // The member who published this event, when a member published it.
   //
   // Nullable because the admin-curated rows predate member hosting and have no
   // member behind them. A null host means "curated by ATHENA"; a set host is who
   // to hold responsible, who to notify, and who a report resolves to. Without
   // this an event was unattributable once published.
-  hostUserId    String?
-  baseAttendees Int         @default(0)
-  maxAttendees  Int?
+  hostUserId      String?
+  // An event that is called off has to say so to the women who registered,
+  // rather than disappear from their list or sit there as if it were still on.
+  // Deleting was the only way to stop one, which also deleted every
+  // registration and so every record of who needed to be told.
+  cancelledAt     DateTime?
+  cancelledReason String?
+  baseAttendees   Int         @default(0)
+  maxAttendees    Int?
   // Nullable so "not published by the organiser" is representable. 0 means
   // genuinely free; null means unknown. Without this, an unverified price
   // rendered as "Free" on the card — a claim we cannot make about a paid
   // conference or a black-tie gala.
-  price         Int?        @default(0)
-  tags          String[]
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  price           Int?        @default(0)
+  tags            String[]
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
 
   registrations EventRegistration[]
   saves         EventSave[]
@@ -2613,7 +2682,18 @@ model CourseCertificate {
   code     String   @unique
   issuedAt DateTime @default(now())
 
-  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  // What she earned, as it was called when she earned it. The public
+  // verification page read the title live from the course, so renaming a
+  // course rewrote every certificate already issued for it, and an employer
+  // checking one saw a qualification the holder was never awarded.
+  courseTitle String?
+  issuerName  String?
+
+  // Restrict, not Cascade. Deleting a course used to delete every certificate
+  // issued for it, and with them the public page an employer uses to check
+  // one: a woman's credential would stop existing because somebody tidied the
+  // catalogue. A course that has issued certificates is retired, not deleted.
+  course Course @relation(fields: [courseId], references: [id], onDelete: Restrict)
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([courseId, userId])
@@ -5525,6 +5605,14 @@ model ContentReport {
   aiConfidence Float? // 0-1 confidence in violation
   aiCategory   String? // Detected category
 
+  // When this report has to have been looked at by, and how urgent it is. The
+  // reporting screen promises a person will review it within 24 to 48 hours,
+  // and both figures used to live inside the evidence JSON, where nothing could
+  // sort by them, filter on them, or say which reports were overdue. A promise
+  // made to someone reporting abuse has to be one the queue can keep track of.
+  reviewDeadline DateTime?
+  priority       String? // URGENT, HIGH, NORMAL
+
   reporter     User @relation("ReportsSubmitted", fields: [reporterId], references: [id])
   reportedUser User @relation("ReportsReceived", fields: [reportedUserId], references: [id])
 
@@ -5534,6 +5622,8 @@ model ContentReport {
   @@index([reportedUserId])
   @@index([status])
   @@index([contentType, contentId])
+  // "Which open reports are overdue" is the question the queue exists to answer.
+  @@index([status, reviewDeadline])
 }
 
 // IncomeStream Creator Analytics
@@ -5791,8 +5881,19 @@ model DvSafeChat {
   participants  String[] @default([])
   // Salted scrypt hash of the PIN; null when the chat has none.
   accessPinHash String?
-  lastActivity  DateTime @default(now())
-  createdAt     DateTime @default(now())
+
+  // Guessing. A chat PIN is a handful of digits, and the person most likely to
+  // be guessing it is holding her phone. scrypt makes each guess slow, but with
+  // no limit on how many she makes a determined person gets there. After enough
+  // wrong PINs the chat locks for a while, and it keeps count of the wrong PINs
+  // since she last opened it herself — so the next time she does, she can be
+  // told that somebody tried.
+  wrongPinAttempts   Int       @default(0)
+  pinLockedUntil     DateTime?
+  wrongPinsSinceOpen Int       @default(0)
+
+  lastActivity DateTime @default(now())
+  createdAt    DateTime @default(now())
 
   messages DvSafeMessage[]
 
