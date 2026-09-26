@@ -3,6 +3,7 @@ import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { groupNotifications, type NotificationRow } from '../services/notification-grouping.service';
+import { registerPushToken } from '../services/push.service';
 
 const router = Router();
 
@@ -10,9 +11,15 @@ const router = Router();
 // PUSH TOKENS
 // ===========================================
 // The mobile app hands over its Expo push token after sign-in and takes it
-// back on sign-out. A token is a device, not a person: one already known is
-// moved to whoever is signed in on that device now. Declared ahead of the
-// /:id routes so DELETE /push-token is never read as a notification id.
+// back on sign-out. A token is a device, not a person — but it is not moved to
+// whoever names it. This route used to reassign any known token to the caller,
+// so a member who had another's token could take over her phone's
+// notifications: the other woman's safety alerts and message previews would
+// stop reaching her and start reaching nobody she chose. A token now moves
+// only when the request proves it holds the device, through the key the
+// device was issued the first time it registered; see registerPushToken.
+// Declared ahead of the /:id routes so DELETE /push-token is never read as a
+// notification id.
 
 const TOKEN_MAX = 4096;
 const PLATFORMS = new Set(['ios', 'android', 'web']);
@@ -42,23 +49,37 @@ router.post('/push-token', authenticate, async (req: AuthRequest, res, next) => 
     }
     const requestedPlatform = typeof req.body?.platform === 'string' ? req.body.platform.toLowerCase() : '';
     const platform = PLATFORMS.has(requestedPlatform) ? requestedPlatform : provider === 'web' ? 'web' : 'android';
-    const deviceId = typeof req.body?.deviceId === 'string' && req.body.deviceId.trim() ? req.body.deviceId.trim().slice(0, 200) : null;
+    // A caller-supplied deviceId is no longer read: PushToken.deviceId holds the
+    // fingerprint of the key the server issued this device, which is what
+    // proves possession when the token is already held by another account.
+    const result = await registerPushToken({
+      userId: req.user!.id,
+      token,
+      platform,
+      deviceKey: req.body?.deviceKey,
+    });
 
-    const existing = await prisma.pushToken.findFirst({ where: { token }, select: { id: true, userId: true } });
-    if (existing) {
-      await prisma.pushToken.update({
-        where: { id: existing.id },
-        data: { userId: req.user!.id, platform, deviceId, isActive: true },
-      });
-      res.json({ success: true, message: 'Device updated', data: { id: existing.id, platform } });
-      return;
+    if (result.outcome === 'held-by-another-account') {
+      throw new ApiError(
+        409,
+        'This device is registered for notifications on another ATHENA account. Sign out of that account on this device first.'
+      );
     }
 
-    const created = await prisma.pushToken.create({
-      data: { userId: req.user!.id, token, platform, deviceId, isActive: true },
-      select: { id: true, platform: true },
+    res.status(result.outcome === 'registered' ? 201 : 200).json({
+      success: true,
+      message:
+        result.outcome === 'registered'
+          ? 'Device registered'
+          : result.outcome === 'moved'
+            ? 'Device moved to this account'
+            : 'Device updated',
+      data: {
+        id: result.id,
+        platform: result.platform,
+        ...(result.deviceKey ? { deviceKey: result.deviceKey } : {}),
+      },
     });
-    res.status(201).json({ success: true, message: 'Device registered', data: created });
   } catch (error) {
     next(error);
   }

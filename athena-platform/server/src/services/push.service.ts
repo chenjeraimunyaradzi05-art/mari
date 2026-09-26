@@ -11,9 +11,11 @@
  * whether it goes, the same way the email channel decides.
  */
 
+import { createHash, randomBytes } from 'crypto';
 import type { NotificationType } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
+import { secretMatches } from '../utils/secret-compare';
 import { safeNotificationFor } from './dv-safe.service';
 
 export const EXPO_PUSH_ENDPOINT = 'https://exp.host/--/api/v2/push/send';
@@ -91,9 +93,10 @@ async function activeTokensOf(userId: string): Promise<StoredToken[]> {
   // active rows and Expo was handed the same token twice in the same batch, so
   // every notification arrived twice: two buzzes for one message.
   //
-  // De-duplicating here fixes the delivery for the rows that already exist. It
-  // does not stop the duplicates being written; that needs @unique on
-  // PushToken.token, which is a schema change.
+  // De-duplicating here fixes the delivery for the rows that already exist.
+  // registerPushToken below now folds a device's rows into one whenever it
+  // registers, and the app no longer registers twice at once, but only
+  // @unique on PushToken.token (a schema change) closes the race for good.
   const seen = new Set<string>();
   const unique: StoredToken[] = [];
   for (const row of rows) {
@@ -316,4 +319,214 @@ export function pushPreview(text: string | null | undefined, fallback = 'Sent yo
     .trim();
   if (!plain) return fallback;
   return plain.length > max ? `${plain.slice(0, max - 1)}…` : plain;
+}
+
+// ===========================================
+// DEVICE REGISTRATION
+// ===========================================
+//
+// A push token is a device, and the register handler used to act as if
+// knowing the token were proof of holding the device: it looked the row up by
+// token alone and moved it onto whoever was calling. Any signed-in member who
+// had learned another member's Expo token could therefore move that phone onto
+// her own account. The phone stopped hearing about its owner's messages,
+// safety notices included, and showed the caller's notifications instead, with
+// nothing on either side saying it had happened. For a member whose abuser has
+// had her phone in his hands for a minute, that is a real attack, not a
+// theoretical one.
+//
+// Holding the device is now proved with a device key. The first time a device
+// registers, the server issues a random key and hands it back once; the app
+// keeps it in the phone's secure store and presents it every time it
+// registers again. Only its fingerprint is stored, in PushToken.deviceId, so
+// the database never holds the key itself. The rules:
+//
+//  - A token nobody holds is registered to the caller.
+//  - A token the caller already holds is refreshed. She may present a new key
+//    or none (an app from before this change): it is the same account either
+//    way, so the stored fingerprint simply follows her.
+//  - A token another account holds moves only when the caller presents the key
+//    whose fingerprint every one of those rows carries. That is the shared
+//    phone: one member signs out, or her session lapses, and the next person
+//    signs in on the same handset, whose secure store still has the key. A
+//    token presented without that proof stays where it is, and the caller is
+//    told the device belongs to another account.
+//
+// The cost is carried by rows written before device keys existed: one held by
+// another account has no fingerprint, so nothing can prove it and it cannot
+// move to a new account. Its owner's next registration from that phone, which
+// happens at every launch while she is signed in, gives it one. A legacy row
+// whose owner signed out before updating the app stays hers until she signs in
+// there again; a phone that misses notifications for a new account is the
+// lesser harm next to a phone anyone can take.
+//
+// Every registration also folds the device's rows into one. Duplicate rows are
+// what let a phone keep the previous member's notifications after a handover:
+// the register handler moved the first row it found and left the other
+// active under her.
+
+const DEVICE_KEY_BYTES = 32;
+/** base64url of DEVICE_KEY_BYTES, the only shape this server ever issues. */
+const DEVICE_KEY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+/** Marks a stored fingerprint, so it can never be mistaken for an id a client chose. */
+const DEVICE_FINGERPRINT_PREFIX = 'dk1:';
+
+export type PushTokenRegistration =
+  | {
+      outcome: 'registered' | 'refreshed' | 'moved';
+      id: string;
+      platform: string;
+      /** Present only when a new key was issued; the device must keep it. */
+      deviceKey?: string;
+    }
+  | { outcome: 'held-by-another-account' };
+
+type RegisteredRow = { id: string; userId: string; deviceId: string | null };
+
+const REGISTERED_ROW = { id: true, userId: true, deviceId: true } as const;
+
+/** A fresh device key: random, and only ever sent to the device it is issued to. */
+export function issueDeviceKey(): string {
+  return randomBytes(DEVICE_KEY_BYTES).toString('base64url');
+}
+
+/** What is stored in place of a device key. */
+export function deviceFingerprint(deviceKey: string): string {
+  return DEVICE_FINGERPRINT_PREFIX + createHash('sha256').update(deviceKey).digest('hex');
+}
+
+/** A presented key, when it is one this server could have issued. */
+function presentedDeviceKey(value: unknown): string | null {
+  return typeof value === 'string' && DEVICE_KEY_PATTERN.test(value) ? value : null;
+}
+
+/** Whether every row another account holds carries the fingerprint of the presented key. */
+function provesDevice(heldByOthers: RegisteredRow[], presentedKey: string | null): boolean {
+  if (!presentedKey || heldByOthers.length === 0) return false;
+  const fingerprint = deviceFingerprint(presentedKey);
+  return heldByOthers.every((row) => secretMatches(fingerprint, row.deviceId));
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return !!error && typeof error === 'object' && (error as { code?: unknown }).code === 'P2002';
+}
+
+/** Every row for a token, oldest first: the oldest is the one that is kept. */
+async function rowsForToken(token: string): Promise<RegisteredRow[]> {
+  const rows = await prisma.pushToken.findMany({
+    where: { token },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    select: REGISTERED_ROW,
+  });
+  return Array.isArray(rows) ? rows : [];
+}
+
+/**
+ * Registers a device's push token for a member, provided the device is hers
+ * to register. See the section comment above for the rules; this never moves
+ * a device another account holds unless the request proves it holds it.
+ */
+export async function registerPushToken(input: {
+  userId: string;
+  token: string;
+  platform: string;
+  deviceKey?: unknown;
+}): Promise<PushTokenRegistration> {
+  const presentedKey = presentedDeviceKey(input.deviceKey);
+  const rows = await rowsForToken(input.token);
+  if (rows.length > 0) return claimRows(rows, input.userId, input.platform, presentedKey, false);
+
+  const deviceKey = presentedKey ?? issueDeviceKey();
+  let createdId: string;
+  try {
+    const created = await prisma.pushToken.create({
+      data: {
+        userId: input.userId,
+        token: input.token,
+        platform: input.platform,
+        deviceId: deviceFingerprint(deviceKey),
+        isActive: true,
+      },
+      select: { id: true },
+    });
+    createdId = created.id;
+  } catch (error) {
+    // Only reachable once the token column is unique: another registration of
+    // this token was written first, so this one is judged against it.
+    if (!isUniqueViolation(error)) throw error;
+    const winner = await rowsForToken(input.token);
+    // Written and gone again between two statements: nothing sensible to
+    // judge against, so the conflict is reported as it happened.
+    if (winner.length === 0) throw error;
+    return claimRows(winner, input.userId, input.platform, presentedKey, false);
+  }
+
+  // Without a unique constraint two registrations of one token can both find
+  // nothing and both create. Whichever row is oldest stands, the same answer
+  // from both sides; a registration whose row was not the oldest is judged
+  // against the one that was, exactly as if it had arrived second, carrying
+  // the key it has just been issued.
+  const after = await rowsForToken(input.token);
+  const survivor = after[0];
+  if (!survivor || survivor.id === createdId) {
+    await removeRows(after.slice(1).map((row) => row.id));
+    return {
+      outcome: 'registered',
+      id: createdId,
+      platform: input.platform,
+      ...(presentedKey ? {} : { deviceKey }),
+    };
+  }
+  const judged = await claimRows(after, input.userId, input.platform, deviceKey, !presentedKey);
+  // Refused, the row this request wrote must not outlive the refusal: it
+  // would leave the device delivering to two accounts at once.
+  if (judged.outcome === 'held-by-another-account') await removeRows([createdId]);
+  return judged;
+}
+
+/**
+ * Takes over the rows a token already has, when the caller may. `keyIsNew`
+ * says the key was issued by this request rather than presented by the
+ * device, so it still has to be handed back.
+ */
+async function claimRows(
+  rows: RegisteredRow[],
+  userId: string,
+  platform: string,
+  presentedKey: string | null,
+  keyIsNew: boolean
+): Promise<PushTokenRegistration> {
+  const heldByOthers = rows.filter((row) => row.userId !== userId);
+  if (heldByOthers.length > 0 && !provesDevice(heldByOthers, keyIsNew ? null : presentedKey)) {
+    // Worth a line: either a phone changed hands before its previous owner's
+    // app ever recorded a device key, or someone is trying to take a device
+    // they do not hold. The ids say which accounts; nothing here says whose
+    // phone it is.
+    logger.warn('Push token registration refused: the device is registered to another account and was not proved', {
+      userId,
+      heldBy: Array.from(new Set(heldByOthers.map((row) => row.userId))),
+    });
+    return { outcome: 'held-by-another-account' };
+  }
+
+  const [keep, ...duplicates] = rows;
+  const deviceKey = presentedKey ?? issueDeviceKey();
+  await prisma.pushToken.update({
+    where: { id: keep.id },
+    data: { userId, platform, deviceId: deviceFingerprint(deviceKey), isActive: true },
+  });
+  await removeRows(duplicates.map((row) => row.id));
+
+  return {
+    outcome: heldByOthers.length > 0 ? 'moved' : 'refreshed',
+    id: keep.id,
+    platform,
+    ...(presentedKey && !keyIsNew ? {} : { deviceKey }),
+  };
+}
+
+/** The extra rows one device has collected; the kept row speaks for it. */
+async function removeRows(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  await prisma.pushToken.deleteMany({ where: { id: { in: ids } } });
 }
