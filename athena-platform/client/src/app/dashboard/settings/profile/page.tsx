@@ -164,7 +164,12 @@ function IdentityGatesCard() {
   const woman = gates.womanVerification;
   const evidence = woman.evidence;
   const documentPassed = Boolean(evidence?.documentCheckPassedAt);
-  const canAskAgain = woman.status === 'UNVERIFIED' || woman.status === 'REJECTED' || !evidence;
+  // Not after a refusal. The server stopped taking a fresh request from a
+  // member a reviewer has refused — one request used to reopen everything the
+  // reviewer had just closed — and this page went on offering the form, so
+  // every press came back 403 while the copy above it said to send another.
+  // A refusal goes to an appeal, which puts it back in front of a person.
+  const canAskAgain = woman.status !== 'REJECTED' && (woman.status === 'UNVERIFIED' || !evidence);
 
   return (
     <div className="space-y-6">
@@ -252,9 +257,19 @@ function IdentityGatesCard() {
             )}
 
             {woman.status === 'REJECTED' && (
-              <p className="mt-4 text-sm text-slate-600 dark:text-slate-300">
-                Your last request was not approved. You can send another with more to go on.
-              </p>
+              <div className="mt-4 rounded-lg bg-slate-50 p-4 text-sm dark:bg-slate-800/60">
+                <p className="text-slate-700 dark:text-slate-200">
+                  A reviewer did not approve your request. If you think that was wrong, appeal the
+                  decision and a person will look at it again. You can tell them anything the first
+                  request did not say.
+                </p>
+                <a
+                  href="/help/appeal?type=verification_decision"
+                  className="btn-outline mt-3 inline-flex px-4 py-2"
+                >
+                  Appeal this decision
+                </a>
+              </div>
             )}
 
             {canAskAgain && woman.status !== 'VERIFIED' && (

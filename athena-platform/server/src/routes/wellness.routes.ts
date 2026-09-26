@@ -15,8 +15,9 @@ import { Router, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { httpUrl } from '../utils/http-url';
 import { randomBytes } from 'crypto';
-import { Prisma } from '@prisma/client';
+import { AuditAction, Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
+import { logAudit } from '../utils/audit';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireRole } from '../middleware/roles';
@@ -1224,10 +1225,39 @@ router.post('/practitioners/:id/bookings', authenticate, async (req: AuthRequest
 // directory; `isVerified: false` takes it out; `isActive: false` hides it
 // from the queue as well (a profile that is not a practice at all). The
 // owner is told either way, with the practice page as the place to fix it.
+//
+// Every decision now leaves a row saying which admin made it and what the
+// profile said when they did — the name, the AHPRA number and the
+// qualifications they were checking against. There was none: a practitioner
+// listed as verified to women booking a psychologist could not be traced to
+// anybody's check, or to what had been checked. An unknown id is a 404 rather
+// than Prisma's P2025 escaping as a 500.
 router.patch('/practitioners/:id/verify', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { isVerified, isActive } = parse(z.object({ isVerified: z.boolean(), isActive: z.boolean().optional() }), req.body);
-    const p = await prisma.healthPractitioner.update({ where: { id: req.params.id }, data: { isVerified, ...(isActive === undefined ? {} : { isActive }) } });
+    let p;
+    try {
+      p = await prisma.healthPractitioner.update({ where: { id: req.params.id }, data: { isVerified, ...(isActive === undefined ? {} : { isActive }) } });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') throw new ApiError(404, 'Practitioner not found');
+      throw error;
+    }
+    await bestEffort('audit.wellness-practitioner-verification', () =>
+      logAudit({
+        action: isVerified ? AuditAction.ADMIN_VERIFICATION_APPROVE : AuditAction.ADMIN_VERIFICATION_REJECT,
+        actorUserId: req.user!.id,
+        targetUserId: p.ownerUserId,
+        ipAddress: req.ip ?? null,
+        userAgent: req.get('user-agent') || null,
+        metadata: {
+          resourceType: 'HealthPractitioner',
+          resourceId: p.id,
+          isVerified,
+          ...(isActive === undefined ? {} : { isActive }),
+          checked: { name: p.name, kind: p.kind, ahpraNumber: p.ahpraNumber, qualifications: p.qualifications },
+        },
+      })
+    );
     // The admin's decision is already saved on the profile, so failing to tell
     // the owner must not make the decision look like it failed. It does leave
     // her guessing — a profile taken out of the directory with no message is
@@ -1265,7 +1295,38 @@ router.put('/practice', authenticate, async (req: AuthRequest, res: Response, ne
     const payload = { ...rest, kind: rest.kind as never, availability: availability ? (normaliseAvailability(availability) as Prisma.InputJsonValue) : existing?.availability === null ? Prisma.JsonNull : undefined };
     let p;
     if (existing) {
-      p = await prisma.healthPractitioner.update({ where: { id: existing.id }, data: { ...payload, availability: availability ? (normaliseAvailability(availability) as Prisma.InputJsonValue) : undefined } });
+      // What an admin checked is who this is and what they are registered as.
+      // A verified owner could change her name, her kind of practice, her
+      // AHPRA number or her qualifications here and keep the badge, so the
+      // listing stayed "verified" and bookable over details nobody had looked
+      // at. Changing any of those now takes the profile back to the queue;
+      // everything else — hours, fees, the blurb — she can edit freely.
+      const identityChanged =
+        existing.isVerified &&
+        (data.name !== existing.name ||
+          data.kind !== existing.kind ||
+          (data.ahpraNumber !== undefined && (data.ahpraNumber ?? null) !== existing.ahpraNumber) ||
+          (data.qualifications !== undefined && data.qualifications.join('\u0000') !== existing.qualifications.join('\u0000')));
+      const updated = await prisma.healthPractitioner.update({
+        where: { id: existing.id },
+        data: {
+          ...payload,
+          availability: availability ? (normaliseAvailability(availability) as Prisma.InputJsonValue) : undefined,
+          ...(identityChanged ? { isVerified: false } : {}),
+        },
+      });
+      p = updated;
+      if (identityChanged) {
+        logger.info('A verified practitioner changed checked details and returns to the queue', { practitionerId: updated.id });
+        await bestEffort('notification.wellness-practitioner-recheck', () =>
+          notifyAdmins({
+            title: 'A practitioner needs checking again',
+            message: `${updated.name} changed the details that were verified, and is out of the directory until someone checks them.`,
+            link: '/admin/practitioners',
+            data: { kind: 'WELLNESS_PRACTITIONER_VERIFY', practitionerId: updated.id },
+          })
+        );
+      }
     } else {
       let slug = slugify(data.name);
       if (await prisma.healthPractitioner.findUnique({ where: { slug } })) slug = `${slug}-${randomBytes(2).toString('hex')}`;

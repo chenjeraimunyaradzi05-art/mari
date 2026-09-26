@@ -45,6 +45,9 @@ export default function AccessibilityPage() {
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A failed load leaves the employer list empty, which must not read as
+  // "there are no employers" when the truth is that we could not ask.
+  const [loadFailed, setLoadFailed] = useState(false);
 
   // Form state
   const [hasVisionImpairment, setHasVisionImpairment] = useState(false);
@@ -61,6 +64,7 @@ export default function AccessibilityPage() {
   const loadData = async () => {
     setLoading(true);
     setError(null);
+    setLoadFailed(false);
     try {
       const [profileRes, employersRes] = await Promise.all([
         impactApi.getAccessibilityProfile(),
@@ -86,6 +90,7 @@ export default function AccessibilityPage() {
     } catch (err: unknown) {
       const error = err as { response?: { data?: { error?: string } } };
       setError(error?.response?.data?.error || 'Failed to load data');
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -222,6 +227,14 @@ export default function AccessibilityPage() {
                       Captions required
                     </label>
                   </div>
+                  {/* These two sat under "preferences" as though ticking them
+                      changed the site, and nothing on the site reads them. Said
+                      plainly rather than left to be discovered. */}
+                  <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+                    High contrast and reduced motion are kept with your profile as a record of what you need. They do not
+                    change how ATHENA looks. ATHENA does follow your device&apos;s own reduce-motion setting, and your
+                    device&apos;s contrast settings apply here as they do everywhere.
+                  </p>
                 </div>
 
                 <div>
@@ -322,8 +335,13 @@ export default function AccessibilityPage() {
               <Briefcase className="w-5 h-5" /> Disability-Confident Employers
             </h2>
 
-            {employers.length === 0 ? (
-              <p className="text-sm text-slate-500">No disability-friendly employers found.</p>
+            {loadFailed ? (
+              <p className="text-sm text-slate-500">We could not load employers just now.</p>
+            ) : employers.length === 0 ? (
+              // Not "none found": nothing has searched. No employer has been
+              // listed here, and the page says that rather than implying a
+              // search came back empty.
+              <p className="text-sm text-slate-500">No employers have been listed here.</p>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {employers.map((employer) => (

@@ -19,6 +19,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import { bestEffort } from '../utils/best-effort';
+import { getRedisClient } from '../utils/cache';
 import { sendEmail } from '../utils/email';
 import { isSmsConfigured, sendSms } from './dv-sms.service';
 import { ApiError } from '../middleware/errorHandler';
@@ -53,7 +54,6 @@ export interface SafeChatSummary {
   id: string;
   name: string;
   disguisedName: string;
-  participants: string[];
   hasPin: boolean;
   isHidden: boolean;
   lastActivity: Date;
@@ -72,6 +72,8 @@ export interface SafeMessage {
 
 export interface SafeChat extends SafeChatSummary {
   messages: SafeMessage[];
+  /** Wrong PINs entered since she last opened it; told to her only behind the right one. */
+  wrongPinAttemptsSinceLastOpen: number;
 }
 
 export interface DVResource {
@@ -80,6 +82,16 @@ export interface DVResource {
   website: string;
   description: string;
   available: string;
+  /** Set on an entry that belongs to one state or territory. */
+  state?: string;
+  /**
+   * 'catalogue' for a line ATHENA staff entered and checked, 'built-in' for a
+   * nationally published number carried in the code. Shown differently,
+   * because she deserves to know which of these someone here has checked.
+   */
+  source: 'catalogue' | 'built-in';
+  /** When staff last confirmed a catalogue entry. Always null on a built-in line. */
+  lastCheckedAt: Date | null;
 }
 
 const SETTING_KEYS = [
@@ -263,14 +275,150 @@ function verifyPin(pin: string | undefined, stored: string | null): boolean {
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
+// ---------------------------------------------------------------- PIN attempts
+
+/*
+ * A four-digit PIN has ten thousand values, and a wrong one used to cost
+ * nothing but a line in the log: no counter, no pause, nothing to tell her.
+ * The person most likely to be guessing is the one holding her unlocked phone,
+ * which is the exact situation the PIN exists for, and at the global limit of a
+ * hundred requests in fifteen minutes the whole space falls in a day.
+ *
+ * So five wrong PINs inside fifteen minutes lock the chat for fifteen minutes,
+ * and every wrong PIN is counted until she next opens the chat herself. The
+ * count is told to her *after* the right PIN — never to whoever is guessing,
+ * and never as a notification on a lock screen someone else may be reading.
+ *
+ * The counters live in Redis when it is configured, so every instance of the
+ * API shares them, and in this process otherwise, the way the login lockout
+ * does. They are not in the database because DvSafeChat has no column for
+ * them; a restart without Redis forgets them, which is the trade-off.
+ */
+const PIN_MAX_FAILURES = 5;
+const PIN_FAILURE_WINDOW_SECONDS = 15 * 60;
+const PIN_LOCK_SECONDS = 15 * 60;
+// How long a wrong-PIN count waits for her to come back and read it.
+const PIN_MISSES_KEEP_SECONDS = 30 * 24 * 60 * 60;
+
+type ExpiringCount = { count: number; expiresAt: number };
+const pinFailures = new Map<string, ExpiringCount>();
+const pinMisses = new Map<string, ExpiringCount>();
+const pinLocks = new Map<string, number>();
+
+/** For tests. */
+export function resetPinAttemptMemory(): void {
+  pinFailures.clear();
+  pinMisses.clear();
+  pinLocks.clear();
+}
+
+function pinRedis() {
+  return process.env.REDIS_URL ? getRedisClient() : null;
+}
+
+function bumpMemory(store: Map<string, ExpiringCount>, key: string, ttlSeconds: number, now: number): number {
+  const existing = store.get(key);
+  const next =
+    existing && existing.expiresAt > now
+      ? { count: existing.count + 1, expiresAt: existing.expiresAt }
+      : { count: 1, expiresAt: now + ttlSeconds * 1000 };
+  store.set(key, next);
+  return next.count;
+}
+
+async function pinLockSecondsLeft(chatId: string): Promise<number> {
+  const client = pinRedis();
+  if (client) {
+    try {
+      const ttl = await client.ttl(`dvpin:lock:${chatId}`);
+      return ttl > 0 ? ttl : 0;
+    } catch (error) {
+      logger.warn('Safe-chat PIN lock read fell back to this process', { error: (error as Error).message });
+    }
+  }
+  const until = pinLocks.get(chatId) ?? 0;
+  const left = Math.ceil((until - Date.now()) / 1000);
+  return left > 0 ? left : 0;
+}
+
+/** Counts a wrong PIN; returns how long the chat is now locked for, or 0. */
+async function notePinMiss(chatId: string): Promise<number> {
+  const client = pinRedis();
+  if (client) {
+    try {
+      const failures = await client.incr(`dvpin:fails:${chatId}`);
+      if (failures === 1) await client.expire(`dvpin:fails:${chatId}`, PIN_FAILURE_WINDOW_SECONDS);
+      const misses = await client.incr(`dvpin:missed:${chatId}`);
+      if (misses === 1) await client.expire(`dvpin:missed:${chatId}`, PIN_MISSES_KEEP_SECONDS);
+      if (failures >= PIN_MAX_FAILURES) {
+        await client.set(`dvpin:lock:${chatId}`, '1', 'EX', PIN_LOCK_SECONDS);
+        await client.del(`dvpin:fails:${chatId}`);
+        return PIN_LOCK_SECONDS;
+      }
+      return 0;
+    } catch (error) {
+      logger.warn('Safe-chat PIN counter fell back to this process', { error: (error as Error).message });
+    }
+  }
+  const now = Date.now();
+  bumpMemory(pinMisses, chatId, PIN_MISSES_KEEP_SECONDS, now);
+  if (bumpMemory(pinFailures, chatId, PIN_FAILURE_WINDOW_SECONDS, now) >= PIN_MAX_FAILURES) {
+    pinFailures.delete(chatId);
+    pinLocks.set(chatId, now + PIN_LOCK_SECONDS * 1000);
+    return PIN_LOCK_SECONDS;
+  }
+  return 0;
+}
+
+/** A right PIN ends the current run of failures. The count kept for her is not touched here. */
+async function clearPinFailures(chatId: string): Promise<void> {
+  pinFailures.delete(chatId);
+  const client = pinRedis();
+  if (!client) return;
+  await bestEffort('safe-chat PIN failure reset', () => client.del(`dvpin:fails:${chatId}`));
+}
+
+/** How many wrong PINs there have been since she last opened the chat; reading it starts the count again. */
+async function takePinMisses(chatId: string): Promise<number> {
+  const now = Date.now();
+  const kept = pinMisses.get(chatId);
+  pinMisses.delete(chatId);
+  let count = kept && kept.expiresAt > now ? kept.count : 0;
+  const client = pinRedis();
+  if (client) {
+    const stored = await bestEffort('safe-chat wrong-PIN count', async () => {
+      const value = await client.get(`dvpin:missed:${chatId}`);
+      await client.del(`dvpin:missed:${chatId}`);
+      return value;
+    });
+    const parsed = Number.parseInt(String(stored ?? ''), 10);
+    if (Number.isFinite(parsed)) count = Math.max(count, parsed);
+  }
+  return count;
+}
+
+function lockedMessage(seconds: number): string {
+  const minutes = Math.max(1, Math.ceil(seconds / 60));
+  return `Too many wrong PINs. This chat is locked for ${minutes} minute${minutes === 1 ? '' : 's'}.`;
+}
+
 // ---------------------------------------------------------------- safe chats
 
+/*
+ * A safe chat is a set of private notes only its owner can open: ownChat
+ * below restricts every read and write to the member who made it. The API
+ * used to accept, store and hand back a list of up to twenty "participants"
+ * as well, which nothing ever read — no route let anyone else in, and no
+ * message could reach them. A field like that invites the next client to
+ * build a share button on top of it and tell her the chat is shared when it
+ * is not, so it is no longer taken or returned. The column is still in the
+ * schema, empty on every new chat.
+ */
 type ChatRow = {
   id: string;
   profileId: string;
   name: string;
   disguisedName: string;
-  participants: string[];
   accessPinHash: string | null;
   lastActivity: Date;
   createdAt: Date;
@@ -281,7 +429,6 @@ function summarize(chat: ChatRow, messageCount: number): SafeChatSummary {
     id: chat.id,
     name: chat.name,
     disguisedName: chat.disguisedName,
-    participants: chat.participants ?? [],
     hasPin: Boolean(chat.accessPinHash),
     isHidden: true,
     lastActivity: chat.lastActivity,
@@ -292,7 +439,7 @@ function summarize(chat: ChatRow, messageCount: number): SafeChatSummary {
 
 export async function createSafeChat(
   userId: string,
-  options: { name: string; disguisedName?: string; participants?: string[]; accessPin?: string }
+  options: { name: string; disguisedName?: string; accessPin?: string }
 ): Promise<SafeChatSummary> {
   const profile = await profileFor(userId);
   const chat = (await prisma.dvSafeChat.create({
@@ -300,7 +447,6 @@ export async function createSafeChat(
       profileId: profile.id,
       name: options.name,
       disguisedName: options.disguisedName?.trim() || 'Shopping List',
-      participants: options.participants ?? [],
       accessPinHash: options.accessPin ? hashPin(options.accessPin) : null,
     },
   })) as ChatRow;
@@ -327,17 +473,42 @@ async function ownChat(userId: string, chatId: string): Promise<ChatRow> {
   return chat;
 }
 
-function requirePin(chat: ChatRow, pin: string | undefined, userId: string): void {
+/**
+ * The PIN gate, with the counting described above. A request that sends no
+ * PIN at all to a locked chat is refused without being counted: that is a
+ * client that has not asked her yet, not a guess, and counting it would let a
+ * page bug lock her out of her own notes.
+ */
+async function requirePin(chat: ChatRow, pin: string | undefined, userId: string): Promise<void> {
+  if (!chat.accessPinHash) return;
+
+  const lockedFor = await pinLockSecondsLeft(chat.id);
+  if (lockedFor > 0) {
+    throw new ApiError(429, lockedMessage(lockedFor));
+  }
+
+  if (!pin) {
+    throw new ApiError(403, 'This chat needs its PIN');
+  }
+
   if (!verifyPin(pin, chat.accessPinHash)) {
-    logger.warn('Wrong PIN for safe chat', { userId, chatId: chat.id });
+    const nowLockedFor = await notePinMiss(chat.id);
+    logger.warn('Wrong PIN for safe chat', { userId, chatId: chat.id, locked: nowLockedFor > 0 });
+    if (nowLockedFor > 0) {
+      throw new ApiError(429, lockedMessage(nowLockedFor));
+    }
     throw new ApiError(403, 'That PIN is not right');
   }
+
+  await clearPinFailures(chat.id);
 }
 
 /** Opens a chat: verifies the PIN, drops messages past their auto-delete time, decrypts the rest. */
 export async function accessSafeChat(userId: string, chatId: string, pin?: string): Promise<SafeChat> {
   const chat = await ownChat(userId, chatId);
-  requirePin(chat, pin, userId);
+  await requirePin(chat, pin, userId);
+  // Only now, behind the right PIN, is she told anyone tried a wrong one.
+  const wrongPinAttemptsSinceLastOpen = chat.accessPinHash ? await takePinMisses(chat.id) : 0;
 
   await prisma.dvSafeMessage.deleteMany({ where: { chatId: chat.id, autoDeleteAt: { lte: new Date() } } });
   const rows = await prisma.dvSafeMessage.findMany({ where: { chatId: chat.id }, orderBy: { createdAt: 'asc' }, take: 500 });
@@ -348,7 +519,7 @@ export async function accessSafeChat(userId: string, chatId: string, pin?: strin
     autoDeleteAt: row.autoDeleteAt ?? undefined,
     createdAt: row.createdAt,
   }));
-  return { ...summarize(chat, messages.length), messages };
+  return { ...summarize(chat, messages.length), messages, wrongPinAttemptsSinceLastOpen };
 }
 
 export async function sendSafeChatMessage(
@@ -359,7 +530,7 @@ export async function sendSafeChatMessage(
   pin?: string
 ): Promise<SafeMessage> {
   const chat = await ownChat(userId, chatId);
-  requirePin(chat, pin, userId);
+  await requirePin(chat, pin, userId);
 
   const autoDeleteAt = autoDeleteMinutes && autoDeleteMinutes > 0 ? new Date(Date.now() + autoDeleteMinutes * 60 * 1000) : null;
   const row = await prisma.dvSafeMessage.create({
@@ -371,7 +542,7 @@ export async function sendSafeChatMessage(
 
 export async function deleteSafeChat(userId: string, chatId: string, pin?: string): Promise<void> {
   const chat = await ownChat(userId, chatId);
-  requirePin(chat, pin, userId);
+  await requirePin(chat, pin, userId);
   await prisma.dvSafeChat.delete({ where: { id: chat.id } });
   logger.info('Safe chat deleted', { userId, chatId });
 }
@@ -715,31 +886,99 @@ export const BUILT_IN_DV_SERVICES: readonly DVSupportServiceView[] = [
   },
 ];
 
+type BuiltInLine = Omit<DVResource, 'source' | 'lastCheckedAt'>;
+
 /**
- * The support lines shown in the Safety Centre, by region. Same standing as
+ * The published lines carried in the code, by region. Same standing as
  * BUILT_IN_DV_SERVICES above and the same obligation: check every number
- * against the currently published one before launch.
+ * against the currently published one before launch. They are marked
+ * 'built-in' on the way out and carry no checked date, because nobody here
+ * has recorded checking them; the page says so rather than implying it.
  */
-export function getDVResources(region: string = 'AU'): DVResource[] {
-  const resources: Record<string, DVResource[]> = {
-    AU: [
-      { name: '1800RESPECT', phone: '1800 737 732', website: 'https://www.1800respect.org.au', description: 'National sexual assault, family and domestic violence counselling', available: '24/7' },
-      { name: 'Lifeline', phone: '13 11 14', website: 'https://www.lifeline.org.au', description: 'Crisis support and suicide prevention', available: '24/7' },
-      { name: 'DVConnect Womensline', phone: '1800 811 811', website: 'https://www.dvconnect.org', description: 'Queensland domestic and family violence helpline', available: '24/7' },
-      { name: 'Safe Steps', phone: '1800 015 188', website: 'https://www.safesteps.org.au', description: 'Victoria family violence response centre', available: '24/7' },
-      { name: 'Emergency', phone: '000', website: 'https://www.triplezero.gov.au', description: 'Police, fire and ambulance', available: '24/7' },
-    ],
-    NZ: [
-      { name: "Women's Refuge", phone: '0800 733 843', website: 'https://womensrefuge.org.nz', description: 'National crisis line for women and children', available: '24/7' },
-    ],
-    UK: [
-      { name: 'National Domestic Abuse Helpline', phone: '0808 2000 247', website: 'https://www.nationaldahelpline.org.uk', description: 'Run by Refuge for women experiencing domestic abuse', available: '24/7' },
-    ],
-    US: [
-      { name: 'National Domestic Violence Hotline', phone: '1-800-799-7233', website: 'https://www.thehotline.org', description: 'National hotline for domestic violence support', available: '24/7' },
-    ],
-  };
-  return resources[region.toUpperCase()] || resources.AU;
+const BUILT_IN_SUPPORT_LINES: Record<string, BuiltInLine[]> = {
+  AU: [
+    { name: '1800RESPECT', phone: '1800 737 732', website: 'https://www.1800respect.org.au', description: 'National sexual assault, family and domestic violence counselling', available: '24/7' },
+    { name: 'Lifeline', phone: '13 11 14', website: 'https://www.lifeline.org.au', description: 'Crisis support and suicide prevention', available: '24/7' },
+    { name: 'DVConnect Womensline', phone: '1800 811 811', website: 'https://www.dvconnect.org', description: 'Queensland domestic and family violence helpline', available: '24/7', state: 'QLD' },
+    { name: 'Safe Steps', phone: '1800 015 188', website: 'https://www.safesteps.org.au', description: 'Victoria family violence response centre', available: '24/7', state: 'VIC' },
+    { name: 'Emergency', phone: '000', website: 'https://www.triplezero.gov.au', description: 'Police, fire and ambulance', available: '24/7' },
+  ],
+  NZ: [
+    { name: "Women's Refuge", phone: '0800 733 843', website: 'https://womensrefuge.org.nz', description: 'National crisis line for women and children', available: '24/7' },
+  ],
+  UK: [
+    { name: 'National Domestic Abuse Helpline', phone: '0808 2000 247', website: 'https://www.nationaldahelpline.org.uk', description: 'Run by Refuge for women experiencing domestic abuse', available: '24/7' },
+  ],
+  US: [
+    { name: 'National Domestic Violence Hotline', phone: '1-800-799-7233', website: 'https://www.thehotline.org', description: 'National hotline for domestic violence support', available: '24/7' },
+  ],
+};
+
+/** The kinds of catalogue entry that belong under "someone to talk to". */
+const TALK_TO_SOMEONE_TYPES = ['CRISIS', 'COUNSELING'];
+/** A ceiling, as on /api/impact/dv-services: a directory of checked lines is tens of rows. */
+const SUPPORT_LINE_LIMIT = 100;
+
+const digitsOf = (phone: string | null | undefined): string => (phone ?? '').replace(/\D/g, '');
+
+/**
+ * The support lines shown on the Safety page, by region.
+ *
+ * This was a literal map and nothing else: no date on any line, no way for
+ * staff to add one, correct one or take one down without a deploy, and only
+ * Queensland and Victoria among the states. Australian lines now come first
+ * from the DV support catalogue staff maintain through the admin impact
+ * console — the same table behind /api/impact/dv-services, where every entry
+ * can be retired and carries the date someone last checked it — with the
+ * built-in national lines beneath. A catalogue entry on the same number as a
+ * built-in one replaces it, because it is the same line, better checked.
+ * State lines for the other states and territories arrive the same way, once
+ * someone has checked them, rather than being typed in here from memory.
+ *
+ * A catalogue that cannot be read leaves the built-in lines standing. This is
+ * the list she reads when she needs help, and "the database is down" must not
+ * become "there is no one to call".
+ */
+export async function getDVResources(region: string = 'AU'): Promise<DVResource[]> {
+  const key = region.toUpperCase();
+  const builtIn: DVResource[] = (BUILT_IN_SUPPORT_LINES[key] ?? BUILT_IN_SUPPORT_LINES.AU).map((line) => ({
+    ...line,
+    source: 'built-in',
+    lastCheckedAt: null,
+  }));
+  if (key !== 'AU' && BUILT_IN_SUPPORT_LINES[key]) return builtIn;
+
+  const catalogue = await bestEffort(
+    'dv-safe.support-line catalogue',
+    () =>
+      prisma.dVSupportService.findMany({
+        where: { isActive: true, type: { in: TALK_TO_SOMEONE_TYPES }, phone: { not: null } },
+        orderBy: [{ isNational: 'desc' }, { name: 'asc' }],
+        take: SUPPORT_LINE_LIMIT,
+      }),
+    []
+  );
+
+  const checked: DVResource[] = catalogue
+    .filter((entry) => digitsOf(entry.phone))
+    .map((entry) => ({
+      name: entry.name,
+      phone: entry.phone ?? '',
+      website: entry.website ?? '',
+      description: entry.description ?? '',
+      available: entry.available24x7 ? '24/7' : 'Check opening hours',
+      ...(entry.state ? { state: entry.state } : {}),
+      source: 'catalogue',
+      lastCheckedAt: entry.lastCheckedAt ?? null,
+    }));
+  const checkedNumbers = new Set(checked.map((line) => digitsOf(line.phone)));
+  const remaining = builtIn.filter((line) => !checkedNumbers.has(digitsOf(line.phone)));
+
+  // 000 leads whatever else the list holds: in immediate danger it is the
+  // only number that matters, and it should not sit under a page of others.
+  const isEmergency = (line: DVResource) => digitsOf(line.phone) === '000';
+  const all = [...checked, ...remaining];
+  return [...all.filter(isEmergency), ...all.filter((line) => !isEmergency(line))];
 }
 
 // ---------------------------------------------------------------- encryption

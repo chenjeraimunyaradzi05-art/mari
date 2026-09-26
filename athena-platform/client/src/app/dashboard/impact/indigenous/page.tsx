@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Heart, Loader2, Users, ExternalLink, BookOpen } from 'lucide-react';
-import { communitySupportApi } from '@/lib/api';
+import { api, communitySupportApi } from '@/lib/api';
 import { safeHref } from '@/lib/safe-href';
 
 type IndigenousCommunity = {
@@ -16,6 +16,8 @@ type IndigenousCommunity = {
   membersCount: number;
   isVerified: boolean;
   culturalProtocols?: string;
+  /** Present when she is signed in: whether she already belongs to it. */
+  isMember?: boolean;
 };
 
 type IndigenousResource = {
@@ -41,6 +43,10 @@ export default function IndigenousPage() {
   const [resources, setResources] = useState<IndigenousResource[]>([]);
   const [loading, setLoading] = useState(true);
   const [joining, setJoining] = useState<string | null>(null);
+  const [leaving, setLeaving] = useState<string | null>(null);
+  // A failed load leaves both lists empty; this keeps that from reading as
+  // "no communities yet" and "no resources".
+  const [loadFailed, setLoadFailed] = useState(false);
   const [resourceType, setResourceType] = useState('');
   const [error, setError] = useState<string | null>(null);
   // Both catalogues are paged server-side, fifty to a page, and this page only
@@ -59,6 +65,7 @@ export default function IndigenousPage() {
   const loadData = async () => {
     setLoading(true);
     setError(null);
+    setLoadFailed(false);
     try {
       const [communitiesRes, resourcesRes] = await Promise.all([
         communitySupportApi.getIndigenousCommunities({ page: 1 }),
@@ -73,6 +80,7 @@ export default function IndigenousPage() {
     } catch (err: unknown) {
       const error = err as { response?: { data?: { error?: string } } };
       setError(error?.response?.data?.error || 'Failed to load data');
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -133,6 +141,28 @@ export default function IndigenousPage() {
     }
   };
 
+  /*
+   * Leaving a community. The server has had a leave route, but this page
+   * offered only "Join", so a woman who joined the wrong community — or who no
+   * longer wants her name on a cultural community's member list — had to
+   * write to someone. The API module has no method for it, so the shared
+   * client is called directly: DELETE /community-support/indigenous/communities/:id/join.
+   */
+  const handleLeave = async (community: IndigenousCommunity) => {
+    if (!window.confirm(`Leave ${community.name}?`)) return;
+    setLeaving(community.id);
+    setError(null);
+    try {
+      await api.delete(`/community-support/indigenous/communities/${community.id}/join`);
+      await loadData();
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      setError(error?.response?.data?.error || 'Could not leave that community. Please try again.');
+    } finally {
+      setLeaving(null);
+    }
+  };
+
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-8">
       <div>
@@ -168,6 +198,13 @@ export default function IndigenousPage() {
         <div className="flex items-center gap-2 text-sm text-slate-500">
           <Loader2 className="w-4 h-4 animate-spin" />
           Loading...
+        </div>
+      ) : loadFailed ? (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-center text-sm text-slate-500">
+          We could not load communities and resources just now.{' '}
+          <button type="button" onClick={loadData} className="font-medium text-primary-600 hover:underline">
+            Try again
+          </button>
         </div>
       ) : (
         <>
@@ -212,13 +249,23 @@ export default function IndigenousPage() {
                       )}
                     </div>
 
-                    <button
-                      onClick={() => handleJoin(community.id)}
-                      disabled={joining === community.id}
-                      className="w-full btn-primary text-sm"
-                    >
-                      {joining === community.id ? 'Joining...' : 'Join community'}
-                    </button>
+                    {community.isMember ? (
+                      <button
+                        onClick={() => handleLeave(community)}
+                        disabled={leaving === community.id}
+                        className="w-full btn-secondary text-sm"
+                      >
+                        {leaving === community.id ? 'Leaving...' : 'Leave community'}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleJoin(community.id)}
+                        disabled={joining === community.id}
+                        className="w-full btn-primary text-sm"
+                      >
+                        {joining === community.id ? 'Joining...' : 'Join community'}
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>

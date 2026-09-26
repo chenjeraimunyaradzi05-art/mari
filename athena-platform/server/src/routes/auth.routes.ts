@@ -1,7 +1,12 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
-import { Persona, Prisma, Region, UserRole, WomanVerificationStatus } from '@prisma/client';
+import rateLimit from 'express-rate-limit';
+import { AuditAction, Persona, Prisma, Region, UserRole, WomanVerificationStatus } from '@prisma/client';
 import { prisma } from '../utils/prisma';
+import { logAudit } from '../utils/audit';
+import { bestEffort } from '../utils/best-effort';
+import { recordFailure } from '../utils/ops-metrics';
+import { SharedRateLimitStore } from '../utils/rate-limit-store';
 import { hashPassword, comparePassword, DUMMY_PASSWORD_HASH } from '../utils/password';
 import {
   generateAccessToken,
@@ -16,6 +21,7 @@ import { logger } from '../utils/logger';
 import crypto from 'crypto';
 import { sessionService } from '../services/session.service';
 import { noteSignIn } from '../services/login-alert.service';
+import { notifyAdmins } from '../services/admin-notify.service';
 import { hashOpaqueToken } from '../utils/opaqueToken';
 import { getTrustedOriginFromHeaders, isCorsOriginAllowed } from '../utils/origins';
 import {
@@ -47,6 +53,172 @@ const RECOVERY_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const RECOVERY_CODE_LENGTH = 10;
 const RECOVERY_CODE_GROUP_LENGTH = 5;
 const RECOVERY_CODE_COUNT = 10;
+// ===========================================
+// SLOWING SCRIPTED SIGN-UPS
+// ===========================================
+
+/**
+ * Google and Facebook sign-in both create accounts, and they sat under the
+ * general limit of a hundred requests in fifteen minutes while password
+ * sign-up and sign-in had ten. A script that wanted a pile of accounts only
+ * had to come in through the OAuth door. This is the same budget as the
+ * password door, counted separately and kept in the same shared store, so an
+ * address gets ten tries at the social routes in fifteen minutes in
+ * production. The switch mirrors index.ts: local tooling can turn limits off,
+ * production cannot.
+ */
+const socialAuthLimitEnabled =
+  process.env.NODE_ENV === 'production' || process.env.RATE_LIMIT_ENABLED !== 'false';
+const socialAuthLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: process.env.NODE_ENV === 'production' ? 10 : 100,
+  message: { success: false, message: 'Too many sign-in attempts, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { xForwardedForHeader: false },
+  store: new SharedRateLimitStore('rl:social-auth:'),
+});
+const socialAuthLimit = (req: Request, res: Response, next: NextFunction) =>
+  socialAuthLimitEnabled ? socialAuthLimiter(req, res, next) : next();
+
+/**
+ * The human check on password sign-up.
+ *
+ * A community whose whole value is that strangers cannot walk in had nothing
+ * on its front door but a per-address rate limit: a script rotating addresses
+ * could open as many accounts as it liked, and every one of them would sit in
+ * the women-gate queue for a person to wade through. Cloudflare Turnstile is
+ * the check because it asks nothing of most people, sets no tracking cookie,
+ * and does not send her to an advertising company to prove she is human.
+ *
+ * It is enforced when TURNSTILE_SECRET_KEY is set and skipped when it is not,
+ * so a developer machine and the test suite need no Cloudflare account. The
+ * web form shows the widget when NEXT_PUBLIC_TURNSTILE_SITE_KEY is set; the
+ * two are configured together. A production server without the key says so in
+ * its log once at start rather than pretending the door is guarded.
+ *
+ * Google and Facebook sign-up are not asked for it: those accounts come with
+ * an address the provider has already verified, which is a stronger signal
+ * than a checkbox, and they are slowed by the limiter above.
+ */
+const HUMAN_CHECK_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+const HUMAN_CHECK_TOKEN_MAX_LENGTH = 2048;
+const HUMAN_CHECK_REQUIRED_MESSAGE = 'Please complete the check that you are a person, then try again.';
+
+if (process.env.NODE_ENV === 'production' && !process.env.TURNSTILE_SECRET_KEY?.trim()) {
+  logger.warn(
+    'TURNSTILE_SECRET_KEY is not set: password sign-up has no human check, only rate limits and email verification'
+  );
+}
+
+async function requireHumanCheck(token: unknown, remoteIp: string | undefined): Promise<void> {
+  const secret = process.env.TURNSTILE_SECRET_KEY?.trim();
+  if (!secret) return;
+
+  if (typeof token !== 'string' || !token.trim() || token.length > HUMAN_CHECK_TOKEN_MAX_LENGTH) {
+    throw new ApiError(400, HUMAN_CHECK_REQUIRED_MESSAGE);
+  }
+
+  const form = new URLSearchParams({ secret, response: token.trim() });
+  if (remoteIp) form.set('remoteip', remoteIp);
+
+  let outcome: { success?: boolean; 'error-codes'?: string[] };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch(HUMAN_CHECK_VERIFY_URL, { method: 'POST', body: form, signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`Turnstile answered ${response.status}`);
+    }
+    outcome = (await response.json()) as typeof outcome;
+  } catch (error) {
+    // Closed rather than open: a check that waves everyone through whenever
+    // Cloudflare is slow is a check a script only has to time. She is told
+    // it is on our side and to try again, not that she failed it.
+    recordFailure('auth.human_check', error);
+    logger.error('Human check could not be verified', { error });
+    throw new ApiError(503, 'We could not complete the sign-up check just now. Please try again in a minute.');
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (outcome.success !== true) {
+    logger.warn('Human check refused a sign-up', { errorCodes: outcome['error-codes'] ?? [] });
+    throw new ApiError(400, 'The check that you are a person did not go through. Please try it again.');
+  }
+}
+
+// ===========================================
+// SIGN-IN PROVIDERS
+// ===========================================
+
+type SignInProvider = 'Google' | 'Facebook';
+
+/**
+ * The refusals a returning member meets on the Google or Facebook door.
+ *
+ * These used to run after the provider id had been written onto her account
+ * with a raw UPDATE, together with emailVerified and lastLoginAt. So a request
+ * that matched a suspended account, or one protected by a second factor, was
+ * refused — and had already attached a new way into the account before it
+ * was. They now run first, and nothing is written for a refused request.
+ */
+function refuseSocialSignIn(account: { isSuspended: boolean; twoFactorEnabled: boolean }): void {
+  if (account.isSuspended) {
+    throw new ApiError(403, SUSPENDED_ACCOUNT_MESSAGE);
+  }
+  if (account.twoFactorEnabled) {
+    throw new ApiError(401, 'Two-factor code required. Please sign in with email and password.');
+  }
+}
+
+/**
+ * A unique-constraint collision on a sign-in, in words. The provider ids are
+ * @unique, and the raw UPDATE that used to write them surfaced a collision as
+ * a bare Postgres error and a 500.
+ */
+function socialAccountConflict(error: unknown, provider: SignInProvider): ApiError | null {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') return null;
+  const target = Array.isArray(error.meta?.target) ? (error.meta.target as string[]) : [];
+  if (target.includes('email')) {
+    return new ApiError(409, 'Email already registered');
+  }
+  if (target.includes('googleId') || target.includes('facebookId')) {
+    return new ApiError(409, `That ${provider} account is already linked to a different ATHENA account.`);
+  }
+  return new ApiError(409, 'Could not create a unique account code. Please try again.');
+}
+
+/**
+ * Who linked a sign-in provider to an account, from where, and whether a
+ * password nobody had proved was theirs went with it. AuditAction has no verb
+ * for this, so the row carries the nearest neutral value and the real event in
+ * metadata, which is the compromise admin-audit.service makes for the same
+ * reason. The link is already committed, so the row is best effort.
+ */
+async function recordSignInProviderLinked(
+  req: Request,
+  userId: string,
+  provider: SignInProvider,
+  clearedUnprovenPassword: boolean
+): Promise<void> {
+  await bestEffort(
+    `${provider} sign-in link audit row`,
+    logAudit({
+      action: AuditAction.DATA_ACCESS,
+      actorUserId: userId,
+      targetUserId: userId,
+      ipAddress: req.ip ?? null,
+      userAgent: req.get('user-agent') || null,
+      metadata: {
+        accountAction: 'SIGN_IN_PROVIDER_LINKED',
+        provider,
+        clearedUnprovenPassword,
+      },
+    })
+  );
+}
+
 /** True when a registration body carries a date of birth an adult could have. */
 function acceptableDateOfBirth(value: unknown): boolean {
   if (typeof value !== 'string' && !(value instanceof Date)) return false;
@@ -546,6 +718,7 @@ router.post(
       .optional({ checkFalsy: true })
       .customSanitizer((v) => (typeof v === 'string' ? v.trim().toUpperCase() : v))
       .isIn(PERSONA_VALUES),
+    body('humanCheckToken').optional().isString().isLength({ max: HUMAN_CHECK_TOKEN_MAX_LENGTH }),
   ],
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -553,6 +726,10 @@ router.post(
       if (!errors.isEmpty()) {
         throw new ApiError(400, errors.array()[0].msg);
       }
+
+      // Before anything reads the database, so a script that has not passed
+      // it cannot even learn which addresses are already registered.
+      await requireHumanCheck(req.body?.humanCheckToken, req.ip);
 
       const rawPersona = req.body?.persona;
       const persona: Persona =
@@ -920,10 +1097,151 @@ router.post(
 );
 
 // ===========================================
+// SUSPENSION APPEAL (from the sign-in page)
+// ===========================================
+
+/**
+ * The one appeal a suspended member can actually send.
+ *
+ * The help pages offer "Account Suspension" and "Account Ban" appeals, and the
+ * appeals API sits behind authenticate — which refuses a suspended account
+ * with a 403, as sign-in does. So those appeals could only be filed by people
+ * who had not been suspended, and the woman they exist for met a refusal she
+ * could do nothing with.
+ *
+ * Here she proves the account is hers the same way sign-in does, with the
+ * address and password she has just typed, and the appeal is filed against
+ * that account for a person to decide in the ordinary appeals queue. No
+ * session is issued; the account stays suspended until someone decides.
+ *
+ * A wrong password counts against the same lockout as a failed sign-in, so
+ * this is not a second door for guessing. The account's standing is disclosed
+ * only after the password checks out, exactly as sign-in discloses it, and an
+ * account that is not suspended is told to sign in instead. One appeal waits
+ * at a time: a second press while the first is with a reviewer is a 409, not
+ * a second row.
+ */
+const suspensionAppealLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: process.env.NODE_ENV === 'production' ? 5 : 100,
+  message: { success: false, message: 'Too many appeal attempts from here. Please try again in an hour.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { xForwardedForHeader: false },
+  store: new SharedRateLimitStore('rl:suspension-appeal:'),
+});
+const suspensionAppealLimit = (req: Request, res: Response, next: NextFunction) =>
+  socialAuthLimitEnabled ? suspensionAppealLimiter(req, res, next) : next();
+
+router.post(
+  '/suspension-appeal',
+  suspensionAppealLimit,
+  [
+    body('email').isEmail().isLength({ max: 254 }).normalizeEmail(),
+    body('password')
+      .isString()
+      .isLength({ min: 1, max: PASSWORD_MAX_LENGTH })
+      .withMessage(`Password must be ${PASSWORD_MAX_LENGTH} characters or fewer`),
+    body('reason')
+      .isString()
+      .trim()
+      .isLength({ min: 10, max: 5000 })
+      .withMessage('Tell the reviewer what happened in at least a sentence, and no more than 5000 characters'),
+  ],
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
+      const { email, password } = req.body as { email: string; password: string };
+      const reason = String(req.body.reason).trim();
+      const ipAddress = req.ip;
+
+      const lockStatus = await getLockoutStatus(email, ipAddress);
+      if (lockStatus.locked) {
+        const minutes = Math.max(1, Math.ceil(lockStatus.retryAfterSeconds / 60));
+        throw new ApiError(429, `Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`);
+      }
+
+      const user = await prisma.user.findUnique({
+        where: { email },
+        select: { id: true, passwordHash: true, isSuspended: true },
+      });
+
+      // Always run bcrypt, as sign-in does, so the answer takes as long for an
+      // address that has no account as for one that does.
+      const isValidPassword = await comparePassword(password, user?.passwordHash || DUMMY_PASSWORD_HASH);
+      if (!user || !user.passwordHash || !isValidPassword) {
+        await recordFailedLogin(email, ipAddress);
+        throw new ApiError(401, 'Invalid email or password');
+      }
+      await clearFailedLogins(email, ipAddress);
+
+      if (!user.isSuspended) {
+        throw new ApiError(409, 'This account is not suspended. Sign in, and appeal anything else from Help.');
+      }
+
+      const waiting = await prisma.appeal.findFirst({
+        where: { userId: user.id, type: 'ACCOUNT_SUSPENSION', status: 'PENDING' },
+        select: { id: true },
+      });
+      if (waiting) {
+        throw new ApiError(409, 'Your appeal is already with a reviewer. If the suspension is lifted, you will be able to sign in again.');
+      }
+
+      const appeal = await prisma.appeal.create({
+        data: {
+          userId: user.id,
+          type: 'ACCOUNT_SUSPENSION',
+          reason,
+          status: 'PENDING',
+          metadata: { submittedFrom: 'sign-in' },
+        },
+        select: { id: true, status: true, createdAt: true },
+      });
+
+      await bestEffort(
+        'suspension appeal audit row',
+        logAudit({
+          action: AuditAction.USER_APPEAL_SUBMIT,
+          actorUserId: user.id,
+          targetUserId: user.id,
+          ipAddress: req.ip ?? null,
+          userAgent: req.get('user-agent') || null,
+          metadata: { appealId: appeal.id, type: 'ACCOUNT_SUSPENSION', submittedFrom: 'sign-in' },
+        })
+      );
+      // The queue is where it is decided; this only tells staff it is there.
+      // No name travels in the notification.
+      await bestEffort(
+        'suspension appeal admin notification',
+        notifyAdmins({
+          title: 'A suspended member has appealed',
+          message: 'An appeal against an account suspension is waiting in the appeals queue.',
+          link: '/admin/appeals',
+          data: { kind: 'APPEAL', appealId: appeal.id, type: 'ACCOUNT_SUSPENSION' },
+        })
+      );
+
+      res.status(201).json({
+        success: true,
+        message: 'Your appeal has been sent and a person will look at it. If the suspension is lifted, you will be able to sign in again.',
+        data: appeal,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// ===========================================
 // GOOGLE AUTH
 // ===========================================
 router.post(
   '/google',
+  socialAuthLimit,
   [
     body('credential').optional().isString().isLength({ min: 1, max: EXTERNAL_AUTH_TOKEN_MAX_LENGTH }),
     body('idToken').optional().isString().isLength({ min: 1, max: EXTERNAL_AUTH_TOKEN_MAX_LENGTH }),
@@ -1007,13 +1325,6 @@ router.post(
           ? (rawPersona.trim().toUpperCase() as Persona)
           : Persona.EARLY_CAREER;
 
-      const linkedGoogleRows = await prisma.$queryRaw<Array<{ id: string }>>`
-        SELECT "id"
-        FROM "User"
-        WHERE "googleId" = ${googleProfile.sub}
-        LIMIT 1
-      `;
-
       const selectUser = {
         id: true,
         email: true,
@@ -1041,13 +1352,23 @@ router.post(
         twoFactorEnabled: true,
       } as const;
 
-      const existingEmailUser = await prisma.user.findUnique({
-        where: { email },
-        select: {
-          ...selectUser,
-          emailVerifiedAt: true,
-        },
+      // Typed lookups: the provider id is in the schema, so nothing here needs
+      // raw SQL, and the account a Google id is linked to wins over whichever
+      // account happens to hold the same address.
+      const accountLookup = {
+        ...selectUser,
+        emailVerified: true,
+        emailVerifiedAt: true,
+        googleId: true,
+        passwordHash: true,
+      } as const;
+      const linkedGoogleUser = await prisma.user.findUnique({
+        where: { googleId: googleProfile.sub },
+        select: accountLookup,
       });
+      const existingEmailUser = linkedGoogleUser
+        ? null
+        : await prisma.user.findUnique({ where: { email }, select: accountLookup });
 
       let user:
         | {
@@ -1079,34 +1400,49 @@ router.post(
         | null = null;
       let created = false;
 
-      if (linkedGoogleRows[0]?.id) {
-        user = await prisma.user.update({
-          where: { id: linkedGoogleRows[0].id },
-          data: {
-            emailVerified: true,
-            emailVerifiedAt: new Date(),
-            lastLoginAt: new Date(),
-            avatar: existingEmailUser?.avatar || googleProfile.picture || undefined,
-          },
-          select: selectUser,
-        });
-      } else if (existingEmailUser) {
-        await prisma.$executeRaw`
-          UPDATE "User"
-          SET "googleId" = ${googleProfile.sub}
-          WHERE "id" = ${existingEmailUser.id}
-        `;
+      const existingAccount = linkedGoogleUser ?? existingEmailUser;
 
-        user = await prisma.user.update({
-          where: { id: existingEmailUser.id },
-          data: {
-            emailVerified: true,
-            emailVerifiedAt: existingEmailUser.emailVerifiedAt ?? new Date(),
-            lastLoginAt: new Date(),
-            avatar: existingEmailUser.avatar || googleProfile.picture || undefined,
-          },
-          select: selectUser,
-        });
+      if (existingAccount) {
+        // Every refusal before any write. See refuseSocialSignIn.
+        refuseSocialSignIn(existingAccount);
+
+        const linking = !linkedGoogleUser;
+        if (linking && existingAccount.googleId && existingAccount.googleId !== googleProfile.sub) {
+          throw new ApiError(409, 'This ATHENA account is already linked to a different Google account.');
+        }
+
+        // An address nobody ever proved they own can carry a password chosen
+        // by someone else: register her address first, wait for her to arrive
+        // through Google, and the password opens the account she has just
+        // made real. Google has proved the address is hers, so a password set
+        // before anyone proved it goes; she can set her own from the reset
+        // page.
+        const clearUnprovenPassword = linking && !existingAccount.emailVerified && Boolean(existingAccount.passwordHash);
+        // Google vouches for its own address. On an account linked earlier
+        // whose address has since changed, that is not the address on file.
+        const googleVouchesForAddress = existingAccount.email === email;
+
+        try {
+          user = await prisma.user.update({
+            where: { id: existingAccount.id },
+            data: {
+              ...(linking ? { googleId: googleProfile.sub } : {}),
+              ...(clearUnprovenPassword ? { passwordHash: null } : {}),
+              ...(googleVouchesForAddress
+                ? { emailVerified: true, emailVerifiedAt: existingAccount.emailVerifiedAt ?? new Date() }
+                : {}),
+              lastLoginAt: new Date(),
+              avatar: existingAccount.avatar || googleProfile.picture || undefined,
+            },
+            select: selectUser,
+          });
+        } catch (error) {
+          throw socialAccountConflict(error, 'Google') ?? error;
+        }
+
+        if (linking) {
+          await recordSignInProviderLinked(req, existingAccount.id, 'Google', clearUnprovenPassword);
+        }
       } else {
         if (mode !== 'register') {
           throw new ApiError(404, 'No ATHENA account exists for this Google email. Please create an account first.');
@@ -1144,6 +1480,10 @@ router.post(
           return tx.user.create({
             data: {
               email,
+              // Written with the account rather than by a second raw UPDATE
+              // afterwards, so an account never exists without the link that
+              // created it, and a collision is a P2002 like any other.
+              googleId: googleProfile.sub,
               firstName,
               lastName,
               displayName,
@@ -1170,15 +1510,13 @@ router.post(
           });
         };
 
-        user = inviteRecord
-          ? await prisma.$transaction((tx) => createSocialUser(tx))
-          : await createSocialUser(prisma);
-
-        await prisma.$executeRaw`
-          UPDATE "User"
-          SET "googleId" = ${googleProfile.sub}
-          WHERE "id" = ${user.id}
-        `;
+        try {
+          user = inviteRecord
+            ? await prisma.$transaction((tx) => createSocialUser(tx))
+            : await createSocialUser(prisma);
+        } catch (error) {
+          throw socialAccountConflict(error, 'Google') ?? error;
+        }
 
         sendBestEffortAuthEmail(
           'Welcome email after Google sign-up',
@@ -1240,6 +1578,7 @@ router.post(
 // ===========================================
 router.post(
   '/facebook',
+  socialAuthLimit,
   [
     body('accessToken').isString().isLength({ min: 1, max: EXTERNAL_AUTH_TOKEN_MAX_LENGTH }),
     body('mode').optional().isIn(['login', 'register']),
@@ -1333,13 +1672,6 @@ router.post(
           ? (fbRawPersona.trim().toUpperCase() as Persona)
           : Persona.EARLY_CAREER;
 
-      const linkedFbRows = await prisma.$queryRaw<Array<{ id: string }>>`
-        SELECT "id"
-        FROM "User"
-        WHERE "facebookId" = ${fbProfile.id}
-        LIMIT 1
-      `;
-
       const fbSelectUser = {
         id: true,
         email: true,
@@ -1367,10 +1699,21 @@ router.post(
         twoFactorEnabled: true,
       } as const;
 
-      const existingFbEmailUser = await prisma.user.findUnique({
-        where: { email: fbEmail },
-        select: { ...fbSelectUser, emailVerifiedAt: true },
+      // The same typed lookups as the Google route, for the same reasons.
+      const fbAccountLookup = {
+        ...fbSelectUser,
+        emailVerified: true,
+        emailVerifiedAt: true,
+        facebookId: true,
+        passwordHash: true,
+      } as const;
+      const linkedFbUser = await prisma.user.findUnique({
+        where: { facebookId: fbProfile.id },
+        select: fbAccountLookup,
       });
+      const existingFbEmailUser = linkedFbUser
+        ? null
+        : await prisma.user.findUnique({ where: { email: fbEmail }, select: fbAccountLookup });
 
       let fbUser:
         | {
@@ -1402,34 +1745,44 @@ router.post(
         | null = null;
       let fbCreated = false;
 
-      if (linkedFbRows[0]?.id) {
-        fbUser = await prisma.user.update({
-          where: { id: linkedFbRows[0].id },
-          data: {
-            emailVerified: true,
-            emailVerifiedAt: new Date(),
-            lastLoginAt: new Date(),
-            avatar: existingFbEmailUser?.avatar || fbAvatarUrl || undefined,
-          },
-          select: fbSelectUser,
-        });
-      } else if (existingFbEmailUser) {
-        await prisma.$executeRaw`
-          UPDATE "User"
-          SET "facebookId" = ${fbProfile.id}
-          WHERE "id" = ${existingFbEmailUser.id}
-        `;
+      const existingFbAccount = linkedFbUser ?? existingFbEmailUser;
 
-        fbUser = await prisma.user.update({
-          where: { id: existingFbEmailUser.id },
-          data: {
-            emailVerified: true,
-            emailVerifiedAt: existingFbEmailUser.emailVerifiedAt ?? new Date(),
-            lastLoginAt: new Date(),
-            avatar: existingFbEmailUser.avatar || fbAvatarUrl || undefined,
-          },
-          select: fbSelectUser,
-        });
+      if (existingFbAccount) {
+        // Every refusal before any write. See refuseSocialSignIn.
+        refuseSocialSignIn(existingFbAccount);
+
+        const fbLinking = !linkedFbUser;
+        if (fbLinking && existingFbAccount.facebookId && existingFbAccount.facebookId !== fbProfile.id) {
+          throw new ApiError(409, 'This ATHENA account is already linked to a different Facebook account.');
+        }
+
+        // See the Google route: a password set on an address nobody had
+        // proved was theirs does not survive the owner arriving.
+        const fbClearUnprovenPassword =
+          fbLinking && !existingFbAccount.emailVerified && Boolean(existingFbAccount.passwordHash);
+        const facebookVouchesForAddress = existingFbAccount.email === fbEmail;
+
+        try {
+          fbUser = await prisma.user.update({
+            where: { id: existingFbAccount.id },
+            data: {
+              ...(fbLinking ? { facebookId: fbProfile.id } : {}),
+              ...(fbClearUnprovenPassword ? { passwordHash: null } : {}),
+              ...(facebookVouchesForAddress
+                ? { emailVerified: true, emailVerifiedAt: existingFbAccount.emailVerifiedAt ?? new Date() }
+                : {}),
+              lastLoginAt: new Date(),
+              avatar: existingFbAccount.avatar || fbAvatarUrl || undefined,
+            },
+            select: fbSelectUser,
+          });
+        } catch (error) {
+          throw socialAccountConflict(error, 'Facebook') ?? error;
+        }
+
+        if (fbLinking) {
+          await recordSignInProviderLinked(req, existingFbAccount.id, 'Facebook', fbClearUnprovenPassword);
+        }
       } else {
         if (fbMode !== 'register') {
           throw new ApiError(404, 'No ATHENA account exists for this Facebook email. Please create an account first.');
@@ -1466,6 +1819,7 @@ router.post(
           return tx.user.create({
             data: {
               email: fbEmail,
+              facebookId: fbProfile.id,
               firstName: fbFirstName,
               lastName: fbLastName,
               displayName: fbDisplayName,
@@ -1485,15 +1839,13 @@ router.post(
           });
         };
 
-        fbUser = fbInviteRecord
-          ? await prisma.$transaction((tx) => createFacebookUser(tx))
-          : await createFacebookUser(prisma);
-
-        await prisma.$executeRaw`
-          UPDATE "User"
-          SET "facebookId" = ${fbProfile.id}
-          WHERE "id" = ${fbUser.id}
-        `;
+        try {
+          fbUser = fbInviteRecord
+            ? await prisma.$transaction((tx) => createFacebookUser(tx))
+            : await createFacebookUser(prisma);
+        } catch (error) {
+          throw socialAccountConflict(error, 'Facebook') ?? error;
+        }
 
         sendBestEffortAuthEmail(
           'Welcome email after Facebook sign-up',

@@ -57,8 +57,21 @@ type Settings = {
 };
 type ChatSummary = { id: string; name: string; disguisedName: string; hasPin: boolean; lastActivity: string; messageCount: number };
 type ChatMessage = { id: string; senderId: string; content: string; autoDeleteAt?: string; createdAt: string };
-type ChatView = ChatSummary & { messages: ChatMessage[] };
-type Resource = { name: string; phone: string; website: string; description: string; available: string };
+// wrongPinAttemptsSinceLastOpen is only ever sent behind the right PIN, so it
+// is shown to her and never to whoever was guessing.
+type ChatView = ChatSummary & { messages: ChatMessage[]; wrongPinAttemptsSinceLastOpen?: number };
+// `source` says whether ATHENA staff checked the line (with the date they did)
+// or it is a nationally published number carried in the code.
+type Resource = {
+  name: string;
+  phone: string;
+  website: string;
+  description: string;
+  available: string;
+  state?: string;
+  source?: 'catalogue' | 'built-in';
+  lastCheckedAt?: string | null;
+};
 
 const AUTO_DELETE = [
   { value: 0, label: 'Keep' },
@@ -237,17 +250,24 @@ export default function SafetyPage() {
   });
 
   // ---- traces
+  // This used to promise to take the page out of the browser's history and
+  // then call replaceState with the address it was already on, which changes
+  // nothing; no website can remove entries from the history list. It clears
+  // what a page really can — ATHENA's own storage in this browser — says so,
+  // and says it could not when the browser refused.
+  const [tracesCleared, setTracesCleared] = useState<'cleared' | 'blocked' | null>(null);
   const clearTraces = useMutation({
     mutationFn: dvSafeApi.clearTraces,
     onSuccess: () => {
       try {
         window.localStorage.clear();
         window.sessionStorage.clear();
-        window.history.replaceState(null, '', '/dashboard/safety');
+        setTracesCleared('cleared');
+        toast.success("ATHENA's saved data is cleared from this browser");
       } catch {
-        // Storage can be blocked; the server side is already done.
+        setTracesCleared('blocked');
+        toast.error('This browser would not let ATHENA clear its storage');
       }
-      toast.success('Traces cleared on this device');
     },
     onError: (error) => toast.error(errorMessage(error) || 'Could not clear traces'),
   });
@@ -627,6 +647,15 @@ export default function SafetyPage() {
                     </button>
                   </div>
                 </div>
+                {(openChat.chat.wrongPinAttemptsSinceLastOpen ?? 0) > 0 && (
+                  <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-900/20 dark:text-amber-100" role="status">
+                    Since you last opened this chat, a wrong PIN was entered{' '}
+                    {openChat.chat.wrongPinAttemptsSinceLastOpen === 1
+                      ? 'once'
+                      : `${openChat.chat.wrongPinAttemptsSinceLastOpen} times`}
+                    . If that was not you, someone may have had your phone or your sign-in. Five wrong PINs lock the chat for fifteen minutes.
+                  </p>
+                )}
                 <ul className="max-h-72 space-y-2 overflow-y-auto">
                   {openChat.chat.messages.length === 0 ? (
                     <li className="text-sm text-slate-500">Nothing written yet.</li>
@@ -751,45 +780,82 @@ export default function SafetyPage() {
               <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-900 dark:text-white">
                 <Eraser className="h-5 w-5" /> Clear traces on this device
               </h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400">Removes saved drafts and settings from this browser and takes this page out of its history.</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                Removes what ATHENA has saved in this browser, such as drafts and page settings. No website can remove pages from your
+                browser&apos;s history: to do that, delete it in the browser&apos;s own settings, or use a private window next time.
+              </p>
+              {tracesCleared === 'blocked' && (
+                <p className="mt-1 text-sm text-red-700 dark:text-red-300" role="status">
+                  This browser would not let ATHENA clear its storage. Clearing site data in the browser&apos;s settings does the same.
+                </p>
+              )}
             </div>
             <button type="button" onClick={() => clearTraces.mutate()} disabled={clearTraces.isPending} className="btn-outline px-4 py-2 text-sm">
               Clear now
             </button>
           </section>
+        </>
+      )}
 
-          {/* Support */}
-          <section className="card space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Someone to talk to</h2>
-              <select value={region} onChange={(e) => setRegion(e.target.value)} aria-label="Country" className="input py-1.5 text-sm">
-                {REGIONS.map(([code, label]) => (
-                  <option key={code} value={code}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <ul className="grid gap-3 sm:grid-cols-2">
-              {(resources.data ?? []).map((r) => (
-                <li key={r.name} className="rounded-xl border border-slate-200 p-4 text-sm dark:border-slate-700">
-                  <p className="font-semibold text-slate-900 dark:text-white">{r.name}</p>
-                  <p className="text-slate-600 dark:text-slate-300">{r.description}</p>
-                  <p className="mt-2 flex flex-wrap items-center gap-3">
-                    <a href={`tel:${r.phone.replace(/\s+/g, '')}`} className="inline-flex items-center gap-1 font-semibold text-rose-700 hover:underline dark:text-rose-300">
-                      <Phone className="h-3.5 w-3.5" /> {r.phone}
-                    </a>
+      {/* Support. Outside the settings branch on purpose: the numbers are the
+          same for everyone and need nothing of hers, so a settings request
+          that failed must not take the crisis lines down with it. */}
+      <section className="card space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Someone to talk to</h2>
+          <select value={region} onChange={(e) => setRegion(e.target.value)} aria-label="Country" className="input py-1.5 text-sm">
+            {REGIONS.map(([code, label]) => (
+              <option key={code} value={code}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+        {resources.isLoading ? (
+          <div className="flex justify-center py-6">
+            <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+          </div>
+        ) : resources.isError ? (
+          // Never an empty list: a failed request here would read as "there is
+          // no one to call", which is the worst thing this page could say.
+          <p className="text-sm text-slate-700 dark:text-slate-200" role="status">
+            We could not load the list of support lines just now. In immediate danger call{' '}
+            <a href="tel:000" className="font-semibold text-rose-700 underline dark:text-rose-300">000</a>. 1800RESPECT, the national
+            domestic and family violence line, is on{' '}
+            <a href="tel:1800737732" className="font-semibold text-rose-700 underline dark:text-rose-300">1800 737 732</a>, any time.
+          </p>
+        ) : (
+          <ul className="grid gap-3 sm:grid-cols-2">
+            {(resources.data ?? []).map((r) => (
+              <li key={`${r.name}-${r.phone}`} className="rounded-xl border border-slate-200 p-4 text-sm dark:border-slate-700">
+                <p className="font-semibold text-slate-900 dark:text-white">
+                  {r.name}
+                  {r.state && <span className="ml-2 text-xs font-normal text-slate-500">{r.state}</span>}
+                </p>
+                <p className="text-slate-600 dark:text-slate-300">{r.description}</p>
+                <p className="mt-2 flex flex-wrap items-center gap-3">
+                  <a href={`tel:${r.phone.replace(/\s+/g, '')}`} className="inline-flex items-center gap-1 font-semibold text-rose-700 hover:underline dark:text-rose-300">
+                    <Phone className="h-3.5 w-3.5" /> {r.phone}
+                  </a>
+                  {r.website && (
                     <a href={safeHref(r.website)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-slate-500 hover:underline">
                       <ExternalLink className="h-3.5 w-3.5" /> Website
                     </a>
-                    <span className="text-xs text-slate-400">{r.available}</span>
-                  </p>
-                </li>
-              ))}
-            </ul>
-          </section>
-        </>
-      )}
+                  )}
+                  <span className="text-xs text-slate-400">{r.available}</span>
+                </p>
+                <p className="mt-1 text-xs text-slate-400">
+                  {r.source === 'catalogue' && r.lastCheckedAt
+                    ? `Checked by ATHENA staff on ${format(new Date(r.lastCheckedAt), 'd MMM yyyy')}`
+                    : r.source === 'catalogue'
+                      ? 'Listed by ATHENA staff'
+                      : 'Nationally published number'}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }

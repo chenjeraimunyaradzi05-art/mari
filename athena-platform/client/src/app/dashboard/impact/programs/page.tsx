@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Users, Loader2, CheckCircle, Clock, Target } from 'lucide-react';
-import { communitySupportApi } from '@/lib/api';
+import { Users, Loader2, CheckCircle, Circle, Target } from 'lucide-react';
+import { api, communitySupportApi } from '@/lib/api';
 
 type Program = {
   id: string;
@@ -16,7 +16,7 @@ type Program = {
   maxParticipants?: number;
   currentParticipants: number;
   isActive: boolean;
-  milestones: { id: string; title: string; description?: string }[];
+  milestones: { id: string; title: string; description?: string; requiredForCompletion?: boolean }[];
   _count: { enrollments: number };
 };
 
@@ -53,6 +53,12 @@ export default function ProgramsPage() {
   const [enrolling, setEnrolling] = useState<string | null>(null);
   const [filterType, setFilterType] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Whether the last full load failed. A failed load leaves the lists empty,
+  // and an empty list here would read as "there are no programmes" when the
+  // truth is "we could not ask".
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [leaving, setLeaving] = useState<string | null>(null);
+  const [ticking, setTicking] = useState<string | null>(null);
   // The catalogue is paged server-side, fifty programs to a page. This page only
   // ever asked for the first one, so a fifty-first program could not be reached
   // at all; "Show more" asks for the next page and adds it to what is already
@@ -65,6 +71,7 @@ export default function ProgramsPage() {
   const loadData = async () => {
     setLoading(true);
     setError(null);
+    setLoadFailed(false);
     try {
       const [programsRes, enrollmentsRes] = await Promise.all([
         communitySupportApi.getPrograms({ communityType: filterType || undefined, page: 1 }),
@@ -77,6 +84,7 @@ export default function ProgramsPage() {
     } catch (err: unknown) {
       const error = err as { response?: { data?: { error?: string } } };
       setError(error?.response?.data?.error || 'Failed to load programs');
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -116,6 +124,63 @@ export default function ProgramsPage() {
       setError(error?.response?.data?.error || 'Failed to enroll');
     } finally {
       setEnrolling(null);
+    }
+  };
+
+  /*
+   * Leaving a programme, and ticking off its milestones.
+   *
+   * The server has let a member withdraw and has recorded milestone progress
+   * for some time — finishing every required milestone is what marks an
+   * enrolment COMPLETED — but this page offered neither. Once enrolled she
+   * could not leave, and the milestones were drawn read-only, so COMPLETED
+   * was unreachable from the product and the "Programs finished" figure on
+   * the impact hub could only ever say nought.
+   *
+   * The withdrawal is called on the shared client directly because the API
+   * module has no method for it; the route is DELETE
+   * /community-support/programs/:id/enroll.
+   */
+  const handleLeave = async (enrollment: Enrollment) => {
+    if (!window.confirm(`Leave ${enrollment.program.name}? Your progress through it will not be kept.`)) return;
+    setLeaving(enrollment.program.id);
+    setError(null);
+    try {
+      await api.delete(`/community-support/programs/${enrollment.program.id}/enroll`);
+      await loadData();
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      setError(error?.response?.data?.error || 'Could not leave that program. Please try again.');
+    } finally {
+      setLeaving(null);
+    }
+  };
+
+  const handleMilestone = async (enrollment: Enrollment, milestoneId: string, isCompleted: boolean) => {
+    setTicking(milestoneId);
+    setError(null);
+    try {
+      const res = await communitySupportApi.updateMilestoneProgress(enrollment.id, { milestoneId, isCompleted });
+      const nextStatus: string | undefined = res.data?.data?.enrollmentStatus;
+      setEnrollments((current) =>
+        current.map((e) =>
+          e.id !== enrollment.id
+            ? e
+            : {
+                ...e,
+                status: nextStatus || e.status,
+                milestoneProgress: [
+                  ...e.milestoneProgress.filter((p) => p.milestoneId !== milestoneId),
+                  { milestoneId, isCompleted },
+                ],
+              }
+        )
+      );
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      setError(error?.response?.data?.error || 'Could not save that milestone. Please try again.');
+    } finally {
+      setTicking(null);
     }
   };
 
@@ -162,9 +227,19 @@ export default function ProgramsPage() {
                         {communityTypeLabels[enrollment.program.communityType] || enrollment.program.communityType}
                       </p>
                     </div>
-                    <span className={`text-xs font-semibold px-2 py-1 rounded-full self-start ${statusColors[enrollment.status]}`}>
-                      {enrollment.status}
-                    </span>
+                    <div className="flex items-center gap-3 self-start">
+                      <span className={`text-xs font-semibold px-2 py-1 rounded-full ${statusColors[enrollment.status]}`}>
+                        {enrollment.status}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleLeave(enrollment)}
+                        disabled={leaving === enrollment.program.id}
+                        className="text-xs font-medium text-slate-500 hover:text-red-600 disabled:opacity-50"
+                      >
+                        {leaving === enrollment.program.id ? 'Leaving…' : 'Leave program'}
+                      </button>
+                    </div>
                   </div>
 
                   <div className="mt-4">
@@ -181,25 +256,41 @@ export default function ProgramsPage() {
                   </div>
 
                   {enrollment.program.milestones.length > 0 && (
-                    <div className="mt-4 space-y-2">
-                      {enrollment.program.milestones.slice(0, 3).map((milestone) => {
+                    <ul className="mt-4 space-y-2">
+                      {enrollment.program.milestones.map((milestone) => {
                         const isComplete = enrollment.milestoneProgress.some(
                           (p) => p.milestoneId === milestone.id && p.isCompleted
                         );
+                        // PAUSED and CANCELLED are decisions someone made about
+                        // the enrolment; the server leaves them alone, so the
+                        // page does not offer a tick that would change nothing.
+                        const canTick = enrollment.status === 'ACTIVE' || enrollment.status === 'COMPLETED';
                         return (
-                          <div key={milestone.id} className="flex items-center gap-2 text-sm">
-                            {isComplete ? (
-                              <CheckCircle className="w-4 h-4 text-emerald-500" />
-                            ) : (
-                              <Clock className="w-4 h-4 text-slate-400" />
-                            )}
-                            <span className={isComplete ? 'text-slate-500 line-through' : 'text-slate-700 dark:text-slate-300'}>
-                              {milestone.title}
-                            </span>
-                          </div>
+                          <li key={milestone.id}>
+                            <button
+                              type="button"
+                              role="checkbox"
+                              aria-checked={isComplete}
+                              disabled={!canTick || ticking === milestone.id}
+                              onClick={() => handleMilestone(enrollment, milestone.id, !isComplete)}
+                              className="flex items-center gap-2 text-left text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {ticking === milestone.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
+                              ) : isComplete ? (
+                                <CheckCircle className="w-4 h-4 text-emerald-500" />
+                              ) : (
+                                <Circle className="w-4 h-4 text-slate-400" />
+                              )}
+                              <span className={isComplete ? 'text-slate-500 line-through' : 'text-slate-700 dark:text-slate-300'}>
+                                {milestone.title}
+                                {milestone.requiredForCompletion && <span className="ml-1 text-xs text-slate-400">(required)</span>}
+                              </span>
+                            </button>
+                          </li>
                         );
                       })}
-                    </div>
+                    </ul>
                   )}
                 </div>
               );
@@ -228,6 +319,13 @@ export default function ProgramsPage() {
         <div className="flex items-center gap-2 text-sm text-slate-500">
           <Loader2 className="w-4 h-4 animate-spin" />
           Loading programs...
+        </div>
+      ) : loadFailed ? (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-center text-sm text-slate-500">
+          We could not load the programs just now.{' '}
+          <button type="button" onClick={loadData} className="font-medium text-primary-600 hover:underline">
+            Try again
+          </button>
         </div>
       ) : programs.length === 0 ? (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-center text-sm text-slate-500">

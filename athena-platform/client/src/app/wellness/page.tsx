@@ -17,6 +17,7 @@ import { CrisisStrip, HealthDisclaimer, useLoad } from '@/components/wellness/We
 import { WELLNESS_GROUPS, WELLNESS_TONES } from '@/lib/wellness-nav';
 import { cn } from '@/lib/utils';
 import { safeHref } from '@/lib/safe-href';
+import { QuickExitButton } from '../dashboard/safety/QuickExit';
 
 type Reference = { crisisLines: CrisisLine[]; k10: { questions: Array<{ id: number; text: string }>; options: Array<{ value: number; label: string }> } };
 type Library = { topics: Array<{ key: string; name: string; blurb: string; items: Array<{ key: string; title: string; summary: string; source: string; url: string; kind: string }> }> };
@@ -146,6 +147,10 @@ export default function WellnessPage() {
       </section>
 
       <div className="mt-8"><HealthDisclaimer /></div>
+      {/* The same way off the page the signed-in wellness pages carry. A
+          visitor reading the crisis lines here is as likely as anyone to need
+          to leave in a hurry; signed out, it goes to the default address. */}
+      <QuickExitButton variant="floating" className="print:hidden" />
     </PageShell>
   );
 }

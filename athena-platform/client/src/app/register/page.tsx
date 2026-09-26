@@ -23,6 +23,7 @@ import Image from 'next/image';
 import { useAuth } from '@/lib/hooks';
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton';
 import { FacebookSignInButton } from '@/components/auth/FacebookSignInButton';
+import { HUMAN_CHECK_SITE_KEY, HumanCheck } from '@/components/auth/HumanCheck';
 import { DATE_OF_BIRTH_REFUSAL, latestAdultBirthDate, meetsMinimumAge } from '@/lib/age-gate';
 
 // Matches the login page: the Facebook chain is complete server-side and only
@@ -132,6 +133,8 @@ function RegisterContent() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [humanCheckToken, setHumanCheckToken] = useState<string | null>(null);
+  const [humanCheckReset, setHumanCheckReset] = useState(0);
 
   useEffect(() => {
     if (isLoading) return;
@@ -175,6 +178,10 @@ function RegisterContent() {
 
   const onSubmit = (data: RegisterForm) => {
     setServerError(null);
+    if (HUMAN_CHECK_SITE_KEY && !humanCheckToken) {
+      setServerError('Please complete the check that you are a person, just above the button.');
+      return;
+    }
     const { confirmPassword: _confirmPassword, inviteCode, persona, ...registerData } = data;
     void _confirmPassword;
     const normalizedInviteCode = inviteCode?.trim();
@@ -184,6 +191,7 @@ function RegisterContent() {
         username: buildCompatibilityUsername(data.email, data.firstName, data.lastName),
         ...(persona ? { persona } : {}),
         ...(normalizedInviteCode ? { inviteCode: normalizedInviteCode } : {}),
+        ...(humanCheckToken ? { humanCheckToken } : {}),
       },
       {
         onSuccess: () => {
@@ -196,6 +204,9 @@ function RegisterContent() {
         },
         onError: (error: unknown) => {
           setServerError(getApiErrorMessage(error, 'Registration failed. Please review your details and try again.'));
+          // A token is spent by the attempt that carried it, whatever the
+          // answer was, so a second try needs a fresh one.
+          if (HUMAN_CHECK_SITE_KEY) setHumanCheckReset((n) => n + 1);
         },
       }
     );
@@ -470,6 +481,8 @@ function RegisterContent() {
             {errors.womanSelfAttested && (
               <p className="mt-1 text-sm text-red-600">{errors.womanSelfAttested.message}</p>
             )}
+
+            <HumanCheck onToken={setHumanCheckToken} resetKey={humanCheckReset} />
 
             <button
               type="submit"

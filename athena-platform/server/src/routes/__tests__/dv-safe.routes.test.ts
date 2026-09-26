@@ -205,17 +205,46 @@ describe('Safe chats', () => {
     await request(app).delete('/api/safety/dv/chats/chat-1?pin=nope').expect(400);
     expect(service.deleteSafeChat).not.toHaveBeenCalled();
   });
+
+  it('does not take a participants list, because nobody else can ever open a safe chat', async () => {
+    await request(app)
+      .post('/api/safety/dv/chats')
+      .send({ name: 'Groceries', participants: ['someone-else'] })
+      .expect(201);
+
+    expect(service.createSafeChat).toHaveBeenCalledWith('her', { name: 'Groceries' });
+  });
+
+  it('passes a lockout from the service through as a 429 with its reason', async () => {
+    const { ApiError } = jest.requireActual('../../middleware/errorHandler') as typeof import('../../middleware/errorHandler');
+    service.accessSafeChat.mockRejectedValue(new ApiError(429, 'Too many wrong PINs. This chat is locked for 15 minutes.'));
+
+    const res = await request(app).post('/api/safety/dv/chats/chat-1/access').send({ pin: '0000' }).expect(429);
+
+    expect(res.body.message).toMatch(/locked for 15 minutes/);
+  });
 });
 
 describe('Traces and resources', () => {
-  it('tells the client exactly what it has to clear on its own side', async () => {
+  it('tells the client to clear only what a page can actually clear', async () => {
     const res = await request(app).post('/api/safety/dv/clear-traces').send({}).expect(200);
 
-    expect(res.body.clientInstructions).toMatchObject({
+    // It used to name two cookies that exist nowhere in the codebase and ask
+    // for the browser history to be replaced, which no page can do; the
+    // Safety page then told her her traces were gone.
+    expect(res.body.clientInstructions).toEqual({
       clearLocalStorage: true,
       clearSessionStorage: true,
-      replaceHistory: true,
     });
+  });
+
+  it('hands out the support lines for the region asked for', async () => {
+    service.getDVResources.mockResolvedValue([{ name: '1800RESPECT', phone: '1800 737 732', source: 'built-in' }] as any);
+
+    const res = await request(app).get('/api/safety/dv/resources?region=nz').expect(200);
+
+    expect(service.getDVResources).toHaveBeenCalledWith('nz');
+    expect(res.body[0].name).toBe('1800RESPECT');
   });
 
   it('shapes a notification preview from her own settings, not from anything the caller sends', async () => {

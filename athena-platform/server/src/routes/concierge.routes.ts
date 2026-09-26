@@ -53,46 +53,15 @@ router.get('/suggestions', authenticate, async (req: Request, res: Response, nex
   }
 });
 
-/**
- * @route POST /api/concierge/intent
- * @desc Process a specific intent directly
- * @access Private
+/*
+ * POST /intent and GET /faq used to sit here. No client called either: the
+ * web panel talks to /chat and /suggestions, and the onboarding checklist to
+ * /onboarding. /intent had also never worked — it passed the member's id
+ * where the intent belonged, so every call fell through to the default reply
+ * — and /faq searched the same eight-line literal /chat already answers from.
+ * Two routes nothing used, one of them broken, were two more things to keep
+ * safe for no one; they and the functions only they called are gone.
  */
-router.post('/intent', authenticate, async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const userId = (req as any).user.id;
-    const { intent, parameters } = req.body;
-
-    if (!intent) {
-      return res.status(400).json({ error: 'Intent is required' });
-    }
-
-    const result = await conciergeService.handleIntent(userId, intent, parameters || {});
-    res.json(result);
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * @route GET /api/concierge/faq
- * @desc Search FAQ knowledge base
- * @access Public
- */
-router.get('/faq', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { q } = req.query;
-    
-    if (!q) {
-      return res.status(400).json({ error: 'Query parameter "q" is required' });
-    }
-
-    const faq = conciergeService.searchFAQ(q as string);
-    res.json({ results: faq });
-  } catch (error) {
-    next(error);
-  }
-});
 
 /**
  * @route GET /api/concierge/onboarding

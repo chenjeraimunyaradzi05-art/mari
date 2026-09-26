@@ -115,6 +115,24 @@ describe('calculateSafetyScore', () => {
     expect(verified.score).toBeLessThan(unverified.score);
   });
 
+  it('stops counting a report a moderator has dismissed, and says why in the breakdown', async () => {
+    prisma.user.findUnique.mockResolvedValue(member());
+
+    prisma.safetyIncident.findMany.mockResolvedValue([]);
+    const clean = await calculateSafetyScore('member-1');
+
+    prisma.safetyIncident.findMany.mockResolvedValue([
+      { id: 'i1', type: 'REPORT', verified: false, resolvedAt: new Date(), reason: 'spam', createdAt: new Date() },
+    ]);
+    const dismissed = await calculateSafetyScore('member-1');
+
+    expect(dismissed.score).toBe(clean.score);
+    expect(dismissed.factors.find((factor) => factor.category === 'incident')).toMatchObject({
+      impact: 0,
+      details: expect.stringContaining('dismissed by a moderator'),
+    });
+  });
+
   it('lets an old incident weigh less than the same incident today', async () => {
     prisma.user.findUnique.mockResolvedValue(member({ createdAt: new Date(Date.now() - 400 * DAY) }));
 
@@ -201,6 +219,9 @@ describe('recordSafetyIncident: the fall has to be measured before the write', (
     });
 
     expect(notify).toHaveBeenCalledWith(expect.objectContaining({ userId: 'member-1', title: 'Account Standing Update' }));
+    // The message asks her to read the guidelines, and the link has to open
+    // them: it used to go to /settings/safety, which has never existed.
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ link: '/help/community-guidelines' }));
   });
 
   it('says nothing to a member whose standing barely moved', async () => {

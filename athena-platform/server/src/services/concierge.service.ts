@@ -191,58 +191,6 @@ export async function getProactiveSuggestions(
   };
 }
 
-/**
- * Handle specific intents
- */
-export async function handleIntent(
-  intent: string,
-  params: Record<string, any>,
-  userId: string
-): Promise<ConciergeResponse> {
-  switch (intent) {
-    case 'find_jobs':
-      return {
-        message: 'I found some great opportunities matching your profile!',
-        actions: [
-          { type: 'navigate', label: 'View Jobs', target: '/dashboard/jobs' },
-          { type: 'navigate', label: 'Use AI Radar', target: '/dashboard/ai/opportunity-radar' },
-        ],
-      };
-
-    case 'schedule_mentor':
-      return {
-        message: 'Let me help you schedule a mentorship session.',
-        actions: [
-          { type: 'navigate', label: 'Browse Mentors', target: '/dashboard/mentors' },
-          { type: 'schedule', label: 'Quick Book', target: '/dashboard/mentors?quickbook=true' },
-        ],
-      };
-
-    case 'improve_resume':
-      return {
-        message: 'I can help optimize your resume for better results!',
-        actions: [
-          { type: 'navigate', label: 'Resume Optimizer', target: '/dashboard/ai/resume-optimizer' },
-        ],
-      };
-
-    case 'safety_help':
-      return {
-        message: 'Your safety is our priority. Let me guide you to our safety resources.',
-        actions: [
-          { type: 'navigate', label: 'Safety Center', target: '/safety-center' },
-        ],
-        quickReplies: ['Enable Safe Mode', 'Report Concern', 'Privacy Settings'],
-      };
-
-    default:
-      return {
-        message: 'I\'m here to help! What would you like to do?',
-        quickReplies: ['Find Jobs', 'Update Resume', 'Find Mentors', 'Learn Skills'],
-      };
-  }
-}
-
 // Helper functions
 
 function checkFAQ(message: string): string | null {
@@ -460,31 +408,6 @@ function getSimulatedResponse(message: string, userContext: any): ConciergeRespo
 
 function daysSince(date: Date): number {
   return Math.floor((Date.now() - date.getTime()) / (1000 * 60 * 60 * 24));
-}
-
-/**
- * Search FAQ knowledge base
- */
-export function searchFAQ(query: string): Array<{ question: string; answer: string }> {
-  const lowerQuery = query.toLowerCase();
-  const results: Array<{ question: string; answer: string; score: number }> = [];
-
-  for (const [key, answer] of Object.entries(FAQ_KNOWLEDGE_BASE)) {
-    const words = lowerQuery.split(/\s+/);
-    const matches = words.filter(w => key.includes(w) || answer.toLowerCase().includes(w)).length;
-    if (matches > 0) {
-      results.push({
-        question: key,
-        answer,
-        score: matches / words.length,
-      });
-    }
-  }
-
-  return results
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 5)
-    .map(({ question, answer }) => ({ question, answer }));
 }
 
 /**

@@ -36,7 +36,17 @@ export default function PracticePage() {
     setBusy(true);
     try {
       const res = await wellnessApi.savePractice({ ...f, qualifications: f.qualifications.split(',').map((s) => s.trim()).filter(Boolean), languages: f.languages.split(',').map((s) => s.trim()).filter(Boolean), suburb: f.suburb || null, city: f.city || null, state: f.state || null, feeFrom: f.feeFrom ? num(f.feeFrom) : null, feeNote: f.feeNote || null, ahpraNumber: f.ahpraNumber || null, website: f.website || null, phone: f.phone || null, bookingUrl: f.bookingUrl || null, slotMinutes: num(f.slotMinutes, 50) });
-      toast.success(res.data?.data?.pendingVerification ? 'Saved. Your profile will show once it is verified.' : 'Saved');
+      // Changing what an admin checked — name, kind of practice, AHPRA number,
+      // qualifications — takes a verified profile back to the queue, and she
+      // should hear that from the save rather than find the badge gone.
+      const pending = Boolean(res.data?.data?.pendingVerification);
+      toast.success(
+        pending && p?.isVerified
+          ? 'Saved. You changed details that were verified, so your profile is out of the directory until an admin checks them again.'
+          : pending
+            ? 'Saved. Your profile will show once it is verified.'
+            : 'Saved'
+      );
       data.reload();
     } catch (err) { toast.error(wellnessError(err, 'That could not be saved.')); } finally { setBusy(false); }
   };

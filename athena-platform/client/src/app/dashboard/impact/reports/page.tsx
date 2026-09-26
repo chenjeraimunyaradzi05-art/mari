@@ -43,10 +43,14 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [filterCommunity, setFilterCommunity] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // A failed request leaves the list empty, and the empty state below says
+  // nothing has been published — which is not what a failure means.
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
     setError(null);
+    setLoadFailed(false);
     try {
       const response = await impactApi.getReports({
         communityType: filterCommunity || undefined,
@@ -55,6 +59,7 @@ export default function ReportsPage() {
     } catch (err: unknown) {
       const error = err as { response?: { data?: { error?: string } } };
       setError(error?.response?.data?.error || 'Failed to load reports');
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -109,14 +114,19 @@ export default function ReportsPage() {
         women this platform is for.
         Until something writes a report, the page says there are none. The
         tiles come back the moment there is one to total.
+
+        The empty state used to add that reports "are published by ATHENA
+        staff for a period at a time". Nothing can publish one — there is no
+        admin screen, route or job that writes an ImpactReport — so that was
+        a description of a process that does not exist, and it is gone.
       */}
-      {!loading && reports.length === 0 ? (
+      {!loading && !loadFailed && reports.length === 0 ? (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6">
           <h2 className="font-semibold text-slate-900 dark:text-white">No impact report has been published yet</h2>
           <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
             {filterCommunity
-              ? 'Nothing has been published for this community yet. Try another filter, or come back — reports are published by ATHENA staff for a period at a time, and there are none covering this one.'
-              : 'Reports are published by ATHENA staff for a period at a time and total what actually happened: women supported, jobs gained, housing secured, safety reached. There is nothing to total yet, so rather than show you a row of zeros we are telling you plainly.'}
+              ? 'Nothing has been published for this community. Try another filter.'
+              : 'An impact report totals what actually happened over a period: women supported, jobs gained, housing secured, safety reached. None has been published, so rather than show you a row of zeros we are telling you plainly.'}
           </p>
           <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">
             Your own progress is on the{' '}

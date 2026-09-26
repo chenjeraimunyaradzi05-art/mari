@@ -1,20 +1,55 @@
 /**
  * DV-Safe routes: settings, emergency contacts, safe chats, the panic button,
  * trace clearing and support lines, for a member in a dangerous situation.
- * Everything is the signed-in member's own; nothing here reads another
- * person's data. Validation failures answer 400 with the reason, never 500.
+ * The support lines are public and the same for everyone; everything else is
+ * the signed-in member's own, and nothing here reads another person's data.
+ * Validation failures answer 400 with the reason, never 500.
  */
 
-import { Router, Response, NextFunction } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { z, ZodError, type ZodTypeAny } from 'zod';
 import { httpUrl } from '../utils/http-url';
 import dvSafeService from '../services/dv-safe.service';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
+import { createRateLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
 
+// ---------------------------------------------------------------- support lines (public)
+
+/**
+ * The support lines, before the sign-in wall rather than behind it.
+ *
+ * This sat under router.use(authenticate), so the one list on this router a
+ * woman might need before she has an account — or on a device where she has
+ * signed out on purpose — answered 401. Nothing in it is hers: it is the same
+ * published and staff-checked numbers for everyone, so it needs no account.
+ */
+router.get('/resources', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const region = typeof req.query.region === 'string' ? req.query.region.slice(0, 8) : undefined;
+    res.json(await dvSafeService.getDVResources(region));
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.use(authenticate);
+
+/**
+ * Opening, writing to and deleting a safe chat all take its PIN, and the
+ * service locks a chat after five wrong ones. This caps how fast anyone can
+ * knock on those doors at all, per member, so a script holding her session
+ * cannot sweep across several chats' lockouts in parallel either.
+ */
+const safeChatLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  keyGenerator: (req) => `dv-chat:${(req as AuthRequest).user?.id ?? req.ip}`,
+  handler: (_req: Request, res: Response) =>
+    res.status(429).json({ success: false, message: 'Too many requests to your safe chats. Please wait a few minutes.' }),
+});
 
 function parse<T extends ZodTypeAny>(schema: T, input: unknown): z.infer<T> {
   try {
@@ -132,10 +167,11 @@ router.get('/visibility/:viewerId', async (req: AuthRequest, res: Response, next
 
 // ---------------------------------------------------------------- safe chats
 
+// No participants: a safe chat is private notes only its owner can open (see
+// dv-safe.service), and a field that suggested otherwise is no longer taken.
 const safeChatSchema = z.object({
   name: z.string().trim().min(1).max(100),
   disguisedName: z.string().trim().min(1).max(60).optional(),
-  participants: z.array(z.string().max(64)).max(20).optional(),
   accessPin: PIN.optional(),
 });
 
@@ -158,7 +194,7 @@ router.get('/chats', async (req: AuthRequest, res: Response, next: NextFunction)
 
 const pinBodySchema = z.object({ pin: PIN.optional() });
 
-router.post('/chats/:chatId/access', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/chats/:chatId/access', safeChatLimiter, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { pin } = parse(pinBodySchema, req.body);
     res.json(await dvSafeService.accessSafeChat(req.user!.id, req.params.chatId, pin));
@@ -174,7 +210,7 @@ const sendMessageSchema = z.object({
   pin: PIN.optional(),
 });
 
-router.post('/chats/:chatId/messages', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/chats/:chatId/messages', safeChatLimiter, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { content, autoDeleteMinutes, pin } = parse(sendMessageSchema, req.body);
     const message = await dvSafeService.sendSafeChatMessage(req.user!.id, req.params.chatId, content, autoDeleteMinutes, pin);
@@ -184,7 +220,7 @@ router.post('/chats/:chatId/messages', async (req: AuthRequest, res: Response, n
   }
 });
 
-router.delete('/chats/:chatId', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.delete('/chats/:chatId', safeChatLimiter, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { pin } = parse(pinBodySchema, { ...(req.query ?? {}), ...(req.body ?? {}) });
     await dvSafeService.deleteSafeChat(req.user!.id, req.params.chatId, pin);
@@ -194,8 +230,18 @@ router.delete('/chats/:chatId', async (req: AuthRequest, res: Response, next: Ne
   }
 });
 
-// ---------------------------------------------------------------- traces and resources
+// ---------------------------------------------------------------- traces
 
+/**
+ * What the client can actually clear, and nothing it cannot.
+ *
+ * This used to tell the client to clear two cookies, athena_session and
+ * athena_user, that exist nowhere in this codebase, and to "replace history",
+ * which a page can only do for its own current entry — the browser's history
+ * list is out of reach of any website. The page then said traces were cleared.
+ * The instructions now name only the two stores a page really can empty, and
+ * the page tells her plainly what is left for her to do in the browser itself.
+ */
 router.post('/clear-traces', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     await dvSafeService.clearActivityTraces(req.user!.id);
@@ -204,19 +250,8 @@ router.post('/clear-traces', async (req: AuthRequest, res: Response, next: NextF
       clientInstructions: {
         clearLocalStorage: true,
         clearSessionStorage: true,
-        clearCookies: ['athena_session', 'athena_user'],
-        replaceHistory: true,
       },
     });
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.get('/resources', async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    const region = typeof req.query.region === 'string' ? req.query.region : undefined;
-    res.json(dvSafeService.getDVResources(region));
   } catch (error) {
     next(error);
   }

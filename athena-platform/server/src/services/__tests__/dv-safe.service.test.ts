@@ -8,6 +8,7 @@ jest.mock('../../utils/prisma', () => ({
     dvPanicAlert: { create: jest.fn() },
     user: { findUnique: jest.fn(), update: jest.fn() },
     profile: { upsert: jest.fn() },
+    dVSupportService: { findMany: jest.fn() },
   },
 }));
 
@@ -25,7 +26,11 @@ import { prisma as prismaTyped } from '../../utils/prisma';
 import { sendEmail } from '../../utils/email';
 import { isSmsConfigured, sendSms } from '../dv-sms.service';
 import { blockUser as platformBlock } from '../../utils/safety-store';
-import dvSafe, { decryptMessage } from '../dv-safe.service';
+import dvSafe, { decryptMessage, resetPinAttemptMemory } from '../dv-safe.service';
+
+// The PIN counters use Redis only when it is configured; these tests hold the
+// in-process path, which is also what a deployment without Redis runs.
+delete process.env.REDIS_URL;
 
 const prisma: any = prismaTyped;
 
@@ -267,6 +272,123 @@ describe('Panic button', () => {
 
     expect(sendSms).not.toHaveBeenCalled();
     expect(result).toMatchObject({ success: false, outcome: 'NOBODY_REACHED', smsAvailable: false, unreachableContacts: ['Jo'] });
+  });
+});
+
+describe('Wrong PINs on a safe chat', () => {
+  // A chat with a known PIN, built the way the service builds one.
+  async function lockedChat(pin = '2468') {
+    const chat: Record<string, unknown> = { id: 'chat-pin', profileId: 'prof-1', name: 'Plan', disguisedName: 'Recipes', createdAt: new Date(), lastActivity: new Date(), accessPinHash: null };
+    prisma.dvSafeChat.create.mockImplementation(async (args: any) => ({ ...chat, ...args.data }));
+    await dvSafe.createSafeChat('u1', { name: 'Plan', accessPin: pin });
+    chat.accessPinHash = prisma.dvSafeChat.create.mock.calls[0][0].data.accessPinHash;
+    prisma.dvSafeChat.findFirst.mockResolvedValue(chat);
+    return chat;
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    resetPinAttemptMemory();
+    prisma.dvSafetyProfile.upsert.mockResolvedValue(profile());
+    prisma.dvSafeMessage.deleteMany.mockResolvedValue({ count: 0 });
+    prisma.dvSafeMessage.findMany.mockResolvedValue([]);
+  });
+
+  it('locks the chat after five wrong PINs, and the right PIN does not open it while it is locked', async () => {
+    await lockedChat();
+
+    for (let attempt = 1; attempt <= 4; attempt += 1) {
+      await expect(dvSafe.accessSafeChat('u1', 'chat-pin', '0000')).rejects.toMatchObject({ statusCode: 403 });
+    }
+    await expect(dvSafe.accessSafeChat('u1', 'chat-pin', '0000')).rejects.toMatchObject({
+      statusCode: 429,
+      message: expect.stringMatching(/locked for 15 minutes/),
+    });
+    // Knowing the PIN does not help whoever is guessing: the lock holds.
+    await expect(dvSafe.accessSafeChat('u1', 'chat-pin', '2468')).rejects.toMatchObject({ statusCode: 429 });
+    await expect(dvSafe.sendSafeChatMessage('u1', 'chat-pin', 'hello', undefined, '2468')).rejects.toMatchObject({ statusCode: 429 });
+    await expect(dvSafe.deleteSafeChat('u1', 'chat-pin', '2468')).rejects.toMatchObject({ statusCode: 429 });
+    expect(prisma.dvSafeChat.delete).not.toHaveBeenCalled();
+  });
+
+  it('tells her how many wrong PINs there were, but only once she has opened it with the right one', async () => {
+    await lockedChat();
+
+    await expect(dvSafe.accessSafeChat('u1', 'chat-pin', '1111')).rejects.toMatchObject({ statusCode: 403 });
+    await expect(dvSafe.accessSafeChat('u1', 'chat-pin', '2222')).rejects.toMatchObject({ statusCode: 403 });
+
+    const opened = await dvSafe.accessSafeChat('u1', 'chat-pin', '2468');
+    expect(opened.wrongPinAttemptsSinceLastOpen).toBe(2);
+
+    // Read once: the next time she opens it, the count starts again.
+    const again = await dvSafe.accessSafeChat('u1', 'chat-pin', '2468');
+    expect(again.wrongPinAttemptsSinceLastOpen).toBe(0);
+  });
+
+  it('does not count a request that sent no PIN at all as a guess', async () => {
+    await lockedChat();
+
+    for (let attempt = 1; attempt <= 6; attempt += 1) {
+      await expect(dvSafe.accessSafeChat('u1', 'chat-pin')).rejects.toMatchObject({ statusCode: 403 });
+    }
+    const opened = await dvSafe.accessSafeChat('u1', 'chat-pin', '2468');
+    expect(opened.wrongPinAttemptsSinceLastOpen).toBe(0);
+  });
+
+  it('keeps no list of participants, because nobody but the owner can open a safe chat', async () => {
+    prisma.dvSafeChat.create.mockImplementation(async (args: any) => ({ id: 'c1', createdAt: new Date(), lastActivity: new Date(), ...args.data }));
+
+    const created = await dvSafe.createSafeChat('u1', { name: 'Plan' });
+
+    expect(prisma.dvSafeChat.create.mock.calls[0][0].data).not.toHaveProperty('participants');
+    expect(created).not.toHaveProperty('participants');
+  });
+});
+
+describe('The support lines on the Safety page', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('puts the lines staff have checked first, with their date, and 000 above everything', async () => {
+    const checkedAt = new Date('2026-09-01T00:00:00Z');
+    prisma.dVSupportService.findMany.mockResolvedValue([
+      { id: 's1', name: 'NSW Domestic Violence Line', type: 'CRISIS', phone: '1800 656 463', website: 'https://example.org', description: 'NSW line', available24x7: true, state: 'NSW', isNational: false, isActive: true, lastCheckedAt: checkedAt },
+    ]);
+
+    const lines = await dvSafe.getDVResources('AU');
+
+    expect(lines[0].phone).toBe('000');
+    expect(lines[1]).toMatchObject({ name: 'NSW Domestic Violence Line', state: 'NSW', source: 'catalogue', lastCheckedAt: checkedAt });
+    expect(lines.filter((line) => line.source === 'built-in').every((line) => line.lastCheckedAt === null)).toBe(true);
+    expect(prisma.dVSupportService.findMany.mock.calls[0][0].where).toMatchObject({ isActive: true, type: { in: ['CRISIS', 'COUNSELING'] } });
+  });
+
+  it('lets a checked entry replace the built-in copy of the same number rather than listing it twice', async () => {
+    prisma.dVSupportService.findMany.mockResolvedValue([
+      { id: 's2', name: 'DVConnect Womensline', type: 'CRISIS', phone: '1800811811', website: null, description: null, available24x7: true, state: 'QLD', isNational: false, isActive: true, lastCheckedAt: new Date() },
+    ]);
+
+    const lines = await dvSafe.getDVResources('AU');
+
+    const dvConnect = lines.filter((line) => line.phone.replace(/\D/g, '') === '1800811811');
+    expect(dvConnect).toHaveLength(1);
+    expect(dvConnect[0].source).toBe('catalogue');
+  });
+
+  it('still lists the national lines when the catalogue cannot be read', async () => {
+    prisma.dVSupportService.findMany.mockRejectedValue(new Error('database down'));
+
+    const lines = await dvSafe.getDVResources('AU');
+
+    expect(lines.map((line) => line.phone)).toEqual(expect.arrayContaining(['000', '1800 737 732', '1800 811 811']));
+  });
+
+  it('answers another country from its own published lines without asking the Australian catalogue', async () => {
+    const lines = await dvSafe.getDVResources('nz');
+
+    expect(lines.map((line) => line.name)).toEqual(["Women's Refuge"]);
+    expect(prisma.dVSupportService.findMany).not.toHaveBeenCalled();
   });
 });
 

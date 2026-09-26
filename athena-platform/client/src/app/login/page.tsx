@@ -22,6 +22,7 @@ import Image from 'next/image';
 import { useAuth } from '@/lib/hooks';
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton';
 import { FacebookSignInButton } from '@/components/auth/FacebookSignInButton';
+import { SuspensionAppeal, isSuspendedRefusal } from '@/components/auth/SuspensionAppeal';
 
 // The whole Facebook chain (proxy route, authApi.facebook, server handler) is
 // live; it only needs an app id.
@@ -76,6 +77,9 @@ function LoginContent() {
   // Once the server has asked for a code the field stays on screen, including
   // after a wrong code, so a retry does not mean typing the password again.
   const [requiresTwoFactor, setRequiresTwoFactor] = useState(false);
+  // Set when sign-in says the account is suspended: the address and password
+  // she typed, which the appeal panel sends to prove the account is hers.
+  const [suspendedAs, setSuspendedAs] = useState<{ email: string; password: string } | null>(null);
 
   useEffect(() => {
     if (isLoading) return;
@@ -100,6 +104,7 @@ function LoginContent() {
 
   const onSubmit = (data: LoginForm) => {
     setServerError(null);
+    setSuspendedAs(null);
 
     const twoFactorCode = data.twoFactorCode?.trim() ?? '';
     if (requiresTwoFactor && twoFactorCode.length < TWO_FACTOR_MIN_LENGTH) {
@@ -134,6 +139,12 @@ function LoginContent() {
 
           if (asksForTwoFactor(responseMessage)) {
             setRequiresTwoFactor(true);
+          }
+
+          // A suspended account used to end here, at a refusal that said to
+          // contact support and nowhere to do it. The appeal is offered instead.
+          if (isSuspendedRefusal(responseMessage)) {
+            setSuspendedAs({ email: data.email, password: data.password });
           }
 
           setServerError(
@@ -180,6 +191,8 @@ function LoginContent() {
                 <p className="text-sm text-red-700 dark:text-red-300">{serverError}</p>
               </div>
             )}
+
+            {suspendedAs && <SuspensionAppeal email={suspendedAs.email} password={suspendedAs.password} />}
 
             <div>
               <label htmlFor="email" className="label">

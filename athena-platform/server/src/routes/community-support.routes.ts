@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { z, ZodError, type ZodTypeAny } from 'zod';
 import type { SupportProgramStatus } from '@prisma/client';
 import { prisma } from '../utils/prisma';
-import { authenticate, AuthRequest } from '../middleware/auth';
+import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
 import { buildPaginationMeta, parsePagination } from '../utils/pagination';
@@ -482,13 +482,20 @@ async function recomputeEnrollmentCompletion(
 // ===========================================
 
 // GET /api/community-support/indigenous/communities - List indigenous communities
-router.get('/indigenous/communities', async (req: Request, res: Response, next: NextFunction) => {
+/*
+ * The list is public, and for a signed-in member it also says which of these
+ * she belongs to. Without that the page had no way to offer a way out: it
+ * showed "Join community" on every card, including the ones she had joined,
+ * so the only thing a second press could do was fail with "Already a member",
+ * and the leave route the server had could not be reached from the product.
+ */
+router.get('/indigenous/communities', optionalAuth, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { region, womenOnly, verified } = req.query;
     const { page, limit, skip } = cataloguePage(req.query);
 
     const where: Record<string, unknown> = {};
-    if (region) where.region = region;
+    if (typeof region === 'string' && region) where.region = region;
     if (womenOnly === 'true') where.isWomenOnly = true;
     if (verified === 'true') where.isVerified = true;
 
@@ -502,7 +509,25 @@ router.get('/indigenous/communities', async (req: Request, res: Response, next: 
       prisma.indigenousCommunityPage.count({ where }),
     ]);
 
-    sendCatalogue(res, communities, total, page, limit);
+    const viewerId = req.user?.id;
+    const memberOf = viewerId && communities.length
+      ? new Set(
+          (
+            await prisma.indigenousCommunityMember.findMany({
+              where: { userId: viewerId, communityId: { in: communities.map((community) => community.id) } },
+              select: { communityId: true },
+            })
+          ).map((membership) => membership.communityId)
+        )
+      : null;
+
+    sendCatalogue(
+      res,
+      memberOf ? communities.map((community) => ({ ...community, isMember: memberOf.has(community.id) })) : communities,
+      total,
+      page,
+      limit
+    );
   } catch (error) {
     next(error);
   }

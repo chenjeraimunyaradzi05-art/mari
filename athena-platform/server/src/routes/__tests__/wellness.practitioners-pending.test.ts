@@ -23,6 +23,7 @@ jest.mock('../../utils/prisma', () => ({
       update: jest.fn(async ({ where, data }: any) => ({ ...row, id: where.id, ...data })),
     },
     notification: { create: jest.fn(async () => ({})), createMany: jest.fn(async () => ({ count: 2 })) },
+    auditLog: { create: jest.fn(async () => ({})) },
   },
 }));
 
@@ -96,5 +97,62 @@ describe('The practitioner approval queue', () => {
     await request(app).patch('/api/wellness/practitioners/pr-new/verify').set(as('boss', 'ADMIN')).send({ isVerified: false, isActive: false }).expect(200);
     expect(prisma.healthPractitioner.update).toHaveBeenLastCalledWith({ where: { id: 'pr-new' }, data: { isVerified: false, isActive: false } });
     expect(prisma.notification.create.mock.calls[1][0].data).toMatchObject({ userId: 'doctor', title: 'Your practice profile is hidden' });
+  });
+
+  it('records which admin verified a practitioner, and what the profile said when they did', async () => {
+    await request(app).patch('/api/wellness/practitioners/pr-new/verify').set(as('boss', 'ADMIN')).send({ isVerified: true }).expect(200);
+
+    const row = prisma.auditLog.create.mock.calls[0][0].data;
+    expect(row).toMatchObject({ action: 'ADMIN_VERIFICATION_APPROVE', actorUserId: 'boss', targetUserId: 'doctor' });
+    expect(row.metadata).toMatchObject({
+      resourceType: 'HealthPractitioner',
+      resourceId: 'pr-new',
+      checked: { name: 'Dr New', ahpraNumber: 'PSY0001234567', qualifications: ['MPsych'] },
+    });
+  });
+
+  it('answers 404 for a practitioner that does not exist, not a database error', async () => {
+    const { Prisma } = jest.requireActual('@prisma/client') as typeof import('@prisma/client');
+    prisma.healthPractitioner.update.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('No record', { code: 'P2025', clientVersion: 'test' })
+    );
+
+    await request(app).patch('/api/wellness/practitioners/nope/verify').set(as('boss', 'ADMIN')).send({ isVerified: true }).expect(404);
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('A verified practitioner editing her profile', () => {
+  const verified = { ...row, isVerified: true };
+  const body = { name: 'Dr New', kind: 'PSYCHOLOGIST', headline: 'A perinatal psychologist', bio: 'Twenty years of perinatal work in Brisbane.', ahpraNumber: 'PSY0001234567', qualifications: ['MPsych'] };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.healthPractitioner.findUnique.mockResolvedValue(verified);
+    prisma.healthPractitioner.update.mockImplementation(async ({ where, data }: any) => ({ ...verified, id: where.id, ...data }));
+  });
+
+  it('keeps the badge for an edit that does not touch what was checked', async () => {
+    const res = await request(app).put('/api/wellness/practice').set(as('doctor')).send({ ...body, headline: 'Perinatal and postnatal care' }).expect(200);
+
+    expect(prisma.healthPractitioner.update.mock.calls[0][0].data).not.toHaveProperty('isVerified');
+    expect(res.body.data.pendingVerification).toBe(false);
+    expect(prisma.notification.createMany).not.toHaveBeenCalled();
+  });
+
+  it('goes back to the queue when the AHPRA number changes, and the admins are told', async () => {
+    const res = await request(app).put('/api/wellness/practice').set(as('doctor')).send({ ...body, ahpraNumber: 'PSY0009999999' }).expect(200);
+
+    expect(prisma.healthPractitioner.update.mock.calls[0][0].data.isVerified).toBe(false);
+    expect(res.body.data.pendingVerification).toBe(true);
+    expect(prisma.notification.createMany.mock.calls[0][0].data[0]).toMatchObject({ title: 'A practitioner needs checking again', link: '/admin/practitioners' });
+  });
+
+  it('goes back to the queue when her name or qualifications change', async () => {
+    await request(app).put('/api/wellness/practice').set(as('doctor')).send({ ...body, name: 'Dr Someone Else' }).expect(200);
+    expect(prisma.healthPractitioner.update.mock.calls[0][0].data.isVerified).toBe(false);
+
+    await request(app).put('/api/wellness/practice').set(as('doctor')).send({ ...body, qualifications: ['MPsych', 'PhD'] }).expect(200);
+    expect(prisma.healthPractitioner.update.mock.calls[1][0].data.isVerified).toBe(false);
   });
 });

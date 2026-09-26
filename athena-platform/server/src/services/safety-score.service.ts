@@ -7,6 +7,7 @@
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import { bestEffort } from '../utils/best-effort';
+import { ApiError } from '../middleware/errorHandler';
 import { notifyAdmins } from './admin-notify.service';
 import { NotificationService } from './notification.service';
 
@@ -168,6 +169,15 @@ export async function calculateSafetyScore(userId: string): Promise<SafetyScoreB
     const decay = calculateDecay(incident.createdAt);
     let impact = 0;
     
+    // A report a moderator has looked at and dismissed says nothing about
+    // her, so it stops counting. Before reports could be decided at all, an
+    // unfounded one weighed on a score for ever.
+    const dismissed = incident.type === 'REPORT' && Boolean(incident.resolvedAt) && !incident.verified;
+    if (dismissed) {
+      factors.push({ category: 'incident', impact: 0, details: `REPORT - ${incident.reason} (dismissed by a moderator)` });
+      continue;
+    }
+
     switch (incident.type) {
       case 'REPORT':
         impact = incident.verified
@@ -325,7 +335,10 @@ export async function recordSafetyIncident(incident: Omit<SafetyIncident, 'id' |
       type: 'SYSTEM',
       title: 'Account Standing Update',
       message: 'Your account standing has changed. Please review our community guidelines.',
-      link: '/settings/safety',
+      // The message sends her to the guidelines, so the link does too. It
+      // pointed at /settings/safety, a page that has never existed, and once
+      // this notification started firing every one of them opened a 404.
+      link: '/help/community-guidelines',
       channels: ['in-app', 'email'],
       priority: 'high',
     });
@@ -448,7 +461,9 @@ export async function verifyReport(incidentId: string, verified: boolean, modera
   });
   
   if (!incident) {
-    throw new Error('Incident not found');
+    // A 404 with a reason, not a bare Error that reaches the member of staff
+    // as a 500.
+    throw new ApiError(404, 'Incident not found');
   }
   
   await prisma.safetyIncident.update({
