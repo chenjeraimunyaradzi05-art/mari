@@ -36,11 +36,12 @@ import { Router, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { httpUrl } from '../utils/http-url';
 import { randomBytes } from 'crypto';
-import { Prisma, type CarModel, type Mechanic, type Dealership, type Vehicle, type CarFinanceApplication } from '@prisma/client';
+import { AuditAction, Prisma, type CarModel, type Mechanic, type Dealership, type Vehicle, type CarFinanceApplication } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { requireRole } from '../middleware/roles';
+import { createRateLimiter } from '../middleware/rateLimiter';
 import { logger } from '../utils/logger';
 import { logAudit } from '../utils/audit';
 import { bestEffort, labelSegment } from '../utils/best-effort';
@@ -62,6 +63,8 @@ import {
   normaliseInspectionReport, purchaseFee, purchaseTransition, withinInspection, type Party, type PurchaseStatus,
 } from '../services/automotive/marketplace.service';
 import { readHoldState, settlePurchaseHold } from '../services/automotive/purchase-escrow.service';
+import { inspectionWorkshopOwners, tradeInDealerOwners } from '../services/automotive/broadcast.service';
+import { drivesClash, hoursWords, openAt } from '../services/automotive/test-drives.service';
 import {
   bookingMinutes, nextServiceAfter, normaliseParts, normalisePriceList, normaliseQuoteLines, priceFor, projectedOdometer, quoteTotal, vehicleName, vehicleReminders,
 } from '../services/automotive/garage.service';
@@ -100,6 +103,35 @@ const qNum = (req: AuthRequest, key: string): number | undefined => { const v = 
 // page that simply has nothing on it. Past the ceiling she gets an empty page.
 const page = (req: AuthRequest) => Math.min(1_000_000, Math.max(1, Math.floor(qNum(req, 'page') ?? 1)));
 const isAdmin = (req: AuthRequest) => req.user?.role === 'ADMIN';
+
+/**
+ * The fuel filter both searches share, with the two ways of asking for one
+ * read together instead of one after the other.
+ *
+ * Both routes used to assign `where.fuelType` from `?fuelType` and then assign
+ * it again from `?electrified`, so the second write won. A buyer who picked
+ * Diesel and ticked "Hybrid or electric" got every hybrid and EV on the site
+ * and not one diesel — a filter that widened when she narrowed it, with
+ * nothing on the page to say her first choice had been dropped. Read
+ * together, the two are an intersection: Hybrid and electrified is hybrids,
+ * Diesel and electrified is nothing, because there is no such car. A fuel
+ * type that is not one of the five is a 400 rather than the database error
+ * `as never` used to hand it on to.
+ */
+const ELECTRIFIED: ReadonlyArray<z.infer<typeof fuelEnum>> = ['HYBRID', 'PLUG_IN_HYBRID', 'ELECTRIC'];
+
+function fuelWhere(req: AuthRequest): { in: Array<z.infer<typeof fuelEnum>> } | undefined {
+  const asked = q(req, 'fuelType');
+  const electrified = qBool(req, 'electrified');
+  if (!asked && !electrified) return undefined;
+  let fuels: Array<z.infer<typeof fuelEnum>> = [...fuelEnum.options];
+  if (asked) {
+    const one = fuelEnum.safeParse(asked);
+    if (!one.success) throw new ApiError(400, 'Pick a fuel type from the list');
+    fuels = [one.data];
+  }
+  return { in: electrified ? fuels.filter((f) => ELECTRIFIED.includes(f)) : fuels };
+}
 const clientBase = () => (process.env.CLIENT_URL || process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
 
 async function memberTimezone(userId: string | null | undefined): Promise<string> {
@@ -165,6 +197,122 @@ async function serialised<T>(label: string, work: (tx: Prisma.TransactionClient)
     }
   }
 }
+
+// ------------------------------------------------------------ rate ceilings
+//
+// This router had no limiter of its own; the only ceiling on it was the
+// global one on /api/, a hundred requests per address per fifteen minutes,
+// which is the same allowance reading the catalogue gets. Several routes here
+// do more than write a row: they tell somebody. An offer puts a notification
+// in front of the seller, and cancelling it and offering again puts two more
+// there — and many of the women selling a car on ATHENA are selling it
+// because they are leaving someone. An offer-cancel-offer loop was a way to
+// keep landing in her notifications, limited only by how many addresses the
+// sender could use. The fleet form needs no account at all and told up to
+// five admins on every submission.
+//
+// So the routes that notify somebody else carry a ceiling keyed on the
+// member, not the address (a shared office network is never penalised), and
+// the one public form carries one keyed on the address. They sit on the
+// shared sliding-window limiter, which falls back to a per-process window when
+// Redis is not there rather than letting everything through. The ceilings are
+// far above what anybody buying or selling one car does in an hour; they are a
+// wall for a script or a harassment spree, and the per-car offer limit on the
+// offer route itself is what stops the loop on one listing.
+
+const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
+
+function memberCeiling(scope: string, max: number, windowMs: number, message: string) {
+  return createRateLimiter({
+    max,
+    windowMs,
+    keyGenerator: (req) => `automotive:${scope}:${(req as AuthRequest).user?.id ?? req.ip}`,
+    handler: (_req, res) => { res.status(429).json({ success: false, message }); },
+  });
+}
+
+/** Offers and cancellations: each one is a notification to the other party. */
+const offerCeiling = memberCeiling('offer', 10, HOUR, 'That is a lot of offers in an hour. Take a break and come back to it.');
+/** Everything else that tells a workshop, a dealership, a seller or an admin that something needs them. */
+const requestCeiling = memberCeiling('request', 30, HOUR, 'You have sent a lot of requests in the last hour. Try again a little later.');
+/** The public fleet form, keyed on the address because it needs no account. */
+const fleetCeiling = createRateLimiter({
+  max: 5,
+  windowMs: HOUR,
+  keyGenerator: (req) => `automotive:fleet:${req.ip}`,
+  handler: (_req, res) => { res.status(429).json({ success: false, message: 'Too many enquiries from this address; try again in an hour.' }); },
+});
+
+/**
+ * How many offers one buyer may make on one car in a day. The seller is told
+ * about every one, so this is the number of times a single buyer can put the
+ * same car in front of her in twenty-four hours, cancellations included.
+ */
+const OFFERS_PER_CAR_PER_DAY = 3;
+
+// ------------------------------------------------------------- admin audit
+//
+// Admins in this vertical take a listing down and write the reason the seller
+// reads, feature a business in front of every member, close a finance
+// enquiry, hide a workshop's review, move a referral fee through the ledger
+// to PAID and rewrite the fee on the way, and release or refund a held
+// purchase. The only record of who did any of that used to be
+// VehiclePurchase.resolvedById on one path; for everything else the member got
+// a notification and that was the whole trail. A mistaken or malicious admin
+// action could not be attributed, and a fee marked PAID could not be traced
+// to the person who said so.
+//
+// The platform's answer for staff actions the AuditAction enum has no verb
+// for is in services/admin-audit.service.ts: the row carries the nearest
+// neutral enum value and the real verb rides in metadata.adminAction. The
+// rows written here take exactly that shape (adminAction, resourceType,
+// resourceId), so a query for staff actions finds these beside the rest; they
+// add `area: 'automotive'` the way auditVerification below always has. They
+// are written here rather than through recordAdminAction only because that
+// module's verb list is a closed union with no car verbs in it yet — see the
+// handoff asking for them, after which this helper is one import away from
+// being replaced. The write is best effort for the same reason it is there:
+// the change has already happened, so a failed audit write must not report
+// the change as failed, and it must not vanish either.
+
+type CarAdminAction =
+  | 'CAR_WORKSHOP_UPDATED'
+  | 'CAR_DEALERSHIP_UPDATED'
+  | 'CAR_LISTING_REVIEWED'
+  | 'CAR_LISTING_EDITED_BY_ADMIN'
+  | 'CAR_REVIEW_MODERATED'
+  | 'CAR_WORKSHOP_REVIEW_MODERATED'
+  | 'CAR_FINANCE_ENQUIRY_UPDATED'
+  | 'CAR_REFERRAL_CREATED'
+  | 'CAR_REFERRAL_UPDATED'
+  | 'CAR_PURCHASE_RELEASED_BY_ADMIN'
+  | 'CAR_PURCHASE_CANCELLED_BY_ADMIN'
+  | 'CAR_PURCHASE_DISPUTE_RESOLVED'
+  | 'CAR_INSPECTION_UPDATED_BY_ADMIN';
+
+/** The same neutral value admin-audit.service uses, for the same reason: the enum has no verb for this yet. */
+const CAR_ADMIN_AUDIT_ACTION: AuditAction = AuditAction.DATA_ACCESS;
+
+async function auditCarAdmin(req: AuthRequest, adminAction: CarAdminAction, detail: { resourceType: string; resourceId: string; targetUserId?: string | null } & Record<string, unknown>): Promise<void> {
+  const { resourceType, resourceId, targetUserId, ...rest } = detail;
+  await bestEffort(`admin audit ${adminAction}`, () => logAudit({
+    action: CAR_ADMIN_AUDIT_ACTION,
+    actorUserId: req.user?.id ?? null,
+    targetUserId: targetUserId ?? null,
+    ipAddress: req.ip ?? null,
+    userAgent: req.get('user-agent') || null,
+    metadata: { adminAction, area: 'automotive', resourceType, resourceId, ...rest } as Prisma.InputJsonValue,
+  }));
+}
+
+/** A field's before and after, only when it moved — so a row says what changed and nothing else. */
+function changed<T>(before: T, after: T | undefined): { from: T; to: T } | undefined {
+  return after === undefined || after === before ? undefined : { from: before, to: after };
+}
+
+/** Whether the person acting is an admin working on something that is not her own. */
+const adminOnOthers = (req: AuthRequest, ownerIds: Array<string | null | undefined>) => isAdmin(req) && !ownerIds.includes(req.user!.id);
 
 const personName = (u: { firstName?: string | null; lastName?: string | null; displayName?: string | null } | null | undefined, fallback = 'A member') => u?.displayName?.trim() || [u?.firstName, u?.lastName].filter(Boolean).join(' ') || fallback;
 const shortName = (u: { firstName?: string | null; lastName?: string | null } | null | undefined) => [u?.firstName, u?.lastName ? `${u.lastName[0]}.` : null].filter(Boolean).join(' ') || 'A member';
@@ -338,7 +486,18 @@ const referralCard = (r: ReferralRow) => ({ id: r.id, kind: r.kind, kindLabel: R
 
 // ---------------------------------------------------------------- reference
 
+/**
+ * The whole content library in one response, and every page in the vertical
+ * asks for it on mount. It was served with no cache header at all, so each
+ * navigation re-serialised the same constants and spent one of the hundred
+ * requests an address gets on /api/ every fifteen minutes, signed-out visitors
+ * included. Nothing in it depends on who is asking and it changes only when
+ * the server is deployed, so a browser (or anything between) may keep it for
+ * an hour and serve a stale copy for a day while it checks. Express already
+ * sets a weak ETag on the body, so that check is a 304 rather than the payload.
+ */
 router.get('/reference', (_req, res) => {
+  res.set('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
   ok(res, {
     asAt: AUTOMOTIVE_AS_AT, catalogueAsAt: CATALOGUE_AS_AT, states: AU_STATES, bodyTypes: BODY_TYPES, fuelTypes: FUEL_TYPES, transmissions: TRANSMISSIONS, makes: MAKES, conditions: CAR_CONDITIONS,
     safetyFeatures: SAFETY_FEATURES, ancap: ANCAP_EXPLAINED, maintenance: MAINTENANCE_GUIDE, serviceKinds: SERVICE_KINDS, inspectionSections: INSPECTION_SECTIONS, buyerProtection: { ...BUYER_PROTECTION, inspectionDays: inspectionDays() }, fraudSigns: FRAUD_SIGNS,
@@ -357,8 +516,8 @@ router.get('/catalogue', async (req: AuthRequest, res: Response, next: NextFunct
     if (search) where.OR = [{ make: { contains: search, mode: 'insensitive' } }, { model: { contains: search, mode: 'insensitive' } }, { variant: { contains: search, mode: 'insensitive' } }];
     if (q(req, 'make')) where.make = { equals: q(req, 'make'), mode: 'insensitive' };
     if (q(req, 'bodyType')) where.bodyType = q(req, 'bodyType') as never;
-    if (q(req, 'fuelType')) where.fuelType = q(req, 'fuelType') as never;
-    if (qBool(req, 'electrified')) where.fuelType = { in: ['HYBRID', 'PLUG_IN_HYBRID', 'ELECTRIC'] };
+    const fuel = fuelWhere(req);
+    if (fuel) where.fuelType = fuel;
     if (qNum(req, 'maxPrice')) where.priceFrom = { lte: qNum(req, 'maxPrice') };
     if (qBool(req, 'sevenSeats')) where.seats = { gte: 7 };
     const rows = await prisma.carModel.findMany({ where, orderBy: [{ make: 'asc' }, { model: 'asc' }] });
@@ -501,6 +660,7 @@ router.patch('/reviews/:id', authenticate, async (req: AuthRequest, res: Respons
     if (data.isHidden !== undefined && !isAdmin(req)) throw new ApiError(403, 'Only an admin can hide a review');
     const updated = await prisma.carReview.update({ where: { id: r.id }, data });
     await prisma.carModel.update({ where: { id: r.carModelId }, data: await carRating(r.carModelId) });
+    if (adminOnOthers(req, [r.userId])) await auditCarAdmin(req, 'CAR_REVIEW_MODERATED', { resourceType: 'CarReview', resourceId: r.id, targetUserId: r.userId, carModelId: r.carModelId, isHidden: changed(r.isHidden, data.isHidden), edited: [data.title !== undefined ? 'title' : null, data.body !== undefined ? 'body' : null].filter(Boolean) });
     ok(res, { id: updated.id, isHidden: updated.isHidden });
   } catch (error) { next(error); }
 });
@@ -512,6 +672,7 @@ router.delete('/reviews/:id', authenticate, async (req: AuthRequest, res: Respon
     if (r.userId !== req.user!.id && !isAdmin(req)) throw new ApiError(403, 'Not your review');
     await prisma.carReview.delete({ where: { id: r.id } });
     await prisma.carModel.update({ where: { id: r.carModelId }, data: await carRating(r.carModelId) });
+    if (adminOnOthers(req, [r.userId])) await auditCarAdmin(req, 'CAR_REVIEW_MODERATED', { resourceType: 'CarReview', resourceId: r.id, targetUserId: r.userId, carModelId: r.carModelId, deleted: true });
     ok(res, { deleted: true });
   } catch (error) { next(error); }
 });
@@ -760,7 +921,8 @@ router.get('/listings', optionalAuth, async (req: AuthRequest, res: Response, ne
     if (q(req, 'make')) where.make = { equals: q(req, 'make'), mode: 'insensitive' };
     if (q(req, 'model')) where.model = { contains: q(req, 'model'), mode: 'insensitive' };
     if (q(req, 'bodyType')) where.bodyType = q(req, 'bodyType') as never;
-    if (q(req, 'fuelType')) where.fuelType = q(req, 'fuelType') as never;
+    const fuel = fuelWhere(req);
+    if (fuel) where.fuelType = fuel;
     if (q(req, 'transmission')) where.transmission = q(req, 'transmission') as never;
     if (q(req, 'state')) where.state = q(req, 'state');
     if (q(req, 'sellerKind')) where.sellerKind = q(req, 'sellerKind') as never;
@@ -775,7 +937,6 @@ router.get('/listings', optionalAuth, async (req: AuthRequest, res: Response, ne
     if (qBool(req, 'fullHistory')) where.serviceHistory = 'FULL';
     if (qBool(req, 'warranty')) where.warranty = { not: 'NONE' };
     if (qBool(req, 'inspected')) where.inspections = { some: { status: 'COMPLETED' } };
-    if (qBool(req, 'electrified')) where.fuelType = { in: ['HYBRID', 'PLUG_IN_HYBRID', 'ELECTRIC'] };
     const sort = q(req, 'sort');
     const orderBy: Prisma.VehicleListingOrderByWithRelationInput[] = [{ isFeatured: 'desc' }, ...(sort === 'price_asc' ? [{ price: 'asc' as const }] : sort === 'price_desc' ? [{ price: 'desc' as const }] : sort === 'km' ? [{ odometerKm: 'asc' as const }] : sort === 'year' ? [{ year: 'desc' as const }] : [{ createdAt: 'desc' as const }])];
     const p = page(req);
@@ -803,7 +964,7 @@ router.get('/listings/saved', authenticate, async (req: AuthRequest, res: Respon
   } catch (error) { next(error); }
 });
 
-router.post('/listings', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/listings', authenticate, requestCeiling, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const data = parse(listingSchema, req.body);
     const [seller, dealership, open] = await Promise.all([
@@ -848,6 +1009,10 @@ router.patch('/listings/:id', authenticate, async (req: AuthRequest, res: Respon
       priceGuideLow: a.bench.guideLow, priceGuideHigh: a.bench.guideHigh, priceVerdict: a.bench.verdict, riskFlags: a.risk.flags.map((f) => f.key), riskScore: a.risk.score, status, suspendedReason: status === 'SUSPENDED' ? l.suspendedReason ?? 'Held for a quick review before it goes live' : null,
     }, include: listingInclude });
     if (status === 'SUSPENDED' && l.status !== 'SUSPENDED') await noteAdmins('A car listing is held for review', `"${updated.title}" scored ${a.risk.score} on the listing checks.`, `/dashboard/cars/admin`, { kind: 'CAR_LISTING_REVIEW', id: updated.id });
+    // An admin can edit anybody's listing through this route, and can put a
+    // held one live past the checks, which is exactly the kind of change the
+    // seller would want attributed if she asked who touched her car.
+    if (adminOnOthers(req, [l.sellerId])) await auditCarAdmin(req, 'CAR_LISTING_EDITED_BY_ADMIN', { resourceType: 'VehicleListing', resourceId: l.id, targetUserId: l.sellerId, status: changed(l.status, status), fields: Object.keys(data) });
     ok(res, { ...listingCard(updated, { full: true, viewerId: req.user!.id, admin: isAdmin(req) }), guide: a.bench, checks: a.risk });
   } catch (error) { next(error); }
 });
@@ -861,6 +1026,7 @@ router.post('/listings/:id/withdraw', authenticate, async (req: AuthRequest, res
       prisma.vehicleListing.update({ where: { id: l.id }, data: { status: 'WITHDRAWN' } }),
       prisma.vehiclePurchase.updateMany({ where: { listingId: l.id, status: { in: ['OFFERED', 'ACCEPTED'] } }, data: { status: 'CANCELLED', cancelledAt: new Date(), cancelReason: 'The listing was withdrawn' } }),
     ]);
+    if (adminOnOthers(req, [l.sellerId])) await auditCarAdmin(req, 'CAR_LISTING_EDITED_BY_ADMIN', { resourceType: 'VehicleListing', resourceId: l.id, targetUserId: l.sellerId, status: changed(l.status, 'WITHDRAWN') });
     ok(res, { status: 'WITHDRAWN' });
   } catch (error) { next(error); }
 });
@@ -872,6 +1038,7 @@ router.post('/listings/:id/sold', authenticate, async (req: AuthRequest, res: Re
       prisma.vehicleListing.update({ where: { id: l.id }, data: { status: 'SOLD', soldAt: new Date() } }),
       prisma.vehiclePurchase.updateMany({ where: { listingId: l.id, status: { in: ['OFFERED', 'ACCEPTED'] } }, data: { status: 'CANCELLED', cancelledAt: new Date(), cancelReason: 'The car was sold elsewhere' } }),
     ]);
+    if (adminOnOthers(req, [l.sellerId])) await auditCarAdmin(req, 'CAR_LISTING_EDITED_BY_ADMIN', { resourceType: 'VehicleListing', resourceId: l.id, targetUserId: l.sellerId, status: changed(l.status, 'SOLD') });
     ok(res, { status: 'SOLD' });
   } catch (error) { next(error); }
 });
@@ -934,7 +1101,7 @@ const inspectionInclude = { listing: { select: { id: true, title: true, sellerId
 type InspectionRow = Prisma.VehicleInspectionGetPayload<{ include: typeof inspectionInclude }>;
 const inspectionCard = (i: InspectionRow, viewerId?: string) => ({ id: i.id, kind: i.kind, status: i.status, fee: i.fee, scheduledAt: i.scheduledAt, completedAt: i.completedAt, outcome: i.outcome, summary: i.summary, report: normaliseInspectionReport(i.report), reportUrl: i.reportUrl, escrowStatus: i.escrow?.status ?? null, createdAt: i.createdAt, listing: i.listing, inspector: i.inspector ? { id: i.inspector.id, name: i.inspector.name, slug: i.inspector.slug, phone: i.inspector.phone } : null, requestedBy: i.requestedById === viewerId ? 'You' : shortName(i.requestedBy), isRequester: i.requestedById === viewerId, isInspector: Boolean(viewerId && i.inspector?.ownerUserId === viewerId), sections: emptyInspectionReport() });
 
-router.post('/listings/:id/inspections', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/listings/:id/inspections', authenticate, requestCeiling, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const l = await prisma.vehicleListing.findUnique({ where: { id: req.params.id }, select: { id: true, title: true, sellerId: true, state: true, status: true } });
     if (!l || !['ACTIVE', 'UNDER_OFFER'].includes(l.status)) throw new ApiError(404, 'Listing not found');
@@ -945,12 +1112,21 @@ router.post('/listings/:id/inspections', authenticate, async (req: AuthRequest, 
     const open = await prisma.vehicleInspection.count({ where: { listingId: l.id, requestedById: req.user!.id, status: { in: ['REQUESTED', 'ASSIGNED', 'SCHEDULED'] } } });
     if (open > 0) throw new ApiError(400, 'You already have an inspection under way on this car');
     const i = await prisma.vehicleInspection.create({ data: { listingId: l.id, requestedById: req.user!.id, purchaseId: purchase?.id ?? null, kind, fee: kind === 'SELLER_PROVIDED' ? 0 : DEFAULT_INSPECTION_FEE, summary: data.note ?? null, reportUrl: data.reportUrl ?? null, status: kind === 'SELLER_PROVIDED' && data.reportUrl ? 'COMPLETED' : 'REQUESTED', completedAt: kind === 'SELLER_PROVIDED' && data.reportUrl ? new Date() : null }, include: inspectionInclude });
+    // Every workshop that will see this on its open queue is told, not the
+    // first ten rows the database happened to return — see broadcast.service.
+    // A workshop run by the buyer or the seller is left out: neither can
+    // inspect a car she is buying or selling. When nobody at all can take it,
+    // the admins are told now rather than finding it on the queue later, and
+    // the buyer's page says so instead of implying a workshop is on its way.
+    let workshopsTold: number | null = null;
     if (kind !== 'SELLER_PROVIDED') {
-      const workshops = await prisma.mechanic.findMany({ where: { isActive: true, isVerified: true, doesInspections: true, ownerUserId: { not: null }, ...(l.state ? { state: l.state } : {}) }, select: { ownerUserId: true }, take: 10 });
-      await Promise.all(workshops.map((w) => note(w.ownerUserId!, 'A pre-purchase inspection is wanted', `A buyer wants "${l.title}" looked over in ${l.state}. Accept it from your workshop page.`, '/dashboard/cars/workshop', { kind: 'CAR_INSPECTION_OPEN', id: i.id })));
+      const owners = (await inspectionWorkshopOwners(l.state)).filter((o) => o !== l.sellerId && o !== req.user!.id);
+      await Promise.all(owners.map((o) => note(o, 'A pre-purchase inspection is wanted', `A buyer wants "${l.title}" looked over in ${l.state}. Accept it from your workshop page.`, '/dashboard/cars/workshop', { kind: 'CAR_INSPECTION_OPEN', id: i.id })));
+      workshopsTold = owners.length;
+      if (owners.length === 0) await noteAdmins('An inspection nobody can take', `A buyer asked for "${l.title}" to be inspected in ${l.state}, and no verified workshop there does inspections. Find one, or tell her what she can do instead.`, '/dashboard/cars/admin', { kind: 'CAR_INSPECTION_UNTAKEN', id: i.id });
       await note(l.sellerId, 'A buyer has asked for an inspection', `An inspection of "${l.title}" has been requested. The workshop will arrange a time with you.`, `/dashboard/cars/sell/${l.id}`, { kind: 'CAR_INSPECTION_REQUESTED', id: i.id });
     }
-    ok(res, inspectionCard(i, req.user!.id), 201);
+    ok(res, { ...inspectionCard(i, req.user!.id), workshopsTold }, 201);
   } catch (error) { next(error); }
 });
 
@@ -1044,6 +1220,9 @@ router.patch('/inspections/:id', authenticate, async (req: AuthRequest, res: Res
       if (i.listing.sellerId !== i.requestedById) await note(i.listing.sellerId, 'An inspection of your car is complete', `The report on "${i.listing.title}" is with the buyer${updated.kind !== 'INDEPENDENT' ? ' and shown on the listing' : ''}.`, `/dashboard/cars/sell/${i.listing.id}`, { kind: 'CAR_INSPECTION_DONE', id: i.id });
     }
     if (data.status === 'CANCELLED' && i.escrow && i.escrowPaymentId) { const e = await prisma.escrowPayment.findUnique({ where: { id: i.escrowPaymentId }, select: { paymentIntentId: true, status: true } }); if (e?.paymentIntentId && !['CANCELED', 'REFUNDED', 'FAILED'].includes(e.status)) await cancelEscrowPayment(e.paymentIntentId, { id: req.user!.id, role: req.user!.role }, 'Inspection cancelled').catch((err) => logger.warn('Inspection hold could not be cancelled', { id: i.id, error: (err as Error).message })); }
+    // An admin cancelling an inspection hands the buyer's held fee back, and
+    // completing one writes the report a buyer reads before she pays for a car.
+    if (adminOnOthers(req, [i.requestedById, i.inspector?.ownerUserId])) await auditCarAdmin(req, 'CAR_INSPECTION_UPDATED_BY_ADMIN', { resourceType: 'VehicleInspection', resourceId: i.id, targetUserId: i.requestedById, status: changed(i.status, data.status), heldFee: Boolean(i.escrowPaymentId), fields: Object.keys(data) });
     ok(res, inspectionCard(updated, req.user!.id));
   } catch (error) { next(error); }
 });
@@ -1064,7 +1243,7 @@ function transition(action: Parameters<typeof purchaseTransition>[0], p: { statu
   return t.to;
 }
 
-router.post('/listings/:id/offers', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/listings/:id/offers', authenticate, offerCeiling, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const l = await prisma.vehicleListing.findUnique({ where: { id: req.params.id }, select: { id: true, title: true, sellerId: true, sellerKind: true, price: true, status: true } });
     if (!l || !['ACTIVE', 'UNDER_OFFER'].includes(l.status)) throw new ApiError(404, 'Listing not found');
@@ -1073,6 +1252,11 @@ router.post('/listings/:id/offers', authenticate, async (req: AuthRequest, res: 
     if (data.amount < l.price * 0.5) throw new ApiError(400, 'An offer under half the asking price will not be sent; make a serious one');
     const open = await prisma.vehiclePurchase.findFirst({ where: { listingId: l.id, buyerId: req.user!.id, status: { notIn: ['DECLINED', 'CANCELLED', 'REFUNDED', 'RELEASED'] } } });
     if (open) throw new ApiError(400, 'You already have an offer or purchase open on this car');
+    // Counted from the purchase rows themselves, so it holds on every server
+    // and from every address: a cancelled offer still counts, because the
+    // seller was still told about it. See OFFERS_PER_CAR_PER_DAY.
+    const lately = await prisma.vehiclePurchase.count({ where: { listingId: l.id, buyerId: req.user!.id, createdAt: { gte: new Date(Date.now() - DAY) } } });
+    if (lately >= OFFERS_PER_CAR_PER_DAY) throw new ApiError(429, `You have made ${OFFERS_PER_CAR_PER_DAY} offers on this car in the last day, and the seller was told about each one. Give it a day before you make another.`);
     const p = await prisma.vehiclePurchase.create({ data: { listingId: l.id, buyerId: req.user!.id, sellerId: l.sellerId, offerAmount: data.amount, platformFee: purchaseFee(l.sellerKind, data.amount), message: data.message ?? null }, include: purchaseInclude });
     await note(l.sellerId, `An offer of $${data.amount.toLocaleString('en-AU')} on your car`, `${data.amount >= l.price ? 'At your asking price' : `Under the $${l.price.toLocaleString('en-AU')} asked`} for "${l.title}". Accept or decline it.`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_OFFER', id: p.id });
     ok(res, purchaseCard(p, req.user!.id), 201);
@@ -1220,6 +1404,7 @@ router.post('/purchases/:id/release', authenticate, async (req: AuthRequest, res
     }
     const updated = await prisma.vehiclePurchase.update({ where: { id: p.id }, data: { status: to, releasedAt: new Date() }, include: purchaseInclude });
     await note(p.sellerId, 'The money has been released to you', `The buyer released $${(p.agreedAmount ?? p.offerAmount).toLocaleString('en-AU')} for "${p.listing.title}". It is on its way to your payout account.`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_PURCHASE_RELEASED', id: p.id });
+    if (party === 'admin') await auditCarAdmin(req, 'CAR_PURCHASE_RELEASED_BY_ADMIN', { resourceType: 'VehiclePurchase', resourceId: p.id, targetUserId: p.buyerId, sellerId: p.sellerId, amount: p.agreedAmount ?? p.offerAmount, status: changed(p.status, to) });
     ok(res, purchaseCard(updated, req.user!.id));
   } catch (error) { next(error); }
 });
@@ -1237,7 +1422,7 @@ router.post('/purchases/:id/dispute', authenticate, async (req: AuthRequest, res
   } catch (error) { next(error); }
 });
 
-router.post('/purchases/:id/cancel', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/purchases/:id/cancel', authenticate, offerCeiling, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { p, party } = await loadPurchase(req, req.params.id);
     const to = transition('cancel', p, party);
@@ -1248,6 +1433,7 @@ router.post('/purchases/:id/cancel', authenticate, async (req: AuthRequest, res:
     if (others === 0 && p.listing.status === 'UNDER_OFFER') await prisma.vehicleListing.update({ where: { id: p.listingId }, data: { status: 'ACTIVE' } });
     const other = party === 'buyer' ? p.sellerId : p.buyerId;
     await note(other, 'A purchase was cancelled', `"${p.listing.title}"${data.reason ? `: ${data.reason.slice(0, 200)}` : ''}. ${p.escrow ? 'Any held money goes back to the buyer\'s card.' : ''}`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_PURCHASE_CANCELLED', id: p.id });
+    if (party === 'admin') await auditCarAdmin(req, 'CAR_PURCHASE_CANCELLED_BY_ADMIN', { resourceType: 'VehiclePurchase', resourceId: p.id, targetUserId: p.buyerId, sellerId: p.sellerId, amount: p.agreedAmount ?? p.offerAmount, heldMoneyReturned: Boolean(p.escrow?.paymentIntentId), status: changed(p.status, to) });
     ok(res, purchaseCard(updated, req.user!.id));
   } catch (error) { next(error); }
 });
@@ -1264,6 +1450,9 @@ router.post('/purchases/:id/resolve', authenticate, requireRole('ADMIN'), async 
     const updated = await prisma.vehiclePurchase.update({ where: { id: p.id }, data: { status: to, disputeResolution: data.note, resolvedAt: new Date(), resolvedById: req.user!.id, ...(to === 'RELEASED' ? { releasedAt: new Date() } : {}) }, include: purchaseInclude });
     const words = data.outcome === 'RELEASE' ? 'The money has been released to the seller.' : 'The money has been returned to the buyer.';
     await Promise.all([p.buyerId, p.sellerId].map((u) => note(u, 'The dispute has been decided', `${words} ${data.note.slice(0, 300)}`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_DISPUTE_RESOLVED', id: p.id })));
+    // resolvedById is on the row, but the row is overwritten by whatever
+    // happens to the purchase next; the audit row is the record that stays.
+    await auditCarAdmin(req, 'CAR_PURCHASE_DISPUTE_RESOLVED', { resourceType: 'VehiclePurchase', resourceId: p.id, targetUserId: p.buyerId, sellerId: p.sellerId, outcome: data.outcome, amount: p.agreedAmount ?? p.offerAmount, status: changed(p.status, to) });
     ok(res, purchaseCard(updated, req.user!.id, true));
   } catch (error) { next(error); }
 });
@@ -1385,7 +1574,7 @@ router.get('/mechanics/:id/slots', async (req: AuthRequest, res: Response, next:
 
 const bookingSchema = z.object({ kind: z.string().trim().min(1).max(30), scheduledAt: z.string().datetime(), vehicleId: uuid.nullable().optional(), concern: z.string().trim().max(2000).nullable().optional(), dropOff: z.boolean().optional(), address: z.string().trim().max(200).nullable().optional(), odometerKm: z.coerce.number().int().min(0).max(1_500_000).nullable().optional(), parts: z.array(z.object({ name: z.string().trim().min(1).max(120), qty: z.coerce.number().int().min(1).max(99).optional(), note: z.string().trim().max(300).optional() })).max(20).optional() });
 
-router.post('/mechanics/:id/bookings', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/mechanics/:id/bookings', authenticate, requestCeiling, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const m = await prisma.mechanic.findFirst({ where: { OR: [{ id: req.params.id }, { slug: req.params.id }], isActive: true, isVerified: true } });
     if (!m) throw new ApiError(404, 'Workshop not found');
@@ -1610,7 +1799,13 @@ router.get('/dealership', authenticate, async (req: AuthRequest, res: Response, 
     const d = await prisma.dealership.findUnique({ where: { ownerUserId: req.user!.id } });
     const counts = d ? { testDrives: await prisma.testDriveRequest.count({ where: { dealershipId: d.id, status: 'REQUESTED' } }), tradeIns: await prisma.tradeInRequest.count({ where: { status: 'OPEN', OR: [{ dealershipId: d.id }, { dealershipId: null, ...(d.brands.length ? { make: { in: d.brands } } : {}) }] } }), stock: await prisma.vehicleListing.count({ where: { dealershipId: d.id, status: { in: ['ACTIVE', 'UNDER_OFFER'] } } }) } : null;
     const referrals = d ? await prisma.carReferral.findMany({ where: { dealershipId: d.id, status: { not: 'VOID' } }, orderBy: { createdAt: 'desc' }, take: 50, include: referralInclude }) : [];
-    ok(res, { profile: d ? { ...dealershipCard(d), about: d.about, email: d.email, isActive: d.isActive } : null, counts, makes: MAKES, referrals: referrals.map(referralCard), referralFee: REFERRAL_FEES.dealerSale });
+    // A sale the member reported and the dealership did not stays off the
+    // dealership's own page until an admin has checked it with them. The row
+    // carries her name and email, and the first the dealership should hear of
+    // it is from ATHENA, not from a line that tells them which of their buyers
+    // said they had left a sale off the books.
+    const shown = referrals.filter((r) => !(r.status === 'PENDING' && memberReported(r)));
+    ok(res, { profile: d ? { ...dealershipCard(d), about: d.about, email: d.email, isActive: d.isActive } : null, counts, makes: MAKES, referrals: shown.map(referralCard), referralFee: REFERRAL_FEES.dealerSale });
   } catch (error) { next(error); }
 });
 
@@ -1634,6 +1829,44 @@ router.put('/dealership', authenticate, async (req: AuthRequest, res: Response, 
 
 const testDriveCard = (t: Prisma.TestDriveRequestGetPayload<{ include: { dealership: { select: { id: true; name: true; slug: true; phone: true } }; carModel: { select: { slug: true; make: true; model: true; variant: true } }; listing: { select: { id: true; title: true } }; user: { select: { firstName: true; lastName: true; email: true; phone: true } } } }>, forDealer = false) => ({ id: t.id, status: t.status, preferredAt: t.preferredAt, alternativeAt: t.alternativeAt, note: t.note, dealerNote: t.dealerNote, confirmedAt: t.confirmedAt, createdAt: t.createdAt, dealership: t.dealership, car: t.carModel ? `${t.carModel.make} ${t.carModel.model}${t.carModel.variant ? ` ${t.carModel.variant}` : ''}` : t.listing?.title ?? null, carSlug: t.carModel?.slug ?? null, listingId: t.listing?.id ?? null, member: forDealer ? { name: personName(t.user), email: t.user.email, phone: t.user.phone } : undefined });
 const testDriveInclude = { dealership: { select: { id: true, name: true, slug: true, phone: true } }, carModel: { select: { slug: true, make: true, model: true, variant: true } }, listing: { select: { id: true, title: true } }, user: { select: { firstName: true, lastName: true, email: true, phone: true } } } as const;
+type TestDriveRow = Prisma.TestDriveRequestGetPayload<{ include: typeof testDriveInclude }>;
+
+// ------------------------------------------------ a test drive that became a sale
+//
+// The dealer-sale fee is one of the vertical's two automatic revenue lines,
+// and until now the only way a row reached the ledger was the dealership
+// saying so. Reporting the sale is what creates the invoice the dealership
+// then owes, so the incentive ran the wrong way: a dealership that marked a
+// test drive "done, no sale" and sold her the car anyway was undetectable,
+// because nobody ever asked the one other person who knows.
+//
+// So she is asked. When a test drive is marked done, or its time has passed,
+// her requests page offers "I bought this car", and saying so writes the same
+// PENDING claim a dealership's report does — marked as hers through
+// createdById, which is the member herself — for an admin to check with the
+// dealership. When the dealership reports a sale she says did not happen, she
+// can say that too, and the claim is voided until an admin looks: between two
+// unverified accounts, ATHENA does not bill a sale the buyer denies. Either way
+// the admins are told, and neither answer costs her anything.
+
+/** A DEALER_SALE row the member wrote herself: she is both the member on it and the person who created it. */
+const memberReported = (r: { kind: string; userId: string | null; createdById: string | null }) => r.kind === 'DEALER_SALE' && Boolean(r.createdById) && r.createdById === r.userId;
+
+/** Whether the test drive has happened as far as ATHENA can tell: marked done, or its time has gone by and nobody called it off. */
+const drivePassed = (t: { status: string; preferredAt: Date }, now = new Date()) => t.status === 'COMPLETED' || (['REQUESTED', 'CONFIRMED'].includes(t.status) && t.preferredAt.getTime() < now.getTime());
+
+type SaleRow = { kind: string; status: string; basisAmount: number; userId: string | null; createdById: string | null };
+
+/** What she sees about a sale on her own test drive. Never the fee: that is between ATHENA and the dealership, and none of it is hers to pay. */
+function memberDriveCard(t: TestDriveRow, sale: SaleRow | null | undefined) {
+  const reportedBy = !sale ? null : memberReported(sale) ? 'you' : sale.createdById ? 'ATHENA' : 'dealership';
+  return {
+    ...testDriveCard(t),
+    sale: sale ? { status: sale.status, amount: sale.basisAmount > 0 ? sale.basisAmount : null, reportedBy } : null,
+    canReportSale: !sale && Boolean(t.dealership) && drivePassed(t),
+    canDisputeSale: Boolean(sale) && reportedBy === 'dealership' && sale!.status === 'PENDING',
+  };
+}
 
 router.get('/dealership/requests', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
@@ -1654,8 +1887,34 @@ router.patch('/dealership/test-drives/:id', authenticate, async (req: AuthReques
     const t = await prisma.testDriveRequest.findFirst({ where: { id: req.params.id, dealershipId: d.id } });
     if (!t) throw new ApiError(404, 'Request not found');
     const { sold, salePrice, ...data } = parse(z.object({ status: z.enum(['CONFIRMED', 'DECLINED', 'COMPLETED']).optional(), dealerNote: z.string().trim().max(1000).nullable().optional(), sold: z.boolean().optional(), salePrice: money.optional() }), req.body);
+    // Every refusal is decided before anything is written. The verified check
+    // used to run after the status update, so an unverified dealership's
+    // "completed" stuck even though the sale that came with it was refused
+    // with a 403 — the member was told her drive was done by a request that
+    // had failed. A sale without a price used to be dropped without a word,
+    // which read to the dealership as recorded and to the ledger as nothing.
+    const reportsSale = sold === true;
+    if (reportsSale) {
+      if ((data.status ?? t.status) !== 'COMPLETED') throw new ApiError(400, 'A sale is reported when the test drive is marked done');
+      if (!salePrice || salePrice <= 0) throw new ApiError(400, 'Give the price it sold for; the referral fee is worked out from it');
+      if (!d.isVerified) throw new ApiError(403, 'Only a verified dealership can report a sale');
+    }
+    // One car cannot be on two test drives at once. Requests are only
+    // requests, so two members may ask for the same hour; the second
+    // confirmation of the same car inside a drive's length is what is refused.
+    if (data.status === 'CONFIRMED' && t.status !== 'CONFIRMED' && t.listingId) {
+      const confirmed = await prisma.testDriveRequest.findMany({ where: { listingId: t.listingId, status: 'CONFIRMED', id: { not: t.id } }, select: { preferredAt: true } });
+      if (confirmed.some((o) => drivesClash(o.preferredAt, t.preferredAt))) throw new ApiError(409, 'Another test drive of this car is already confirmed within the hour. Decline this one with a note offering her another time.');
+    }
     const updated = await prisma.testDriveRequest.update({ where: { id: t.id }, data: { ...data, ...(data.status === 'CONFIRMED' ? { confirmedAt: new Date() } : {}) }, include: testDriveInclude });
-    if (data.status && data.status !== t.status) await note(t.userId, `Your test drive was ${data.status.toLowerCase()}`, `${d.name}${data.dealerNote ? `: ${data.dealerNote.slice(0, 200)}` : ''}`, '/dashboard/cars/requests', { kind: 'CAR_TEST_DRIVE', id: t.id });
+    if (data.status && data.status !== t.status) {
+      // Done with no sale is when she is asked, because it is the one moment
+      // a sale that goes unreported would otherwise pass without anybody
+      // outside the dealership knowing.
+      const ask = data.status === 'COMPLETED' && !reportsSale ? ' If you went on to buy the car, you can tell us from your requests page. It costs you nothing: a dealership pays ATHENA for a sale that started here, never the buyer.' : '';
+      const said = `${d.name}${data.dealerNote ? `: ${data.dealerNote.slice(0, 200)}` : ''}`;
+      await note(t.userId, `Your test drive was ${data.status.toLowerCase()}`, ask ? `${said}${/[.!?]$/.test(said) ? '' : '.'}${ask}` : said, '/dashboard/cars/requests', { kind: 'CAR_TEST_DRIVE', id: t.id });
+    }
     // A test drive that became a sale earns the referral fee the blueprint
     // sets. Everything about it — that a sale happened at all, and what it
     // sold for — is the dealership's own word: no money passes through ATHENA
@@ -1675,19 +1934,28 @@ router.patch('/dealership/test-drives/:id', authenticate, async (req: AuthReques
     // until now she was never asked. The fee is recorded once per test drive,
     // so a dealership cannot bill the same sale twice by sending the request
     // again.
+    //
+    // If she has already told us she bought it, the dealership's report is
+    // the corroboration her claim was waiting for: the row is hers, it gains
+    // the dealership's price if she did not give one, and the admins are told
+    // the two accounts now agree.
     let referral: { fee: number } | null = null;
-    if (updated.status === 'COMPLETED' && sold && salePrice && salePrice > 0) {
-      if (!d.isVerified) throw new ApiError(403, 'Only a verified dealership can report a sale');
+    if (reportsSale && salePrice) {
       const existing = await prisma.carReferral.findFirst({ where: { kind: 'DEALER_SALE', referenceId: t.id } });
-      if (existing) referral = { fee: existing.fee };
+      const car = testDriveCard(updated).car ?? 'a car';
+      const amount = Math.round(salePrice).toLocaleString('en-AU');
+      if (existing && memberReported(existing) && existing.status === 'PENDING') {
+        const f = referralFee('DEALER_SALE', salePrice);
+        const agreed = await prisma.carReferral.update({ where: { id: existing.id }, data: { ...(existing.basisAmount > 0 ? {} : { basisAmount: Math.round(salePrice), feePercent: f.percent, fee: f.fee }), note: `${existing.note ?? ''} ${d.name} has since reported the sale itself, at $${amount}.`.trim() } });
+        referral = { fee: agreed.fee };
+        await noteAdmins('A dealership has confirmed a sale a member reported', `${d.name} now says it sold ${car} for $${amount}, which the member had already told us about${existing.basisAmount > 0 && existing.basisAmount !== Math.round(salePrice) ? ` at $${existing.basisAmount.toLocaleString('en-AU')}` : ''}. Check the figure before you confirm it on the ledger.`, '/dashboard/cars/admin', { kind: 'CAR_REFERRAL', id: existing.id });
+      } else if (existing) referral = { fee: existing.fee };
       else {
         const f = referralFee('DEALER_SALE', salePrice);
-        const car = testDriveCard(updated).car ?? 'a car';
-        const amount = Math.round(salePrice).toLocaleString('en-AU');
         const created = await prisma.carReferral.create({ data: { kind: 'DEALER_SALE', userId: t.userId, dealershipId: d.id, referenceId: t.id, partner: d.name, basisAmount: Math.round(salePrice), feePercent: f.percent, fee: f.fee, note: `${d.name} reports selling ${car} for $${amount} after a test drive booked on ATHENA. Self-reported by the dealership and not verified by ATHENA.` } });
         referral = { fee: created.fee };
         await noteAdmins('A dealership reported a sale', `${d.name} says it sold ${car} for $${amount} after a test drive booked here. Both the sale and the price are the dealership's own figures, unverified. The referral fee would be $${f.fee}; check it before you confirm it on the ledger.`, '/dashboard/cars/admin', { kind: 'CAR_REFERRAL', id: created.id });
-        await note(t.userId, `${d.name} has recorded your test drive as a sale`, `They have told us you bought ${car} for $${amount}. Nothing is owed by you either way — ATHENA charges the dealership, not you. If that is not what happened, please tell us so we do not bill them for it.`, '/dashboard/cars/requests', { kind: 'CAR_DEALER_SALE_REPORTED', id: created.id });
+        await note(t.userId, `${d.name} has recorded your test drive as a sale`, `They have told us you bought ${car} for $${amount}. Nothing is owed by you either way — ATHENA charges the dealership, not you. If that is not what happened, say so from your requests page and we will not bill them for it until we have checked.`, '/dashboard/cars/requests', { kind: 'CAR_DEALER_SALE_REPORTED', id: created.id });
       }
     }
     ok(res, { ...testDriveCard(updated, true), referralFee: referral?.fee ?? null });
@@ -1724,17 +1992,37 @@ router.post('/dealership/trade-ins/:id/quotes', authenticate, async (req: AuthRe
 
 // -------------------------------------------------- test drives, trade-ins
 
-router.post('/test-drives', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/test-drives', authenticate, requestCeiling, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const data = parse(z.object({ dealershipId: uuid.optional(), carModelId: uuid.optional(), listingId: uuid.optional(), preferredAt: z.string().datetime(), alternativeAt: z.string().datetime().optional(), note: z.string().trim().max(1000).optional() }), req.body);
     if (!data.dealershipId && !data.listingId) throw new ApiError(400, 'Pick a dealership, or a dealer\'s listing');
     let dealershipId = data.dealershipId ?? null;
     if (data.listingId) { const l = await prisma.vehicleListing.findUnique({ where: { id: data.listingId }, select: { dealershipId: true, sellerId: true } }); if (!l) throw new ApiError(404, 'Listing not found'); if (!l.dealershipId) throw new ApiError(400, 'Private sellers arrange a look at the car by message; test drives are booked with dealerships'); dealershipId = l.dealershipId; }
-    const d = await prisma.dealership.findFirst({ where: { id: dealershipId!, isActive: true, isVerified: true }, select: { id: true, name: true, ownerUserId: true } });
+    const d = await prisma.dealership.findFirst({ where: { id: dealershipId!, isActive: true, isVerified: true }, select: { id: true, name: true, ownerUserId: true, hours: true } });
     if (!d) throw new ApiError(404, 'Dealership not found');
-    if (new Date(data.preferredAt).getTime() < Date.now()) throw new ApiError(400, 'Pick a time in the future');
-    const t = await prisma.testDriveRequest.create({ data: { userId: req.user!.id, dealershipId: d.id, carModelId: data.carModelId ?? null, listingId: data.listingId ?? null, preferredAt: new Date(data.preferredAt), alternativeAt: data.alternativeAt ? new Date(data.alternativeAt) : null, note: data.note ?? null }, include: testDriveInclude });
-    if (d.ownerUserId) await note(d.ownerUserId, 'A test drive request', `${testDriveCard(t).car ?? 'A car'} on ${new Date(data.preferredAt).toLocaleString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}. Confirm it from your dealership page.`, '/dashboard/cars/dealership', { kind: 'CAR_TEST_DRIVE', id: t.id });
+    const preferred = new Date(data.preferredAt);
+    const second = data.alternativeAt ? new Date(data.alternativeAt) : null;
+    if (preferred.getTime() < Date.now()) throw new ApiError(400, 'Pick a time in the future');
+    // The second time was never looked at: yesterday, or the same minute as
+    // the first, went straight through to the dealership.
+    if (second && second.getTime() < Date.now()) throw new ApiError(400, 'Pick a second time in the future as well, or leave it out');
+    const alternative = second && second.getTime() !== preferred.getTime() ? second : null;
+    // Both times are held to the hours the dealership published, read in its
+    // own timezone the way a workshop booking is. A dealership that has not
+    // set any hours cannot be said to be closed, so the request goes to them
+    // to confirm, as before. See test-drives.service.
+    const hours = normaliseAvailability(d.hours);
+    if (Object.keys(hours).length > 0) {
+      const tz = await memberTimezone(d.ownerUserId);
+      const closed = [preferred, alternative].find((at) => at && !openAt(hours, at, tz));
+      if (closed) throw new ApiError(400, `${d.name} is closed at ${closed === preferred ? 'the time' : 'the second time'} you picked. Their hours are ${hoursWords(hours)}, their local time.`);
+    }
+    if (data.listingId) {
+      const booked = await prisma.testDriveRequest.findMany({ where: { listingId: data.listingId, status: 'CONFIRMED' }, select: { preferredAt: true } });
+      if (booked.some((b) => drivesClash(b.preferredAt, preferred))) throw new ApiError(409, 'That car is already booked for a test drive around then. Pick another time.');
+    }
+    const t = await prisma.testDriveRequest.create({ data: { userId: req.user!.id, dealershipId: d.id, carModelId: data.carModelId ?? null, listingId: data.listingId ?? null, preferredAt: preferred, alternativeAt: alternative, note: data.note ?? null }, include: testDriveInclude });
+    if (d.ownerUserId) await note(d.ownerUserId, 'A test drive request', `${testDriveCard(t).car ?? 'A car'} on ${preferred.toLocaleString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}. Confirm it from your dealership page.`, '/dashboard/cars/dealership', { kind: 'CAR_TEST_DRIVE', id: t.id });
     ok(res, testDriveCard(t), 201);
   } catch (error) { next(error); }
 });
@@ -1742,7 +2030,54 @@ router.post('/test-drives', authenticate, async (req: AuthRequest, res: Response
 router.get('/test-drives', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const rows = await prisma.testDriveRequest.findMany({ where: { userId: req.user!.id }, orderBy: { preferredAt: 'desc' }, take: 50, include: testDriveInclude });
-    ok(res, rows.map((t) => testDriveCard(t)));
+    const sales = rows.length ? await prisma.carReferral.findMany({ where: { kind: 'DEALER_SALE', referenceId: { in: rows.map((t) => t.id) } }, select: { referenceId: true, kind: true, status: true, basisAmount: true, userId: true, createdById: true } }) : [];
+    ok(res, rows.map((t) => memberDriveCard(t, sales.find((s) => s.referenceId === t.id))));
+  } catch (error) { next(error); }
+});
+
+async function ownDrive(req: AuthRequest, id: string): Promise<TestDriveRow> {
+  const t = await prisma.testDriveRequest.findFirst({ where: { id, userId: req.user!.id }, include: testDriveInclude });
+  if (!t) throw new ApiError(404, 'Request not found');
+  return t;
+}
+
+/** She says she bought the car. See the note above memberReported. */
+router.post('/test-drives/:id/sale', authenticate, requestCeiling, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const t = await ownDrive(req, req.params.id);
+    if (!t.dealershipId || !t.dealership) throw new ApiError(400, 'That dealership is no longer on ATHENA, so there is nothing to record');
+    if (!drivePassed(t)) throw new ApiError(400, 'You can tell us once the test drive has happened');
+    const data = parse(z.object({ price: money.optional() }), req.body ?? {});
+    const price = data.price && data.price > 0 ? Math.round(data.price) : null;
+    const car = testDriveCard(t).car ?? 'the car';
+    const dealership = t.dealership;
+    // Read and written together so two taps on the button cannot put the same
+    // sale on the ledger twice.
+    const { row, created } = await serialised('automotive.member-sale-report', async (tx) => {
+      const existing = await tx.carReferral.findFirst({ where: { kind: 'DEALER_SALE', referenceId: t.id } });
+      if (existing) return { row: existing, created: false };
+      const f = price ? referralFee('DEALER_SALE', price) : { fee: 0, percent: REFERRAL_FEES.dealerSale.percent };
+      const note = `Reported by the member, not by the dealership: she says she bought ${car} from ${dealership.name}${price ? ` for $${price.toLocaleString('en-AU')}` : ''} after a test drive booked on ATHENA. ${dealership.name} has not reported this sale.${price ? '' : ' She did not give the price, so no fee is worked out until the dealership confirms it.'} Check it with the dealership before confirming.`;
+      return { row: await tx.carReferral.create({ data: { kind: 'DEALER_SALE', userId: t.userId, dealershipId: t.dealershipId, referenceId: t.id, partner: dealership.name, basisAmount: price ?? 0, feePercent: f.percent, fee: f.fee, createdById: req.user!.id, note } }), created: true };
+    });
+    if (created) await noteAdmins('A member bought a car the dealership did not report', `${personName(t.user)} says she bought ${car} from ${dealership.name}${price ? ` for $${price.toLocaleString('en-AU')}` : ''} after a test drive booked here. ${dealership.name} marked no sale. Check it with them before you confirm the fee.`, '/dashboard/cars/admin', { kind: 'CAR_REFERRAL', id: row.id });
+    else if (!memberReported(row) && price && price !== row.basisAmount) await noteAdmins('A member gives a different price for a reported sale', `${dealership.name} reported ${car} as sold for $${row.basisAmount.toLocaleString('en-AU')}; the buyer says she paid $${price.toLocaleString('en-AU')}. The fee is worked out from the price, so check which is right.`, '/dashboard/cars/admin', { kind: 'CAR_REFERRAL', id: row.id });
+    ok(res, memberDriveCard(t, row), created ? 201 : 200);
+  } catch (error) { next(error); }
+});
+
+/** She says the sale the dealership reported did not happen. */
+router.post('/test-drives/:id/sale/dispute', authenticate, requestCeiling, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const t = await ownDrive(req, req.params.id);
+    const r = await prisma.carReferral.findFirst({ where: { kind: 'DEALER_SALE', referenceId: t.id } });
+    if (!r || memberReported(r)) throw new ApiError(404, 'No dealership has reported a sale on this test drive');
+    if (r.status === 'VOID') { ok(res, memberDriveCard(t, r)); return; }
+    if (r.status !== 'PENDING') throw new ApiError(409, 'ATHENA has already checked this sale with the dealership, so it cannot be changed from here. If it is still wrong, tell us through the contact page and we will look at it again.');
+    const when = new Date().toISOString().slice(0, 10);
+    const voided = await prisma.carReferral.update({ where: { id: r.id }, data: { status: 'VOID', note: `${r.note ?? ''} On ${when} the member said she did not buy this car, so it is not billed unless an admin checks it with the dealership and restores it.`.trim() } });
+    await noteAdmins('A member says a reported sale did not happen', `${personName(t.user)} says she did not buy ${testDriveCard(t).car ?? 'the car'} from ${r.partner ?? 'the dealership'}, which reported it sold for $${r.basisAmount.toLocaleString('en-AU')}. The fee has been voided until someone checks with them; restore it on the ledger if the sale was real.`, '/dashboard/cars/admin', { kind: 'CAR_REFERRAL', id: r.id });
+    ok(res, memberDriveCard(t, voided));
   } catch (error) { next(error); }
 });
 
@@ -1756,7 +2091,7 @@ router.patch('/test-drives/:id', authenticate, async (req: AuthRequest, res: Res
   } catch (error) { next(error); }
 });
 
-router.post('/trade-ins', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/trade-ins', authenticate, requestCeiling, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const data = parse(z.object({ vehicleId: uuid.optional(), dealershipId: uuid.optional(), make: z.string().trim().max(40).optional(), model: z.string().trim().max(60).optional(), year: z.coerce.number().int().min(1960).max(new Date().getFullYear() + 1).optional(), variant: z.string().trim().max(80).optional(), odometerKm: z.coerce.number().int().min(0).max(1_500_000).optional(), condition: conditionEnum, notes: z.string().trim().max(1000).optional(), photos: z.array(httpUrl(500)).max(12).optional(), newPrice: money.optional() }), req.body);
     let make = data.make; let model = data.model; let year = data.year; let km = data.odometerKm; let variant = data.variant ?? null; let body: BodyKey | null = null; let fuel: FuelKey | null = null; let newPrice = data.newPrice ?? null;
@@ -1765,8 +2100,12 @@ router.post('/trade-ins', authenticate, async (req: AuthRequest, res: Response, 
     const fromCatalogue = newPrice ? null : await catalogueNewPrice(make, model);
     const v = estimateValue({ year, odometerKm: km, bodyType: body ?? fromCatalogue?.bodyType ?? null, fuelType: fuel ?? fromCatalogue?.fuelType ?? null, condition: data.condition, newPrice: newPrice ?? fromCatalogue?.price ?? null, make });
     const t = await prisma.tradeInRequest.create({ data: { userId: req.user!.id, vehicleId: data.vehicleId ?? null, dealershipId: data.dealershipId ?? null, make, model, year, variant, odometerKm: km, condition: data.condition, photos: data.photos ?? [], notes: data.notes ?? null, estimateLow: v.low, estimateMid: v.mid, estimateHigh: v.high, expiresAt: new Date(Date.now() + 30 * 86400000) } });
-    const dealers = data.dealershipId ? await prisma.dealership.findMany({ where: { id: data.dealershipId, isActive: true, isVerified: true }, select: { ownerUserId: true } }) : await prisma.dealership.findMany({ where: { isActive: true, isVerified: true, ownerUserId: { not: null } }, select: { ownerUserId: true }, take: 10 });
-    await Promise.all(dealers.filter((d) => d.ownerUserId).map((d) => note(d.ownerUserId!, 'A trade-in quote is wanted', `${year} ${make} ${model}, ${km!.toLocaleString('en-AU')} km, ${data.condition.toLowerCase()} condition. Quote from your dealership page.`, '/dashboard/cars/dealership', { kind: 'CAR_TRADE_IN', id: t.id })));
+    // Told: the dealerships that will see it on their own requests page, all
+    // of them, and nobody who will not. It used to be any ten verified
+    // dealerships, whatever they sold, while the page they were sent to
+    // filtered the request out for most of them. See broadcast.service.
+    const dealers = (await tradeInDealerOwners({ make, dealershipId: data.dealershipId })).filter((o) => o !== req.user!.id);
+    await Promise.all(dealers.map((o) => note(o, 'A trade-in quote is wanted', `${year} ${make} ${model}, ${km!.toLocaleString('en-AU')} km, ${data.condition.toLowerCase()} condition. Quote from your dealership page.`, '/dashboard/cars/dealership', { kind: 'CAR_TRADE_IN', id: t.id })));
     ok(res, { id: t.id, estimate: v, tradeIn: v.tradeIn, expiresAt: t.expiresAt, dealersAsked: dealers.length }, 201);
   } catch (error) { next(error); }
 });
@@ -1835,7 +2174,7 @@ router.get('/finance/applications', authenticate, async (req: AuthRequest, res: 
   } catch (error) { next(error); }
 });
 
-router.post('/finance/applications', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/finance/applications', authenticate, requestCeiling, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const data = parse(applicationSchema, req.body);
     const open = await prisma.carFinanceApplication.count({ where: { userId: req.user!.id, status: { in: ['DRAFT', 'SUBMITTED', 'IN_REVIEW', 'PRE_APPROVED'] } } });
@@ -1917,11 +2256,12 @@ const featured = (days?: number | null) => (days === undefined ? {} : days === n
  * words for an admin granting or withdrawing a trust marker, which is exactly
  * what this is; the metadata says which kind of business and which row, so an
  * automotive decision is never confused with an identity one. The other admin
- * actions in this file — suspending a listing, closing a finance enquiry,
- * moving a referral through the ledger — have no honest value in AuditAction
- * yet and are deliberately not logged under a wrong one. See the
- * schemaChangesNeeded note asking for ADMIN_CAR_LISTING_STATUS,
- * ADMIN_CAR_FINANCE_UPDATE and ADMIN_CAR_REFERRAL_UPDATE.
+ * actions in this file — suspending a listing, featuring a business, closing a
+ * finance enquiry, hiding a review, moving a referral through the ledger,
+ * deciding a disputed purchase — have no value of their own in AuditAction and
+ * go through auditCarAdmin near the top of this file, which files them the way
+ * admin-audit.service files every other staff action without a verb: a neutral
+ * value, with the real one in metadata.adminAction.
  */
 async function auditVerification(req: AuthRequest, entity: 'mechanic' | 'dealership', target: { id: string; name: string; ownerUserId: string | null; isVerified: boolean }): Promise<void> {
   await logAudit({
@@ -1941,6 +2281,10 @@ router.patch('/admin/mechanics/:id', authenticate, requireRole('ADMIN'), async (
     const data = parse(z.object({ isVerified: z.boolean().optional(), isActive: z.boolean().optional(), featuredDays: z.coerce.number().int().min(0).max(365).nullable().optional() }), req.body);
     const updated = await prisma.mechanic.update({ where: { id: m.id }, data: { isVerified: data.isVerified, isActive: data.isActive, ...featured(data.featuredDays) } });
     if (data.isVerified !== undefined && data.isVerified !== m.isVerified) await auditVerification(req, 'mechanic', { id: m.id, name: m.name, ownerUserId: m.ownerUserId, isVerified: data.isVerified });
+    // Featuring puts a workshop at the top of every member's search, and
+    // hiding one takes it out of the directory: neither is a verification, and
+    // both were unattributed.
+    if (changed(m.isActive, data.isActive) || data.featuredDays !== undefined) await auditCarAdmin(req, 'CAR_WORKSHOP_UPDATED', { resourceType: 'Mechanic', resourceId: m.id, targetUserId: m.ownerUserId, name: m.name, isActive: changed(m.isActive, data.isActive), featured: data.featuredDays === undefined ? undefined : { from: m.isFeatured, to: updated.isFeatured, until: updated.featuredUntil } });
     if (m.ownerUserId && data.isVerified !== undefined && data.isVerified !== m.isVerified) await note(m.ownerUserId, data.isVerified ? 'Your workshop is live in the directory' : 'Your workshop has been taken out of the directory', data.isVerified ? 'Members can now find and book you.' : 'Check the workshop page for what to fix.', '/dashboard/cars/workshop', { kind: 'CAR_MECHANIC_VERIFIED', id: m.id });
     ok(res, mechanicCard(updated));
   } catch (error) { next(error); }
@@ -1953,6 +2297,7 @@ router.patch('/admin/dealerships/:id', authenticate, requireRole('ADMIN'), async
     const data = parse(z.object({ isVerified: z.boolean().optional(), isActive: z.boolean().optional(), featuredDays: z.coerce.number().int().min(0).max(365).nullable().optional() }), req.body);
     const updated = await prisma.dealership.update({ where: { id: d.id }, data: { isVerified: data.isVerified, isActive: data.isActive, ...featured(data.featuredDays) } });
     if (data.isVerified !== undefined && data.isVerified !== d.isVerified) await auditVerification(req, 'dealership', { id: d.id, name: d.name, ownerUserId: d.ownerUserId, isVerified: data.isVerified });
+    if (changed(d.isActive, data.isActive) || data.featuredDays !== undefined) await auditCarAdmin(req, 'CAR_DEALERSHIP_UPDATED', { resourceType: 'Dealership', resourceId: d.id, targetUserId: d.ownerUserId, name: d.name, isActive: changed(d.isActive, data.isActive), featured: data.featuredDays === undefined ? undefined : { from: d.isFeatured, to: updated.isFeatured, until: updated.featuredUntil } });
     if (d.ownerUserId && data.isVerified !== undefined && data.isVerified !== d.isVerified) await note(d.ownerUserId, data.isVerified ? 'Your dealership is live' : 'Your dealership has been hidden', data.isVerified ? 'Members can now book test drives and ask for trade-in quotes.' : 'Check the dealership page for what to fix.', '/dashboard/cars/dealership', { kind: 'CAR_DEALERSHIP_VERIFIED', id: d.id });
     ok(res, dealershipCard(updated));
   } catch (error) { next(error); }
@@ -1965,6 +2310,10 @@ router.patch('/admin/listings/:id', authenticate, requireRole('ADMIN'), async (r
     const data = parse(z.object({ status: z.enum(['ACTIVE', 'SUSPENDED', 'WITHDRAWN']).optional(), suspendedReason: z.string().trim().max(500).nullable().optional(), featuredDays: z.coerce.number().int().min(0).max(365).nullable().optional() }), req.body);
     const updated = await prisma.vehicleListing.update({ where: { id: l.id }, data: { status: data.status, suspendedReason: data.status === 'ACTIVE' ? null : data.suspendedReason, ...featured(data.featuredDays) }, include: listingInclude });
     if (data.status && data.status !== l.status) await note(l.sellerId, data.status === 'ACTIVE' ? 'Your listing is live' : data.status === 'SUSPENDED' ? 'Your listing has been paused' : 'Your listing has been taken down', data.status === 'ACTIVE' ? `"${l.title}" passed review and is showing.` : `"${l.title}": ${data.suspendedReason ?? 'see the listing for what to fix'}.`, `/dashboard/cars/sell/${l.id}`, { kind: 'CAR_LISTING_STATUS', id: l.id });
+    // The reason is kept in the row as well as on the listing: it is the
+    // admin's own words to the seller, and the listing's copy is overwritten
+    // the next time anybody reviews it.
+    await auditCarAdmin(req, 'CAR_LISTING_REVIEWED', { resourceType: 'VehicleListing', resourceId: l.id, targetUserId: l.sellerId, status: changed(l.status, data.status), reason: data.status && data.status !== 'ACTIVE' ? data.suspendedReason ?? null : undefined, featured: data.featuredDays === undefined ? undefined : { from: l.isFeatured, to: updated.isFeatured } });
     ok(res, listingCard(updated, { full: true, admin: true }));
   } catch (error) { next(error); }
 });
@@ -2003,6 +2352,9 @@ router.patch('/admin/finance/:id', authenticate, requireRole('ADMIN'), async (re
       ? `We have closed it.${data.decisionNote ? ` ${data.decisionNote.slice(0, 200)}` : ''} Your estimate is still on the page, and a licensed broker or lender is who to take it to.`
       : 'Someone at ATHENA has read it. This is not a credit assessment and no lender has seen it; the numbers on the page are ATHENA’s own estimate.';
     await note(a.userId, closing ? 'Your car finance enquiry has been closed' : 'Your car finance enquiry has been read', words, '/dashboard/cars/finance', { kind: 'CAR_FINANCE_STATUS', id: a.id });
+    // The note itself stays on her timeline, where she reads it; the audit row
+    // says who wrote it and what it did to the enquiry.
+    await auditCarAdmin(req, 'CAR_FINANCE_ENQUIRY_UPDATED', { resourceType: 'CarFinanceApplication', resourceId: a.id, targetUserId: a.userId, referenceCode: a.referenceCode, status: changed(a.status, data.status), withNote: Boolean(data.decisionNote) });
     ok(res, applicationCard(updated));
   } catch (error) { next(error); }
 });
@@ -2014,6 +2366,8 @@ router.patch('/admin/mechanic-reviews/:id', authenticate, requireRole('ADMIN'), 
     const data = parse(z.object({ isHidden: z.boolean() }), req.body);
     await prisma.mechanicReview.update({ where: { id: r.id }, data });
     await prisma.mechanic.update({ where: { id: r.mechanicId }, data: await mechanicRating(r.mechanicId) });
+    // Hiding a review moves a workshop's average, which is what members sort by.
+    await auditCarAdmin(req, 'CAR_WORKSHOP_REVIEW_MODERATED', { resourceType: 'MechanicReview', resourceId: r.id, targetUserId: r.userId, mechanicId: r.mechanicId, isHidden: changed(r.isHidden, data.isHidden) });
     ok(res, { id: r.id, isHidden: data.isHidden });
   } catch (error) { next(error); }
 });
@@ -2037,6 +2391,7 @@ router.post('/admin/referrals', authenticate, requireRole('ADMIN'), async (req: 
     const f = referralFee(data.kind, data.basisAmount);
     const now = new Date();
     const r = await prisma.carReferral.create({ data: { kind: data.kind, partner: data.partner, basisAmount: Math.round(data.basisAmount), feePercent: f.percent, fee: data.fee !== undefined ? Math.round(data.fee) : f.fee, userId: data.userId ?? null, dealershipId: data.dealershipId ?? null, referenceId: data.referenceId ?? null, note: data.note ?? null, createdById: req.user!.id, status: data.status ?? 'PENDING', confirmedAt: data.status && data.status !== 'PENDING' ? now : null, paidAt: data.status === 'PAID' ? now : null }, include: referralInclude });
+    await auditCarAdmin(req, 'CAR_REFERRAL_CREATED', { resourceType: 'CarReferral', resourceId: r.id, targetUserId: r.userId, kind: r.kind, partner: r.partner, basisAmount: r.basisAmount, fee: r.fee, standardFee: f.fee, status: r.status });
     ok(res, referralCard(r), 201);
   } catch (error) { next(error); }
 });
@@ -2048,6 +2403,12 @@ router.patch('/admin/referrals/:id', authenticate, requireRole('ADMIN'), async (
     const data = parse(z.object({ status: z.enum(['PENDING', 'CONFIRMED', 'PAID', 'VOID']).optional(), fee: money.optional(), note: z.string().trim().max(500).nullable().optional(), partner: z.string().trim().max(80).nullable().optional() }), req.body);
     const now = new Date();
     const updated = await prisma.carReferral.update({ where: { id: r.id }, data: { status: data.status, fee: data.fee !== undefined ? Math.round(data.fee) : undefined, note: data.note, partner: data.partner, ...(data.status === 'CONFIRMED' ? { confirmedAt: r.confirmedAt ?? now } : {}), ...(data.status === 'PAID' ? { confirmedAt: r.confirmedAt ?? now, paidAt: now } : {}) }, include: referralInclude });
+    // PAID and a rewritten fee are the two moves on the ledger that change
+    // what ATHENA says it has been paid, and until now neither said by whom.
+    // The note's previous wording goes in the row because a PATCH replaces it
+    // whole, and on a dealer sale it is where the member's and the
+    // dealership's accounts of the sale are written down.
+    await auditCarAdmin(req, 'CAR_REFERRAL_UPDATED', { resourceType: 'CarReferral', resourceId: r.id, targetUserId: r.userId, kind: r.kind, status: changed(r.status, updated.status), fee: changed(r.fee, updated.fee), partner: changed(r.partner, data.partner), previousNote: data.note !== undefined && data.note !== r.note ? r.note : undefined });
     ok(res, referralCard(updated));
   } catch (error) { next(error); }
 });
@@ -2055,18 +2416,24 @@ router.patch('/admin/referrals/:id', authenticate, requireRole('ADMIN'), async (
 // -------------------------------------------------------------------- fleet
 
 /** A business asking about the fleet programme. It lands on the marketing leads board, where the team already works, and the admins are told. */
-router.post('/fleet-enquiries', optionalAuth, async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/fleet-enquiries', fleetCeiling, optionalAuth, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const data = parse(z.object({ business: z.string().trim().min(2).max(120), contactName: z.string().trim().min(2).max(80), email: z.string().trim().email().max(120), phone: z.string().trim().max(20).optional(), vehicles: z.coerce.number().int().min(1).max(500), state: stateEnum.optional(), needs: z.string().trim().max(2000).optional(), wants: z.array(z.string().trim().max(60)).max(10).optional() }), req.body);
     const email = data.email.toLowerCase();
     const plural = data.vehicles === 1 ? '' : 's';
     const message = [`Fleet programme enquiry: ${data.vehicles} vehicle${plural}${data.state ? ` in ${data.state}` : ''}.`, data.wants?.length ? `Wants: ${data.wants.join(', ')}.` : null, data.needs || null, data.phone ? `Phone ${data.phone}.` : null].filter(Boolean).join(' ');
+    // The same business sending the form again within a day updates its lead
+    // and does not tell the admins again: the form needs no account, and five
+    // notifications per submission was a way to fill every admin's bell from a
+    // loop. The lead board still shows the latest message either way.
+    const before = await prisma.lead.findUnique({ where: { email_source: { email, source: 'CONTACT_SALES' } }, select: { interest: true, updatedAt: true } });
+    const heardToday = Boolean(before && before.interest === 'Automotive fleet programme' && before.updatedAt.getTime() > Date.now() - DAY);
     const lead = await prisma.lead.upsert({
       where: { email_source: { email, source: 'CONTACT_SALES' } },
       create: { email, name: data.contactName, organisation: data.business, role: 'Fleet contact', source: 'CONTACT_SALES', interest: 'Automotive fleet programme', message, convertedUserId: req.user?.id ?? null },
       update: { name: data.contactName, organisation: data.business, interest: 'Automotive fleet programme', message, status: 'NEW' },
     });
-    await noteAdmins('A fleet programme enquiry', `${data.business} (${data.contactName}), ${data.vehicles} vehicle${plural}${data.state ? ` in ${data.state}` : ''}. It is on the leads board.`, '/admin/marketing/leads', { kind: 'CAR_FLEET_ENQUIRY', id: lead.id });
+    if (!heardToday) await noteAdmins('A fleet programme enquiry', `${data.business} (${data.contactName}), ${data.vehicles} vehicle${plural}${data.state ? ` in ${data.state}` : ''}. It is on the leads board.`, '/admin/marketing/leads', { kind: 'CAR_FLEET_ENQUIRY', id: lead.id });
     ok(res, { received: true, programme: FLEET_PROGRAMME }, 201);
   } catch (error) { next(error); }
 });

@@ -17,7 +17,7 @@ import { CarFront, Check as CheckIcon, Banknote, ShieldCheck, Store, Umbrella, W
 import { PageShell } from '@/components/layout/PageShell';
 import { useAuth } from '@/lib/hooks';
 import { autoApi, autoError, aud0, type CarCard, type DealershipCard } from '@/lib/automotive-api';
-import { AncapBadge, AutoDisclaimer, Chip, ErrorBox, Loading, PageTitle, StarPicker, Stars, useLoad } from '@/components/automotive/AutoUi';
+import { AncapBadge, AutoDisclaimer, Chip, ErrorBox, HoursLine, Loading, PageTitle, StarPicker, Stars, useLoad } from '@/components/automotive/AutoUi';
 import { Field, NumberInput, Panel, SelectInput, Stat, inputClass } from '@/components/strategy/StrategyUi';
 import { cn } from '@/lib/utils';
 import { safeHref } from '@/lib/safe-href';
@@ -140,7 +140,7 @@ export default function CarPage() {
                 {c.dealerships.length > 0 && (isAuthenticated ? (
                   <div className="space-y-3">
                     <Field label="Dealership"><SelectInput value={drive.dealershipId} onChange={(v) => setDrive((x) => ({ ...x, dealershipId: v }))} options={[{ value: '', label: 'Pick one' }, ...c.dealerships.map((d) => ({ value: d.id, label: `${d.name}${d.city ? `, ${d.city}` : ''}` }))]} /></Field>
-                    <Field label="When suits you"><input type="datetime-local" value={drive.preferredAt} onChange={(e) => setDrive((x) => ({ ...x, preferredAt: e.target.value }))} className={inputClass} /></Field>
+                    <Field label="When suits you"><input type="datetime-local" value={drive.preferredAt} onChange={(e) => setDrive((x) => ({ ...x, preferredAt: e.target.value }))} className={inputClass} />{drive.dealershipId && <HoursLine hours={c.dealerships.find((d) => d.id === drive.dealershipId)?.hours} />}</Field>
                     <Field label="Anything to know"><input value={drive.note} onChange={(e) => setDrive((x) => ({ ...x, note: e.target.value }))} maxLength={300} className={inputClass} placeholder="Bringing a child seat to check the fit" /></Field>
                     <button type="button" onClick={requestDrive} disabled={busy || !drive.dealershipId || !drive.preferredAt} className="btn-primary w-full text-sm disabled:opacity-50">Request a test drive</button>
                   </div>

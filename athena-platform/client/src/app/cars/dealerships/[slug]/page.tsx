@@ -14,7 +14,7 @@ import { Globe, MessageSquare, Phone, Store } from 'lucide-react';
 import { PageShell } from '@/components/layout/PageShell';
 import { useAuth } from '@/lib/hooks';
 import { autoApi, autoError, aud0, km, type CarCard, type DealershipCard, type ListingCard, type VehicleCard } from '@/lib/automotive-api';
-import { AncapBadge, Chip, ErrorBox, Loading, PageTitle, Stars, VerdictChip, useLoad, useReference } from '@/components/automotive/AutoUi';
+import { AncapBadge, Chip, ErrorBox, HoursLine, Loading, PageTitle, Stars, VerdictChip, useLoad, useReference } from '@/components/automotive/AutoUi';
 import { Field, NumberInput, Panel, SelectInput, inputClass, num } from '@/components/strategy/StrategyUi';
 import { safeHref } from '@/lib/safe-href';
 
@@ -70,7 +70,7 @@ export default function DealershipPage() {
                 {!d.canRequest ? <Link href={`/login?redirect=/cars/dealerships/${d.slug}`} className="btn-primary inline-block text-sm">Sign in to book</Link> : (
                   <div className="space-y-3">
                     <Field label="Which car"><SelectInput value={drive.carModelId} onChange={(v) => setDrive((x) => ({ ...x, carModelId: v }))} options={[{ value: '', label: 'Any, I will say in the note' }, ...d.models.map((c) => ({ value: c.id, label: `${c.make} ${c.model}` }))]} /></Field>
-                    <Field label="When suits you"><input type="datetime-local" value={drive.preferredAt} onChange={(e) => setDrive((x) => ({ ...x, preferredAt: e.target.value }))} className={inputClass} /></Field>
+                    <Field label="When suits you"><input type="datetime-local" value={drive.preferredAt} onChange={(e) => setDrive((x) => ({ ...x, preferredAt: e.target.value }))} className={inputClass} /><HoursLine hours={d.hours} /></Field>
                     <Field label="A note"><input value={drive.note} onChange={(e) => setDrive((x) => ({ ...x, note: e.target.value }))} maxLength={300} className={inputClass} /></Field>
                     <button type="button" onClick={requestDrive} disabled={busy || !drive.preferredAt} className="btn-primary w-full text-sm disabled:opacity-50">Request a test drive</button>
                   </div>

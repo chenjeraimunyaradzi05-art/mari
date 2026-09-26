@@ -3,9 +3,11 @@
  * garage is due (service by time or kilometres, registration, insurance,
  * the warranty running out), each sent once a month at most; the buyer
  * protection window, nudged two days out and released when it passes
- * without a dispute; trade-in requests that have run their time; featured
- * flags that have expired; and the retraction of the car finance
- * "pre-approvals" ATHENA was never licensed to issue.
+ * without a dispute; inspection requests no workshop has taken, raised
+ * with the buyer and the admins instead of left to sit; trade-in requests
+ * that have run their time; featured flags that have expired; and the
+ * retraction of the car finance "pre-approvals" ATHENA was never licensed
+ * to issue.
  */
 
 import { Prisma } from '@prisma/client';
@@ -15,6 +17,7 @@ import { bestEffort, labelSegment } from '../../utils/best-effort';
 import { cancelEscrowPayment, captureEscrowPayment } from '../stripe-connect.service';
 import { markSent, shouldSend, vehicleReminders } from './garage.service';
 import { readHoldState, settlePurchaseHold } from './purchase-escrow.service';
+import { inspectionWorkshopOwners } from './broadcast.service';
 import { runExclusively } from '../../utils/redis';
 
 const DAY = 86400000;
@@ -339,18 +342,67 @@ export async function sweepExpiries(now = new Date()): Promise<{ tradeIns: numbe
   return { tradeIns: tradeIns.count, retracted, featured: f1.count + f2.count + f3.count };
 }
 
+/**
+ * How long an inspection request may sit with no workshop before somebody is
+ * told. Three days is long enough for a workshop to see it between jobs, and
+ * short enough that a buyer holding an offer open on a car is not left waiting
+ * on a queue nobody is reading.
+ */
+export const UNTAKEN_INSPECTION_AFTER = 3 * DAY;
+
+/**
+ * The inspection requests nobody has taken.
+ *
+ * A request used to be announced once, to at most ten workshops, and then
+ * nothing: no reminder, no escalation, so it could sit at REQUESTED for as
+ * long as the listing lasted while the buyer waited to hear. Past three days
+ * this does three things, once per request. It tells every workshop in the
+ * state that can take it and has not been told — one verified since the
+ * request was made, or one the old ten-row broadcast never reached. It tells
+ * the buyer plainly that nobody has taken it yet and what she can do. And it
+ * tells the admins, whose queue already lists it, that this one has gone
+ * stale. The buyer's notification is the marker that the escalation has
+ * happened, so a request is escalated once and not every six hours; the
+ * lookup fails closed like every other duplicate check here.
+ */
+export async function sweepUntakenInspections(now = new Date()): Promise<{ untaken: number; reminded: number }> {
+  const stale = await prisma.vehicleInspection.findMany({
+    where: { status: 'REQUESTED', kind: { not: 'SELLER_PROVIDED' }, createdAt: { lt: new Date(now.getTime() - UNTAKEN_INSPECTION_AFTER) }, listing: { status: { in: ['ACTIVE', 'UNDER_OFFER'] } } },
+    include: { listing: { select: { id: true, title: true, state: true, sellerId: true } } },
+    orderBy: [{ createdAt: 'asc' }],
+    take: 200,
+  });
+  let untaken = 0;
+  let reminded = 0;
+  for (const i of stale) {
+    if (await alreadyNotified(i.requestedById, 'CAR_INSPECTION_UNTAKEN', i.id)) continue;
+    const owners = (await inspectionWorkshopOwners(i.listing.state)).filter((o) => o !== i.listing.sellerId && o !== i.requestedById);
+    for (const o of owners) {
+      if (await alreadyNotified(o, 'CAR_INSPECTION_OPEN', i.id)) continue;
+      await notify(o, 'A pre-purchase inspection is still wanted', `A buyer has been waiting since ${i.createdAt.toISOString().slice(0, 10)} for "${i.listing.title}" to be looked over in ${i.listing.state}. Accept it from your workshop page.`, '/dashboard/cars/workshop', { kind: 'CAR_INSPECTION_OPEN', id: i.id });
+      reminded += 1;
+    }
+    const where = owners.length ? `The ${owners.length === 1 ? 'workshop' : `${owners.length} workshops`} in ${i.listing.state} that ${owners.length === 1 ? 'does' : 'do'} inspections ${owners.length === 1 ? 'has' : 'have'} been reminded` : `No verified workshop in ${i.listing.state} does inspections yet`;
+    await notify(i.requestedById, 'No workshop has taken your inspection yet', `Nobody has taken on the inspection of "${i.listing.title}" so far. ${where}, and the ATHENA team has been told. Nothing has been charged. You can also ask a mechanic you trust to look at it independently.`, '/dashboard/cars/purchases', { kind: 'CAR_INSPECTION_UNTAKEN', id: i.id });
+    await notifyAdmins('An inspection request has gone three days untaken', `"${i.listing.title}" in ${i.listing.state}, asked for on ${i.createdAt.toISOString().slice(0, 10)}. ${owners.length} workshop${owners.length === 1 ? '' : 's'} there can take it. Ring one, or tell the buyer what she can do instead.`, '/dashboard/cars/admin', { kind: 'CAR_INSPECTION_UNTAKEN', id: i.id });
+    untaken += 1;
+  }
+  return { untaken, reminded };
+}
+
 export async function runAutomotiveSweep(now = new Date()) {
   const garage = await sweepGarage(now);
   const purchases = await sweepPurchases(now);
+  const inspections = await sweepUntakenInspections(now);
   const expiries = await sweepExpiries(now);
-  return { garage, purchases, expiries };
+  return { garage, purchases, inspections, expiries };
 }
 
 let timer: NodeJS.Timeout | null = null;
 
 export function startAutomotiveSweeper(intervalMs = 6 * 60 * 60 * 1000): void {
   if (timer || process.env.NODE_ENV === 'test') return;
-  const run = () => runExclusively('automotive', () => runAutomotiveSweep()).then((r) => { if (r && (r.garage.sent || r.purchases.released || r.purchases.nudged || r.purchases.stuck || r.purchases.abandoned || r.expiries.retracted)) logger.info('Automotive sweep', r); }).catch((err) => logger.warn('Automotive sweep failed', { error: (err as Error).message }));
+  const run = () => runExclusively('automotive', () => runAutomotiveSweep()).then((r) => { if (r && (r.garage.sent || r.purchases.released || r.purchases.nudged || r.purchases.stuck || r.purchases.abandoned || r.inspections.untaken || r.expiries.retracted)) logger.info('Automotive sweep', r); }).catch((err) => logger.warn('Automotive sweep failed', { error: (err as Error).message }));
   setTimeout(run, 120_000).unref();
   timer = setInterval(run, intervalMs);
   timer.unref();

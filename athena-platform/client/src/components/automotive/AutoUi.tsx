@@ -173,6 +173,20 @@ export function Money({ n, big }: { n: number | null | undefined; big?: boolean 
   return <span className={cn('tabular-nums', big && 'text-2xl font-semibold')}>{`$${Math.round(Number(n) || 0).toLocaleString('en-AU')}`}</span>;
 }
 
+const WEEK = [1, 2, 3, 4, 5, 6, 0];
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/**
+ * A dealership's opening hours, beside the time picker for a test drive. The
+ * server refuses a time outside them, so she should see them before she picks
+ * one rather than learn them from the refusal.
+ */
+export function HoursLine({ hours }: { hours: Record<string, Array<[string, string]>> | null | undefined }) {
+  const days = WEEK.filter((d) => (hours?.[String(d)] ?? []).length > 0);
+  if (!hours || days.length === 0) return <p className="mt-1 text-[11px] text-slate-500">This dealership has not published its hours; they will confirm a time that suits them.</p>;
+  return <p className="mt-1 text-[11px] text-slate-500">Open {days.map((d) => `${DAY_NAMES[d]} ${hours[String(d)].map(([a, b]) => `${a}–${b}`).join(', ')}`).join(' · ')}, their local time.</p>;
+}
+
 export function Kv({ k, v }: { k: string; v: ReactNode }) {
   return <div><dt className="text-[11px] uppercase tracking-wide text-slate-500">{k}</dt><dd className="text-sm text-slate-800 dark:text-slate-200">{v}</dd></div>;
 }

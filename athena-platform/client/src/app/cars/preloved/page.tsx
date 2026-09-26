@@ -21,7 +21,7 @@ import { Heart, Search, ShieldCheck, Tag } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHero, PageShell } from '@/components/layout/PageShell';
 import { useAuth } from '@/lib/hooks';
-import { autoApi, autoError, aud0, km, type ListingCard } from '@/lib/automotive-api';
+import { ELECTRIFIED_FUELS, autoApi, autoError, aud0, km, type ListingCard } from '@/lib/automotive-api';
 import { AutoDisclaimer, Chip, Empty, ErrorBox, Loading, VerdictChip, useLoad, useReference } from '@/components/automotive/AutoUi';
 import { Check, Field, NumberInput, SelectInput, inputClass } from '@/components/strategy/StrategyUi';
 import { cn } from '@/lib/utils';
@@ -54,10 +54,10 @@ function Listings() {
           <Field label="From"><NumberInput value={f.minPrice} onChange={(v) => set('minPrice', v)} prefix="$" /></Field>
           <Field label="Kilometres up to"><NumberInput value={f.maxKm} onChange={(v) => set('maxKm', v)} suffix="km" /></Field>
           <Field label="Year from"><NumberInput value={f.minYear} onChange={(v) => set('minYear', v)} /></Field>
-          <Field label="Fuel"><SelectInput value={f.fuelType} onChange={(v) => set('fuelType', v)} options={[{ value: '', label: 'Any' }, ...(ref.data?.fuelTypes ?? []).map((b) => ({ value: b.key, label: b.label }))]} /></Field>
+          <Field label="Fuel"><SelectInput value={f.fuelType} onChange={(v) => set('fuelType', v)} options={[{ value: '', label: f.electrified ? 'Any hybrid or electric' : 'Any' }, ...(ref.data?.fuelTypes ?? []).filter((b) => !f.electrified || ELECTRIFIED_FUELS.includes(b.key)).map((b) => ({ value: b.key, label: b.label }))]} /></Field>
           <Field label="Seller"><SelectInput value={f.sellerKind} onChange={(v) => set('sellerKind', v)} options={[{ value: '', label: 'Anyone' }, { value: 'PRIVATE', label: 'Private' }, { value: 'DEALER', label: 'Dealer' }]} /></Field>
         </div>
-        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2"><Check checked={f.ppsr} onChange={(v) => set('ppsr', v)} label="Seller says a PPSR check is done" /><Check checked={f.fullHistory} onChange={(v) => set('fullHistory', v)} label="Full service history" /><Check checked={f.inspected} onChange={(v) => set('inspected', v)} label="Already inspected" /><Check checked={f.warranty} onChange={(v) => set('warranty', v)} label="With a warranty" /><Check checked={f.electrified} onChange={(v) => set('electrified', v)} label="Hybrid or electric" /></div>
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2"><Check checked={f.ppsr} onChange={(v) => set('ppsr', v)} label="Seller says a PPSR check is done" /><Check checked={f.fullHistory} onChange={(v) => set('fullHistory', v)} label="Full service history" /><Check checked={f.inspected} onChange={(v) => set('inspected', v)} label="Already inspected" /><Check checked={f.warranty} onChange={(v) => set('warranty', v)} label="With a warranty" /><Check checked={f.electrified} onChange={(v) => { setPage(1); setF((x) => ({ ...x, electrified: v, fuelType: v && x.fuelType && !ELECTRIFIED_FUELS.includes(x.fuelType) ? '' : x.fuelType })); }} label="Hybrid or electric" /></div>
       </div>
       {data.loading && <div className="mt-6"><Loading /></div>}
       <ErrorBox error={data.error} />

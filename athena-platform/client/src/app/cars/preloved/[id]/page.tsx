@@ -15,7 +15,7 @@ import toast from 'react-hot-toast';
 import { Heart, MessageSquare, ShieldCheck, Tag } from 'lucide-react';
 import { PageShell } from '@/components/layout/PageShell';
 import { useAuth } from '@/lib/hooks';
-import { autoApi, autoError, aud0, km, type InspectionCard, type ListingCard } from '@/lib/automotive-api';
+import { autoApi, autoError, aud0, km, messageAbout, type InspectionCard, type ListingCard } from '@/lib/automotive-api';
 import { AutoDisclaimer, Chip, ErrorBox, Kv, Loading, PageTitle, PhotoStrip, StatusChip, VerdictChip, fmtDay, useLoad, useReference } from '@/components/automotive/AutoUi';
 import { Field, NumberInput, Panel, Stat, inputClass, num } from '@/components/strategy/StrategyUi';
 import { cn } from '@/lib/utils';
@@ -47,7 +47,15 @@ export default function ListingPage() {
   const inspect = async () => {
     if (!l) return;
     setBusy(true);
-    try { await autoApi.requestInspection(l.id, { kind: 'ATHENA_VETTED' }); toast.success('Requested. Workshops nearby that do inspections have been told; the fee is paid when one takes it on.'); data.reload(); }
+    try {
+      // The count is the server's: every workshop in the state that can take
+      // it. None means none, and she is told so rather than told a workshop
+      // is on its way.
+      const res = await autoApi.requestInspection(l.id, { kind: 'ATHENA_VETTED' });
+      const told = Number(res.data?.data?.workshopsTold ?? 0);
+      toast.success(told > 0 ? `Requested. ${told === 1 ? 'The workshop' : `All ${told} workshops`} in ${l.state} that ${told === 1 ? 'does' : 'do'} inspections ${told === 1 ? 'has' : 'have'} been told; the fee is paid when one takes it on.` : `Requested, but no verified workshop in ${l.state} does inspections yet. The ATHENA team has been told and will come back to you. Nothing is charged.`);
+      data.reload();
+    }
     catch (err) { toast.error(autoError(err, 'That could not be requested.')); } finally { setBusy(false); }
   };
   const save = async () => { if (!l) return; try { if (l.saved) await autoApi.unsaveListing(l.id); else await autoApi.saveListing(l.id); data.reload(); } catch (err) { toast.error(autoError(err, 'That did not work.')); } };
@@ -113,7 +121,7 @@ export default function ListingPage() {
                   <Field label="Your offer"><NumberInput value={offer} onChange={setOffer} prefix="$" placeholder={String(l.price)} /></Field>
                   <Field label="A word to the seller" className="mt-3"><textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={3} maxLength={1000} className={inputClass} placeholder="When you could collect, and what you would like to see first." /></Field>
                   <button type="button" onClick={makeOffer} disabled={busy || num(offer) <= 0} className="btn-primary mt-3 w-full text-sm disabled:opacity-50">Send the offer</button>
-                  <a href={`/dashboard/messages?user=${l.seller.id}`} className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-rose-600"><MessageSquare className="h-4 w-4" /> Message the seller first</a>
+                  <a href={messageAbout(l.seller.id, `your ${l.year} ${l.make} ${l.model} listed at ${aud0(l.price)}`, `/cars/preloved/${l.id}`)} className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-rose-600"><MessageSquare className="h-4 w-4" /> Message the seller first</a>
                 </Panel>
               ) : !isAuthenticated ? (
                 <Panel title="Buy it with the money held"><p className="text-sm text-slate-700 dark:text-slate-300">Sign in to make an offer, request an inspection, or save this car.</p><Link href={`/login?redirect=/cars/preloved/${l.id}`} className="btn-primary mt-3 inline-block text-sm">Sign in</Link></Panel>

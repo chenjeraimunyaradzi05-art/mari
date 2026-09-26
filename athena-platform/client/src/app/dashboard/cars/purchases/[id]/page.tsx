@@ -22,7 +22,7 @@ import { useParams } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { MessageSquare, ShieldCheck } from 'lucide-react';
 import { api } from '@/lib/api';
-import { autoApi, autoError, aud0, km, type InspectionCard, type PurchaseCard } from '@/lib/automotive-api';
+import { autoApi, autoError, aud0, km, messageAbout, type InspectionCard, type PurchaseCard } from '@/lib/automotive-api';
 import { AutoNav, Confirm, ErrorBox, Loading, PageTitle, PayHold, StarPicker, StatusChip, fmtDay, fmtWhen, useLoad } from '@/components/automotive/AutoUi';
 import { Field, Panel, Stat, inputClass } from '@/components/strategy/StrategyUi';
 import { cn } from '@/lib/utils';
@@ -126,7 +126,7 @@ export default function PurchasePage() {
                 </div>
               </Panel>
               <Panel title="The other party" intro={p.role === 'buyer' ? `${p.seller.name}${p.seller.email ? ` · ${p.seller.email}` : ''}` : `${p.buyer.name}${p.buyer.email ? ` · ${p.buyer.email}` : ''}`}>
-                <a href={`/dashboard/messages?user=${p.role === 'buyer' ? p.seller.id : p.buyer.id}`} className="inline-flex items-center gap-1.5 text-sm font-semibold text-rose-600"><MessageSquare className="h-4 w-4" /> Message them</a>
+                <a href={messageAbout(p.role === 'buyer' ? p.seller.id : p.buyer.id, `the purchase of the ${p.listing.year} ${p.listing.make} ${p.listing.model}`, `/dashboard/cars/purchases/${p.id}`)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-rose-600"><MessageSquare className="h-4 w-4" /> Message them</a>
                 <p className="mt-2 text-xs text-slate-500">Email addresses are shared once the money is held, so the handover can be arranged. Keep payment inside ATHENA; anything asked for outside it is not protected.</p>
               </Panel>
               {p.role === 'buyer' && <Panel title="Checks before you release"><ul className="space-y-1 text-sm"><li><a href={safeHref(p.checks.ppsr.url)} target="_blank" rel="noopener noreferrer" className="font-semibold text-rose-600">PPSR certificate</a>{p.listing.vin ? <span className="text-xs text-slate-500"> · VIN {p.listing.vin}</span> : ''}</li>{p.checks.rego && <li><a href={safeHref(p.checks.rego.url)} target="_blank" rel="noopener noreferrer" className="font-semibold text-rose-600">{p.checks.rego.name}</a>{p.listing.rego ? <span className="text-xs text-slate-500"> · {p.listing.rego}</span> : ''}</li>}<li><Link href="/cars/safety" className="font-semibold text-rose-600">What an inspection covers</Link></li></ul><div className="mt-3"><Stat label="Transfer" value="Within 14 days" sub="Most states give fourteen days to transfer the registration into your name; the seller lodges a notice of disposal." /></div></Panel>}

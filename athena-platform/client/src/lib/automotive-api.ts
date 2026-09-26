@@ -10,12 +10,33 @@
  * paying and anything that is a member's own needs a session.
  */
 
+import type { AxiosResponse } from 'axios';
 import { api } from './api';
 
 type Body = Record<string, unknown>;
 
+/**
+ * The reference library, asked for once per page load and shared.
+ *
+ * Sixteen pages call useReference() on mount, and every one of them used to
+ * fetch the whole library again — the same constants, re-sent on each
+ * navigation within the vertical, each fetch spending one of the hundred
+ * requests an address gets every fifteen minutes. The server now lets the
+ * browser cache it too; this keeps a single request in flight and reuses its
+ * answer for as long as the tab is open. A failure is not kept, so the next
+ * page to ask tries again rather than inheriting the error.
+ */
+let referenceOnce: Promise<AxiosResponse> | null = null;
+function reference(): Promise<AxiosResponse> {
+  if (!referenceOnce) {
+    referenceOnce = api.get('/automotive/reference');
+    referenceOnce.catch(() => { referenceOnce = null; });
+  }
+  return referenceOnce;
+}
+
 export const autoApi = {
-  reference: () => api.get('/automotive/reference'),
+  reference,
   overview: () => api.get('/automotive/overview'),
 
   catalogue: (params?: Body) => api.get('/automotive/catalogue', { params }),
@@ -109,6 +130,8 @@ export const autoApi = {
   requestTestDrive: (data: Body) => api.post('/automotive/test-drives', data),
   testDrives: () => api.get('/automotive/test-drives'),
   cancelTestDrive: (id: string) => api.patch(`/automotive/test-drives/${id}`, {}),
+  reportSale: (id: string, data: { price?: number }) => api.post(`/automotive/test-drives/${id}/sale`, data),
+  disputeSale: (id: string) => api.post(`/automotive/test-drives/${id}/sale/dispute`, {}),
   requestTradeIn: (data: Body) => api.post('/automotive/trade-ins', data),
   tradeIns: () => api.get('/automotive/trade-ins'),
   updateTradeIn: (id: string, data: Body) => api.patch(`/automotive/trade-ins/${id}`, data),
@@ -125,6 +148,32 @@ export const autoApi = {
     referral: (id: string, data: Body) => api.patch(`/automotive/admin/referrals/${id}`, data),
   },
 };
+
+/**
+ * The fuels "Hybrid or electric" means. The searches read a fuel type and that
+ * box together — Diesel and electrified is nothing, because there is no such
+ * car — so the pages keep the two from contradicting each other: with the box
+ * ticked, the fuel list offers only these, and ticking it clears a fuel that
+ * is not one of them rather than leaving a filter that can match nothing.
+ */
+export const ELECTRIFIED_FUELS: readonly string[] = ['HYBRID', 'PLUG_IN_HYBRID', 'ELECTRIC'];
+
+/**
+ * A link that opens a direct message to someone, with a first line saying
+ * which car it is about.
+ *
+ * The "message the seller" links went to the general inbox addressed to the
+ * seller and nothing else, so a woman selling two cars got a message that
+ * could have been about either, and a thread that ended in a dispute had
+ * nothing in it tying it to the purchase. The inbox already carries a draft
+ * through `?text=` into the composer, so the draft names the car and links
+ * back to it; she can edit or delete the line before she sends anything.
+ */
+export function messageAbout(userId: string, subject: string, path: string): string {
+  const origin = typeof window === 'undefined' ? '' : window.location.origin;
+  const draft = `About ${subject} (${origin}${path}): `;
+  return `/dashboard/messages?user=${encodeURIComponent(userId)}&text=${encodeURIComponent(draft)}`;
+}
 
 /** The message an API error carries, or a fallback. */
 export function autoError(err: unknown, fallback: string): string {

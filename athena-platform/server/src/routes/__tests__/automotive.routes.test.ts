@@ -184,6 +184,7 @@ import { app } from '../../index';
 import { prisma } from '../../utils/prisma';
 import { CAR_SEEDS } from '../../services/automotive/automotive-library';
 import { captureEscrowPayment, createEscrowPayment } from '../../services/stripe-connect.service';
+import { resetMemoryRateLimits } from '../../middleware/rateLimiter';
 
 const as = (userId: string, role = 'USER') => ({ 'x-test-user': userId, 'x-test-role': role });
 /**
@@ -231,6 +232,9 @@ const dealership = (id: string, ownerUserId: string, name: string, slug: string,
 describe('The automotive routes', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    // The router's own ceilings count in this process when Redis is absent,
+    // so each test starts with none of the last one's requests on the clock.
+    resetMemoryRateLimits();
     for (const k of Object.keys(store) as Array<keyof typeof store>) store[k] = [];
     seedCars();
     store.mechanics = [workshop()];
@@ -238,6 +242,11 @@ describe('The automotive routes', () => {
 
   it('opens the reference and the catalogue to anyone, with ratings dated and lapsed ratings marked', async () => {
     const ref = await request(app).get('/api/automotive/reference').expect(200);
+    // Every car page asks for this on mount; it is the same for everyone and
+    // changes only on a deploy, so the browser is allowed to keep it.
+    expect(ref.headers['cache-control']).toContain('max-age=3600');
+    expect(ref.headers.etag).toBeTruthy();
+    await request(app).get('/api/automotive/reference').set('If-None-Match', ref.headers.etag).expect(304);
     expect(ref.body.data.safetyFeatures.length).toBeGreaterThan(10);
     expect(ref.body.data.buyerProtection.inspectionDays).toBe(14);
     const cat = await request(app).get('/api/automotive/catalogue?fuelType=HYBRID&sort=price').expect(200);
@@ -358,6 +367,10 @@ describe('The automotive routes', () => {
     const resolved = await request(app).post(`/api/automotive/purchases/${pid}/resolve`).set(as('admin', 'ADMIN')).send({ outcome: 'REFUND', note: 'The kilometres were misdescribed; refunded in full.' }).expect(200);
     expect(resolved.body.data.status).toBe('REFUNDED');
     expect(store.escrows[0].status).toBe('CANCELED');
+    // Who decided where twenty-one thousand dollars went, kept apart from the
+    // purchase row that the next change to it would overwrite.
+    expect(store.audits).toHaveLength(1);
+    expect(store.audits[0]).toMatchObject({ action: 'DATA_ACCESS', actorUserId: 'admin', targetUserId: 'member', metadata: { adminAction: 'CAR_PURCHASE_DISPUTE_RESOLVED', area: 'automotive', resourceType: 'VehiclePurchase', resourceId: pid, outcome: 'REFUND', amount: 21000, status: { from: 'DISPUTED', to: 'REFUNDED' } } });
   });
 
   it('releases the money to the seller when the buyer is satisfied', async () => {
@@ -804,16 +817,26 @@ describe('The automotive routes', () => {
     expect(store.audits[0]).toMatchObject({ actorUserId: 'admin', targetUserId: 'newbie', metadata: { area: 'automotive', entity: 'mechanic', name: 'New One Motors', isVerified: true } });
   });
 
+  /**
+   * Featuring used to leave no trace at all, which this test once asserted
+   * as "no audit row". It is now recorded under its own verb — featuring puts
+   * a business in front of every member — so the verification rows are the
+   * ones counted here, and the featuring row is checked for what it says.
+   */
   it('records which admin verified a dealership, and only when the answer changed', async () => {
     const id = randomUUID();
+    const verifications = () => store.audits.filter((a) => String(a.action).startsWith('ADMIN_VERIFICATION'));
     store.dealerships = [dealership(id, 'seller', 'Sunny Motors', 'sunny-motors', { isVerified: false })];
     await request(app).patch(`/api/automotive/admin/dealerships/${id}`).set(as('admin', 'ADMIN')).send({ featuredDays: 30 }).expect(200);
-    expect(store.audits).toHaveLength(0);
-    await request(app).patch(`/api/automotive/admin/dealerships/${id}`).set(as('admin', 'ADMIN')).send({ isVerified: true }).expect(200);
+    expect(verifications()).toHaveLength(0);
     expect(store.audits).toHaveLength(1);
-    expect(store.audits[0]).toMatchObject({ action: 'ADMIN_VERIFICATION_APPROVE', actorUserId: 'admin', targetUserId: 'seller', metadata: { area: 'automotive', entity: 'dealership', entityId: id } });
+    expect(store.audits[0]).toMatchObject({ actorUserId: 'admin', targetUserId: 'seller', metadata: { adminAction: 'CAR_DEALERSHIP_UPDATED', area: 'automotive', resourceType: 'Dealership', resourceId: id, featured: { from: false, to: true } } });
     await request(app).patch(`/api/automotive/admin/dealerships/${id}`).set(as('admin', 'ADMIN')).send({ isVerified: true }).expect(200);
-    expect(store.audits).toHaveLength(1);
+    expect(verifications()).toHaveLength(1);
+    expect(verifications()[0]).toMatchObject({ action: 'ADMIN_VERIFICATION_APPROVE', actorUserId: 'admin', targetUserId: 'seller', metadata: { area: 'automotive', entity: 'dealership', entityId: id } });
+    await request(app).patch(`/api/automotive/admin/dealerships/${id}`).set(as('admin', 'ADMIN')).send({ isVerified: true }).expect(200);
+    expect(verifications()).toHaveLength(1);
+    expect(store.audits).toHaveLength(2);
   });
 
   /**
@@ -850,8 +873,16 @@ describe('The automotive routes', () => {
     const refused = await request(app).patch(`/api/automotive/dealership/test-drives/${drive.body.data.id}`).set(as('seller')).send({ status: 'COMPLETED', sold: true, salePrice: 42000 }).expect(403);
     expect(refused.body.message).toContain('verified dealership');
     expect(store.referrals).toHaveLength(0);
+    // The refusal is decided before anything is written: the "completed" that
+    // came with the refused sale does not stick, and she is told nothing.
+    expect(store.testDrives[0].status).toBe('REQUESTED');
+    expect(store.notifications.some((x) => x.userId === 'member' && x.data.kind === 'CAR_TEST_DRIVE')).toBe(false);
 
     store.dealerships[0].isVerified = true;
+    // A sale with no price used to be dropped without a word.
+    const noPrice = await request(app).patch(`/api/automotive/dealership/test-drives/${drive.body.data.id}`).set(as('seller')).send({ status: 'COMPLETED', sold: true }).expect(400);
+    expect(noPrice.body.message).toContain('price');
+    expect(store.testDrives[0].status).toBe('REQUESTED');
     const sold = await request(app).patch(`/api/automotive/dealership/test-drives/${drive.body.data.id}`).set(as('seller')).send({ status: 'COMPLETED', sold: true, salePrice: 42000 }).expect(200);
     expect(sold.body.data.referralFee).toBe(420);
     expect(store.referrals).toHaveLength(1);
@@ -1064,5 +1095,232 @@ describe('The automotive routes', () => {
     expect(hers.body.data.roles).toMatchObject({ isDealer: true, dealerVerified: true, isMechanic: false });
     const jo = await request(app).get('/api/automotive/overview').set(as('mech')).expect(200);
     expect(jo.body.data.roles).toMatchObject({ isMechanic: true, mechanicVerified: true, isDealer: false });
+  });
+
+  /**
+   * The fuel type and the electrified box used to be two writes to the same
+   * key, so the second won: Diesel with "Hybrid or electric" ticked showed
+   * every hybrid and EV and not one diesel.
+   */
+  it('reads a fuel type and "hybrid or electric" together, in the catalogue and in the listings', async () => {
+    const dieselAndElectric = await request(app).get('/api/automotive/catalogue?fuelType=DIESEL&electrified=true').expect(200);
+    expect(dieselAndElectric.body.data.cars).toHaveLength(0);
+    const hybridAndElectric = await request(app).get('/api/automotive/catalogue?fuelType=HYBRID&electrified=true').expect(200);
+    expect(hybridAndElectric.body.data.cars.length).toBeGreaterThan(0);
+    expect(hybridAndElectric.body.data.cars.every((c: any) => c.fuelType === 'HYBRID')).toBe(true);
+    const electrified = await request(app).get('/api/automotive/catalogue?electrified=true').expect(200);
+    expect(electrified.body.data.cars.every((c: any) => ['HYBRID', 'PLUG_IN_HYBRID', 'ELECTRIC'].includes(c.fuelType))).toBe(true);
+    await request(app).get('/api/automotive/catalogue?fuelType=STEAM').expect(400);
+
+    const base = { make: 'Toyota', year: 2019, bodyType: 'UTE' as const, odometerKm: 90000, price: 30000, state: 'QLD', photos: ['https://img.example.com/a.jpg', 'https://img.example.com/b.jpg', 'https://img.example.com/c.jpg', 'https://img.example.com/d.jpg'], publish: true };
+    await request(app).post('/api/automotive/listings').set(as('seller')).send({ ...base, model: 'HiLux', fuelType: 'DIESEL', title: '2019 Toyota HiLux SR, towbar', description: 'Work ute, serviced by the book, towbar and tub liner, never off-road.', vin: 'MR0HA3CD100123456' }).expect(201);
+    await request(app).post('/api/automotive/listings').set(as('seller')).send({ ...base, model: 'RAV4', bodyType: 'SUV', fuelType: 'HYBRID', title: '2019 Toyota RAV4 hybrid GX', description: 'Family SUV, one owner, full Toyota history, sold because we need seven seats.', vin: 'JTMRWRFV10D123456' }).expect(201);
+    const diesels = await request(app).get('/api/automotive/listings?fuelType=DIESEL').expect(200);
+    expect(diesels.body.data.listings.map((x: any) => x.fuelType)).toEqual(['DIESEL']);
+    const both = await request(app).get('/api/automotive/listings?fuelType=DIESEL&electrified=true').expect(200);
+    expect(both.body.data.listings).toHaveLength(0);
+    const hybrids = await request(app).get('/api/automotive/listings?electrified=true').expect(200);
+    expect(hybrids.body.data.listings.map((x: any) => x.fuelType)).toEqual(['HYBRID']);
+  });
+
+  /**
+   * An offer puts a notification in front of the seller, and cancelling it
+   * and offering again put two more there, as often as a buyer liked. Many of
+   * the women selling a car here are selling it because they are leaving
+   * someone, so a loop on one listing is a way to keep landing in her
+   * notifications. Three offers a day on one car, cancellations counted.
+   */
+  it('stops a buyer offering on the same car over and over, however often she cancels in between', async () => {
+    const l = await request(app).post('/api/automotive/listings').set(as('seller')).send({ title: '2020 Mazda 3 G20 Evolve', make: 'Mazda', model: '3', year: 2020, bodyType: 'HATCH', fuelType: 'PETROL', odometerKm: 50000, price: 21000, description: 'City car, garaged, serviced at Mazda, two keys and the books in the glovebox.', state: 'QLD', photos: ['https://img.example.com/a.jpg', 'https://img.example.com/b.jpg', 'https://img.example.com/c.jpg', 'https://img.example.com/d.jpg'], vin: 'JM0BP2HE200123456', publish: true }).expect(201);
+    for (let i = 0; i < 3; i += 1) {
+      const o = await request(app).post(`/api/automotive/listings/${l.body.data.id}/offers`).set(as('member')).send({ amount: 20000 + i * 100 }).expect(201);
+      await request(app).post(`/api/automotive/purchases/${o.body.data.id}/cancel`).set(as('member')).expect(200);
+    }
+    const fourth = await request(app).post(`/api/automotive/listings/${l.body.data.id}/offers`).set(as('member')).send({ amount: 20500 }).expect(429);
+    expect(fourth.body.message).toContain('the seller was told about each one');
+    expect(store.notifications.filter((n) => n.userId === 'seller' && n.data.kind === 'CAR_OFFER')).toHaveLength(3);
+    expect(store.purchases).toHaveLength(3);
+    // A day later the count has moved on.
+    for (const p of store.purchases) p.createdAt = new Date(Date.now() - 25 * 3600 * 1000);
+    await request(app).post(`/api/automotive/listings/${l.body.data.id}/offers`).set(as('member')).send({ amount: 20500 }).expect(201);
+  });
+
+  it('tells the admins about a fleet enquiry once a day per business, and stops a flood from one address', async () => {
+    const form = { business: 'Bloom Florists', contactName: 'Mei Lin', email: 'fleet@bloom.example', vehicles: 4 };
+    await request(app).post('/api/automotive/fleet-enquiries').send(form).expect(201);
+    await request(app).post('/api/automotive/fleet-enquiries').send({ ...form, vehicles: 5 }).expect(201);
+    expect(store.notifications.filter((n) => n.userId === 'admin' && n.data.kind === 'CAR_FLEET_ENQUIRY')).toHaveLength(1);
+    expect(store.leads).toHaveLength(1);
+    expect(store.leads[0].message).toContain('5 vehicles');
+    await request(app).post('/api/automotive/fleet-enquiries').send({ ...form, email: 'fleet@other.example' }).expect(201);
+    expect(store.notifications.filter((n) => n.userId === 'admin' && n.data.kind === 'CAR_FLEET_ENQUIRY')).toHaveLength(2);
+    await request(app).post('/api/automotive/fleet-enquiries').send({ ...form, email: 'a@one.example' }).expect(201);
+    await request(app).post('/api/automotive/fleet-enquiries').send({ ...form, email: 'b@two.example' }).expect(201);
+    const sixth = await request(app).post('/api/automotive/fleet-enquiries').send({ ...form, email: 'c@three.example' }).expect(429);
+    expect(sixth.body.message).toContain('try again in an hour');
+  });
+
+  /**
+   * Taking a listing down, rewriting a referral fee, marking it paid, closing
+   * a finance enquiry and hiding a review used to leave no record of which
+   * admin did it. Each now writes a row under the platform's staff-action
+   * shape: the neutral enum value, the real verb in metadata.adminAction.
+   */
+  it('records which admin held a listing, moved a fee, closed an enquiry and hid a review', async () => {
+    const held = await request(app).post('/api/automotive/listings').set(as('newbie')).send({ title: 'Urgent sale, overseas, cheap SUV', make: 'Toyota', model: 'RAV4', year: 2022, bodyType: 'SUV', fuelType: 'HYBRID', odometerKm: 9000, price: 12000, description: 'I am overseas, a shipping agent will deliver after a deposit to hold it. Urgent.', state: 'NSW', publish: true }).expect(201);
+    expect(held.body.data.status).toBe('SUSPENDED');
+    const reason = 'The price is far under the guide and there are no photos. Add photos and the VIN and it can go live.';
+    await request(app).patch(`/api/automotive/admin/listings/${held.body.data.id}`).set(as('admin', 'ADMIN')).send({ status: 'WITHDRAWN', suspendedReason: reason }).expect(200);
+    const byVerb = (verb: string) => store.audits.filter((a) => a.metadata?.adminAction === verb);
+    expect(byVerb('CAR_LISTING_REVIEWED')).toHaveLength(1);
+    expect(byVerb('CAR_LISTING_REVIEWED')[0]).toMatchObject({ action: 'DATA_ACCESS', actorUserId: 'admin', targetUserId: 'newbie', metadata: { area: 'automotive', resourceType: 'VehicleListing', resourceId: held.body.data.id, status: { from: 'SUSPENDED', to: 'WITHDRAWN' }, reason } });
+
+    const fee = await request(app).post('/api/automotive/admin/referrals').set(as('admin', 'ADMIN')).send({ kind: 'INSURANCE', partner: 'An insurer', basisAmount: 1200 }).expect(201);
+    expect(byVerb('CAR_REFERRAL_CREATED')[0]).toMatchObject({ actorUserId: 'admin', metadata: { resourceId: fee.body.data.id, fee: 180, standardFee: 180, status: 'PENDING' } });
+    await request(app).patch(`/api/automotive/admin/referrals/${fee.body.data.id}`).set(as('admin', 'ADMIN')).send({ status: 'PAID', fee: 150 }).expect(200);
+    expect(byVerb('CAR_REFERRAL_UPDATED')).toHaveLength(1);
+    expect(byVerb('CAR_REFERRAL_UPDATED')[0]).toMatchObject({ actorUserId: 'admin', metadata: { resourceType: 'CarReferral', resourceId: fee.body.data.id, status: { from: 'PENDING', to: 'PAID' }, fee: { from: 180, to: 150 } } });
+
+    const enquiry = await request(app).post('/api/automotive/finance/applications').set(as('member')).send({ purpose: 'USED', vehiclePrice: 25000, deposit: 5000, termMonths: 60, incomeAnnual: 78000, expensesMonthly: 2400, employment: 'FULL_TIME', employmentMonths: 30, residency: 'CITIZEN', submit: true }).expect(201);
+    await request(app).patch(`/api/automotive/admin/finance/${enquiry.body.data.id}`).set(as('admin', 'ADMIN')).send({ status: 'WITHDRAWN', decisionNote: 'Take the estimate to a broker; we cannot assess credit.' }).expect(200);
+    expect(byVerb('CAR_FINANCE_ENQUIRY_UPDATED')[0]).toMatchObject({ actorUserId: 'admin', targetUserId: 'member', metadata: { status: { from: 'SUBMITTED', to: 'WITHDRAWN' }, withNote: true } });
+
+    store.mechanicReviews = [{ id: 'mr9', mechanicId: 'm1', userId: 'member', bookingId: 'b9', rating: 1, transparency: 1, comment: 'Not true.', isHidden: false, createdAt: new Date() }];
+    await request(app).patch('/api/automotive/admin/mechanic-reviews/mr9').set(as('admin', 'ADMIN')).send({ isHidden: true }).expect(200);
+    expect(byVerb('CAR_WORKSHOP_REVIEW_MODERATED')[0]).toMatchObject({ actorUserId: 'admin', targetUserId: 'member', metadata: { resourceId: 'mr9', isHidden: { from: false, to: true } } });
+  });
+
+  /**
+   * A dealership could mark a test drive "done, no sale" and sell her the car
+   * anyway, and the ledger would never know: nobody asked the one other
+   * person who does. Now she can say so, her claim goes on the ledger as
+   * hers, the dealership does not see it until an admin has checked, and the
+   * dealership's own report later corroborates it rather than doubling it.
+   */
+  it('lets the member report a sale the dealership left off, and keeps it from the dealership until it is checked', async () => {
+    const id = randomUUID();
+    store.dealerships = [dealership(id, 'seller', 'Sunny Motors', 'sunny-motors')];
+    const drive = await request(app).post('/api/automotive/test-drives').set(as('member')).send({ dealershipId: id, preferredAt: new Date(Date.now() + 3 * 86400000).toISOString() }).expect(201);
+    const driveId = drive.body.data.id;
+    // Before it has happened there is nothing to report.
+    await request(app).post(`/api/automotive/test-drives/${driveId}/sale`).set(as('member')).send({ price: 40000 }).expect(400);
+    await request(app).patch(`/api/automotive/dealership/test-drives/${driveId}`).set(as('seller')).send({ status: 'COMPLETED' }).expect(200);
+    const asked = store.notifications.find((n) => n.userId === 'member' && n.data.kind === 'CAR_TEST_DRIVE');
+    expect(asked!.message).toContain('If you went on to buy the car');
+    const mine = await request(app).get('/api/automotive/test-drives').set(as('member')).expect(200);
+    expect(mine.body.data[0]).toMatchObject({ canReportSale: true, sale: null });
+
+    // Only she can say it about her own test drive.
+    await request(app).post(`/api/automotive/test-drives/${driveId}/sale`).set(as('newbie')).send({ price: 40000 }).expect(404);
+    const told = await request(app).post(`/api/automotive/test-drives/${driveId}/sale`).set(as('member')).send({ price: 40000 }).expect(201);
+    expect(told.body.data).toMatchObject({ canReportSale: false, sale: { status: 'PENDING', amount: 40000, reportedBy: 'you' } });
+    expect(told.body.data.sale.fee).toBeUndefined();
+    expect(store.referrals).toHaveLength(1);
+    expect(store.referrals[0]).toMatchObject({ kind: 'DEALER_SALE', status: 'PENDING', userId: 'member', createdById: 'member', dealershipId: id, referenceId: driveId, basisAmount: 40000, fee: 400 });
+    expect(store.referrals[0].note).toContain('Reported by the member');
+    expect(store.notifications.some((n) => n.userId === 'admin' && n.data.kind === 'CAR_REFERRAL')).toBe(true);
+    // Twice is still once.
+    await request(app).post(`/api/automotive/test-drives/${driveId}/sale`).set(as('member')).send({ price: 40000 }).expect(200);
+    expect(store.referrals).toHaveLength(1);
+
+    // The dealership does not see her claim on its own page before an admin has.
+    const theirs = await request(app).get('/api/automotive/dealership').set(as('seller')).expect(200);
+    expect(theirs.body.data.referrals).toHaveLength(0);
+
+    // When the dealership reports the sale after all, it lands on her row.
+    const reported = await request(app).patch(`/api/automotive/dealership/test-drives/${driveId}`).set(as('seller')).send({ status: 'COMPLETED', sold: true, salePrice: 40000 }).expect(200);
+    expect(reported.body.data.referralFee).toBe(400);
+    expect(store.referrals).toHaveLength(1);
+    expect(store.referrals[0].note).toContain('has since reported the sale itself');
+    expect(store.notifications.some((n) => n.userId === 'admin' && n.title.includes('confirmed a sale a member reported'))).toBe(true);
+  });
+
+  it('lets the member say a reported sale did not happen, and bills nothing for it until an admin checks', async () => {
+    const id = randomUUID();
+    store.dealerships = [dealership(id, 'seller', 'Sunny Motors', 'sunny-motors')];
+    const drive = await request(app).post('/api/automotive/test-drives').set(as('member')).send({ dealershipId: id, preferredAt: new Date(Date.now() + 3 * 86400000).toISOString() }).expect(201);
+    const driveId = drive.body.data.id;
+    await request(app).post(`/api/automotive/test-drives/${driveId}/sale/dispute`).set(as('member')).expect(404);
+    await request(app).patch(`/api/automotive/dealership/test-drives/${driveId}`).set(as('seller')).send({ status: 'COMPLETED', sold: true, salePrice: 42000 }).expect(200);
+    const before = await request(app).get('/api/automotive/test-drives').set(as('member')).expect(200);
+    expect(before.body.data[0]).toMatchObject({ canDisputeSale: true, sale: { reportedBy: 'dealership', amount: 42000, status: 'PENDING' } });
+
+    const disputed = await request(app).post(`/api/automotive/test-drives/${driveId}/sale/dispute`).set(as('member')).expect(200);
+    expect(disputed.body.data).toMatchObject({ canDisputeSale: false, sale: { status: 'VOID' } });
+    expect(store.referrals[0].status).toBe('VOID');
+    expect(store.referrals[0].note).toContain('the member said she did not buy this car');
+    expect(store.notifications.some((n) => n.userId === 'admin' && n.title.includes('did not happen'))).toBe(true);
+    const ledger = await request(app).get('/api/automotive/admin/referrals').set(as('admin', 'ADMIN')).expect(200);
+    expect(ledger.body.data.totals.pending).toBe(0);
+    await request(app).post(`/api/automotive/test-drives/${driveId}/sale/dispute`).set(as('member')).expect(200);
+
+    // Once an admin has checked it with the dealership, it is not undone from her page.
+    await request(app).patch(`/api/automotive/admin/referrals/${store.referrals[0].id}`).set(as('admin', 'ADMIN')).send({ status: 'CONFIRMED' }).expect(200);
+    const settled = await request(app).post(`/api/automotive/test-drives/${driveId}/sale/dispute`).set(as('member')).expect(409);
+    expect(settled.body.message).toContain('already checked');
+    expect(store.referrals[0].status).toBe('CONFIRMED');
+  });
+
+  /**
+   * A 3am Sunday request was accepted as a normal booking request, because
+   * the only check on the time was that it was in the future. The hours the
+   * profile collects are the check now, in the dealership's own timezone.
+   */
+  it('holds a test drive to the dealership\'s hours and keeps one car off two drives at once', async () => {
+    const id = randomUUID();
+    store.dealerships = [dealership(id, 'seller', 'Sunny Motors', 'sunny-motors', { hours: { '1': [['09:00', '17:00']], '2': [['09:00', '17:00']] } })];
+    // Monday 10:00 and Sunday 03:00 in Brisbane, which is UTC+10 all year.
+    const monday = new Date(Date.UTC(2026, 0, 1));
+    monday.setUTCDate(monday.getUTCDate() + ((8 - monday.getUTCDay()) % 7));
+    while (monday.getTime() < Date.now() + 2 * 86400000) monday.setUTCDate(monday.getUTCDate() + 7);
+    const at = (dayOffset: number, utcHour: number) => new Date(monday.getTime() + dayOffset * 86400000 + utcHour * 3600000).toISOString();
+    const mondayTen = at(0, 0);
+    const sundayThree = at(-1, -7);
+    const closed = await request(app).post('/api/automotive/test-drives').set(as('member')).send({ dealershipId: id, preferredAt: sundayThree }).expect(400);
+    expect(closed.body.message).toContain('Mon 09:00–17:00');
+    expect(store.testDrives).toHaveLength(0);
+    await request(app).post('/api/automotive/test-drives').set(as('member')).send({ dealershipId: id, preferredAt: mondayTen, alternativeAt: new Date(Date.now() - 86400000).toISOString() }).expect(400);
+    await request(app).post('/api/automotive/test-drives').set(as('member')).send({ dealershipId: id, preferredAt: mondayTen, alternativeAt: sundayThree }).expect(400);
+    await request(app).post('/api/automotive/test-drives').set(as('member')).send({ dealershipId: id, preferredAt: mondayTen, alternativeAt: at(1, 0) }).expect(201);
+
+    // One car, two members, the same morning.
+    const l = await request(app).post('/api/automotive/listings').set(as('seller')).send({ title: '2021 Toyota Yaris Cross GX', make: 'Toyota', model: 'Yaris Cross', year: 2021, bodyType: 'SUV', fuelType: 'HYBRID', odometerKm: 30000, price: 31000, description: 'Dealer stock, one owner, full Toyota history and the balance of the new-car warranty.', state: 'QLD', photos: ['https://img.example.com/a.jpg', 'https://img.example.com/b.jpg', 'https://img.example.com/c.jpg', 'https://img.example.com/d.jpg'], vin: 'JTDKBABB10A123456', publish: true }).expect(201);
+    expect(l.body.data.dealership?.id).toBe(id);
+    const first = await request(app).post('/api/automotive/test-drives').set(as('member')).send({ listingId: l.body.data.id, preferredAt: mondayTen }).expect(201);
+    const second = await request(app).post('/api/automotive/test-drives').set(as('newbie')).send({ listingId: l.body.data.id, preferredAt: at(0, 0.5) }).expect(201);
+    await request(app).patch(`/api/automotive/dealership/test-drives/${first.body.data.id}`).set(as('seller')).send({ status: 'CONFIRMED' }).expect(200);
+    const clash = await request(app).patch(`/api/automotive/dealership/test-drives/${second.body.data.id}`).set(as('seller')).send({ status: 'CONFIRMED' }).expect(409);
+    expect(clash.body.message).toContain('already confirmed');
+    await request(app).post('/api/automotive/test-drives').set(as('newbie')).send({ listingId: l.body.data.id, preferredAt: at(0, 0.25) }).expect(409);
+    await request(app).post('/api/automotive/test-drives').set(as('newbie')).send({ listingId: l.body.data.id, preferredAt: at(0, 3) }).expect(201);
+  });
+
+  /**
+   * An inspection request used to reach at most ten workshops, whichever ten
+   * the database returned first, and a trade-in any ten dealerships whatever
+   * they sold. Everyone who will see the job on their own page is told now,
+   * and nobody who will not.
+   */
+  it('tells every workshop that can take an inspection, and every dealership that will see a trade-in', async () => {
+    store.mechanics = Array.from({ length: 12 }, (_, i) => ({ ...workshop(), id: `mq${i}`, slug: `qld-${i}`, name: `Workshop ${i}`, ownerUserId: `owner-q${i}` }));
+    store.mechanics.push({ ...workshop(), id: 'mn1', slug: 'nsw-1', name: 'Over the border', ownerUserId: 'owner-nsw', state: 'NSW' });
+    const l = await request(app).post('/api/automotive/listings').set(as('seller')).send({ title: '2018 Honda Jazz VTi', make: 'Honda', model: 'Jazz', year: 2018, bodyType: 'HATCH', fuelType: 'PETROL', odometerKm: 80000, price: 14000, description: 'Small, reliable and cheap to run. Serviced at Honda, new battery last winter.', state: 'QLD', photos: ['https://img.example.com/a.jpg', 'https://img.example.com/b.jpg', 'https://img.example.com/c.jpg', 'https://img.example.com/d.jpg'], vin: 'MRHGK5850JP123456', publish: true }).expect(201);
+    const asked = await request(app).post(`/api/automotive/listings/${l.body.data.id}/inspections`).set(as('member')).send({ kind: 'ATHENA_VETTED' }).expect(201);
+    expect(asked.body.data.workshopsTold).toBe(12);
+    const told = store.notifications.filter((n) => n.data.kind === 'CAR_INSPECTION_OPEN').map((n) => n.userId);
+    expect(new Set(told).size).toBe(12);
+    expect(told).not.toContain('owner-nsw');
+
+    // Nobody in the state at all: the admins hear now, and she is not told a workshop is coming.
+    store.mechanics = [];
+    const l2 = await request(app).post('/api/automotive/listings').set(as('seller')).send({ title: '2018 Honda Jazz GLi', make: 'Honda', model: 'Jazz', year: 2018, bodyType: 'HATCH', fuelType: 'PETROL', odometerKm: 90000, price: 13000, description: 'Same car, the base model. Serviced on time, one careful owner, tyres nearly new.', state: 'QLD', photos: ['https://img.example.com/a.jpg', 'https://img.example.com/b.jpg', 'https://img.example.com/c.jpg', 'https://img.example.com/d.jpg'], vin: 'MRHGK5850JP654321', publish: true }).expect(201);
+    const nobody = await request(app).post(`/api/automotive/listings/${l2.body.data.id}/inspections`).set(as('member')).send({ kind: 'ATHENA_VETTED' }).expect(201);
+    expect(nobody.body.data.workshopsTold).toBe(0);
+    expect(store.notifications.some((n) => n.userId === 'admin' && n.data.kind === 'CAR_INSPECTION_UNTAKEN')).toBe(true);
+
+    store.dealerships = [dealership(randomUUID(), 'seller', 'Sunny Toyota', 'sunny-toyota', { brands: ['Toyota'] }), dealership(randomUUID(), 'mech', 'Any Make Motors', 'any-make', { brands: [] }), dealership(randomUUID(), 'newbie', 'Mazda Only', 'mazda-only', { brands: ['Mazda'] })];
+    const trade = await request(app).post('/api/automotive/trade-ins').set(as('member')).send({ make: 'Toyota', model: 'Yaris', year: 2018, odometerKm: 64000, condition: 'GOOD' }).expect(201);
+    expect(trade.body.data.dealersAsked).toBe(2);
+    expect(store.notifications.filter((n) => n.data.kind === 'CAR_TRADE_IN').map((n) => n.userId).sort()).toEqual(['mech', 'seller']);
   });
 });
