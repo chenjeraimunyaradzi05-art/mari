@@ -3,6 +3,11 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 
 jest.mock('../../utils/prisma', () => ({
   prisma: {
+    // The block checks read the DV safety profile's list as well as the
+    // platform one, in both directions; nobody is blocked here.
+    dvSafetyProfile: { findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => null) },
+    userSafetySettings: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
+    follow: { findMany: jest.fn(async () => []) },
     $transaction: jest.fn(),
     group: {
       findMany: jest.fn(),
@@ -484,7 +489,26 @@ describe('Groups routes (Prisma-backed)', () => {
     (prisma.post.findMany as any).mockResolvedValue([{ id: 'p1', groupId: 'g1', content: 'inside', poll: null, author: { id: 'a' } }]);
     const res = await request(app).get('/api/groups/g1/posts').set('x-test-auth', '1').expect(200);
     expect(res.body.data[0]).toMatchObject({ id: 'p1', content: 'inside', isLiked: false });
-    expect((prisma.post.findMany as any).mock.calls[0][0].where).toEqual({ groupId: 'g1', isHidden: false });
+    const where = (prisma.post.findMany as any).mock.calls[0][0].where;
+    expect(where).toMatchObject({ groupId: 'g1', isHidden: false });
+    // A block holds inside the group too: the DV safety profile's list is read
+    // through the author, in the direction the id list cannot cover.
+    expect(where.AND).toContainEqual({
+      NOT: { author: { dvSafetyProfile: { is: { blockedUserIds: { has: 'user-123' } } } } },
+    });
+  });
+
+  it('GET /api/groups/:id/posts leaves out posts from anyone on either side of a block', async () => {
+    (prisma.group.findUnique as any).mockResolvedValue({ id: 'g1', privacy: 'PUBLIC', isHidden: false });
+    // She blocked blocked-1; blocker-2 blocked her.
+    (prisma.userSafetySettings.findUnique as any).mockResolvedValueOnce({ blockedUsers: ['blocked-1'] });
+    (prisma.userSafetySettings.findMany as any).mockResolvedValueOnce([{ userId: 'blocker-2' }]);
+    (prisma.post.findMany as any).mockResolvedValue([]);
+
+    await request(app).get('/api/groups/g1/posts').set('x-test-auth', '1').expect(200);
+
+    const where = (prisma.post.findMany as any).mock.calls[0][0].where;
+    expect(where.AND).toContainEqual({ authorId: { notIn: ['blocked-1', 'blocker-2'] } });
   });
 
   it('DELETE /api/groups/:id/posts/:postId returns 403 when not moderator/admin', async () => {

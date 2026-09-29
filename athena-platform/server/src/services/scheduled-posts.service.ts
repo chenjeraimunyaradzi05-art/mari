@@ -13,6 +13,8 @@
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import { runExclusively } from '../utils/redis';
+import { bestEffort } from '../utils/best-effort';
+import { recordPublishedPost } from './engagement.service';
 
 export const SCHEDULE_MIN_MINUTES = 5;
 export const SCHEDULE_MAX_DAYS = 30;
@@ -33,22 +35,40 @@ export function parseScheduledFor(raw: unknown, now = new Date()): Date | undefi
   return date;
 }
 
+/**
+ * Publishes what has come due and counts it for its author.
+ *
+ * A post that went out on schedule used to be invisible to engagement: the
+ * posting streak and the content badges advance in recordPublishedPost, which
+ * post creation calls for a post that goes out at once, and nothing called it
+ * here. A member who queued her week's posts on Sunday broke her streak every
+ * day they went out. Counting happens after the post is live, and a failure
+ * there is logged rather than allowed to stop the rest of the batch going out.
+ *
+ * Each post is released with a conditional update, so one that was deleted, or
+ * published by another path, between the read and the write is skipped rather
+ * than throwing and leaving every post after it in the batch unpublished.
+ */
 export async function publishDuePosts(now = new Date()): Promise<number> {
   const due = await prisma.post.findMany({
     where: { scheduledFor: { lte: now }, isHidden: true },
-    select: { id: true },
+    select: { id: true, authorId: true },
     take: 200,
   });
   if (due.length === 0) return 0;
 
+  let published = 0;
   for (const post of due) {
-    await prisma.post.update({
-      where: { id: post.id },
+    const released = await prisma.post.updateMany({
+      where: { id: post.id, isHidden: true, scheduledFor: { not: null } },
       data: { isHidden: false, scheduledFor: null, createdAt: now },
     });
+    if (released.count === 0) continue;
+    published += 1;
+    await bestEffort('scheduled-posts.achievements', () => recordPublishedPost(post.authorId));
   }
-  logger.info('Scheduled posts published', { count: due.length });
-  return due.length;
+  logger.info('Scheduled posts published', { count: published });
+  return published;
 }
 
 export function startScheduledPostPublisher(intervalMs = 60_000): () => void {

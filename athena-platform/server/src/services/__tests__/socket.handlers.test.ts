@@ -26,16 +26,20 @@ const participantUpdateMany = jest.fn() as Query;
 const userFindUnique = jest.fn() as Query;
 const notificationCreate = jest.fn() as Query;
 const liveStreamFindUnique = jest.fn() as Query;
+const messageFindMany = jest.fn() as Query;
+const messageUpdateMany = jest.fn() as Query;
+const safetySettingsFindUnique = jest.fn() as Query;
 const transaction = jest.fn() as jest.Mock<(ops: Array<Promise<unknown>>) => Promise<unknown[]>>;
 
 jest.mock('../../utils/prisma', () => ({
   prisma: {
-    message: { create: messageCreate },
+    message: { create: messageCreate, findMany: messageFindMany, updateMany: messageUpdateMany },
     conversation: { update: conversationUpdate },
     conversationParticipant: { updateMany: participantUpdateMany },
     user: { findUnique: userFindUnique },
     notification: { create: notificationCreate },
     liveStream: { findUnique: liveStreamFindUnique },
+    userSafetySettings: { findUnique: safetySettingsFindUnique },
     $transaction: transaction,
   },
 }));
@@ -55,8 +59,9 @@ jest.mock('../moderation.service', () => ({ assertContentAllowed }));
 const pushToUser = jest.fn();
 jest.mock('../push.service', () => ({ pushToUser, pushPreview: (text: string) => text }));
 
+const findDirectConversation = jest.fn() as jest.Mock<(a: string, b: string) => Promise<string | null>>;
 jest.mock('../direct-message.service', () => ({
-  findDirectConversation: jest.fn(async () => null),
+  findDirectConversation,
   getOrCreateDirectConversation: jest.fn(async () => ({ id: 'conv-1' })),
 }));
 
@@ -71,6 +76,9 @@ jest.mock('../livestream.service', () => ({
   postChatMessage,
   recordViewerCount: jest.fn(),
 }));
+
+const announcePresence = jest.fn() as jest.Mock<(userId: string, state: 'online' | 'offline') => Promise<number>>;
+jest.mock('../presence.service', () => ({ announcePresence }));
 
 jest.mock('../i18n.service', () => ({
   i18nService: { tSync: jest.fn(() => 'You have a new message') },
@@ -193,6 +201,11 @@ beforeEach(() => {
   transaction.mockImplementation(async (ops) => Promise.all(ops));
   notificationCreate.mockImplementation(async (args: any) => ({ id: 'n-1', ...args.data }));
   postChatMessage.mockResolvedValue({ id: 'chat-1' });
+  findDirectConversation.mockResolvedValue(null);
+  announcePresence.mockResolvedValue(0);
+  messageFindMany.mockResolvedValue([]);
+  messageUpdateMany.mockResolvedValue({ count: 0 });
+  safetySettingsFindUnique.mockResolvedValue(null);
 });
 
 // ------------------------------------------------------------------ handshake
@@ -418,5 +431,79 @@ describe('live chat and the live room', () => {
     await socket.fire('live:join', 'stream-2');
     expect(socket.rooms.has('live:stream-2')).toBe(false);
     expect(socket.errors('live:error')).toEqual([{ streamId: 'stream-2', message: 'This stream is not live' }]);
+  });
+});
+
+// ------------------------------------------------------------------ presence
+
+describe('presence', () => {
+  it('hands "online" to the presence audience rule instead of telling every socket', async () => {
+    const her = account('her');
+    const socket = connect(her);
+
+    await socket.fire('presence:online');
+
+    expect(announcePresence).toHaveBeenCalledWith(her, 'online');
+    expect(socket.broadcast.emit).not.toHaveBeenCalled();
+  });
+
+  it('announces offline once, through the same rule, only when her last socket closes', async () => {
+    const her = account('her');
+    const phone = connect(her);
+    const laptop = connect(her);
+
+    await phone.fire('disconnect');
+    expect(announcePresence).not.toHaveBeenCalled();
+
+    await laptop.fire('disconnect');
+    expect(announcePresence).toHaveBeenCalledTimes(1);
+    expect(announcePresence).toHaveBeenCalledWith(her, 'offline');
+    expect(laptop.broadcast.emit).not.toHaveBeenCalled();
+  });
+});
+
+// ------------------------------------------------------------------ read receipts
+
+describe('messages:mark_read', () => {
+  const readReceipts = () => roomEmissions.filter((e) => e.event === 'messages:read');
+
+  beforeEach(() => {
+    findDirectConversation.mockResolvedValue('conv-9');
+    messageFindMany.mockResolvedValue([{ id: 'm-1' }, { id: 'm-2' }]);
+    messageUpdateMany.mockResolvedValue({ count: 2 });
+  });
+
+  it('marks the messages read and tells the sender, when she has not hidden receipts', async () => {
+    const reader = account('reader');
+    const socket = connect(reader);
+
+    await socket.fire('messages:mark_read', 'sender');
+
+    expect(messageUpdateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ['m-1', 'm-2'] } } }));
+    expect(readReceipts().map((e) => e.rooms)).toEqual([
+      [`conversation:${[reader, 'sender'].sort().join(':')}`],
+      ['user:sender'],
+    ]);
+    expect(readReceipts()[0].payload).toEqual({ conversationId: 'conv-9', readerId: reader, messageIds: ['m-1', 'm-2'] });
+  });
+
+  it('marks them read but tells nobody when she has hidden read receipts', async () => {
+    const socket = connect(account('private'));
+    safetySettingsFindUnique.mockResolvedValue({ hideReadReceipts: true });
+
+    await socket.fire('messages:mark_read', 'sender');
+
+    expect(messageUpdateMany).toHaveBeenCalledTimes(1);
+    expect(readReceipts()).toEqual([]);
+  });
+
+  it('withholds the receipt when her settings cannot be read', async () => {
+    const socket = connect(account('unreadable'));
+    safetySettingsFindUnique.mockRejectedValue(new Error('connection reset'));
+
+    await socket.fire('messages:mark_read', 'sender');
+
+    expect(messageUpdateMany).toHaveBeenCalledTimes(1);
+    expect(readReceipts()).toEqual([]);
   });
 });

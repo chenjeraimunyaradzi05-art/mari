@@ -24,18 +24,22 @@ jest.mock('../../utils/logger', () => ({
 
 import { app } from '../../index';
 import { prisma as prismaTyped } from '../../utils/prisma';
+import { resetTrendingTopicsCache } from '../topic.routes';
 
 const prisma: any = prismaTyped;
 
 describe('GET /api/topics/suggest', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    resetTrendingTopicsCache();
     prisma.post.findMany.mockResolvedValue([
-      { content: 'Notes on #leadership and #learning' },
-      { content: 'More #leadership' },
-      { content: '#Layoffs again' },
+      { id: 'p1', content: 'Notes on #leadership and #learning', createdAt: new Date() },
+      { id: 'p2', content: 'More #leadership', createdAt: new Date() },
+      { id: 'p3', content: '#Layoffs again', createdAt: new Date() },
     ]);
-    prisma.video.findMany.mockResolvedValue([{ description: '#leadership on camera', hashtags: [] }]);
+    prisma.video.findMany.mockResolvedValue([
+      { id: 'v1', description: '#leadership on camera', hashtags: [], publishedAt: new Date() },
+    ]);
   });
 
   it('offers topics that start with what was typed, busiest first', async () => {
@@ -52,5 +56,16 @@ describe('GET /api/topics/suggest', () => {
   it('a new topic is offered as itself', async () => {
     const res = await request(app).get('/api/topics/suggest?q=%23Grants').expect(200);
     expect(res.body.data).toEqual([{ tag: 'grants', count: 0 }]);
+  });
+
+  it('offers a matching topic however far down the month it ranks', async () => {
+    // Sixty busier tags, then the one she is typing. The suggestions used to
+    // be drawn from the busiest fifty only, so this one was never offered.
+    const busy = Array.from({ length: 60 }, (_, i) => ({ id: `p-${i}`, content: `#busy${i}`, createdAt: new Date() }));
+    prisma.post.findMany.mockResolvedValue([...busy, ...busy, { id: 'rare', content: 'First one #quietquitting', createdAt: new Date() }]);
+    prisma.video.findMany.mockResolvedValue([]);
+
+    const res = await request(app).get('/api/topics/suggest?q=quiet').expect(200);
+    expect(res.body.data).toEqual([{ tag: 'quietquitting', count: 1 }, { tag: 'quiet', count: 0 }]);
   });
 });

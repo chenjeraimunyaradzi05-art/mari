@@ -15,18 +15,18 @@ import { notifySocial, socialLinks } from '../utils/social-notifications';
 import { assertSoundExists, attachSounds, recordSoundUse } from '../services/sound.service';
 import { enqueueVideoProcessing } from '../services/video-pipeline.service';
 import { bestEffort } from '../utils/best-effort';
+import { viewerContextFor } from '../services/search.service';
+import { isBlockedEitherWay } from '../services/audience.service';
 import { createRateLimiter } from '../middleware/rateLimiter';
+import { COUNTED_VIEW_WINDOW_MS } from '../services/creator-content-analytics.service';
 import { commentLimiter, postLimiter, reactionLimiter } from '../middleware/socialLimits';
 
 const router = Router();
 
-/**
- * How long one member's watch of one reel stands for a single counted view.
- * A day, so rewatching a reel in the evening that she watched at breakfast
- * counts twice — which is a real second view — while a page that fires the
- * ping on every loop of a fifteen-second clip counts once.
- */
-const COUNTED_VIEW_WINDOW_MS = 24 * 60 * 60 * 1000;
+// How long one member's watch of one reel stands for a single counted view
+// lives with the creator dashboard, which replays the same rule over the stored
+// watches to say how many views fell on each day. One constant keeps the view
+// route and the dashboard agreeing about what a view is.
 
 /**
  * Reels had no ceiling of any kind: publishing, commenting, reacting and the
@@ -211,18 +211,38 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
     // identical to a member who had muted no one. Note that muting is a
     // preference, not a safety control; a safety block belongs behind a rule
     // that fails closed, not this one.
+    //
+    // The safety block is the rule below, and until now it was missing: the
+    // reels feed never read either block list, so a blocked abuser's reels
+    // reached her For You tab and hers reached his. viewerContextFor reads
+    // both stores (the platform-wide list and the DV safety profile's) in both
+    // directions and is not best-effort: if it cannot be read the feed fails,
+    // because an empty list standing in for one that could not be read is
+    // exactly how he would come back. The author clause covers a member who
+    // blocked the viewer from her DV safety page before that block reached
+    // the platform-wide store. search.service's hiddenMemberWhere is not used
+    // whole, because its hide-from-search clauses are about being found by
+    // name: a woman who asked for that did not ask for her reels to stop
+    // reaching the feed.
     if (req.user) {
       const viewerId = req.user.id;
-      const prefs = await bestEffort('video.feed-blocked-creators', () =>
-        prisma.userFeedPreferences.findUnique({
-          where: { userId: viewerId },
-          select: { blockedCreators: true },
-        })
-      );
-      const blocked = prefs?.blockedCreators ?? [];
-      if (blocked.length > 0) {
-        where.authorId = { ...(where.authorId ?? {}), notIn: blocked };
+      const [prefs, viewer] = await Promise.all([
+        bestEffort('video.feed-blocked-creators', () =>
+          prisma.userFeedPreferences.findUnique({
+            where: { userId: viewerId },
+            select: { blockedCreators: true },
+          })
+        ),
+        viewerContextFor(viewerId),
+      ]);
+      const hidden = Array.from(new Set([...(prefs?.blockedCreators ?? []), ...viewer.blockedIds]));
+      if (hidden.length > 0) {
+        where.authorId = { ...(where.authorId ?? {}), notIn: hidden };
       }
+      where.author = {
+        ...(where.author ?? {}),
+        NOT: { dvSafetyProfile: { is: { blockedUserIds: { has: viewerId } } } },
+      };
     }
 
     const orderBy: any[] =
@@ -261,14 +281,31 @@ function parsePage(value: unknown): number {
   return Number.isNaN(parsed) || parsed < 1 ? 1 : parsed;
 }
 
-// Page-based listing shared by the category and per-author browse routes.
+/**
+ * The clause that keeps reels between two members who have blocked each other
+ * out of each other's lists: the same rule the feed above applies, for the
+ * trending, category and per-author lists that browse the same reels. Null for
+ * a signed-out viewer, who has blocked nobody. Fails closed, like the feed.
+ */
+async function blockedAuthorsWhere(viewerId: string | undefined): Promise<Record<string, unknown> | null> {
+  if (!viewerId) return null;
+  const viewer = await viewerContextFor(viewerId);
+  return {
+    ...(viewer.blockedIds.length > 0 ? { authorId: { notIn: viewer.blockedIds } } : {}),
+    author: { NOT: { dvSafetyProfile: { is: { blockedUserIds: { has: viewerId } } } } },
+  };
+}
+
+// Page-based listing shared by the trending, category and per-author routes.
 async function listVideos(
-  where: Record<string, unknown>,
+  baseWhere: Record<string, unknown>,
   req: AuthRequest,
   orderBy: Record<string, string>[] = [{ createdAt: 'desc' }]
 ) {
   const page = parsePage(req.query.page);
   const limit = parseLimit(req.query.limit, 20, 50);
+  const safety = await blockedAuthorsWhere(req.user?.id);
+  const where = safety ? { AND: [baseWhere, safety] } : baseWhere;
 
   const [videos, total] = await Promise.all([
     prisma.video.findMany({
@@ -410,6 +447,13 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
       throw new ApiError(404, 'Video not found');
     }
 
+    // A shared link reaches past every list: a reel between two members who
+    // have blocked each other is not found, the same answer as one that does
+    // not exist, so the link does not confirm the block either.
+    if (req.user && req.user.role !== 'ADMIN' && (await isBlockedEitherWay(req.user.id, video.authorId))) {
+      throw new ApiError(404, 'Video not found');
+    }
+
     const [decorated] = await withViewerState([video], req.user?.id);
     res.json({ success: true, data: decorated });
   } catch (error) {
@@ -445,7 +489,7 @@ router.get('/:id/processing', authenticate, async (req: AuthRequest, res, next) 
     if (!video || (video.authorId !== req.user!.id && req.user!.role !== 'ADMIN')) {
       throw new ApiError(404, 'Video not found');
     }
-    const { authorId, ...status } = video;
+    const { authorId: _authorId, ...status } = video;
     res.json({ success: true, data: status });
   } catch (error) {
     next(error);

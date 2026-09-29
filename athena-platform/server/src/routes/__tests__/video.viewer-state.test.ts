@@ -3,6 +3,10 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 
 jest.mock('../../utils/prisma', () => ({
   prisma: {
+    // The block checks read the DV safety profile's list as well as the
+    // platform one, in both directions; nobody is blocked here.
+    dvSafetyProfile: { findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => null) },
+    userSafetySettings: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
     video: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn(), count: jest.fn() },
     videoLike: { findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn(), deleteMany: jest.fn() },
     videoSave: { findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn(), deleteMany: jest.fn(), count: jest.fn() },
@@ -89,6 +93,14 @@ describe('Video feed viewer state', () => {
 
     expect(res.body.data.isLiked).toBe(true);
     expect(res.body.data.isSaved).toBe(false);
+  });
+
+  it('a shared link to a reel across a block is not found', async () => {
+    prisma.video.findUnique.mockResolvedValue(VIDEO('v2'));
+    // The creator blocked the viewer from her DV safety page.
+    prisma.dvSafetyProfile.findFirst.mockResolvedValueOnce({ userId: 'creator-1' });
+
+    await request(app).get('/api/video/v2').set('x-test-auth', '1').expect(404);
   });
 });
 

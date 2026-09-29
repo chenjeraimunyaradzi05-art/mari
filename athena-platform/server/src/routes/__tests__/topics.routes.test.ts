@@ -33,6 +33,7 @@ jest.mock('../../utils/logger', () => ({
 import { app } from '../../index';
 import { prisma as prismaTyped } from '../../utils/prisma';
 import { reasonsFor } from '../../services/feed.service';
+import { resetTrendingTopicsCache } from '../topic.routes';
 
 const prisma: any = prismaTyped;
 const as = (userId: string) => ({ 'x-test-user': userId });
@@ -40,6 +41,7 @@ const as = (userId: string) => ({ 'x-test-user': userId });
 describe('Topics', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    resetTrendingTopicsCache();
     prisma.post.findMany.mockResolvedValue([]);
     prisma.video.findMany.mockResolvedValue([]);
     prisma.userFeedPreferences.findUnique.mockResolvedValue(null);
@@ -47,11 +49,14 @@ describe('Topics', () => {
 
   it('trending adds up hashtags across posts and reels, case-insensitively', async () => {
     prisma.post.findMany.mockResolvedValue([
-      { content: 'Got the offer #Salary #negotiation' },
-      { content: 'Talk on #salary tomorrow' },
-      { content: 'No tags here' },
+      { id: 'p1', content: 'Got the offer #Salary #negotiation', createdAt: new Date() },
+      { id: 'p2', content: 'Talk on #salary tomorrow', createdAt: new Date() },
+      { id: 'p3', content: 'No tags here', createdAt: new Date() },
     ]);
-    prisma.video.findMany.mockResolvedValue([{ hashtags: ['salary', 'interviews'] }, { hashtags: ['Interviews'] }]);
+    prisma.video.findMany.mockResolvedValue([
+      { id: 'v1', hashtags: ['salary', 'interviews'], publishedAt: new Date() },
+      { id: 'v2', hashtags: ['Interviews'], publishedAt: new Date() },
+    ]);
 
     const res = await request(app).get('/api/topics/trending?days=7&limit=3').expect(200);
 
@@ -60,6 +65,14 @@ describe('Topics', () => {
       { tag: 'interviews', posts: 0, videos: 2, total: 2 },
       { tag: 'negotiation', posts: 1, videos: 0, total: 1 },
     ]);
+  });
+
+  it('a trending count that failed is a 500, not an empty list', async () => {
+    prisma.post.findMany.mockRejectedValue(new Error('connection reset'));
+
+    const res = await request(app).get('/api/topics/trending').expect(500);
+
+    expect(res.body.data).toBeUndefined();
   });
 
   it('a topic page carries counts, follow state and related tags', async () => {

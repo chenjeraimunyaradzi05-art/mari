@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { 
@@ -9,7 +9,6 @@ import {
   Users, 
   MessageCircle, 
   Play,
-  Heart,
   MessageSquare,
   Share2,
   Bookmark,
@@ -22,7 +21,7 @@ import {
   X
 } from 'lucide-react';
 import {
-  useFeed,
+  useInfiniteFeed,
   useCreatePost,
   useSavePost,
   useUnsavePost,
@@ -42,6 +41,7 @@ import { RepostEmbed, RepostedBy, type RepostOriginal } from '@/components/commu
 import { useImpression } from '@/lib/impressions';
 import { NewPostsPill } from '@/components/community/NewPostsPill';
 import StartHereRail from '@/components/feed/StartHereRail';
+import { FeedPager } from '@/components/feed/FeedPager';
 import { altFor } from '@/components/community/PostCard';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -638,8 +638,21 @@ function CreatePostBox() {
 export default function FeedPage() {
   const [filter, setFilter] = useState<FeedFilter>('latest');
   // The endpoint takes tab + algorithm; it has never read a `sort` param, so
-  // all three tabs were returning the same for-you feed.
-  const { data: posts, isLoading, error } = useFeed(FEED_QUERY[filter]);
+  // all three tabs were returning the same for-you feed. It is paged: this
+  // page used to show the first twenty posts and stop there, with nothing to
+  // say there were more.
+  const {
+    data: posts,
+    isLoading,
+    error,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+    isFetchNextPageError,
+  } = useInfiniteFeed<Post>(FEED_QUERY[filter]);
+  const loadMore = useCallback(() => {
+    void fetchNextPage();
+  }, [fetchNextPage]);
   const { user, isAuthenticated } = useAuth();
   // Real picks for a member who is still new here; the rail hides itself
   // once GET /feed/cold-start/score says she has settled in.
@@ -743,22 +756,28 @@ export default function FeedPage() {
                   </div>
                 ))}
               </div>
-            ) : error ? (
-              <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-8 text-center">
-                <p className="text-slate-600 dark:text-slate-400 mb-4">Unable to load feed. Please try again.</p>
-                <button 
-                  onClick={() => window.location.reload()}
-                  className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition"
-                >
-                  Retry
-                </button>
-              </div>
             ) : posts && posts.length > 0 ? (
               <div className="space-y-4">
                 <NewPostsPill />
                 {posts.map((post: Post) => (
                   <PostCard key={post.id} post={post} currentUserId={user?.id} />
                 ))}
+                <FeedPager
+                  hasNextPage={Boolean(hasNextPage)}
+                  isFetchingNextPage={isFetchingNextPage}
+                  failed={isFetchNextPageError}
+                  onLoadMore={loadMore}
+                />
+              </div>
+            ) : error ? (
+              <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-8 text-center">
+                <p className="text-slate-600 dark:text-slate-400 mb-4">Unable to load feed. Please try again.</p>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition"
+                >
+                  Retry
+                </button>
               </div>
             ) : (
               <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-8 text-center">

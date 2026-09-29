@@ -246,28 +246,137 @@ export function hiddenMemberWhere(viewer: ViewerContext): Prisma.UserWhereInput 
 // SEARCH FUNCTIONS
 // ==========================================
 
+type SearchKind = Exclude<NonNullable<SearchOptions['type']>, 'all'>;
+
+const ALL_KINDS: SearchKind[] = ['users', 'posts', 'jobs', 'courses', 'videos', 'mentors'];
+
+/**
+ * The kinds whose OpenSearch index is actually written.
+ *
+ * Only users, posts and jobs have indexers (the route files that write them
+ * call indexDocument). Nothing has ever indexed a course, a reel or a mentor,
+ * so while OpenSearch was on, search asked those three empty indices and got
+ * nothing back: turning the engine on quietly removed courses, reels and
+ * mentors from search, on the all tab and on their own. They are answered
+ * from the database until something indexes them.
+ */
+const OPENSEARCH_INDEXED_KINDS = new Set<SearchKind>(['users', 'posts', 'jobs']);
+
+/** The OpenSearch index a kind lives in. Only ever asked for an indexed kind. */
+function indexForKind(kind: SearchKind): string {
+  switch (kind) {
+    case 'users':
+      return IndexNames.USERS;
+    case 'posts':
+      return IndexNames.POSTS;
+    case 'jobs':
+      return IndexNames.JOBS;
+    case 'courses':
+      return IndexNames.COURSES;
+    case 'videos':
+      return IndexNames.VIDEOS;
+    case 'mentors':
+      return IndexNames.MENTORS;
+  }
+}
+
+/** Runs the database searchers for these kinds, in parallel. */
+async function searchDatabase(
+  kinds: SearchKind[],
+  keywords: string[],
+  options: SearchOptions,
+  viewer: ViewerContext
+): Promise<SearchResult[]> {
+  const { persona, filters = {} } = options;
+  const searchers: Record<SearchKind, () => Promise<SearchResult[]>> = {
+    users: () => searchUsers(keywords, filters, viewer, persona),
+    posts: () => searchPosts(keywords, filters, viewer),
+    jobs: () => searchJobs(keywords, filters, persona),
+    courses: () => searchCourses(keywords, filters),
+    videos: () => searchVideos(keywords, filters),
+    mentors: () => searchMentors(keywords, filters, viewer, persona),
+  };
+  const batches = await Promise.all(kinds.map((kind) => searchers[kind]()));
+  return batches.flat();
+}
+
+function sortResults(results: SearchResult[], sort: SearchOptions['sort']): void {
+  switch (sort) {
+    case 'recent':
+      results.sort((a, b) => {
+        const timeA = a.metadata.createdAt ? new Date(a.metadata.createdAt).getTime() : 0;
+        const timeB = b.metadata.createdAt ? new Date(b.metadata.createdAt).getTime() : 0;
+        return timeB - timeA;
+      });
+      break;
+    case 'popular':
+      results.sort((a, b) => (b.metadata.popularity || 0) - (a.metadata.popularity || 0));
+      break;
+    default: // relevance
+      results.sort((a, b) => b.score - a.score);
+  }
+}
+
+/**
+ * Scores from two engines are not on one scale: OpenSearch's are BM25, the
+ * database searchers' are calculateRelevanceScore. To rank the two together on
+ * the all tab, each set is expressed relative to its own best match, which
+ * keeps each engine's own order and puts the best of each side by side.
+ */
+function relativeScores(results: SearchResult[]): SearchResult[] {
+  const best = results.reduce((max, result) => Math.max(max, result.score || 0), 0);
+  if (best <= 0) return results;
+  return results.map((result) => ({ ...result, score: (result.score || 0) / best }));
+}
+
 export async function search(options: SearchOptions): Promise<SearchResponse> {
   const viewer = await viewerContextFor(options.viewerId);
+  const { query, type = 'all', sort = 'relevance', page = 1, limit = 20 } = options;
+
+  const kinds = type === 'all' ? ALL_KINDS : [type];
+  const engineKinds = kinds.filter((kind) => OPENSEARCH_INDEXED_KINDS.has(kind));
+  const databaseKinds = kinds.filter((kind) => !OPENSEARCH_INDEXED_KINDS.has(kind));
 
   const openSearch = getOpenSearchClient();
-  if (openSearch) {
+  if (openSearch && engineKinds.length > 0) {
     try {
-      return await searchWithOpenSearch(openSearch, options, viewer);
+      if (databaseKinds.length === 0) {
+        // Everything asked for is indexed: the engine answers on its own, and
+        // pages itself.
+        return await searchWithOpenSearch(openSearch, options, viewer, engineKinds.map(indexForKind));
+      }
+
+      // The all tab: the indexed kinds from the engine and the rest from the
+      // database, merged and paged here. The engine is asked for everything
+      // up to the end of the requested page, because any of those could
+      // outrank the database's matches once the two are merged.
+      const keywords = extractKeywords(normalizeQuery(query));
+      const [engine, database] = await Promise.all([
+        searchWithOpenSearch(
+          openSearch,
+          { ...options, page: 1, limit: page * limit },
+          viewer,
+          engineKinds.map(indexForKind)
+        ),
+        keywords.length > 0 ? searchDatabase(databaseKinds, keywords, options, viewer) : Promise.resolve([]),
+      ]);
+
+      const results = [...relativeScores(engine.results), ...relativeScores(database)];
+      sortResults(results, sort);
+      const total = engine.total + database.length;
+
+      return {
+        results: results.slice((page - 1) * limit, page * limit),
+        total,
+        page,
+        totalPages: Math.ceil(total / limit),
+        query,
+      };
     } catch (error) {
       logger.error('OpenSearch failed, falling back to Prisma', { error });
       // Fallback proceeds below
     }
   }
-
-  const {
-    query,
-    type = 'all',
-    persona,
-    sort = 'relevance',
-    page = 1,
-    limit = 20,
-    filters = {},
-  } = options;
 
   const normalizedQuery = normalizeQuery(query);
   const keywords = extractKeywords(normalizedQuery);
@@ -283,64 +392,8 @@ export async function search(options: SearchOptions): Promise<SearchResponse> {
     };
   }
 
-  const results: SearchResult[] = [];
-
-  // Search in parallel
-  const searchPromises: Promise<void>[] = [];
-
-  if (type === 'all' || type === 'users') {
-    searchPromises.push(
-      searchUsers(keywords, filters, viewer, persona).then((r) => { results.push(...r); })
-    );
-  }
-
-  if (type === 'all' || type === 'posts') {
-    searchPromises.push(
-      searchPosts(keywords, filters, viewer).then((r) => { results.push(...r); })
-    );
-  }
-
-  if (type === 'all' || type === 'jobs') {
-    searchPromises.push(
-      searchJobs(keywords, filters, persona).then((r) => { results.push(...r); })
-    );
-  }
-
-  if (type === 'all' || type === 'courses') {
-    searchPromises.push(
-      searchCourses(keywords, filters).then((r) => { results.push(...r); })
-    );
-  }
-
-  if (type === 'all' || type === 'videos') {
-    searchPromises.push(
-      searchVideos(keywords, filters).then((r) => { results.push(...r); })
-    );
-  }
-
-  if (type === 'all' || type === 'mentors') {
-    searchPromises.push(
-      searchMentors(keywords, filters, viewer, persona).then((r) => { results.push(...r); })
-    );
-  }
-
-  await Promise.all(searchPromises);
-
-  // Sort results
-  switch (sort) {
-    case 'recent':
-      results.sort((a, b) => {
-        const timeA = a.metadata.createdAt ? new Date(a.metadata.createdAt).getTime() : 0;
-        const timeB = b.metadata.createdAt ? new Date(b.metadata.createdAt).getTime() : 0;
-        return timeB - timeA;
-      });
-      break;
-    case 'popular':
-      results.sort((a, b) => (b.metadata.popularity || 0) - (a.metadata.popularity || 0));
-      break;
-    default: // relevance
-      results.sort((a, b) => b.score - a.score);
-  }
+  const results = await searchDatabase(kinds, keywords, options, viewer);
+  sortResults(results, sort);
 
   // Paginate
   const total = results.length;
@@ -1216,19 +1269,16 @@ async function allowedOpenSearchHits(hits: any[], viewer: ViewerContext): Promis
   });
 }
 
-async function searchWithOpenSearch(client: any, options: SearchOptions, viewer: ViewerContext): Promise<SearchResponse> {
-  const { query, type = 'all', page = 1, limit = 20 } = options;
+// indices: which of the written indices to ask; search() decides, because only
+// some of them are ever written (see OPENSEARCH_INDEXED_KINDS).
+async function searchWithOpenSearch(
+  client: any,
+  options: SearchOptions,
+  viewer: ViewerContext,
+  indices: string[]
+): Promise<SearchResponse> {
+  const { query, page = 1, limit = 20 } = options;
   const from = (page - 1) * limit;
-
-  // Determine indices to search
-  let indices: string[] = [];
-  if (type === 'all') indices = Object.values(IndexNames);
-  else if (type === 'users') indices = [IndexNames.USERS];
-  else if (type === 'jobs') indices = [IndexNames.JOBS];
-  else if (type === 'posts') indices = [IndexNames.POSTS];
-  else if (type === 'courses') indices = [IndexNames.COURSES];
-  else if (type === 'videos') indices = [IndexNames.VIDEOS];
-  else if (type === 'mentors') indices = [IndexNames.MENTORS];
 
   const body = {
     from,

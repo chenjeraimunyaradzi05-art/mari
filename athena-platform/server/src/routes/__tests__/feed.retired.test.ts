@@ -45,7 +45,10 @@ describe('the retired mixed feed', () => {
 
     expect(res.body).toMatchObject({ success: false, deprecated: true });
     expect(res.body.message).toContain('/api/posts/feed');
-    expect(res.body.message).toContain('/api/ai-algorithms');
+    // Not /api/ai-algorithms: its opportunity routes answer 410 as well.
+    expect(res.body.message).toContain('/api/algorithms/opportunity-scan');
+    expect(res.body.message).toContain('/api/ai/opportunity-radar');
+    expect(res.body.message).not.toContain('/api/ai-algorithms');
     expect(res.body.data).toBeUndefined();
     expect(prisma.job.findMany).not.toHaveBeenCalled();
     expect(prisma.course.findMany).not.toHaveBeenCalled();

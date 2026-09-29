@@ -3,6 +3,9 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 
 jest.mock('../../utils/prisma', () => ({
   prisma: {
+    // The block checks read the DV safety profile's list as well as the
+    // platform one, in both directions; nobody is blocked here.
+    dvSafetyProfile: { findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => null) },
     post: { findMany: jest.fn(), count: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
     follow: { findMany: jest.fn() },
     like: { findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn(), groupBy: jest.fn(async () => []) },

@@ -52,13 +52,20 @@ export function SharePostDialog({
     }
   }, [open]);
 
-  // The other person in each recent one-to-one thread.
+  // The other person in each recent one-to-one thread. The inbox answers her
+  // as `participant`, with her names as fields; this read `participants[].name`,
+  // a shape the store uses and the API never sent, so the recent list was
+  // always empty and every share started from a blank search.
   const recent = useMemo<Person[]>(() => {
-    const list = Array.isArray(conversations) ? conversations : [];
     const people: Person[] = [];
-    for (const conversation of list as Array<{ participants?: Array<{ id: string; name: string; avatar?: string | null }> }>) {
-      const other = (conversation.participants ?? []).find((p) => p.id !== user?.id);
-      if (other && !people.some((p) => p.id === other.id)) people.push({ id: other.id, name: other.name, avatar: other.avatar ?? null });
+    for (const conversation of conversations ?? []) {
+      const other = conversation.participant;
+      // A thread whose other member deleted her account has nobody to send to.
+      if (!other || other.id === 'deleted' || other.id === user?.id) continue;
+      if (people.some((p) => p.id === other.id)) continue;
+      const name =
+        other.displayName?.trim() || [other.firstName, other.lastName].filter(Boolean).join(' ').trim() || 'Member';
+      people.push({ id: other.id, name, avatar: other.avatar ?? null });
     }
     return people.slice(0, 8);
   }, [conversations, user?.id]);

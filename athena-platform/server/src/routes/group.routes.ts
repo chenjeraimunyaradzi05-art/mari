@@ -4,6 +4,7 @@ import { ApiError } from '../middleware/errorHandler';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { decoratePosts } from '../services/post-decoration.service';
+import { viewerContextFor } from '../services/search.service';
 import { assertContentAllowed } from '../services/moderation.service';
 import { enrichPostLinkPreview } from '../services/link-preview.service';
 import { resolveMentionedUserIds } from '../utils/mentions';
@@ -706,8 +707,24 @@ router.get('/:id/posts', optionalAuth, async (req: AuthRequest, res, next) => {
     const group = await ensureVisibleGroup(req.params.id, req.user?.role);
     await assertCanReadGroupPosts(group, req);
 
+    // A block holds inside a group as it does in the feed: neither of two
+    // members who have blocked each other reads the other's posts here. Being
+    // in the same group was a way round it, since this list never asked. Read
+    // from both block stores and not best-effort, like the feed: a lookup that
+    // fails fails the request rather than showing everything. Platform staff
+    // see every post, because moderating the group is the reason they look.
+    const where: Prisma.PostWhereInput = { groupId: group.id, isHidden: false };
+    const viewerId = req.user?.id;
+    if (viewerId && req.user?.role !== 'ADMIN') {
+      const viewer = await viewerContextFor(viewerId);
+      where.AND = [
+        ...(viewer.blockedIds.length > 0 ? [{ authorId: { notIn: viewer.blockedIds } }] : []),
+        { NOT: { author: { dvSafetyProfile: { is: { blockedUserIds: { has: viewerId } } } } } },
+      ];
+    }
+
     const posts = await prisma.post.findMany({
-      where: { groupId: group.id, isHidden: false },
+      where,
       orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }],
       take: 100,
       include: GROUP_POST_AUTHOR,

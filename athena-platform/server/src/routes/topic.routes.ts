@@ -12,6 +12,7 @@
  */
 
 import { Router } from 'express';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
@@ -39,46 +40,204 @@ const AUTHOR_SELECT = {
   },
 };
 
-/** Counts hashtags across recent posts and reels; the two are added together. */
-export async function trendingTopics(days = 7, limit = 10) {
-  const since = new Date(Date.now() - Math.min(Math.max(days, 1), 90) * 24 * 60 * 60 * 1000);
-  const [posts, videos] = await Promise.all([
-    prisma.post.findMany({
-      where: { isHidden: false, isPublic: true, groupId: null, createdAt: { gte: since }, content: { contains: '#' } },
-      select: { content: true },
-      orderBy: { createdAt: 'desc' },
-      take: 1000,
-    }),
-    prisma.video.findMany({
-      where: { status: 'PUBLISHED', isHidden: false, publishedAt: { gte: since } },
-      select: { hashtags: true },
-      orderBy: { publishedAt: 'desc' },
-      take: 1000,
-    }),
-  ]);
+export type TopicCount = { tag: string; posts: number; videos: number; total: number };
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Rows read per round trip while reading a span. */
+export const TRENDING_SCAN_BATCH = 1000;
+
+/**
+ * The spans the database is actually read over, in days. A window of any
+ * length is answered from the shortest span that covers it: `?days=` takes
+ * ninety values, and when each was read on its own, asking for all ninety in
+ * turn cost ninety full reads a minute. Now it costs at most one read of each
+ * span a minute, however many windows are asked for.
+ */
+export const TRENDING_SCAN_SPANS = [7, 30, 90] as const;
+
+/**
+ * How long a read is reused. The composer's # autocomplete asks for the 30-day
+ * count on every keystroke, and a count that is a minute old is still the
+ * right answer to "what is the community tagging this month".
+ */
+const TRENDING_MEMO_MS = 60_000;
+
+/** A post or reel in a span that carries at least one tag, and when it went out. */
+type TaggedItem = { at: number; kind: 'posts' | 'videos'; tags: string[] };
+
+/**
+ * Every tagged post and reel from the last `days` days, read in pages until
+ * the span is exhausted.
+ *
+ * This used to read the newest 1,000 posts and the newest 1,000 reels and
+ * count only those. Once the community posts more than that in a week, the
+ * "this week" list was really "the last few hours", and nothing in the answer
+ * said it had been cut short. Each post or reel counts once per tag it
+ * carries, however many times the tag is repeated in it.
+ */
+async function readSpan(days: number, now: number): Promise<TaggedItem[]> {
+  const since = new Date(now - days * DAY_MS);
+  const items: TaggedItem[] = [];
+
+  // Keyset paging on (date, id) rather than skip/take: an offset page re-reads
+  // every row before it, and a post published mid-read would shift the pages
+  // under it so that one row was counted twice and another missed. The "after
+  // this row" test is written out in the where clause rather than handed to
+  // Prisma as a cursor, because a Prisma cursor is looked up by id: a post
+  // deleted between two pages would match nothing, the next page would come
+  // back empty, and the count would end there looking complete.
+  let lastPost: { createdAt: Date; id: string } | null = null;
+  for (;;) {
+    const after: Prisma.PostWhereInput | null = lastPost
+      ? {
+          OR: [
+            { createdAt: { gt: lastPost.createdAt } },
+            { createdAt: lastPost.createdAt, id: { gt: lastPost.id } },
+          ],
+        }
+      : null;
+    const page: Array<{ id: string; content: string; createdAt: Date }> = await prisma.post.findMany({
+      where: {
+        isHidden: false,
+        isPublic: true,
+        groupId: null,
+        createdAt: { gte: since },
+        content: { contains: '#' },
+        ...(after ? { AND: [after] } : {}),
+      },
+      select: { id: true, content: true, createdAt: true },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: TRENDING_SCAN_BATCH,
+    });
+    for (const post of page) {
+      const tags = hashtagsIn(post.content);
+      if (tags.length > 0) items.push({ at: post.createdAt.getTime(), kind: 'posts', tags });
+    }
+    if (page.length < TRENDING_SCAN_BATCH) break;
+    const last = page[page.length - 1];
+    lastPost = { createdAt: last.createdAt, id: last.id };
+  }
+
+  let lastReel: { publishedAt: Date; id: string } | null = null;
+  for (;;) {
+    const after: Prisma.VideoWhereInput | null = lastReel
+      ? {
+          OR: [
+            { publishedAt: { gt: lastReel.publishedAt } },
+            { publishedAt: lastReel.publishedAt, id: { gt: lastReel.id } },
+          ],
+        }
+      : null;
+    const page: Array<{ id: string; hashtags: string[]; publishedAt: Date | null }> = await prisma.video.findMany({
+      where: {
+        status: 'PUBLISHED',
+        isHidden: false,
+        publishedAt: { gte: since },
+        ...(after ? { AND: [after] } : {}),
+      },
+      select: { id: true, hashtags: true, publishedAt: true },
+      orderBy: [{ publishedAt: 'asc' }, { id: 'asc' }],
+      take: TRENDING_SCAN_BATCH,
+    });
+    let tail: { publishedAt: Date; id: string } | null = null;
+    for (const video of page) {
+      // The where clause above only matches reels with a publication date.
+      // Were one to come back without it, it could be placed in no window, and
+      // the scan could not say where it had got to; dropping it quietly would
+      // pass a partial count off as the whole.
+      if (!video.publishedAt) throw new Error('A reel in the trending window came back without a publication date');
+      // A reel's tags are typed by hand and can repeat ("#salary", "Salary").
+      const tags = Array.from(new Set((video.hashtags ?? []).map(normalizeTag).filter(Boolean)));
+      if (tags.length > 0) items.push({ at: video.publishedAt.getTime(), kind: 'videos', tags });
+      tail = { publishedAt: video.publishedAt, id: video.id };
+    }
+    if (page.length < TRENDING_SCAN_BATCH) break;
+    lastReel = tail;
+  }
+
+  return items;
+}
+
+/** Every tag carried by an item from `since` on, busiest first. */
+function countTags(items: ReadonlyArray<TaggedItem>, since: number): TopicCount[] {
   const counts = new Map<string, { posts: number; videos: number }>();
-  for (const post of posts) {
-    for (const tag of hashtagsIn(post.content)) {
+  for (const item of items) {
+    if (item.at < since) continue;
+    for (const tag of item.tags) {
       const entry = counts.get(tag) ?? { posts: 0, videos: 0 };
-      entry.posts += 1;
+      entry[item.kind] += 1;
       counts.set(tag, entry);
     }
   }
-  for (const video of videos) {
-    for (const raw of video.hashtags ?? []) {
-      const tag = normalizeTag(raw);
-      if (!tag) continue;
-      const entry = counts.get(tag) ?? { posts: 0, videos: 0 };
-      entry.videos += 1;
-      counts.set(tag, entry);
-    }
-  }
-
   return Array.from(counts.entries())
     .map(([tag, entry]) => ({ tag, posts: entry.posts, videos: entry.videos, total: entry.posts + entry.videos }))
-    .sort((a, b) => b.total - a.total || a.tag.localeCompare(b.tag))
-    .slice(0, Math.min(Math.max(limit, 1), 50));
+    .sort((a, b) => b.total - a.total || a.tag.localeCompare(b.tag));
+}
+
+// The promises are kept, not the results, so that ten keystrokes arriving while
+// a read is still running wait for that read rather than each starting one.
+type Memo<T> = { startedAt: number; value: Promise<T> };
+const spanReads = new Map<number, Memo<TaggedItem[]>>();
+const windowCounts = new Map<number, Memo<TopicCount[]>>();
+
+/**
+ * Keeps `value` under `key` for the next minute, unless it fails. A failure is
+ * not kept: the caller is told (an empty list would say nobody is tagging
+ * anything), and the next request tries again rather than being handed the
+ * same failure for a minute.
+ */
+function remember<T>(memos: Map<number, Memo<T>>, key: number, startedAt: number, value: Promise<T>): Memo<T> {
+  const entry = { startedAt, value };
+  memos.set(key, entry);
+  value.catch(() => {
+    if (memos.get(key) === entry) memos.delete(key);
+  });
+  return entry;
+}
+
+const isFresh = <T>(memo: Memo<T> | undefined, now: number): memo is Memo<T> =>
+  !!memo && now - memo.startedAt < TRENDING_MEMO_MS;
+
+/** A read covering at least the last `days` days: one already running or made this minute, or a new one. */
+function itemsCovering(days: number, now: number): Memo<TaggedItem[]> {
+  for (const span of TRENDING_SCAN_SPANS) {
+    if (span < days) continue;
+    const memo = spanReads.get(span);
+    if (isFresh(memo, now)) return memo;
+  }
+  const span = TRENDING_SCAN_SPANS.find((candidate) => candidate >= days) ?? 90;
+  return remember(spanReads, span, now, readSpan(span, now));
+}
+
+/** Forgets every memoised read and count. For tests, which each need to start clean. */
+export function resetTrendingTopicsCache(): void {
+  spanReads.clear();
+  windowCounts.clear();
+}
+
+/** Every tag used over the last `days` days (1 to 90), busiest first. */
+export async function topicCountsFor(days: number): Promise<TopicCount[]> {
+  const window = Number.isFinite(days) ? Math.min(Math.max(Math.floor(days), 1), 90) : 7;
+  const now = Date.now();
+  const memo = windowCounts.get(window);
+  if (isFresh(memo, now)) return memo.value;
+  const since = now - window * DAY_MS;
+  const read = itemsCovering(window, now);
+  // Dated from the read it was counted from, not from now, so that a count is
+  // never more than a minute behind the database however it was arrived at.
+  return remember(
+    windowCounts,
+    window,
+    read.startedAt,
+    read.value.then((items) => countTags(items, since))
+  ).value;
+}
+
+/** Counts hashtags across recent posts and reels; the two are added together. */
+export async function trendingTopics(days = 7, limit = 10): Promise<TopicCount[]> {
+  const counted = await topicCountsFor(days);
+  return counted.slice(0, Number.isFinite(limit) ? Math.min(Math.max(Math.floor(limit), 1), 50) : 10);
 }
 
 async function followedTagsOf(userId: string): Promise<string[]> {
@@ -115,7 +274,9 @@ router.get('/me/following', authenticate, async (req: AuthRequest, res, next) =>
 router.get('/suggest', optionalAuth, async (req, res, next) => {
   try {
     const q = normalizeTag(req.query.q).slice(0, 40);
-    const topics = await trendingTopics(30, 200);
+    // Every tag in the month, not the busiest fifty: a topic that is 51st by
+    // volume is still the one she is typing, and used to go unoffered.
+    const topics = await topicCountsFor(30);
     const matches = topics
       .filter((t) => (q ? t.tag.startsWith(q) : true))
       .slice(0, 8)

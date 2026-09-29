@@ -9,6 +9,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import sharp from 'sharp';
 import { v4 as uuidv4 } from 'uuid';
+import os from 'os';
 import path from 'path';
 import fs from 'fs';
 import { prisma } from '../utils/prisma';
@@ -18,16 +19,37 @@ import { uploadLimiter } from '../middleware/rateLimiter';
 import { logger } from '../utils/logger';
 import { moderateImage } from '../services/moderation.service';
 import { checkFileContent } from '../utils/file-signature';
+import { hasS3Credentials, storeFile } from '../utils/media-storage';
+import { canManageJobApplicants, isHiringMemberOfAny } from '../services/hiring-access.service';
 
 const router = Router();
+
+/** Enough of the start of a file for every signature checkFileContent knows. */
+const SIGNATURE_BYTES = 4096;
+
+/**
+ * The first bytes of an upload, from memory or from the temporary file a
+ * video is received into.
+ */
+async function leadingBytes(file: Express.Multer.File): Promise<Buffer> {
+  if (file.buffer) return file.buffer.subarray(0, SIGNATURE_BYTES);
+  const handle = await fs.promises.open(file.path, 'r');
+  try {
+    const head = Buffer.alloc(SIGNATURE_BYTES);
+    const { bytesRead } = await handle.read(head, 0, SIGNATURE_BYTES, 0);
+    return head.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
+}
 
 /**
  * The bytes have to agree with the declared type before anything else
  * looks at the file. The allow-lists below check the browser's claim; this
  * checks the file.
  */
-function assertContentMatches(file: Express.Multer.File): void {
-  const check = checkFileContent(file.mimetype, file.buffer);
+async function assertContentMatches(file: Express.Multer.File): Promise<void> {
+  const check = checkFileContent(file.mimetype, await leadingBytes(file));
   if (!check.ok) {
     logger.warn('Upload refused: content does not match declared type', {
       declared: file.mimetype,
@@ -166,16 +188,23 @@ const PRIVATE_UPLOAD_FOLDERS = new Set(
 );
 
 /**
- * Reads the upload into memory with the ceiling of its own kind, not the
- * video ceiling for everything: a 400 MB "avatar" used to be buffered in
- * full before the 5 MB limit was looked at. Multer stops reading at the
- * limit and its error is answered as 413 by the error handler. An unknown
- * kind is refused before a byte is read.
+ * Receives the upload with the ceiling of its own kind, not the video ceiling
+ * for everything: a 400 MB "avatar" used to be buffered in full before the
+ * 5 MB limit was looked at. Multer stops reading at the limit and its error is
+ * answered as 413 by the error handler. An unknown kind is refused before a
+ * byte is read.
+ *
+ * Pictures, documents and sounds are small enough to hold in memory, and the
+ * image path needs the buffer for moderation and resizing. A video is not: up
+ * to 500 MB of it sat in the heap for the length of the upload and again for
+ * the write to S3, so a handful of members posting reels at once could take
+ * the process down for everyone. Video goes to a temporary file instead and is
+ * streamed from there; the route removes the file when it is done with it.
  */
 function receiveUpload(
   limitFor: (req: AuthRequest) => number | null,
   field: string,
-  options: { maxFiles?: number } = {}
+  options: { maxFiles?: number; toDisk?: (req: AuthRequest) => boolean } = {}
 ) {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
     const fileSize = limitFor(req);
@@ -183,12 +212,29 @@ function receiveUpload(
       return next(new ApiError(400, 'Invalid upload type'));
     }
     const receiver = multer({
-      storage: multer.memoryStorage(),
+      storage: options.toDisk?.(req)
+        ? multer.diskStorage({
+            destination: os.tmpdir(),
+            filename: (_req, _file, cb) => cb(null, `athena-upload-${uuidv4()}`),
+          })
+        : multer.memoryStorage(),
       limits: { fileSize, files: options.maxFiles ?? 1 },
     });
     const handler = options.maxFiles ? receiver.array(field, options.maxFiles) : receiver.single(field);
     handler(req, res, next);
   };
+}
+
+/** Removes the temporary file a disk-received upload left behind, if any. */
+async function discardTemporaryUpload(file: Express.Multer.File | undefined): Promise<void> {
+  if (!file?.path) return;
+  try {
+    await fs.promises.unlink(file.path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      logger.warn('Could not remove a temporary upload', { path: file.path, error: (error as Error).message });
+    }
+  }
 }
 
 function configFor(type: unknown): FileConfig | null {
@@ -197,8 +243,57 @@ function configFor(type: unknown): FileConfig | null {
     : null;
 }
 
-function hasS3Credentials(): boolean {
-  return !!process.env.AWS_ACCESS_KEY_ID && !!process.env.AWS_SECRET_ACCESS_KEY;
+/**
+ * What a failed write to S3 becomes.
+ *
+ * It used to become a write to this container's disk, everywhere, and the
+ * member was handed a URL that worked until the next deploy replaced the
+ * container and then never again: her avatar, her reel, the résumé she had
+ * attached to an application. utils/media-storage holds the rule for the files
+ * the server produces; this route had its own copy of the old fallback. In
+ * production the failure is now the answer, a 503 she can retry. Outside
+ * production the disk is where a developer's files live anyway.
+ */
+function onS3UploadFailure(key: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  if (process.env.NODE_ENV === 'production') {
+    logger.error('S3 upload failed; not storing on the container disk, which the next deploy wipes', { key, error: message });
+    throw new ApiError(503, 'Media storage is unavailable. Please try again in a few minutes.');
+  }
+  logger.warn('S3 upload failed, storing locally instead (outside production only)', { key, error: message });
+}
+
+/**
+ * Stores an upload held in memory: in S3 when it is configured, on the local
+ * disk otherwise, and never on the local disk in production because S3 said
+ * no. Returns the URL the file is served from.
+ */
+async function storeUploadedBuffer(options: {
+  key: string;
+  body: Buffer;
+  contentType: string;
+  visibility: FileConfig['visibility'];
+  userId: string;
+  originalName: string;
+}): Promise<string> {
+  const { key, body, contentType, visibility, userId, originalName } = options;
+  if (hasS3Credentials()) {
+    try {
+      await s3Client.send(
+        new PutObjectCommand({
+          Bucket: BUCKET_NAME,
+          Key: key,
+          Body: body,
+          ContentType: contentType,
+          Metadata: { userId, originalName },
+        })
+      );
+      return `${CDN_URL}/${key}`;
+    } catch (s3Error) {
+      onS3UploadFailure(key, s3Error);
+    }
+  }
+  return saveFileLocally(body, key, visibility);
 }
 
 function getSafeExtensionForContentType(contentType: string): string {
@@ -264,11 +359,59 @@ function validateOwnedUploadKey(key: string, userId: string) {
 }
 
 /**
+ * Whether this reader is on the hiring side of an application the résumé was
+ * attached to.
+ *
+ * The file travels with an application, so the people deciding on it may read
+ * it. That used to mean anyone with an OrganizationMember row at the employer:
+ * a VIEWER, whom the employer console shows counts and never people, or
+ * someone whose invitation she had never accepted, could open every applicant's
+ * résumé by its key. It now asks the same question the applicant lists ask
+ * (services/hiring-access): for a job, canManageJobApplicants, which is the
+ * organisation's accepted hiring staff, or the poster of a job with no
+ * organisation; for an apprenticeship, accepted hiring staff of the RTO or the
+ * host employer.
+ *
+ * Only applications made by the woman the key belongs to count. The upload
+ * route writes `resumes/<her id>/…`, and an application can only carry her own
+ * upload (assertOwnResumeUpload), so this matches what she sent and nothing
+ * anyone else could have pointed at her file.
+ */
+async function isHiringReaderOfResume(normalizedKey: string, ownerId: string, readerId: string): Promise<boolean> {
+  const where = { userId: ownerId, resumeUrl: { endsWith: `/${normalizedKey}` } };
+
+  const [jobApplications, apprenticeshipApplications] = await Promise.all([
+    prisma.jobApplication.findMany({
+      where,
+      select: { job: { select: { organizationId: true, postedById: true } } },
+      take: 25,
+    }),
+    prisma.apprenticeshipApplication.findMany({
+      where,
+      select: { apprenticeship: { select: { rtoId: true, hostEmployerId: true } } },
+      take: 25,
+    }),
+  ]);
+
+  for (const application of jobApplications) {
+    if (await canManageJobApplicants(application.job, readerId)) return true;
+  }
+
+  const organizationIds = Array.from(
+    new Set(
+      apprenticeshipApplications.flatMap(({ apprenticeship }) =>
+        [apprenticeship.rtoId, apprenticeship.hostEmployerId].filter((id): id is string => Boolean(id))
+      )
+    )
+  );
+  return isHiringMemberOfAny(readerId, organizationIds);
+}
+
+/**
  * Who may read a private upload. The owner always. A résumé travels with a
- * job application, so a team member of the organisation that received the
- * application may read that one file too: the key is matched against
- * JobApplication.resumeUrl for the organisations the caller belongs to.
- * Anyone else is told the file does not exist rather than whose it is.
+ * job or apprenticeship application, so the hiring staff deciding on that
+ * application may read that one file too (isHiringReaderOfResume). Anyone
+ * else is told the file does not exist rather than whose it is.
  *
  * Deleting stays owner-only (validateOwnedUploadKey); this is for reads.
  */
@@ -293,17 +436,8 @@ async function resolveReadableUploadKey(
     return { normalizedKey, folder };
   }
 
-  if (folder === FILE_CONFIGS.resume.folder) {
-    const received = await prisma.jobApplication.findFirst({
-      where: {
-        resumeUrl: { endsWith: `/${normalizedKey}` },
-        job: { organization: { members: { some: { userId } } } },
-      },
-      select: { id: true },
-    });
-    if (received) {
-      return { normalizedKey, folder };
-    }
+  if (folder === FILE_CONFIGS.resume.folder && (await isHiringReaderOfResume(normalizedKey, ownerId, userId))) {
+    return { normalizedKey, folder };
   }
 
   logger.warn('Private file requested by someone it does not belong to', {
@@ -328,13 +462,12 @@ async function saveFileLocally(
   visibility: FileConfig['visibility']
 ): Promise<string> {
   const filePath = resolveLocalFilePath(key);
-  const dir = path.dirname(filePath);
 
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-
-  fs.writeFileSync(filePath, buffer);
+  // Asynchronous, like utils/media-storage: a synchronous write held the
+  // event loop for as long as the file took to land, and every other request
+  // on the instance, the health check included, waited with it.
+  await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.promises.writeFile(filePath, buffer);
   logger.info('File saved locally', { filePath, key, visibility });
 
   return buildLocalFileUrl(key, visibility);
@@ -353,192 +486,161 @@ async function deleteLocalFileIfPresent(key: string): Promise<boolean> {
 }
 
 // ===========================================
-// GET PRESIGNED UPLOAD URL
+// PRESIGNED UPLOAD URL: withdrawn
 // ===========================================
-router.post('/presigned-url', authenticate, uploadLimiter, async (req: AuthRequest, res, next) => {
-  try {
-    const { fileType, fileName, contentType } = req.body;
-
-    if (!fileType || !fileName || !contentType) {
-      throw new ApiError(400, 'fileType, fileName, and contentType are required');
-    }
-
-    // The name is stored as object metadata, which has a size ceiling of its
-    // own and no business carrying control characters.
-    // eslint-disable-next-line no-control-regex -- refusing control characters is the point
-    if (typeof fileName !== 'string' || typeof contentType !== 'string' || fileName.length > 255 || /[ -]/.test(fileName)) {
-      throw new ApiError(400, 'fileName must be a plain name of 255 characters or fewer');
-    }
-
-    const config = configFor(fileType);
-    if (!config) {
-      throw new ApiError(400, 'Invalid file type');
-    }
-
-    if (!config.allowedTypes.includes(contentType)) {
-      throw new ApiError(400, `Invalid content type for ${fileType}`);
-    }
-
-    const fileExtension = getSafeExtensionForContentType(contentType);
-    const key = `${config.folder}/${req.user!.id}/${uuidv4()}${fileExtension}`;
-
-    const command = new PutObjectCommand({
-      Bucket: BUCKET_NAME,
-      Key: key,
-      ContentType: contentType,
-      Metadata: {
-        userId: req.user!.id,
-        originalName: fileName,
-      },
-    });
-
-    const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-
-    res.json({
-      success: true,
-      data: {
-        uploadUrl: signedUrl,
-        key,
-        publicUrl: `${CDN_URL}/${key}`,
-        expiresIn: 3600,
-      },
-    });
-  } catch (error) {
-    next(error);
-  }
-});
+// POST /presigned-url signed a bare S3 PUT for anyone signed in: no size
+// ceiling, an hour to use it, and nothing ever looked at what arrived. The
+// multer limits and the content-signature check below only run on uploads
+// that come through this server, so the signed URL was a way round both, into
+// the public bucket. Nothing called it: the web client had a helper that no
+// screen used, and the app posts to a path this server has never had. The
+// route is gone rather than tightened, because a direct-to-bucket upload that
+// is safe needs a signed POST policy and a confirm step that checks the bytes
+// before anything points at them, and until that exists every upload goes
+// through /upload/:type.
 
 // ===========================================
 // UPLOAD FILE (Direct Upload)
 // ===========================================
-router.post('/upload/:type', authenticate, uploadLimiter, receiveUpload((req) => configFor(req.params.type)?.maxSize ?? null, 'file'), async (req: AuthRequest, res, next) => {
-  try {
-    const { type } = req.params;
+router.post(
+  '/upload/:type',
+  authenticate,
+  uploadLimiter,
+  receiveUpload((req) => configFor(req.params.type)?.maxSize ?? null, 'file', {
+    toDisk: (req) => req.params.type === 'video',
+  }),
+  async (req: AuthRequest, res, next) => {
     const file = req.file;
+    try {
+      const { type } = req.params;
 
-    logger.info(`Upload request received: type=${type}, hasFile=${!!file}`);
+      logger.info(`Upload request received: type=${type}, hasFile=${!!file}`);
 
-    if (!file) {
-      throw new ApiError(400, 'No file provided');
-    }
+      if (!file) {
+        throw new ApiError(400, 'No file provided');
+      }
 
-    logger.info(
-      `File details: name=${file.originalname}, size=${file.size}, mimetype=${file.mimetype}`
-    );
-
-    const config = FILE_CONFIGS[type as keyof typeof FILE_CONFIGS];
-    if (!config) {
-      throw new ApiError(400, 'Invalid upload type');
-    }
-
-    if (!config.allowedTypes.includes(file.mimetype)) {
-      throw new ApiError(
-        400,
-        `Invalid file type. Allowed: ${config.allowedTypes.join(', ')}`
+      logger.info(
+        `File details: name=${file.originalname}, size=${file.size}, mimetype=${file.mimetype}`
       );
-    }
 
-    if (file.size > config.maxSize) {
-      throw new ApiError(
-        400,
-        `File too large. Max size: ${config.maxSize / (1024 * 1024)}MB`
-      );
-    }
+      const config = FILE_CONFIGS[type as keyof typeof FILE_CONFIGS];
+      if (!config) {
+        throw new ApiError(400, 'Invalid upload type');
+      }
 
-    assertContentMatches(file);
+      if (!config.allowedTypes.includes(file.mimetype)) {
+        throw new ApiError(
+          400,
+          `Invalid file type. Allowed: ${config.allowedTypes.join(', ')}`
+        );
+      }
 
-    let processedBuffer = file.buffer;
-    let contentType = file.mimetype;
+      if (file.size > config.maxSize) {
+        throw new ApiError(
+          400,
+          `File too large. Max size: ${config.maxSize / (1024 * 1024)}MB`
+        );
+      }
 
-    if (file.mimetype.startsWith('image/')) {
-      const moderationResult = await moderateImage(file.buffer);
-      if (moderationResult.action === 'block') {
-        logger.warn('Image upload blocked by moderation', {
-          userId: req.user?.id,
-          reason: moderationResult.reason,
+      await assertContentMatches(file);
+
+      const userId = req.user!.id;
+
+      // A video was received to a temporary file, and is streamed from there
+      // to S3 (storeFile sends it with its length, so it never has to be read
+      // into memory). A production write that fails is a 503, never a copy on
+      // this container's disk.
+      if (file.path) {
+        const key = `${config.folder}/${userId}/${uuidv4()}${getSafeExtensionForContentType(file.mimetype)}`;
+        let url: string;
+        try {
+          url = await storeFile(key, file.path, file.mimetype);
+        } catch (storageError) {
+          logger.error('Streamed upload could not be stored', {
+            key,
+            error: storageError instanceof Error ? storageError.message : String(storageError),
+          });
+          throw new ApiError(503, 'Media storage is unavailable. Please try again in a few minutes.');
+        }
+
+        logger.info(`File uploaded: ${key} by user ${userId}`);
+        res.json({
+          success: true,
+          data: { key, url, contentType: file.mimetype, size: file.size },
         });
-        throw new ApiError(400, `Image rejected: ${moderationResult.reason}`);
+        return;
       }
-    }
 
-    if (
-      config.resize &&
-      file.mimetype.startsWith('image/') &&
-      !file.mimetype.includes('gif')
-    ) {
-      processedBuffer = await sharp(file.buffer)
-        .resize(config.resize.width, config.resize.height, {
-          fit: 'cover',
-          position: 'center',
-        })
-        .webp({ quality: 85 })
-        .toBuffer();
-      contentType = 'image/webp';
-    }
+      let processedBuffer = file.buffer;
+      let contentType = file.mimetype;
 
-    const fileExtension =
-      contentType === 'image/webp'
-        ? '.webp'
-        : getSafeExtensionForContentType(contentType);
-    const key = `${config.folder}/${req.user!.id}/${uuidv4()}${fileExtension}`;
+      if (file.mimetype.startsWith('image/')) {
+        const moderationResult = await moderateImage(file.buffer);
+        if (moderationResult.action === 'block') {
+          logger.warn('Image upload blocked by moderation', {
+            userId,
+            reason: moderationResult.reason,
+          });
+          throw new ApiError(400, `Image rejected: ${moderationResult.reason}`);
+        }
+      }
 
-    let publicUrl: string;
-
-    logger.info(
-      `AWS credentials check: hasKeyId=${!!process.env.AWS_ACCESS_KEY_ID}, hasSecret=${!!process.env.AWS_SECRET_ACCESS_KEY}`
-    );
-
-    if (hasS3Credentials()) {
-      try {
-        await s3Client.send(
-          new PutObjectCommand({
-            Bucket: BUCKET_NAME,
-            Key: key,
-            Body: processedBuffer,
-            ContentType: contentType,
-            Metadata: {
-              userId: req.user!.id,
-              originalName: file.originalname,
-            },
+      if (
+        config.resize &&
+        file.mimetype.startsWith('image/') &&
+        !file.mimetype.includes('gif')
+      ) {
+        processedBuffer = await sharp(file.buffer)
+          .resize(config.resize.width, config.resize.height, {
+            fit: 'cover',
+            position: 'center',
           })
-        );
-        publicUrl = `${CDN_URL}/${key}`;
-      } catch (s3Error) {
-        logger.warn(
-          `S3 upload failed, falling back to local storage: ${(s3Error as Error).message}`
-        );
-        publicUrl = await saveFileLocally(
-          processedBuffer,
-          key,
-          config.visibility
-        );
+          .webp({ quality: 85 })
+          .toBuffer();
+        contentType = 'image/webp';
       }
-    } else {
-      publicUrl = await saveFileLocally(processedBuffer, key, config.visibility);
-    }
 
-    if (type === 'avatar') {
-      await prisma.user.update({
-        where: { id: req.user!.id },
-        data: { avatar: publicUrl },
-      });
-    }
+      const fileExtension =
+        contentType === 'image/webp'
+          ? '.webp'
+          : getSafeExtensionForContentType(contentType);
+      const key = `${config.folder}/${userId}/${uuidv4()}${fileExtension}`;
 
-    logger.info(`File uploaded: ${key} by user ${req.user!.id}`);
-
-    res.json({
-      success: true,
-      data: {
+      const publicUrl = await storeUploadedBuffer({
         key,
-        url: publicUrl,
+        body: processedBuffer,
         contentType,
-        size: processedBuffer.length,
-      },
-    });
-  } catch (error) {
-    next(error);
+        visibility: config.visibility,
+        userId,
+        originalName: file.originalname,
+      });
+
+      if (type === 'avatar') {
+        await prisma.user.update({
+          where: { id: userId },
+          data: { avatar: publicUrl },
+        });
+      }
+
+      logger.info(`File uploaded: ${key} by user ${userId}`);
+
+      res.json({
+        success: true,
+        data: {
+          key,
+          url: publicUrl,
+          contentType,
+          size: processedBuffer.length,
+        },
+      });
+    } catch (error) {
+      next(error);
+    } finally {
+      await discardTemporaryUpload(file);
+    }
   }
-});
+);
 
 // ===========================================
 // DELETE FILE
@@ -704,37 +806,19 @@ router.post('/resume', authenticate, uploadLimiter, receiveUpload(() => FILE_CON
       );
     }
 
-    assertContentMatches(file);
+    await assertContentMatches(file);
 
     const fileExtension = getSafeExtensionForContentType(file.mimetype);
     const key = `${config.folder}/${req.user!.id}/${uuidv4()}${fileExtension}`;
 
-    let publicUrl: string;
-
-    if (hasS3Credentials()) {
-      try {
-        await s3Client.send(
-          new PutObjectCommand({
-            Bucket: BUCKET_NAME,
-            Key: key,
-            Body: file.buffer,
-            ContentType: file.mimetype,
-            Metadata: {
-              userId: req.user!.id,
-              originalName: file.originalname,
-            },
-          })
-        );
-        publicUrl = `${CDN_URL}/${key}`;
-      } catch (s3Error) {
-        logger.warn(
-          `S3 resume upload failed, falling back to local storage: ${(s3Error as Error).message}`
-        );
-        publicUrl = await saveFileLocally(file.buffer, key, config.visibility);
-      }
-    } else {
-      publicUrl = await saveFileLocally(file.buffer, key, config.visibility);
-    }
+    const publicUrl = await storeUploadedBuffer({
+      key,
+      body: file.buffer,
+      contentType: file.mimetype,
+      visibility: config.visibility,
+      userId: req.user!.id,
+      originalName: file.originalname,
+    });
 
     logger.info(`Resume uploaded: ${key} by user ${req.user!.id}`);
 
@@ -776,7 +860,16 @@ router.post('/post-images', authenticate, uploadLimiter, receiveUpload(() => FIL
         throw new ApiError(400, `File too large: ${file.originalname}`);
       }
 
-      assertContentMatches(file);
+      await assertContentMatches(file);
+
+      // The same screening the single upload applies. Post images went
+      // straight to the public bucket without it, so a picture the moderation
+      // service would have refused as an avatar was accepted in a post.
+      const moderationResult = await moderateImage(file.buffer);
+      if (moderationResult.action === 'block') {
+        logger.warn('Post image blocked by moderation', { userId: req.user?.id, reason: moderationResult.reason });
+        throw new ApiError(400, `Image rejected: ${moderationResult.reason}`);
+      }
 
       let processedBuffer = file.buffer;
       let contentType = file.mimetype;
@@ -798,36 +891,14 @@ router.post('/post-images', authenticate, uploadLimiter, receiveUpload(() => FIL
           : getSafeExtensionForContentType(contentType);
       const key = `${config.folder}/${req.user!.id}/${uuidv4()}${fileExtension}`;
 
-      let fileUrl: string;
-
-      if (hasS3Credentials()) {
-        try {
-          await s3Client.send(
-            new PutObjectCommand({
-              Bucket: BUCKET_NAME,
-              Key: key,
-              Body: processedBuffer,
-              ContentType: contentType,
-              Metadata: {
-                userId: req.user!.id,
-                originalName: file.originalname,
-              },
-            })
-          );
-          fileUrl = `${CDN_URL}/${key}`;
-        } catch (s3Error) {
-          logger.warn(
-            `S3 post image upload failed, falling back to local storage: ${(s3Error as Error).message}`
-          );
-          fileUrl = await saveFileLocally(
-            processedBuffer,
-            key,
-            config.visibility
-          );
-        }
-      } else {
-        fileUrl = await saveFileLocally(processedBuffer, key, config.visibility);
-      }
+      const fileUrl = await storeUploadedBuffer({
+        key,
+        body: processedBuffer,
+        contentType,
+        visibility: config.visibility,
+        userId: req.user!.id,
+        originalName: file.originalname,
+      });
 
       uploadedFiles.push({
         key,

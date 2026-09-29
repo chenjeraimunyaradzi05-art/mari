@@ -3,6 +3,10 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 
 jest.mock('../../utils/prisma', () => ({
   prisma: {
+    // The block checks read the DV safety profile's list as well as the
+    // platform one, in both directions; nobody is blocked here.
+    dvSafetyProfile: { findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => null) },
+    userSafetySettings: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
     video: { findMany: jest.fn() },
     follow: { findMany: jest.fn() },
     userFeedPreferences: { findUnique: jest.fn() },
@@ -134,5 +138,31 @@ describe('GET /api/video/feed', () => {
     await request(app).get('/api/video/feed?type=REEL&feed=trending').expect(200);
 
     expect((prisma.video.findMany as any).mock.calls[0][0].where.type).toBe('REEL');
+  });
+  it('leaves out reels from anyone on either side of a block with a signed-in viewer', async () => {
+    authenticatedUserId = 'user-123';
+    // She blocked a1; b2 blocked her.
+    (prisma.userSafetySettings.findUnique as any).mockResolvedValueOnce({ blockedUsers: ['a1'] });
+    (prisma.userSafetySettings.findMany as any).mockResolvedValueOnce([{ userId: 'b2' }]);
+    (prisma.userFeedPreferences.findUnique as any).mockResolvedValue({ blockedCreators: ['muted-1'] });
+    (prisma.video.findMany as any).mockResolvedValue([]);
+
+    await request(app).get('/api/video/feed').expect(200);
+
+    const where = (prisma.video.findMany as any).mock.calls[0][0].where;
+    expect(where.authorId.notIn.sort()).toEqual(['a1', 'b2', 'muted-1']);
+    // A block she made from her DV safety page, before it reached the
+    // platform-wide list, is honoured through the author's own profile.
+    expect(where.author).toEqual({ NOT: { dvSafetyProfile: { is: { blockedUserIds: { has: 'user-123' } } } } });
+  });
+
+  it('fails rather than serving the feed unfiltered when the block list cannot be read', async () => {
+    authenticatedUserId = 'user-123';
+    (prisma.userSafetySettings.findUnique as any).mockRejectedValueOnce(new Error('database unavailable'));
+    (prisma.video.findMany as any).mockResolvedValue([]);
+
+    await request(app).get('/api/video/feed').expect(500);
+
+    expect(prisma.video.findMany).not.toHaveBeenCalled();
   });
 });

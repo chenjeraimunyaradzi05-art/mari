@@ -17,6 +17,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { bestEffort } from '../utils/best-effort';
+import { isBlockedRelationship } from '../utils/safety-store';
 
 export type ProfileVisibility = 'public' | 'connections' | 'private';
 
@@ -66,10 +67,44 @@ export async function isFollower(viewerId: string, targetId: string): Promise<bo
 }
 
 /**
+ * Whether either of two members has blocked the other, in either store.
+ *
+ * A block is written to the platform-wide list (UserSafetySettings) and, from
+ * the DV safety page, to DvSafetyProfile.blockedUserIds as well; the mirror
+ * between them is best-effort, so both are read, in both directions. Not
+ * best-effort itself: a lookup that fails throws, and the caller's request
+ * fails with it, because answering "not blocked" when the answer could not be
+ * read is how a blocked man gets back to her profile.
+ */
+export async function isBlockedEitherWay(userId: string, otherUserId: string): Promise<boolean> {
+  if (userId === otherUserId) return false;
+  const [platform, dv] = await Promise.all([
+    isBlockedRelationship(userId, otherUserId),
+    prisma.dvSafetyProfile.findFirst({
+      where: {
+        OR: [
+          { userId, blockedUserIds: { has: otherUserId } },
+          { userId: otherUserId, blockedUserIds: { has: userId } },
+        ],
+      },
+      select: { userId: true },
+    }),
+  ]);
+  return platform || Boolean(dv);
+}
+
+/**
  * What a viewer may see of a member's profile and posts.
  *   full     everything
  *   limited  name, picture, headline, counts and a request-to-follow button
  *   closed   nothing beyond "this profile is private"
+ *
+ * A block closes it, whichever of the two pressed block and whatever the
+ * profile's visibility. Before, the public shortcut answered first, so a
+ * member who had blocked someone still had her full profile read by him:
+ * her real name, city, employer, education and work history. The answer for
+ * a block is the same "closed" a private profile gets, so the closed door
+ * does not also tell him why it is closed.
  */
 export async function profileAccess(
   viewerId: string | undefined,
@@ -77,6 +112,9 @@ export async function profileAccess(
 ): Promise<{ visibility: ProfileVisibility; access: 'full' | 'limited' | 'closed'; isFollower: boolean }> {
   const visibility = await profileVisibilityOf(targetId);
   if (viewerId === targetId) return { visibility, access: 'full', isFollower: true };
+  if (viewerId && (await isBlockedEitherWay(viewerId, targetId))) {
+    return { visibility, access: 'closed', isFollower: false };
+  }
   if (visibility === 'public') return { visibility, access: 'full', isFollower: false };
   const follower = viewerId ? await isFollower(viewerId, targetId) : false;
   if (visibility === 'private') return { visibility, access: 'closed', isFollower: follower };

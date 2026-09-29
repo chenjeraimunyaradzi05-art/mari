@@ -39,6 +39,9 @@ import { CONTENT_LIMITS, normalizeUserText } from '../utils/contentSafety';
 import { findDirectConversation, getOrCreateDirectConversation } from './direct-message.service';
 import { conversationTtl, expiryFor } from './message-expiry.service';
 import { LIVE_CHAT_MAX_LENGTH, postChatMessage, recordViewerCount } from './livestream.service';
+// presence.service imports emitToUserRoom from this file; the cycle resolves
+// at call time, as it already does for livestream.service.
+import { announcePresence } from './presence.service';
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -415,6 +418,26 @@ export function initializeSocketHandlers(io: SocketIOServer) {
           data: { isRead: true, readAt: new Date() },
         });
 
+        // The messages are read either way; what she can switch off is the
+        // sender being told. "Hide read receipts" in her safety settings used
+        // to be stored and then ignored here, so the blue ticks went out
+        // regardless. If her settings cannot be read, nothing is sent: a
+        // receipt she asked to withhold is worse than one that is late.
+        let hideReceipts = true;
+        try {
+          const settings = await prisma.userSafetySettings.findUnique({
+            where: { userId },
+            select: { hideReadReceipts: true },
+          });
+          hideReceipts = settings?.hideReadReceipts ?? false;
+        } catch (lookupError) {
+          logger.warn('Read receipt withheld: safety settings unreadable', {
+            userId,
+            error: lookupError instanceof Error ? lookupError.message : String(lookupError),
+          });
+        }
+        if (hideReceipts) return;
+
         const payload = { conversationId, readerId: userId, messageIds };
         const roomId = getConversationRoomId(userId, senderId);
         io.to(roomId).emit('messages:read', payload);
@@ -519,8 +542,14 @@ export function initializeSocketHandlers(io: SocketIOServer) {
     // PRESENCE HANDLERS
     // ==========================================
 
+    // This used to be socket.broadcast.emit to every connected socket on the
+    // platform: no block, no "hide my online status", no Safe Mode, so any
+    // account at all, a man she had blocked included, could watch her user id
+    // come online and go offline. presence.service holds the audience rule
+    // (established threads only, never across a block, never while she hides)
+    // and never throws; a failure there is logged and costs only the dot.
     socket.on('presence:online', () => {
-      socket.broadcast.emit('presence:user_online', { userId });
+      void announcePresence(userId, 'online');
     });
 
     // ==========================================
@@ -541,8 +570,10 @@ export function initializeSocketHandlers(io: SocketIOServer) {
           sockets.delete(socket.id);
           if (sockets.size === 0) {
             userSockets.delete(userId);
-            // User fully offline
-            socket.broadcast.emit('presence:user_offline', { userId });
+            // Fully offline. The same audience as her online notice, for the
+            // same reason: to someone she hides from, "offline" would say she
+            // had been on until this moment.
+            void announcePresence(userId, 'offline');
           }
         }
       }
@@ -762,9 +793,10 @@ export async function createNotification(io: SocketIOServer, data: NotificationD
       },
     });
 
-    // Emit to user's room
-    io.to(`user:${data.userId}`).emit('notifications:new', notification);
-    io.to(`notifications:${data.userId}`).emit('notifications:new', notification);
+    // One emit to the union of the two rooms. Two separate emits delivered the
+    // notification twice to every socket that had subscribed, since every
+    // socket is also in its user room from the moment it connects.
+    io.to(`user:${data.userId}`).to(`notifications:${data.userId}`).emit('notifications:new', notification);
 
     return notification;
   } catch (error) {

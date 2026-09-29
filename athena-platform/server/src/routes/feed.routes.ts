@@ -35,16 +35,21 @@ const router = Router();
  * leaves them out.
  *
  * Neither client ever called either route. The feed the web and the app
- * read is GET /api/posts/feed; opportunities that are actually scored against
- * a member live at /api/ai-algorithms/*. Answering 410 with those pointers,
- * rather than serving the mix, is what stops a new screen being built on it.
+ * read is GET /api/posts/feed. The newest open jobs, courses and events are at
+ * GET /api/algorithms/opportunity-scan, which /dashboard/ai/opportunities
+ * reads and which says plainly that it is not personalised; the ATHENA Pro
+ * opportunity radar, which is matched to her profile, is GET
+ * /api/ai/opportunity-radar. This used to point at /api/ai-algorithms/*,
+ * whose opportunity routes now answer 410 themselves. Answering 410 with the
+ * live pointers, rather than serving the mix, is what stops a new screen
+ * being built on it.
  */
 function retiredMixedFeed(_req: Request, res: Response) {
   res.status(410).json({
     success: false,
     deprecated: true,
     message:
-      'This mixed feed has been retired. Read the feed at GET /api/posts/feed; opportunities scored against a member are at /api/ai-algorithms.',
+      'This mixed feed has been retired. Read the feed at GET /api/posts/feed. New opportunities are at GET /api/algorithms/opportunity-scan (not personalised); the ATHENA Pro opportunity radar, matched to your profile, is GET /api/ai/opportunity-radar.',
   });
 }
 
@@ -132,9 +137,9 @@ router.get('/onboarding', authenticate, async (req: AuthRequest, res: Response, 
 /**
  * @route GET /api/feed/opportunities
  * Retired with GET /api/feed; see retiredMixedFeed at the top of this file.
- * Opportunities that are actually scored against a member live at
- * `/api/ai-algorithms/*`, behind /dashboard/ai/opportunity-radar and
- * /dashboard/ai/opportunity-scan.
+ * The newest opportunities are at /api/algorithms/opportunity-scan, behind
+ * /dashboard/ai/opportunities, and the opportunity radar that is matched to a
+ * member is /api/ai/opportunity-radar, behind /dashboard/ai/opportunity-radar.
  */
 router.get('/opportunities', retiredMixedFeed);
 

@@ -3,6 +3,10 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 
 jest.mock('../../utils/prisma', () => ({
   prisma: {
+    // The block checks read the DV safety profile's list as well as the
+    // platform one, in both directions; nobody is blocked here.
+    dvSafetyProfile: { findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => null) },
+    userSafetySettings: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
     video: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn(), delete: jest.fn() },
     videoSave: { findMany: jest.fn(), count: jest.fn() },
     // Every signed-in listing is decorated with the viewer's like state.
@@ -113,20 +117,24 @@ describe('Video browse routes are not swallowed by /:id', () => {
     await request(app).get(`/api/video/user/${AUTHOR}`).set(as(VIEWER)).expect(200);
 
     const where = (prisma.video.findMany as any).mock.calls[0][0].where;
-    expect(where).toEqual({ status: 'PUBLISHED', isHidden: false, authorId: AUTHOR });
+    expect(where.AND[0]).toEqual({ status: 'PUBLISHED', isHidden: false, authorId: AUTHOR });
+    // A signed-in viewer's lists also leave out anyone on either side of a block.
+    expect(where.AND[1]).toMatchObject({
+      author: { NOT: { dvSafetyProfile: { is: { blockedUserIds: { has: VIEWER } } } } },
+    });
   });
 
   it('GET /user/:userId shows authors their own unpublished uploads', async () => {
     await request(app).get(`/api/video/user/${AUTHOR}`).set(as(AUTHOR)).expect(200);
 
     const where = (prisma.video.findMany as any).mock.calls[0][0].where;
-    expect(where).toEqual({ authorId: AUTHOR, isHidden: false });
+    expect(where.AND[0]).toEqual({ authorId: AUTHOR, isHidden: false });
   });
 
   it('GET /user/:userId shows admins everything too', async () => {
     await request(app).get(`/api/video/user/${AUTHOR}`).set(as(VIEWER, 'ADMIN')).expect(200);
 
-    expect((prisma.video.findMany as any).mock.calls[0][0].where.status).toBeUndefined();
+    expect((prisma.video.findMany as any).mock.calls[0][0].where.AND[0].status).toBeUndefined();
   });
 });
 
