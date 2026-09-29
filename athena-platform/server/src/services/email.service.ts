@@ -10,7 +10,6 @@
 export { sendEmail, sendVerificationEmail, sendPasswordResetEmail, sendWelcomeEmail } from '../utils/email';
 
 import { sendEmail as sendEmailCore } from '../utils/email';
-import { logger } from '../utils/logger';
 
 interface EmailTemplate {
   subject: string;
@@ -19,9 +18,13 @@ interface EmailTemplate {
 }
 
 /**
- * Escapes HTML special characters to prevent XSS in email templates
+ * Escapes HTML special characters to prevent XSS in email templates.
+ *
+ * Exported so every email built from text a member or a provider wrote — an
+ * appeal decision note, a course or event title — escapes it the same way,
+ * rather than each sender writing its own copy or, as some did, none at all.
  */
-function escapeHtml(unsafe: string): string {
+export function escapeHtml(unsafe: string): string {
   return unsafe
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')

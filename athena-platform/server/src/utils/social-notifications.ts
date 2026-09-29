@@ -20,6 +20,7 @@ import { prisma } from './prisma';
 import { logger } from './logger';
 import { memberWantsSocialNotification } from '../services/notification-preferences.service';
 import { pushToUser } from '../services/push.service';
+import { emitToUserRoom } from '../services/socket.service';
 
 // The kinds worth waking a phone for. A like is shown in the app, not pushed.
 const PUSHED_KINDS = new Set<NotificationType>(['COMMENT', 'MENTION', 'FOLLOW', 'FOLLOW_REQUEST', 'REPOST']);
@@ -51,7 +52,7 @@ export async function notifySocial(input: SocialNotificationInput): Promise<void
 
     // The recipient may have switched this kind off.
     if (!(await memberWantsSocialNotification(input.recipientId, input.type))) return;
-    await prisma.notification.create({
+    const notification = await prisma.notification.create({
       data: {
         userId: input.recipientId,
         type: input.type,
@@ -62,6 +63,14 @@ export async function notifySocial(input: SocialNotificationInput): Promise<void
         data: { actorId: input.actorId, actorName: name },
       },
     });
+
+    // Live to any client she has open. Before, a like, comment, follow,
+    // mention or repost reached web and mobile only on their next poll, since
+    // the only emitters of notifications:new were createNotification and the
+    // go-live notice. The user room only: every socket joins user:<id> when
+    // it connects, and emitting to notifications:<id> as well would deliver
+    // twice to a socket in both.
+    emitToUserRoom(input.recipientId, 'notifications:new', notification);
 
     // After the row exists: the same news on the recipient's phone, subject
     // to their push preferences. Never awaited into the request.

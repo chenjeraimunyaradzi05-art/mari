@@ -1,9 +1,12 @@
 import { Router } from 'express';
+import { ConsentStatus, ConsentType } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { groupNotifications, type NotificationRow } from '../services/notification-grouping.service';
 import { registerPushToken } from '../services/push.service';
+import { gdprService } from '../services/gdpr.service';
+import { consentService } from '../services/consent.service';
 
 const router = Router();
 
@@ -132,7 +135,11 @@ export const defaultNotificationPreferences: NotificationPreferencesFull = {
     applications: true,
     messages: true,
     mentions: true,
-    newsletter: true,
+    // Marketing is opt-in: the privacy policy says no marketing email is sent
+    // unless she has said yes, and this default said yes for her. The value a
+    // member sees is read from the consent ledger in any case (see
+    // marketingEmailConsented below); this is only the fallback's shape.
+    newsletter: false,
   },
   push: {
     jobMatches: true,
@@ -203,6 +210,35 @@ function mergeNotificationPreferences(
       ...base.inApp,
       ...(o.inApp || {}),
     },
+  };
+}
+
+/**
+ * Whether the consent ledger holds her yes to marketing email.
+ *
+ * The newsletter switch and the Privacy Centre's marketing consent are two
+ * stores for one decision. A change in the Privacy Centre already reaches the
+ * switch (consent.service syncMarketingEmailPreference); a change here reached
+ * nothing, so a member who turned the newsletter off in Settings was still
+ * recorded as consenting, and one who turned it on had consented to nothing
+ * the platform could show. The ledger is the authority, so the switch reads
+ * from it and writes to it. It also settles the rows that defaulted to yes:
+ * every save wrote the whole preferences object, the old default included, so
+ * a stored `true` says nothing about whether she ever chose it.
+ */
+async function marketingEmailConsented(userId: string): Promise<boolean> {
+  const record = await prisma.consentRecord.findUnique({
+    where: { userId_consentType: { userId, consentType: ConsentType.MARKETING_EMAIL } },
+    select: { status: true },
+  });
+  return record?.status === ConsentStatus.GRANTED;
+}
+
+function consentContext(req: AuthRequest) {
+  return {
+    ipAddress: req.ip,
+    userAgent: req.headers['user-agent'],
+    region: (req.headers['cf-ipcountry'] as string) || 'UNKNOWN',
   };
 }
 
@@ -399,20 +435,21 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res, next) => {
 // ===========================================
 router.get('/preferences', authenticate, async (req: AuthRequest, res, next) => {
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.user!.id },
-      // Cast to any so this compiles even if Prisma client isn't regenerated yet.
-      select: { notificationPreferences: true } as any,
-    });
+    const userId = req.user!.id;
+    const [user, newsletter] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: userId },
+        select: { notificationPreferences: true },
+      }),
+      marketingEmailConsented(userId),
+    ]);
 
-    const stored = isPlainObject((user as any)?.notificationPreferences)
-      ? (user as any).notificationPreferences
+    const stored = isPlainObject(user?.notificationPreferences)
+      ? (user!.notificationPreferences as NotificationPreferences)
       : null;
 
-    const preferences = mergeNotificationPreferences(
-      defaultNotificationPreferences,
-      stored as NotificationPreferences | null,
-    );
+    const preferences = mergeNotificationPreferences(defaultNotificationPreferences, stored);
+    preferences.email.newsletter = newsletter;
 
     res.json({
       success: true,
@@ -428,28 +465,49 @@ router.get('/preferences', authenticate, async (req: AuthRequest, res, next) => 
 // ===========================================
 router.patch('/preferences', authenticate, async (req: AuthRequest, res, next) => {
   try {
+    const userId = req.user!.id;
     const input = (req.body && (req.body.preferences ?? req.body)) ?? {};
     const updateParsed = validatePreferences(input);
 
-    const current = await prisma.user.findUnique({
-      where: { id: req.user!.id },
-      select: { notificationPreferences: true } as any,
-    });
+    const [current, consented] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: userId },
+        select: { notificationPreferences: true },
+      }),
+      marketingEmailConsented(userId),
+    ]);
 
-    const currentStored = isPlainObject((current as any)?.notificationPreferences)
-      ? (current as any).notificationPreferences
+    const currentStored = isPlainObject(current?.notificationPreferences)
+      ? (current!.notificationPreferences as NotificationPreferences)
       : null;
 
-    const base = mergeNotificationPreferences(
-      defaultNotificationPreferences,
-      currentStored as NotificationPreferences | null,
-    );
+    const base = mergeNotificationPreferences(defaultNotificationPreferences, currentStored);
+    base.email.newsletter = consented;
+
+    // Flipping the newsletter switch is a consent decision, and it is recorded
+    // as one before anything else is saved. Only a change counts: the settings
+    // page sends every switch on every save, and re-sending the answer the
+    // ledger already holds is not a new decision. recordConsent orders its own
+    // two writes so that a failure part-way leaves her opted out, never in.
+    const requested = updateParsed.email?.newsletter;
+    if (typeof requested === 'boolean' && requested !== consented) {
+      if (requested) {
+        const frozen = await consentService.getRestrictedConsentTypes(userId);
+        if (frozen.has(ConsentType.MARKETING_EMAIL)) {
+          throw new ApiError(
+            409,
+            'Marketing email is restricted under your Article 18 request. Lift the restriction in the Privacy Centre first.'
+          );
+        }
+      }
+      await gdprService.recordConsent(userId, ConsentType.MARKETING_EMAIL, requested, consentContext(req));
+    }
 
     const merged = mergeNotificationPreferences(base, updateParsed);
 
     await prisma.user.update({
-      where: { id: req.user!.id },
-      data: { notificationPreferences: merged } as any,
+      where: { id: userId },
+      data: { notificationPreferences: merged },
     });
 
     res.json({

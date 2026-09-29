@@ -3,7 +3,7 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 
 jest.mock('../../utils/prisma', () => ({
   prisma: {
-    pushToken: { findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn(), create: jest.fn(), updateMany: jest.fn(), deleteMany: jest.fn() },
+    pushToken: { findFirst: jest.fn(), findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn(), create: jest.fn(), updateMany: jest.fn(), deleteMany: jest.fn() },
     user: { findUnique: jest.fn() },
     notification: { findMany: jest.fn(), count: jest.fn(), findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn(), deleteMany: jest.fn(), delete: jest.fn() },
   },
@@ -33,7 +33,8 @@ const EXPO = 'ExponentPushToken[abcdefghijklmnop]';
 describe('Push token registration', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    prisma.pushToken.findMany.mockResolvedValue([]);
+    // token is unique, so a device is one row or none.
+    prisma.pushToken.findUnique.mockResolvedValue(null);
     prisma.pushToken.create.mockImplementation(async (args: any) => ({ id: 'pt1', platform: args.data.platform }));
     prisma.pushToken.update.mockResolvedValue({});
     prisma.pushToken.updateMany.mockResolvedValue({ count: 1 });
@@ -41,12 +42,6 @@ describe('Push token registration', () => {
   });
 
   it('registers a new Expo device and issues it a key the device must keep', async () => {
-    // After the create, the route re-reads the token's rows to settle any race;
-    // the only row is the one just written.
-    prisma.pushToken.findMany
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ id: 'pt1', userId: 'user-123', deviceId: 'x' }]);
-
     const res = await request(app)
       .post('/api/notifications/push-token')
       .send({ token: EXPO, provider: 'expo', platform: 'ios', deviceId: 'caller-chosen' })
@@ -65,9 +60,9 @@ describe('Push token registration', () => {
   // token could POST it and the device became hers, so the other woman's
   // safety alerts and message previews stopped reaching her.
   it('refuses to move a device another account holds when no key is presented', async () => {
-    prisma.pushToken.findMany.mockResolvedValue([
-      { id: 'pt-old', userId: 'someone-else', deviceId: deviceFingerprint(issueDeviceKey()) },
-    ]);
+    prisma.pushToken.findUnique.mockResolvedValue(
+      { id: 'pt-old', userId: 'someone-else', deviceId: deviceFingerprint(issueDeviceKey()) }
+    );
 
     await request(app).post('/api/notifications/push-token').send({ token: EXPO, provider: 'expo' }).expect(409);
 
@@ -76,9 +71,9 @@ describe('Push token registration', () => {
   });
 
   it('refuses to move a device another account holds when the wrong key is presented', async () => {
-    prisma.pushToken.findMany.mockResolvedValue([
-      { id: 'pt-old', userId: 'someone-else', deviceId: deviceFingerprint(issueDeviceKey()) },
-    ]);
+    prisma.pushToken.findUnique.mockResolvedValue(
+      { id: 'pt-old', userId: 'someone-else', deviceId: deviceFingerprint(issueDeviceKey()) }
+    );
 
     await request(app)
       .post('/api/notifications/push-token')
@@ -92,9 +87,9 @@ describe('Push token registration', () => {
   // so the member now signed in on it can take it over.
   it('moves a device to the account signed in on it when the device proves it holds the key', async () => {
     const heldKey = issueDeviceKey();
-    prisma.pushToken.findMany.mockResolvedValue([
-      { id: 'pt-old', userId: 'someone-else', deviceId: deviceFingerprint(heldKey) },
-    ]);
+    prisma.pushToken.findUnique.mockResolvedValue(
+      { id: 'pt-old', userId: 'someone-else', deviceId: deviceFingerprint(heldKey) }
+    );
 
     const res = await request(app)
       .post('/api/notifications/push-token')

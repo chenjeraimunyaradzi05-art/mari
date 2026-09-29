@@ -81,30 +81,13 @@ async function activeTokensOf(userId: string): Promise<StoredToken[]> {
     orderBy: { createdAt: 'desc' },
     select: { id: true, token: true, platform: true },
   });
-  if (!Array.isArray(rows)) return [];
-
-  // One device, one notification.
-  //
-  // PushToken.token is indexed but not unique, and the register handler is a
-  // findFirst followed by a create with no constraint behind it. The app calls
-  // syncPushToken() twice in quick succession on a cold start that ends in a
-  // sign-in — once from App.tsx on mount, once from AuthContext on login — so
-  // the two registrations race and both create a row. The phone then had two
-  // active rows and Expo was handed the same token twice in the same batch, so
-  // every notification arrived twice: two buzzes for one message.
-  //
-  // De-duplicating here fixes the delivery for the rows that already exist.
-  // registerPushToken below now folds a device's rows into one whenever it
-  // registers, and the app no longer registers twice at once, but only
-  // @unique on PushToken.token (a schema change) closes the race for good.
-  const seen = new Set<string>();
-  const unique: StoredToken[] = [];
-  for (const row of rows) {
-    if (seen.has(row.token)) continue;
-    seen.add(row.token);
-    unique.push(row);
-  }
-  return unique;
+  // One device, one row, one notification. PushToken.token is unique, so a
+  // member's active tokens are distinct devices. Before the constraint, two
+  // registrations racing on a cold start could both create a row, Expo was
+  // handed the same token twice in one batch, and every notification arrived
+  // twice; this read used to de-duplicate to make up for it. The migration
+  // that added the constraint collapsed the duplicates that existed.
+  return Array.isArray(rows) ? rows : [];
 }
 
 async function deactivate(ids: string[]): Promise<void> {
@@ -360,10 +343,13 @@ export function pushPreview(text: string | null | undefined, fallback = 'Sent yo
 // there again; a phone that misses notifications for a new account is the
 // lesser harm next to a phone anyone can take.
 //
-// Every registration also folds the device's rows into one. Duplicate rows are
-// what let a phone keep the previous member's notifications after a handover:
-// the register handler moved the first row it found and left the other
-// active under her.
+// A token has one row. PushToken.token is unique, so a device can no longer
+// collect duplicates, which is what used to let a phone keep the previous
+// member's notifications after a handover: the register handler moved the
+// first row it found and left another active under her. Before the constraint
+// this code folded a device's rows into one on every registration and checked
+// after each create for a racing twin; the database now refuses the twin, and
+// the registration that loses is judged against the row that won.
 
 const DEVICE_KEY_BYTES = 32;
 /** base64url of DEVICE_KEY_BYTES, the only shape this server ever issues. */
@@ -400,25 +386,19 @@ function presentedDeviceKey(value: unknown): string | null {
   return typeof value === 'string' && DEVICE_KEY_PATTERN.test(value) ? value : null;
 }
 
-/** Whether every row another account holds carries the fingerprint of the presented key. */
-function provesDevice(heldByOthers: RegisteredRow[], presentedKey: string | null): boolean {
-  if (!presentedKey || heldByOthers.length === 0) return false;
-  const fingerprint = deviceFingerprint(presentedKey);
-  return heldByOthers.every((row) => secretMatches(fingerprint, row.deviceId));
+/** Whether the row another account holds carries the fingerprint of the presented key. */
+function provesDevice(heldByOther: RegisteredRow, presentedKey: string | null): boolean {
+  if (!presentedKey) return false;
+  return secretMatches(deviceFingerprint(presentedKey), heldByOther.deviceId);
 }
 
 function isUniqueViolation(error: unknown): boolean {
   return !!error && typeof error === 'object' && (error as { code?: unknown }).code === 'P2002';
 }
 
-/** Every row for a token, oldest first: the oldest is the one that is kept. */
-async function rowsForToken(token: string): Promise<RegisteredRow[]> {
-  const rows = await prisma.pushToken.findMany({
-    where: { token },
-    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-    select: REGISTERED_ROW,
-  });
-  return Array.isArray(rows) ? rows : [];
+/** The one row a token has, if it has one. */
+async function rowForToken(token: string): Promise<RegisteredRow | null> {
+  return prisma.pushToken.findUnique({ where: { token }, select: REGISTERED_ROW });
 }
 
 /**
@@ -433,11 +413,10 @@ export async function registerPushToken(input: {
   deviceKey?: unknown;
 }): Promise<PushTokenRegistration> {
   const presentedKey = presentedDeviceKey(input.deviceKey);
-  const rows = await rowsForToken(input.token);
-  if (rows.length > 0) return claimRows(rows, input.userId, input.platform, presentedKey, false);
+  const existing = await rowForToken(input.token);
+  if (existing) return claimRow(existing, input.userId, input.platform, presentedKey);
 
   const deviceKey = presentedKey ?? issueDeviceKey();
-  let createdId: string;
   try {
     const created = await prisma.pushToken.create({
       data: {
@@ -449,84 +428,57 @@ export async function registerPushToken(input: {
       },
       select: { id: true },
     });
-    createdId = created.id;
-  } catch (error) {
-    // Only reachable once the token column is unique: another registration of
-    // this token was written first, so this one is judged against it.
-    if (!isUniqueViolation(error)) throw error;
-    const winner = await rowsForToken(input.token);
-    // Written and gone again between two statements: nothing sensible to
-    // judge against, so the conflict is reported as it happened.
-    if (winner.length === 0) throw error;
-    return claimRows(winner, input.userId, input.platform, presentedKey, false);
-  }
-
-  // Without a unique constraint two registrations of one token can both find
-  // nothing and both create. Whichever row is oldest stands, the same answer
-  // from both sides; a registration whose row was not the oldest is judged
-  // against the one that was, exactly as if it had arrived second, carrying
-  // the key it has just been issued.
-  const after = await rowsForToken(input.token);
-  const survivor = after[0];
-  if (!survivor || survivor.id === createdId) {
-    await removeRows(after.slice(1).map((row) => row.id));
     return {
       outcome: 'registered',
-      id: createdId,
+      id: created.id,
       platform: input.platform,
       ...(presentedKey ? {} : { deviceKey }),
     };
+  } catch (error) {
+    // Another registration of this token was written between this one's read
+    // and its write (the app registers from two places on a cold start that
+    // ends in a sign-in). The unique token column refused this row, so this
+    // registration is judged against the one that won, exactly as if it had
+    // arrived second, with the key the device presented.
+    if (!isUniqueViolation(error)) throw error;
+    const winner = await rowForToken(input.token);
+    // Written and gone again between two statements: nothing sensible to
+    // judge against, so the conflict is reported as it happened.
+    if (!winner) throw error;
+    return claimRow(winner, input.userId, input.platform, presentedKey);
   }
-  const judged = await claimRows(after, input.userId, input.platform, deviceKey, !presentedKey);
-  // Refused, the row this request wrote must not outlive the refusal: it
-  // would leave the device delivering to two accounts at once.
-  if (judged.outcome === 'held-by-another-account') await removeRows([createdId]);
-  return judged;
 }
 
-/**
- * Takes over the rows a token already has, when the caller may. `keyIsNew`
- * says the key was issued by this request rather than presented by the
- * device, so it still has to be handed back.
- */
-async function claimRows(
-  rows: RegisteredRow[],
+/** Takes over the row a token already has, when the caller may. */
+async function claimRow(
+  row: RegisteredRow,
   userId: string,
   platform: string,
-  presentedKey: string | null,
-  keyIsNew: boolean
+  presentedKey: string | null
 ): Promise<PushTokenRegistration> {
-  const heldByOthers = rows.filter((row) => row.userId !== userId);
-  if (heldByOthers.length > 0 && !provesDevice(heldByOthers, keyIsNew ? null : presentedKey)) {
+  const heldByOther = row.userId !== userId;
+  if (heldByOther && !provesDevice(row, presentedKey)) {
     // Worth a line: either a phone changed hands before its previous owner's
     // app ever recorded a device key, or someone is trying to take a device
     // they do not hold. The ids say which accounts; nothing here says whose
     // phone it is.
     logger.warn('Push token registration refused: the device is registered to another account and was not proved', {
       userId,
-      heldBy: Array.from(new Set(heldByOthers.map((row) => row.userId))),
+      heldBy: [row.userId],
     });
     return { outcome: 'held-by-another-account' };
   }
 
-  const [keep, ...duplicates] = rows;
   const deviceKey = presentedKey ?? issueDeviceKey();
   await prisma.pushToken.update({
-    where: { id: keep.id },
+    where: { id: row.id },
     data: { userId, platform, deviceId: deviceFingerprint(deviceKey), isActive: true },
   });
-  await removeRows(duplicates.map((row) => row.id));
 
   return {
-    outcome: heldByOthers.length > 0 ? 'moved' : 'refreshed',
-    id: keep.id,
+    outcome: heldByOther ? 'moved' : 'refreshed',
+    id: row.id,
     platform,
-    ...(presentedKey && !keyIsNew ? {} : { deviceKey }),
+    ...(presentedKey ? {} : { deviceKey }),
   };
-}
-
-/** The extra rows one device has collected; the kept row speaks for it. */
-async function removeRows(ids: string[]): Promise<void> {
-  if (ids.length === 0) return;
-  await prisma.pushToken.deleteMany({ where: { id: { in: ids } } });
 }

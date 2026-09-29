@@ -1,24 +1,28 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 // An in-memory PushToken table, so the tests exercise what the rows end up as
-// rather than which Prisma calls were made on the way.
+// rather than which Prisma calls were made on the way. The token column is
+// unique, as it is in the database: a second row for a token is refused with
+// Prisma's P2002, the way the real constraint refuses it.
 type Row = { id: string; userId: string; token: string; platform: string; deviceId: string | null; isActive: boolean; createdAt: number };
 const table: Row[] = [];
 let nextId = 1;
 let clock = 1;
+
+const uniqueViolation = () =>
+  Object.assign(new Error('Unique constraint failed on the fields: (`token`)'), { code: 'P2002' });
 
 jest.mock('../../utils/prisma', () => ({
   prisma: {
     user: { findUnique: jest.fn() },
     dvSafetyProfile: { findUnique: jest.fn() },
     pushToken: {
-      findMany: jest.fn(async (args: any) =>
-        table
-          .filter((row) => row.token === args.where.token)
-          .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
-          .map((row) => ({ id: row.id, userId: row.userId, deviceId: row.deviceId }))
-      ),
+      findUnique: jest.fn(async (args: any) => {
+        const row = table.find((r) => r.token === args.where.token);
+        return row ? { id: row.id, userId: row.userId, deviceId: row.deviceId } : null;
+      }),
       create: jest.fn(async (args: any) => {
+        if (table.some((r) => r.token === args.data.token)) throw uniqueViolation();
         const row: Row = { id: `pt${nextId++}`, createdAt: clock++, deviceId: null, ...args.data };
         table.push(row);
         return { id: row.id };
@@ -30,17 +34,7 @@ jest.mock('../../utils/prisma', () => ({
         return row;
       }),
       updateMany: jest.fn(async () => ({ count: 0 })),
-      deleteMany: jest.fn(async (args: any) => {
-        const ids: string[] = args.where.id.in;
-        let count = 0;
-        for (let i = table.length - 1; i >= 0; i--) {
-          if (ids.includes(table[i].id)) {
-            table.splice(i, 1);
-            count++;
-          }
-        }
-        return { count };
-      }),
+      deleteMany: jest.fn(async () => ({ count: 0 })),
     },
   },
 }));
@@ -88,6 +82,14 @@ describe('registerPushToken', () => {
     expect(table[0].deviceId).not.toContain(result.deviceKey!);
   });
 
+  it('keeps the key an unknown device presents rather than issuing another', async () => {
+    const key = issueDeviceKey();
+    const result = await registerPushToken({ userId: 'mei', token: TOKEN, platform: 'ios', deviceKey: key });
+
+    expect(result).toEqual({ outcome: 'registered', id: table[0].id, platform: 'ios' });
+    expect(table[0].deviceId).toBe(deviceFingerprint(key));
+  });
+
   it('will not move a device another member holds when the caller cannot prove she holds it', async () => {
     const key = issueDeviceKey();
     seed({ userId: 'victim', deviceId: deviceFingerprint(key) });
@@ -123,21 +125,8 @@ describe('registerPushToken', () => {
     expect(table[0]).toMatchObject({ userId: 'second', isActive: true, deviceId: deviceFingerprint(key) });
   });
 
-  it('moves every duplicate on a handover, so none stays active under the previous member', async () => {
-    const key = issueDeviceKey();
-    seed({ userId: 'first', deviceId: deviceFingerprint(key) });
-    seed({ userId: 'first', deviceId: deviceFingerprint(key) });
-
-    const result = await registerPushToken({ userId: 'second', token: TOKEN, platform: 'ios', deviceKey: key });
-
-    expect(result.outcome).toBe('moved');
-    expect(table).toHaveLength(1);
-    expect(table.filter((row) => row.userId === 'first')).toEqual([]);
-  });
-
   it('refreshes the caller’s own device, giving a row from before device keys a key of its own', async () => {
     seed({ userId: 'mei', deviceId: null, isActive: false });
-    seed({ userId: 'mei', deviceId: null });
 
     const result = await registerPushToken({ userId: 'mei', token: TOKEN, platform: 'android' });
 
@@ -158,14 +147,12 @@ describe('registerPushToken', () => {
     expect(table[0].deviceId).toBe(deviceFingerprint(key));
   });
 
-  it('settles two registrations that both found nothing on the oldest row', async () => {
+  it('settles two registrations of her own device that both found nothing on the one row', async () => {
     const { prisma } = jest.requireMock('../../utils/prisma') as { prisma: any };
     // The other registration lands between this one's read and its write.
-    prisma.pushToken.create.mockImplementationOnce(async (args: any) => {
+    prisma.pushToken.findUnique.mockImplementationOnce(async () => {
       seed({ userId: 'mei', deviceId: null });
-      const row: Row = { id: `pt${nextId++}`, createdAt: clock++, ...args.data };
-      table.push(row);
-      return { id: row.id };
+      return null;
     });
 
     const result = await registerPushToken({ userId: 'mei', token: TOKEN, platform: 'ios' });
@@ -176,35 +163,41 @@ describe('registerPushToken', () => {
     expect(table[0]).toMatchObject({ id: result.id, userId: 'mei', deviceId: deviceFingerprint(result.deviceKey!) });
   });
 
-  it('removes its own row when it loses that race to another account', async () => {
-    const { prisma } = jest.requireMock('../../utils/prisma') as { prisma: any };
-    const key = issueDeviceKey();
-    prisma.pushToken.create.mockImplementationOnce(async (args: any) => {
-      seed({ userId: 'victim', deviceId: deviceFingerprint(key) });
-      const row: Row = { id: `pt${nextId++}`, createdAt: clock++, ...args.data };
-      table.push(row);
-      return { id: row.id };
-    });
-
-    const result = await registerPushToken({ userId: 'attacker', token: TOKEN, platform: 'ios' });
-
-    expect(result).toEqual({ outcome: 'held-by-another-account' });
-    expect(table).toHaveLength(1);
-    expect(table[0].userId).toBe('victim');
-  });
-
   it('is judged against the row that won when the token column refuses a duplicate', async () => {
     const { prisma } = jest.requireMock('../../utils/prisma') as { prisma: any };
     const key = issueDeviceKey();
-    prisma.pushToken.create.mockImplementationOnce(async () => {
+    prisma.pushToken.findUnique.mockImplementationOnce(async () => {
       seed({ userId: 'victim', deviceId: deviceFingerprint(key) });
-      throw Object.assign(new Error('Unique constraint failed on the fields: (`token`)'), { code: 'P2002' });
+      return null;
     });
 
     const result = await registerPushToken({ userId: 'attacker', token: TOKEN, platform: 'ios', deviceKey: issueDeviceKey() });
 
     expect(result).toEqual({ outcome: 'held-by-another-account' });
     expect(table).toHaveLength(1);
-    expect(table[0].userId).toBe('victim');
+    expect(table[0]).toMatchObject({ userId: 'victim', deviceId: deviceFingerprint(key) });
+  });
+
+  it('moves the device when the racing winner was another account and the phone proves its key', async () => {
+    const { prisma } = jest.requireMock('../../utils/prisma') as { prisma: any };
+    const key = issueDeviceKey();
+    prisma.pushToken.findUnique.mockImplementationOnce(async () => {
+      seed({ userId: 'first', deviceId: deviceFingerprint(key) });
+      return null;
+    });
+
+    const result = await registerPushToken({ userId: 'second', token: TOKEN, platform: 'ios', deviceKey: key });
+
+    expect(result).toEqual({ outcome: 'moved', id: table[0].id, platform: 'ios' });
+    expect(table[0].userId).toBe('second');
+  });
+
+  it('passes on a failure that is not the token conflict', async () => {
+    const { prisma } = jest.requireMock('../../utils/prisma') as { prisma: any };
+    prisma.pushToken.create.mockImplementationOnce(async () => {
+      throw new Error('connection reset');
+    });
+
+    await expect(registerPushToken({ userId: 'mei', token: TOKEN, platform: 'ios' })).rejects.toThrow('connection reset');
   });
 });
