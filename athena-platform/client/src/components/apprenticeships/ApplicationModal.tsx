@@ -1,12 +1,47 @@
 'use client';
 
+/**
+ * Applying for an apprenticeship.
+ *
+ * The résumé used to be a "Resume URL" box asking for a link to a file on
+ * Google Drive or Dropbox. The job application screens stopped taking links
+ * for good reasons — a provider's click on one goes to a server somebody else
+ * controls, and nothing says the file behind it is hers — so this uses the
+ * same upload those screens do, and the server now takes nothing else.
+ *
+ * Any failure used to read "Failed to submit application. Please try again."
+ * The refusals this form meets are mostly ones a retry cannot change: a
+ * provider with nobody on ATHENA to receive the application (409), an
+ * application already sent, a link that is not a web address (400). She is
+ * shown the server's own words, and the generic line only when there are none.
+ *
+ * The confirmation promised an email "shortly" and a reply "within 5-7
+ * business days". Neither is anything ATHENA does or can promise for a
+ * provider: she is told in her notifications, and the provider's hiring team
+ * is told the application has arrived.
+ */
+
 import { useState } from 'react';
-import { Upload, X, Loader2, CheckCircle } from 'lucide-react';
+import { Loader2, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Modal } from '@/components/ui/modal';
+import { ResumeAttachment, type ResumeAttachmentValue } from '@/app/jobs/ResumeAttachment';
 import { Apprenticeship, primaryOrg } from './types';
 import { cn } from '@/lib/utils';
+
+function serverMessage(error: unknown): string | undefined {
+  const message = (error as { response?: { data?: { message?: unknown } } })?.response?.data?.message;
+  return typeof message === 'string' && message.trim() ? message : undefined;
+}
+
+/** "2027-02-01" as a date, read as the calendar day it names wherever she is. */
+function formatStartDate(value: string): string {
+  const date = new Date(`${value}T00:00:00Z`);
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleDateString('en-AU', { dateStyle: 'long', timeZone: 'UTC' });
+}
 
 interface ApplicationModalProps {
   isOpen: boolean;
@@ -42,6 +77,7 @@ export function ApplicationModal({
     availableStartDate: '',
     answers: {},
   });
+  const [resume, setResume] = useState<ResumeAttachmentValue | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const totalSteps = 3;
@@ -60,6 +96,10 @@ export function ApplicationModal({
     if (step === 2) {
       if (!formData.availableStartDate) {
         newErrors.availableStartDate = 'Please select your available start date';
+      }
+      const portfolio = formData.portfolioUrl?.trim();
+      if (portfolio && !/^https:\/\/\S+$/i.test(portfolio)) {
+        newErrors.portfolioUrl = 'Paste the full link, starting with https://';
       }
     }
 
@@ -82,10 +122,16 @@ export function ApplicationModal({
 
     setIsSubmitting(true);
     try {
-      await onSubmit(formData);
+      await onSubmit({
+        ...formData,
+        resumeUrl: resume?.url || undefined,
+        portfolioUrl: formData.portfolioUrl?.trim() || undefined,
+      });
       setIsSuccess(true);
     } catch (error) {
-      setErrors({ submit: 'Failed to submit application. Please try again.' });
+      setErrors({
+        submit: serverMessage(error) || 'Your application could not be sent just now. Please try again.',
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -101,6 +147,7 @@ export function ApplicationModal({
       availableStartDate: '',
       answers: {},
     });
+    setResume(null);
     setErrors({});
     onClose();
   };
@@ -117,10 +164,12 @@ export function ApplicationModal({
           </h2>
           <p className="text-slate-500 dark:text-slate-400 mb-6">
             Your application for <strong>{apprenticeship.title}</strong> at{' '}
-            <strong>{orgName}</strong> has been submitted successfully.
+            <strong>{orgName}</strong> has been sent.
           </p>
           <p className="text-sm text-slate-500 mb-6">
-            You'll receive an email confirmation shortly. The team will review your application and get back to you within 5-7 business days.
+            {orgName === 'the provider' ? 'The provider' : orgName}&apos;s hiring team has been told it
+            has arrived. When they move it along or make a decision, you will see it in your
+            notifications.
           </p>
           <Button onClick={handleClose}>Close</Button>
         </div>
@@ -192,30 +241,18 @@ I am excited to apply for this apprenticeship opportunity because..."
               Documents & Availability
             </h3>
 
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                Resume URL (optional)
-              </label>
-              <Input
-                type="url"
-                value={formData.resumeUrl || ''}
-                onChange={(e) => setFormData({ ...formData, resumeUrl: e.target.value })}
-                placeholder="https://drive.google.com/your-resume.pdf"
-              />
-              <p className="mt-1 text-xs text-slate-500">
-                Link to your resume on Google Drive, Dropbox, or similar
-              </p>
-            </div>
+            <ResumeAttachment value={resume} onChange={setResume} disabled={isSubmitting} />
 
             <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                Portfolio URL (optional)
+                Portfolio link (optional)
               </label>
               <Input
                 type="url"
                 value={formData.portfolioUrl || ''}
                 onChange={(e) => setFormData({ ...formData, portfolioUrl: e.target.value })}
                 placeholder="https://yourportfolio.com"
+                error={errors.portfolioUrl}
               />
             </div>
 
@@ -266,8 +303,8 @@ I am excited to apply for this apprenticeship opportunity because..."
                   <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     Resume
                   </h4>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
-                    {formData.resumeUrl ? 'Attached' : 'Not provided'}
+                  <p className="truncate text-sm text-slate-600 dark:text-slate-400">
+                    {resume ? resume.fileName : 'Not attached'}
                   </p>
                 </div>
                 <div>
@@ -276,7 +313,7 @@ I am excited to apply for this apprenticeship opportunity because..."
                   </h4>
                   <p className="text-sm text-slate-600 dark:text-slate-400">
                     {formData.availableStartDate
-                      ? new Date(formData.availableStartDate).toLocaleDateString()
+                      ? formatStartDate(formData.availableStartDate)
                       : 'Not specified'}
                   </p>
                 </div>
@@ -284,8 +321,8 @@ I am excited to apply for this apprenticeship opportunity because..."
             </div>
 
             <div className="p-3 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded-lg text-sm">
-              By submitting this application, you confirm that the information provided is accurate
-              and agree to be contacted regarding this opportunity.
+              Your cover letter, résumé, start date and portfolio link go to {orgName}&apos;s hiring
+              team, with your name and email address so they can contact you about this opportunity.
             </div>
           </div>
         )}

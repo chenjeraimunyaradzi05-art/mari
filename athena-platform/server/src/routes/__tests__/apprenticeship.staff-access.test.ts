@@ -164,7 +164,7 @@ describe('Applying for an apprenticeship', () => {
     expect(prisma.apprenticeshipApplication.create).not.toHaveBeenCalled();
   });
 
-  it('takes her own upload, or an https link to a document held elsewhere', async () => {
+  it('takes her own upload and nothing held elsewhere, as job applications do', async () => {
     prisma.organizationMember.findMany.mockResolvedValue([{ userId: 'staff-1', organizationId: 'rto-1' }]);
 
     await request(app)
@@ -173,11 +173,15 @@ describe('Applying for an apprenticeship', () => {
       .send({ resumeUrl: `/api/media/local/resumes/${APPLICANT}/cv.pdf` })
       .expect(201);
 
+    // The form uploads the file now. A link sends the provider's click to a
+    // server somebody else controls.
     await request(app)
       .post('/api/apprenticeships/ap1/apply')
       .set({ 'x-test-user': APPLICANT })
       .send({ resumeUrl: 'https://drive.google.com/file/d/abc/view' })
-      .expect(201);
+      .expect(400);
+
+    expect(prisma.apprenticeshipApplication.create).toHaveBeenCalledTimes(1);
   });
 
   it('refuses a résumé link that is not a web address', async () => {
@@ -188,6 +192,74 @@ describe('Applying for an apprenticeship', () => {
       .set({ 'x-test-user': APPLICANT })
       .send({ resumeUrl: 'javascript:alert(1)' })
       .expect(400);
+  });
+
+  it('keeps the start date and portfolio she entered, which used to be dropped', async () => {
+    prisma.organizationMember.findMany.mockResolvedValue([{ userId: 'staff-1', organizationId: 'rto-1' }]);
+
+    await request(app)
+      .post('/api/apprenticeships/ap1/apply')
+      .set({ 'x-test-user': APPLICANT })
+      .send({
+        coverLetter: 'Hello',
+        availableStartDate: '2027-02-01',
+        portfolioUrl: 'https://example.com/work',
+        answers: { availableStartDate: 'not what she chose' },
+      })
+      .expect(201);
+
+    expect(prisma.apprenticeshipApplication.create.mock.calls[0][0].data.answers).toEqual({
+      availableStartDate: '2027-02-01',
+      portfolioUrl: 'https://example.com/work',
+    });
+  });
+
+  it('reopens a withdrawn application instead of refusing her for ever', async () => {
+    prisma.organizationMember.findMany.mockResolvedValue([{ userId: 'staff-1', organizationId: 'rto-1' }]);
+    prisma.apprenticeshipApplication.findUnique.mockResolvedValue({ id: 'a-old', status: 'WITHDRAWN', userId: APPLICANT });
+    prisma.apprenticeshipApplication.update = jest.fn(async ({ data }: any) => ({ id: 'a-old', ...data }));
+
+    await request(app)
+      .post('/api/apprenticeships/ap1/apply')
+      .set({ 'x-test-user': APPLICANT })
+      .send({ coverLetter: 'Trying again' })
+      .expect(201);
+
+    expect(prisma.apprenticeshipApplication.create).not.toHaveBeenCalled();
+    expect(prisma.apprenticeshipApplication.update.mock.calls[0][0]).toMatchObject({
+      where: { id: 'a-old' },
+      data: { status: 'SUBMITTED', coverLetter: 'Trying again' },
+    });
+  });
+
+  it('answers 409 to an application still in progress', async () => {
+    prisma.organizationMember.findMany.mockResolvedValue([{ userId: 'staff-1', organizationId: 'rto-1' }]);
+    prisma.apprenticeshipApplication.findUnique.mockResolvedValue({ id: 'a-old', status: 'SCREENING', userId: APPLICANT });
+
+    const res = await request(app)
+      .post('/api/apprenticeships/ap1/apply')
+      .set({ 'x-test-user': APPLICANT })
+      .send({ coverLetter: 'Again' })
+      .expect(409);
+    expect(res.body.message).toMatch(/already applied/);
+  });
+
+  it('refuses answers that are not a short list of text', async () => {
+    prisma.organizationMember.findMany.mockResolvedValue([{ userId: 'staff-1', organizationId: 'rto-1' }]);
+
+    await request(app)
+      .post('/api/apprenticeships/ap1/apply')
+      .set({ 'x-test-user': APPLICANT })
+      .send({ answers: { essay: 'x'.repeat(5001) } })
+      .expect(400);
+
+    await request(app)
+      .post('/api/apprenticeships/ap1/apply')
+      .set({ 'x-test-user': APPLICANT })
+      .send({ portfolioUrl: 'javascript:alert(1)' })
+      .expect(400);
+
+    expect(prisma.apprenticeshipApplication.create).not.toHaveBeenCalled();
   });
 });
 

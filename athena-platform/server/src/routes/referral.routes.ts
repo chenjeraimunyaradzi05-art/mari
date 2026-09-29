@@ -1,6 +1,6 @@
 import { Router, Response, NextFunction } from 'express';
 import { prisma } from '../utils/prisma';
-import { authenticate, requireRole, AuthRequest, optionalAuth } from '../middleware/auth';
+import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
 import { hiddenMemberWhere, viewerContextFor } from '../services/search.service';
 import crypto from 'crypto';
 
@@ -14,6 +14,31 @@ function leaderboardName(user: { displayName: string | null; firstName: string |
   if (first && initial) return `${first} ${initial}.`;
   return first || 'An ATHENA member';
 }
+
+/**
+ * What a referrer is shown of a referred member who has since hidden herself
+ * from search, or blocked the referrer, or been blocked by them.
+ *
+ * The referral history used to show every referred member's current first
+ * name, last name and photo, whatever had happened since the invitation. On a
+ * platform whose members include women leaving violent relationships, the
+ * person who sent the link is not always a friend: he can be the partner she
+ * signed up under, and the history kept showing him the name she now uses and
+ * the photo she now posts after she had blocked him or hidden herself from
+ * search. The referral is still his record — it counts, and its status still
+ * moves — but who it was is no longer his to see. No id either: an id is a
+ * way to open her profile.
+ *
+ * The strings keep the shape the referrals page reads (it takes the first
+ * character of each name for the initials), so the page renders "A member you
+ * referred" without needing to know why.
+ */
+const WITHHELD_REFERRED_MEMBER = {
+  id: null,
+  firstName: 'A member you referred',
+  lastName: '',
+  avatar: null,
+} as const;
 
 // ============================================================================
 // REFERRAL CODE GENERATION
@@ -101,11 +126,34 @@ router.get('/me', authenticate, async (req: AuthRequest, res: Response, next: Ne
       creditsEarned: user.referralCredits,
     };
 
+    // The referred members this referrer may still see: the same hide-from-
+    // search and block rules as search and the leaderboard, both stores of
+    // each and blocks in both directions. Nothing here is best-effort — if the
+    // block list cannot be read the request fails, because a history that
+    // quietly stopped filtering would put a blocked woman's name and photo
+    // back in front of the person she blocked.
+    const referredIds = user.referralsMade.map(r => r.referred.id);
+    const visibleIds = new Set<string>();
+    if (referredIds.length > 0) {
+      const viewer = await viewerContextFor(userId);
+      const visible = await prisma.user.findMany({
+        where: { AND: [{ id: { in: referredIds } }, hiddenMemberWhere(viewer)] },
+        select: { id: true },
+      });
+      for (const row of visible) visibleIds.add(row.id);
+    }
+
+    const referrals = user.referralsMade.map(referral =>
+      visibleIds.has(referral.referred.id)
+        ? referral
+        : { ...referral, referred: WITHHELD_REFERRED_MEMBER }
+    );
+
     res.json({
       referralCode: user.referralCode,
       referralLink,
       stats,
-      referrals: user.referralsMade,
+      referrals,
     });
   } catch (error) {
     next(error);
@@ -303,54 +351,64 @@ router.post('/:id/complete', authenticate, requireRole('ADMIN'), async (req: Aut
  * out anyone who asked to be hidden or who is blocked in either direction with
  * the viewer, and names people the way the rest of the platform does: by the
  * display name they chose, or a first name and an initial.
+ *
+ * Ranked by completed referrals, the number both leaderboards show beside each
+ * name. It used to be ranked by referralCredits, which is not the same count:
+ * a member who joined with somebody else's code starts with 100 credits of her
+ * own, so of two women each shown with "1 referral" the one who had been
+ * referred herself sat above the other, and the order contradicted the figure
+ * printed next to it. Credits are also a balance nothing on the platform
+ * accepts, so a table of top referrers was ranking women by a currency rather
+ * than by the thing it names. Ties go to whoever reached her count first.
  */
 router.get('/leaderboard', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const viewer = await viewerContextFor(req.user!.id);
 
-    const topReferrers = await prisma.user.findMany({
+    const ranked = await prisma.referral.groupBy({
+      by: ['referrerId'],
       where: {
-        AND: [
-          {
-            referralsMade: {
-              some: {
-                status: 'COMPLETED',
-              },
-            },
-          },
-          hiddenMemberWhere(viewer),
-        ],
+        status: 'COMPLETED',
+        referrer: hiddenMemberWhere(viewer),
       },
-      select: {
-        id: true,
-        displayName: true,
-        firstName: true,
-        lastName: true,
-        avatar: true,
-        referralCredits: true,
-        _count: {
-          select: {
-            referralsMade: {
-              where: { status: 'COMPLETED' },
-            },
-          },
-        },
-      },
-      orderBy: {
-        referralCredits: 'desc',
-      },
+      _count: { referrerId: true },
+      _max: { completedAt: true },
+      orderBy: [{ _count: { referrerId: 'desc' } }, { _max: { completedAt: 'asc' } }],
       take: 10,
     });
 
-    // Transform the data
-    const leaderboard = topReferrers.map((user, index) => ({
-      rank: index + 1,
-      id: user.id,
-      name: leaderboardName(user),
-      avatar: user.avatar,
-      referrals: user._count.referralsMade,
-      credits: user.referralCredits,
-    }));
+    const referrerIds = ranked.map((row) => row.referrerId);
+    const people =
+      referrerIds.length > 0
+        ? await prisma.user.findMany({
+            where: { id: { in: referrerIds } },
+            select: {
+              id: true,
+              displayName: true,
+              firstName: true,
+              lastName: true,
+              avatar: true,
+              referralCredits: true,
+            },
+          })
+        : [];
+    const byId = new Map(people.map((person) => [person.id, person]));
+
+    // A referrer whose account went between the two reads is left out rather
+    // than shown as a blank row; the ranks that remain stay consecutive.
+    const leaderboard = ranked
+      .flatMap((row) => {
+        const person = byId.get(row.referrerId);
+        return person ? [{ person, referrals: row._count.referrerId }] : [];
+      })
+      .map(({ person, referrals }, index) => ({
+        rank: index + 1,
+        id: person.id,
+        name: leaderboardName(person),
+        avatar: person.avatar,
+        referrals,
+        credits: person.referralCredits,
+      }));
 
     res.json(leaderboard);
   } catch (error) {

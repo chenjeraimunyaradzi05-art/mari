@@ -29,11 +29,21 @@ import { EmptyState, PageHero, PageShell, Section } from '@/components/layout/Pa
  *
  * The benchmark comes from pay that people on ATHENA have actually shared
  * (`SalaryDataPoint`), read back through `/api/ai-algorithms/salary-equity/*`.
- * No seeded figures, no modelled ranges, no illustrative pay gaps: the server
- * refuses to return a benchmark until at least five people have shared pay for
- * a role, and only reports a gender gap once at least three women and three men
- * are in that sample. Where there is not enough, we say so and ask the reader to
- * add the first data point rather than showing a number we invented.
+ * No seeded figures, no modelled ranges, no illustrative pay gaps. The server
+ * publishes a cut point only with at least five contributors on either side of
+ * it, so a median needs ten people, the quartiles twenty and the 10th and 90th
+ * percentiles fifty, and every figure it publishes is rounded to the nearest
+ * thousand dollars. A gender gap needs ten women and ten men, the same rule
+ * applied to each side's median. Where there is not enough, we say so and ask
+ * the reader to add a data point rather than showing a number we invented.
+ *
+ * This page used to say five people and "three women and three men". Those
+ * were the floors two changes ago; the server raised them because a median of
+ * three or five reports is close enough to one person's pay to name her, and
+ * the page went on promising members a smaller crowd than the one their figure
+ * actually hides in. The numbers below mirror the server's, and where the
+ * server says in its own words why something is withheld, that is what is
+ * shown.
  *
  * Two more sources sit beside it, each labelled as what it is:
  *   - `/api/algorithms/salary-equity` is the median of the ranges employers
@@ -44,14 +54,21 @@ import { EmptyState, PageHero, PageShell, Section } from '@/components/layout/Pa
  *     scenario, filled in only with what the member typed. It is presented as
  *     a template to adapt, never as advice about what she is owed.
  *
- * On `/api/salary/*` generally: the simulated in-memory table an earlier note
- * here warned about was deleted (see the header of server salary.routes.ts).
- * `salary-equity.service.ts` now reads `SalaryDataPoint` with the same five
- * and three-per-gender floors, and the company transparency route measures
- * only the share of an employer's roles that publish a range. Its benchmark
- * routes still overlap with `/api/ai-algorithms/salary-equity/*`, which is why
- * the lookup above keeps using the latter until the two are merged.
+ * On `/api/salary/*` generally: the simulated table and the benchmark, range,
+ * pay-gap and submit routes that sat on it are gone (see the header of server
+ * salary.routes.ts), because they had fallen behind the privacy floors above.
+ * What remains there is the negotiation template and the company transparency
+ * measure, which counts only the share of an employer's roles that publish a
+ * range.
  */
+
+/**
+ * The server's publication floors, from ai-algorithms.routes.ts: five
+ * contributors either side of any published cut point.
+ */
+const MEDIAN_MIN_CONTRIBUTORS = 10;
+const RANGE_MIN_CONTRIBUTORS = 20;
+const GAP_MIN_PER_GENDER = 10;
 
 type SalaryBands = {
   p10?: number | string | null;
@@ -125,18 +142,52 @@ function errorMessage(error: unknown, fallback: string): string {
 
 /* ----------------------------------------------------------------- results */
 
+// The 10th and 90th used to be described as "the lowest end" and "the top end
+// of what was shared", which reads as the lowest and highest salary anyone
+// reported. They are not, and could not be without publishing two people's pay:
+// a tenth of the sample sits beyond each of them.
 const BAND_ROWS: { key: keyof SalaryBands; label: string; note: string }[] = [
-  { key: 'p10', label: '10th percentile', note: 'The lowest end of what was shared' },
+  { key: 'p10', label: '10th percentile', note: 'A tenth reported less than this' },
   { key: 'p25', label: '25th percentile', note: 'A quarter reported less than this' },
   { key: 'p50', label: 'Median', note: 'The middle of the shared figures' },
   { key: 'p75', label: '75th percentile', note: 'A quarter reported more than this' },
-  { key: 'p90', label: '90th percentile', note: 'The top end of what was shared' },
+  { key: 'p90', label: '90th percentile', note: 'A tenth reported more than this' },
 ];
 
-function BenchmarkResult({ analysis }: { analysis: SalaryAnalysis }) {
+/**
+ * The gap in words, by its sign. The server computes it as the men's median
+ * less the women's, so a negative figure means women's pay sits higher. The
+ * sentence used to say "above" whatever the sign, which described a gap in
+ * women's favour as one against them and printed a minus sign in the amount.
+ */
+function describeGap(percent: number, amount: number | null): string {
+  if (percent === 0 || amount === 0) {
+    return 'In this sample the medians for men and for women are the same, to the nearest thousand dollars.';
+  }
+  const share = Math.abs(percent) < 0.1 ? 'less than 0.1%' : `${Math.abs(percent).toFixed(1)}%`;
+  const dollars = amount !== null && Number.isFinite(amount) ? money(Math.abs(amount)) : null;
+  const inBrackets = dollars ? ` (${dollars})` : '';
+  const direction = percent > 0 ? 'above' : 'below';
+  return `In this sample the median for men sits ${share}${inBrackets} ${direction} the median for women.`;
+}
+
+function BenchmarkResult({
+  analysis,
+  gapWithheld,
+  bandWithheld,
+}: {
+  analysis: SalaryAnalysis;
+  /** The server's own reason a gap is not shown, when it gave one. */
+  gapWithheld?: string | null;
+  /** The server's own reason the range is not shown, when it gave one. */
+  bandWithheld?: string | null;
+}) {
   const bands = analysis.salaryBands ?? {};
   const gapPercent = analysis.genderGapPercent;
-  const gapAmount = money(analysis.genderGapAmount);
+  const gapAmountValue =
+    analysis.genderGapAmount === null || analysis.genderGapAmount === undefined || analysis.genderGapAmount === ''
+      ? null
+      : Number(analysis.genderGapAmount);
 
   return (
     <div className="space-y-4">
@@ -150,7 +201,8 @@ function BenchmarkResult({ analysis }: { analysis: SalaryAnalysis }) {
           {analysis.sampleSize === 1 ? 'salary shared' : 'salaries shared'} for{' '}
           {analysis.targetRole}
           {analysis.targetLocation ? ` in ${analysis.targetLocation}` : ''}. Base salary only, in
-          Australian dollars, before bonus or equity.
+          Australian dollars, before bonus or equity, and rounded to the nearest thousand so that no
+          figure is any one person&apos;s pay to the dollar.
         </p>
       </div>
 
@@ -168,6 +220,13 @@ function BenchmarkResult({ analysis }: { analysis: SalaryAnalysis }) {
         })}
       </ul>
 
+      {bands.p25 === null || bands.p25 === undefined ? (
+        <p className="text-sm leading-6 text-slate-600 dark:text-slate-400">
+          {bandWithheld ||
+            `A salary range is published once ${RANGE_MIN_CONTRIBUTORS} members have reported pay for this role; until then only the median is shown.`}
+        </p>
+      ) : null}
+
       <div className="tile-soft p-4">
         <div className="flex items-center gap-2">
           <Scale className="h-4 w-4 text-rose-500" />
@@ -175,14 +234,14 @@ function BenchmarkResult({ analysis }: { analysis: SalaryAnalysis }) {
         </div>
         {typeof gapPercent === 'number' ? (
           <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-400">
-            In this sample the median for men sits {gapPercent.toFixed(1)}%
-            {gapAmount ? ` (${gapAmount})` : ''} above the median for women. It is a straight
-            comparison of medians, not adjusted for experience or seniority.
+            {describeGap(gapPercent, gapAmountValue)} It is a straight comparison of medians, not
+            adjusted for experience or seniority.
           </p>
         ) : (
           <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-400">
-            Not enough to say. A gap is only reported once at least three women and three men have
-            shared pay for this role, so no one can be identified from it.
+            Not enough to say.{' '}
+            {gapWithheld ||
+              `A gap is only reported once at least ${GAP_MIN_PER_GENDER} women and ${GAP_MIN_PER_GENDER} men have shared pay for this role, so no one can be identified from it.`}
           </p>
         )}
       </div>
@@ -497,6 +556,13 @@ export default function SalaryInsightsPage() {
   const [benchmarkState, setBenchmarkState] = useState<BenchmarkState>('idle');
   const [analysis, setAnalysis] = useState<SalaryAnalysis | null>(null);
   const [benchmarkError, setBenchmarkError] = useState('');
+  // The server's own sentences for what it held back and why, so the page
+  // cannot drift from its floors again.
+  const [withheld, setWithheld] = useState<{ thin: string; gap: string | null; band: string | null }>({
+    thin: '',
+    gap: null,
+    band: null,
+  });
   const [askedFor, setAskedFor] = useState('');
   // The title as it was looked up, so the template below follows the lookup
   // rather than whatever is in the box now.
@@ -570,7 +636,19 @@ export default function SalaryInsightsPage() {
         role: trimmedRole,
         ...(trimmedLocation ? { location: trimmedLocation } : {}),
       });
-      const data = response.data?.data as SalaryAnalysis | null | undefined;
+      const body = (response.data ?? {}) as {
+        data?: SalaryAnalysis | null;
+        message?: unknown;
+        genderGapWithheld?: unknown;
+        bandWithheld?: unknown;
+      };
+      const data = body.data;
+      const said = (value: unknown) => (typeof value === 'string' && value.trim() ? value : null);
+      setWithheld({
+        thin: said(body.message) ?? '',
+        gap: said(body.genderGapWithheld),
+        band: said(body.bandWithheld),
+      });
       if (data) {
         setAnalysis(data);
         setBenchmarkState('ready');
@@ -664,7 +742,7 @@ export default function SalaryInsightsPage() {
         <Section
           icon={Search}
           title="Look up a role"
-          description="A benchmark appears once five or more people have shared pay for that role. Below five there is nothing honest to show."
+          description={`A median appears once ${MEDIAN_MIN_CONTRIBUTORS} people have shared pay for that role, and a range once ${RANGE_MIN_CONTRIBUTORS} have. Below that there is nothing we could show without pointing at someone.`}
         >
           <form onSubmit={runBenchmark} className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
             <div>
@@ -717,16 +795,18 @@ export default function SalaryInsightsPage() {
               <div className="h-32 animate-pulse rounded-xl border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-800" />
             )}
 
-            {benchmarkState === 'ready' && analysis && <BenchmarkResult analysis={analysis} />}
+            {benchmarkState === 'ready' && analysis && (
+              <BenchmarkResult analysis={analysis} gapWithheld={withheld.gap} bandWithheld={withheld.band} />
+            )}
 
             {benchmarkState === 'thin' && (
               <EmptyState
                 icon={BarChart3}
                 reason="empty"
                 title="Not enough pay data for that role yet"
-                description={`Fewer than five people have shared pay for ${
+                description={`${withheld.thin || `Fewer than ${MEDIAN_MIN_CONTRIBUTORS} people have shared pay for ${
                   askedFor || 'that role'
-                }, so there is no benchmark we would stand behind. If you know the number, yours could be the one that starts it.`}
+                }, so there is no benchmark we would stand behind.`} If you know the number, yours could help get it there.`}
                 primaryAction={{ label: 'Add your salary', href: '#share' }}
                 secondaryAction={{ label: 'See roles with pay listed', href: '/jobs' }}
               />
@@ -771,8 +851,9 @@ export default function SalaryInsightsPage() {
                 Thank you, that is counted
               </h3>
               <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-400">
-                Your figure joins the pool for that role. It shows up in a benchmark once five people
-                have shared pay for the same title.
+                Your figure joins the pool for that role. A median is published for it once{' '}
+                {MEDIAN_MIN_CONTRIBUTORS} people have shared pay for the same title, rounded to the
+                nearest thousand.
               </p>
               <button
                 type="button"
@@ -920,8 +1001,8 @@ export default function SalaryInsightsPage() {
                   ))}
                 </select>
                 <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-500">
-                  Used only to work out a pay gap, and only once at least three women and three men
-                  have shared pay for the same role.
+                  Used only to work out a pay gap, and only once at least {GAP_MIN_PER_GENDER} women and{' '}
+                  {GAP_MIN_PER_GENDER} men have shared pay for the same role.
                 </p>
               </div>
               <div className="flex items-center gap-2 sm:col-span-2">

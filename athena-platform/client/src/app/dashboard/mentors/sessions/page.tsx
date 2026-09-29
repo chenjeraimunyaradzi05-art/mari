@@ -8,6 +8,17 @@
  * mentor profile: confirm or decline a request, move it, mark it complete.
  * Every action here has existed on the server for some time; this is the
  * first page that reaches it. Notification links land here with ?session=.
+ *
+ * Completing a session is what takes the money held on the mentee's card, and
+ * the server lets either person do it once the booked time has passed — not
+ * before, and after that the mentee can no longer cancel a confirmed session
+ * (a request the mentor never accepted she can always withdraw). The page used to
+ * offer the mentor "Mark complete" on a session still weeks away and the
+ * mentee "Cancel" on one that had already run, both of which the server
+ * refuses, while never offering the mentee the one thing she could do after
+ * the hour: say it went ahead. The buttons now follow the same clock as the
+ * server, and a mentee whose card has been charged is told where to go if the
+ * session did not take place.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -20,8 +31,11 @@ import { ArrowLeft, CalendarDays, Check, Clock, Loader2, X } from 'lucide-react'
 import { mentorApi } from '@/lib/api';
 import { useAuthStore } from '@/lib/hooks';
 import { Avatar } from '@/components/ui/avatar';
-import { cn, formatCurrency } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import { PaymentIntentForm } from '@/components/payments/PaymentIntentForm';
+
+/** Help & Support, whose contact card reaches a person on the team. */
+const HELP_LINK = '/dashboard/settings/help';
 
 type Role = 'mentee' | 'mentor';
 type Status = 'REQUESTED' | 'CONFIRMED' | 'CANCELED' | 'COMPLETED';
@@ -49,14 +63,57 @@ const STATUS: Record<Status, { label: string; className: string }> = {
 const errorMessage = (error: unknown) =>
   (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
 
-const PAYMENT: Record<string, string> = {
-  PENDING: 'Payment not authorised yet',
-  AUTHORIZED: 'Payment held on your card',
-  CAPTURED: 'Paid',
-  REFUNDED: 'Refunded',
-  FAILED: 'Payment failed',
-  CANCELED: 'Payment released',
+// Told from each side. The mentor was shown "Payment held on your card" about
+// money on the mentee's card, which is not hers.
+const PAYMENT: Record<Role, Record<string, string>> = {
+  mentee: {
+    PENDING: 'Payment not authorised yet',
+    AUTHORIZED: 'Payment held on your card',
+    CAPTURED: 'Paid',
+    REFUNDED: 'Refunded',
+    FAILED: 'Payment failed',
+    CANCELED: 'Payment released',
+  },
+  mentor: {
+    PENDING: 'Waiting for the mentee to authorise payment',
+    AUTHORIZED: 'Payment held on the mentee’s card',
+    CAPTURED: 'Paid',
+    REFUNDED: 'Refunded to the mentee',
+    FAILED: 'Payment could not be collected',
+    CANCELED: 'Payment released to the mentee',
+  },
 };
+
+/**
+ * Whether the booked time is over — the same test the server applies before
+ * it lets anyone complete a session or refuses a mentee's cancellation. A
+ * session with no time on it has not happened.
+ */
+function sessionHasEnded(session: Pick<Session, 'scheduledAt' | 'durationMinutes'>, now: number): boolean {
+  if (!session.scheduledAt) return false;
+  return new Date(session.scheduledAt).getTime() + session.durationMinutes * 60 * 1000 <= now;
+}
+
+/**
+ * The session's own amount in its own currency, to the cent. The shared
+ * formatter rounds to whole units in the viewer's preferred currency, which
+ * showed a 45-minute session at A$37.50 as "$38" and a session booked in US
+ * dollars under an Australian symbol — on the screen where she authorises the
+ * charge.
+ */
+function formatSessionAmount(amount: number, currency: string | undefined): string {
+  const code = (currency || 'AUD').toUpperCase();
+  try {
+    return new Intl.NumberFormat('en-AU', {
+      style: 'currency',
+      currency: code,
+      minimumFractionDigits: Number.isInteger(amount) ? 0 : 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return `${amount.toFixed(2)} ${code}`;
+  }
+}
 
 function counterpartOf(session: Session, role: Role) {
   const person = role === 'mentee' ? session.mentorProfile?.user : session.mentee;
@@ -78,7 +135,7 @@ export default function MentorSessionsPage() {
   const [role, setRole] = useState<Role>('mentee');
   const [rescheduling, setRescheduling] = useState<string | null>(null);
   const [newTime, setNewTime] = useState('');
-  const [paying, setPaying] = useState<{ sessionId: string; clientSecret: string; amount: number } | null>(null);
+  const [paying, setPaying] = useState<{ sessionId: string; clientSecret: string; amount: number; currency?: string } | null>(null);
   const highlightRef = useRef<HTMLLIElement | null>(null);
 
   const profile = useQuery({
@@ -89,6 +146,11 @@ export default function MentorSessionsPage() {
     select: (response) => response.data as { id: string } | null,
   });
   const isMentor = Boolean(profile.data?.id);
+  // A 404 is the answer "she has no mentor profile". Anything else is a
+  // question that went unanswered, and hiding the "As a mentor" tab over it
+  // would tell a mentor with requests waiting that she has none.
+  const profileStatus = (profile.error as { response?: { status?: number } } | null)?.response?.status;
+  const profileUnknown = profile.isError && profileStatus !== 404;
 
   // The notification says which session; open the side it belongs to.
   useEffect(() => {
@@ -128,11 +190,11 @@ export default function MentorSessionsPage() {
     onSuccess: (response, sessionId) => {
       const data = response.data?.data ?? {};
       if (!data.clientSecret) {
-        toast.success(PAYMENT[data.paymentStatus] ?? 'Nothing to pay right now');
+        toast.success(PAYMENT.mentee[data.paymentStatus] ?? 'Nothing to pay right now');
         refresh();
         return;
       }
-      setPaying({ sessionId, clientSecret: data.clientSecret, amount: Number(data.amount ?? 0) });
+      setPaying({ sessionId, clientSecret: data.clientSecret, amount: Number(data.amount ?? 0), currency: data.currency });
     },
     onError: (error) => toast.error(errorMessage(error) || 'Could not start the payment'),
   });
@@ -163,12 +225,42 @@ export default function MentorSessionsPage() {
     changeStatus.mutate({ id: session.id, status: 'CANCELED' });
   };
 
+  // Completing is what moves the money, so each side is told what it does
+  // before it happens: the mentee that her card is charged, the mentor that
+  // the mentee is.
+  const confirmComplete = (session: Session) => {
+    const amount = session.sessionAmount !== undefined ? Number(session.sessionAmount) : 0;
+    const held = amount > 0 && session.paymentStatus === 'AUTHORIZED';
+    const question =
+      role === 'mentee'
+        ? held
+          ? `Confirm this session went ahead? The ${formatSessionAmount(amount, session.currency)} held on your card is paid to your mentor now.`
+          : 'Confirm this session went ahead?'
+        : held
+          ? `Mark this session complete? The mentee’s card is charged ${formatSessionAmount(amount, session.currency)} now, and she is told.`
+          : 'Mark this session complete? The mentee is told.';
+    if (!window.confirm(question)) return;
+    changeStatus.mutate({ id: session.id, status: 'COMPLETED' });
+  };
+
   const Row = ({ session }: { session: Session }) => {
     const person = counterpartOf(session, role);
     const status = STATUS[session.status] ?? STATUS.REQUESTED;
     const open = session.status === 'REQUESTED' || session.status === 'CONFIRMED';
     const amount = session.sessionAmount !== undefined ? Number(session.sessionAmount) : null;
     const isHighlighted = highlighted === session.id;
+    const ended = sessionHasEnded(session, Date.now());
+    const canComplete = session.status === 'CONFIRMED' && ended;
+    // Once a confirmed session's time has passed the server refuses the
+    // mentee's cancellation: the hour may have run, so voiding it is the
+    // mentor's call. A request the mentor never accepted she can always
+    // withdraw. The mentor declines a request rather than cancelling it.
+    const canCancel =
+      role === 'mentee'
+        ? session.status === 'REQUESTED' || (session.status === 'CONFIRMED' && !ended)
+        : session.status === 'CONFIRMED';
+    const menteeCannotCancel = role === 'mentee' && session.status === 'CONFIRMED' && ended;
+    const wasCharged = role === 'mentee' && session.status === 'COMPLETED' && session.paymentStatus === 'CAPTURED' && amount !== null && amount > 0;
 
     return (
       <li
@@ -195,7 +287,7 @@ export default function MentorSessionsPage() {
                 <span className="inline-flex items-center gap-1">
                   <Clock className="h-3.5 w-3.5" /> {session.durationMinutes} min
                 </span>
-                {amount !== null && amount > 0 && <span>{formatCurrency(amount)}</span>}
+                {amount !== null && amount > 0 && <span>{formatSessionAmount(amount, session.currency)}</span>}
               </div>
             </div>
           </div>
@@ -206,7 +298,28 @@ export default function MentorSessionsPage() {
 
         {session.paymentStatus && amount !== null && amount > 0 && (
           <p className={cn('text-xs', session.paymentStatus === 'PENDING' && open ? 'text-amber-700 dark:text-amber-300' : 'text-slate-500')}>
-            {PAYMENT[session.paymentStatus] ?? session.paymentStatus}
+            {PAYMENT[role][session.paymentStatus] ?? session.paymentStatus}
+          </p>
+        )}
+
+        {wasCharged && (
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            If this session did not take place, contact the team from{' '}
+            <Link href={HELP_LINK} className="text-primary-600 hover:underline">
+              Help &amp; Support
+            </Link>{' '}
+            and they will look at a refund with you.
+          </p>
+        )}
+
+        {menteeCannotCancel && (
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            This session’s time has passed. If it went ahead, confirm it below. If it did not, ask your mentor to cancel
+            it, or contact the team from{' '}
+            <Link href={HELP_LINK} className="text-primary-600 hover:underline">
+              Help &amp; Support
+            </Link>
+            .
           </p>
         )}
 
@@ -214,7 +327,7 @@ export default function MentorSessionsPage() {
           <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
             <PaymentIntentForm
               clientSecret={paying.clientSecret}
-              amountLabel={formatCurrency(paying.amount)}
+              amountLabel={formatSessionAmount(paying.amount, paying.currency)}
               onAuthorised={() => {
                 setPaying(null);
                 refresh();
@@ -243,14 +356,14 @@ export default function MentorSessionsPage() {
                 </button>
               </>
             )}
-            {role === 'mentor' && session.status === 'CONFIRMED' && (
+            {canComplete && (
               <button
                 type="button"
-                onClick={() => changeStatus.mutate({ id: session.id, status: 'COMPLETED' })}
+                onClick={() => confirmComplete(session)}
                 disabled={changeStatus.isPending}
                 className="btn-primary px-3 py-1.5 text-sm"
               >
-                Mark complete
+                {role === 'mentee' ? 'It went ahead' : 'Mark complete'}
               </button>
             )}
             {role === 'mentee' && session.paymentStatus === 'PENDING' && amount !== null && amount > 0 && paying?.sessionId !== session.id && (
@@ -263,7 +376,7 @@ export default function MentorSessionsPage() {
                 Authorise payment
               </button>
             )}
-            {(role === 'mentee' || session.status === 'CONFIRMED') && (
+            {canCancel && (
               <button type="button" onClick={() => confirmCancel(session)} disabled={changeStatus.isPending} className="text-sm font-medium text-red-600 hover:text-red-700">
                 Cancel
               </button>
@@ -314,6 +427,15 @@ export default function MentorSessionsPage() {
         <p className="mt-1 text-slate-500 dark:text-slate-400">Requests, confirmed sessions and what has been completed.</p>
       </div>
 
+      {profileUnknown && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
+          <span>We could not check your mentor profile, so any sessions you give as a mentor are not shown here yet.</span>
+          <button type="button" onClick={() => profile.refetch()} className="font-medium underline">
+            Try again
+          </button>
+        </div>
+      )}
+
       {isMentor && (
         <div className="flex gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800" role="tablist" aria-label="Which side">
           {(
@@ -342,6 +464,16 @@ export default function MentorSessionsPage() {
       {sessions.isLoading ? (
         <div className="flex justify-center py-12">
           <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+        </div>
+      ) : sessions.isError ? (
+        // A list that could not be read used to fall through to "Nothing
+        // booked", telling a member with a paid session tomorrow that she had
+        // none.
+        <div role="alert" className="card space-y-3 p-6 text-sm text-slate-600 dark:text-slate-300">
+          <p>We could not load your sessions just now. Nothing has been changed.</p>
+          <button type="button" onClick={() => sessions.refetch()} className="btn-outline px-3 py-1.5 text-sm">
+            Try again
+          </button>
         </div>
       ) : (
         <>

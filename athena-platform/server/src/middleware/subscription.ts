@@ -114,8 +114,9 @@ const TIER_PERMISSIONS: Record<SubscriptionTier, string[]> = {
 
 // Route to permission mapping
 const ROUTE_PERMISSIONS: Record<string, string> = {
-  // Jobs
-  'POST /api/jobs': 'jobs:post',
+  // Jobs. There is no POST /api/jobs any more: a job is posted through the
+  // employer console, under the organisation, and the mapping that named the
+  // old route described a gate on nothing.
   'POST /api/jobs/*/apply': 'jobs:apply',
   'GET /api/jobs/insights': 'jobs:recruiter_access',
   

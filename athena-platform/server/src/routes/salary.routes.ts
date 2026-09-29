@@ -19,7 +19,7 @@
  * GET /benchmark, GET /range, POST /analyze-gap and POST /submit were twins of
  * `/api/ai-algorithms/salary-equity/*`, which is what `/salary-insights`
  * calls. Nothing called these four, and they had fallen behind the privacy
- * floors the live routes enforce. The live routes need eight women and eight
+ * floors the live routes enforce. The live routes need ten women and ten
  * men before they state a gap, because below that one woman's figure can be
  * worked out from what is published; these needed three. Worse, the pay-gap
  * route took the median of women's reported pay from however many reports

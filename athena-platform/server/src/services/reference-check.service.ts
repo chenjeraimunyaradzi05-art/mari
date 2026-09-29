@@ -4,8 +4,10 @@
  * Phase 2: Backend Logic & Integrations
  */
 
+import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
+import { ApiError } from '../middleware/errorHandler';
 import { emailService } from './email.service';
 import crypto from 'crypto';
 
@@ -418,6 +420,61 @@ export async function getReferenceByToken(token: string): Promise<{
 }
 
 /**
+ * The referee's answers, kept to the questions she was actually asked and to
+ * the kind of answer each one takes.
+ *
+ * Answers were stored as they arrived. The form is reached by a token alone,
+ * and what it stores is shown to the employer beside the candidate's
+ * application, so an answer to a question nobody asked, a rating of 400 or a
+ * "yes or no" answered with an essay all went straight onto that page. An
+ * answer for a question that is not on this request is dropped; one of the
+ * wrong kind is refused. A later answer to the same question replaces an
+ * earlier one, and a blank text answer counts as no answer.
+ */
+function checkedAnswers(
+  questions: ReferenceQuestion[],
+  submitted: ReferenceResponse['answers']
+): ReferenceResponse['answers'] {
+  const byId = new Map(questions.map((q) => [q.id, q]));
+  const kept = new Map<string, ReferenceResponse['answers'][number]>();
+
+  for (const { questionId, answer } of submitted) {
+    const question = byId.get(questionId);
+    if (!question) continue;
+
+    switch (question.type) {
+      case 'RATING':
+        if (typeof answer !== 'number' || !Number.isInteger(answer) || answer < 1 || answer > 5) {
+          throw new ApiError(400, 'Each rating must be a whole number from 1 to 5.');
+        }
+        break;
+      case 'YES_NO':
+        if (typeof answer !== 'boolean') {
+          throw new ApiError(400, 'Each yes-or-no question needs a yes or a no.');
+        }
+        break;
+      case 'MULTIPLE_CHOICE':
+        if (typeof answer !== 'string' || !(question.options ?? []).includes(answer)) {
+          throw new ApiError(400, 'Choose one of the options offered for each multiple-choice question.');
+        }
+        break;
+      default:
+        if (typeof answer !== 'string') {
+          throw new ApiError(400, 'Each written answer must be text.');
+        }
+        if (!answer.trim()) {
+          kept.delete(questionId);
+          continue;
+        }
+    }
+
+    kept.set(questionId, { questionId, answer: typeof answer === 'string' ? answer.trim() : answer });
+  }
+
+  return Array.from(kept.values());
+}
+
+/**
  * Submit reference response
  */
 export async function submitReferenceResponse(
@@ -440,51 +497,62 @@ export async function submitReferenceResponse(
     },
   });
   
+  // Typed errors rather than plain ones. The route turned any plain error it
+  // did not recognise into a 500, so a referee who missed a question, or who
+  // opened the link again after declining, was told the server had broken.
   if (!reference) {
-    throw new Error('Reference request not found');
+    throw new ApiError(404, 'Reference request not found');
   }
-  
+
   if (reference.status === 'COMPLETED') {
-    throw new Error('Reference has already been submitted');
+    throw new ApiError(409, 'This reference has already been submitted');
   }
-  
+
   if (reference.status === 'DECLINED') {
-    throw new Error('Reference request was declined');
+    throw new ApiError(409, 'This reference request was declined, so it can no longer be answered');
   }
-  
+
   if (reference.expiresAt && new Date() > reference.expiresAt) {
     await prisma.referenceRequest.update({
       where: { id: reference.id },
       data: { status: 'EXPIRED' },
     });
-    throw new Error('Reference request has expired');
+    throw new ApiError(410, 'This reference request has expired');
   }
-  
-  // Validate required questions are answered
+
   const questions = (reference.customQuestions || []) as unknown as ReferenceQuestion[];
-  const requiredQuestionIds = questions
-    .filter((q) => q.required)
-    .map((q) => q.id);
-  
-  const answeredIds = response.answers.map((a) => a.questionId);
-  const missingRequired = requiredQuestionIds.filter((id) => !answeredIds.includes(id));
-  
+  const answers = checkedAnswers(questions, response.answers);
+
+  const answeredIds = new Set(answers.map((a) => a.questionId));
+  const missingRequired = questions.filter((q) => q.required && !answeredIds.has(q.id));
+
   if (missingRequired.length > 0) {
-    throw new Error(`Missing required answers: ${missingRequired.join(', ')}`);
+    throw new ApiError(
+      400,
+      `Please answer every required question before submitting (${missingRequired.length} still to answer).`
+    );
   }
-  
-  // Save response
-  await prisma.referenceRequest.update({
-    where: { id: reference.id },
+
+  // Only a request still waiting on the referee moves to COMPLETED. Two
+  // submissions racing each other used to both pass the status check above
+  // and the second overwrote the first.
+  const saved = await prisma.referenceRequest.updateMany({
+    where: { id: reference.id, status: { notIn: ['COMPLETED', 'DECLINED', 'EXPIRED'] } },
     data: {
       status: 'COMPLETED',
       responses: {
-        ...response,
+        answers,
+        overallRating: response.overallRating,
+        wouldRecommend: response.wouldRecommend,
+        additionalComments: response.additionalComments,
         submittedAt: new Date(),
-      } as any,
+      } as Prisma.InputJsonValue,
       completedAt: new Date(),
     },
   });
+  if (saved.count === 0) {
+    throw new ApiError(409, 'This reference has already been submitted');
+  }
   
   // Notify candidate - use candidateId since we don't have candidate included
   logger.info(`Reference ${reference.id} completed, candidate ${reference.candidateId} will be notified`);
@@ -511,21 +579,27 @@ export async function declineReferenceRequest(
   });
   
   if (!reference) {
-    throw new Error('Reference request not found');
+    throw new ApiError(404, 'Reference request not found');
   }
-  
+
   if (reference.status === 'COMPLETED') {
-    throw new Error('Reference has already been submitted');
+    throw new ApiError(409, 'This reference has already been submitted');
   }
-  
-  await prisma.referenceRequest.update({
-    where: { id: reference.id },
+
+  // The same guard the submit path uses: only a request still waiting on the
+  // referee moves to DECLINED. A second decline, or one racing a submission,
+  // used to overwrite the stored reason or the submitted answers.
+  const declined = await prisma.referenceRequest.updateMany({
+    where: { id: reference.id, status: { notIn: ['COMPLETED', 'DECLINED', 'EXPIRED'] } },
     data: {
       status: 'DECLINED',
-      responses: { declined: true, reason } as any,
+      responses: { declined: true, reason: reason?.trim() || null },
     },
   });
-  
+  if (declined.count === 0) {
+    throw new ApiError(409, 'This reference request has already been answered or has expired');
+  }
+
   logger.info(`Reference ${reference.id} declined by ${reference.refereeEmail}`);
   
   return true;

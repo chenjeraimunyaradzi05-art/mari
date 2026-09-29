@@ -1,4 +1,5 @@
 import { Router, Response, NextFunction } from 'express';
+import { Prisma } from '@prisma/client';
 import { body, validationResult } from 'express-validator';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
@@ -685,13 +686,82 @@ router.post('/:id/publish', authenticate, async (req: AuthRequest, res, next) =>
 // ===========================================
 // APPLY TO APPRENTICESHIP
 // ===========================================
+
+/**
+ * What an application may carry besides the cover letter and the résumé.
+ *
+ * The apply form has always asked for a portfolio link and the earliest date
+ * she could start, the latter marked required, and this route read neither: it
+ * stored `coverLetter`, `resumeUrl` and `answers` and dropped the rest, so
+ * every applicant believed she had told the provider when she could start and
+ * the provider was never told. There are no columns for either, so they go
+ * into `answers` under their own names, where the provider's applicant list
+ * reads them back.
+ *
+ * `answers` itself was stored as whatever arrived — any shape, any size — and
+ * shown to the provider. Apprenticeships define no questions, so the only
+ * legitimate content is a short list of plain text answers, and that is all
+ * that is taken.
+ *
+ * The résumé used to be a link to a document held elsewhere, and so the route
+ * accepted any https address for it. That is the link the job route stopped
+ * taking, for the same reasons: a provider's click on it goes to a server
+ * somebody else controls, and the form now uploads the file instead.
+ */
+const MAX_APPLICATION_ANSWERS = 20;
+const APPLICATION_ANSWERS_RULE = `Answers must be at most ${MAX_APPLICATION_ANSWERS} short pieces of text.`;
+
+function isApplicationAnswers(value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  if (typeof value !== 'object' || Array.isArray(value)) return false;
+  const entries = Object.entries(value as Record<string, unknown>);
+  return (
+    entries.length <= MAX_APPLICATION_ANSWERS &&
+    entries.every(([key, answer]) => key.length > 0 && key.length <= 64 && typeof answer === 'string' && answer.length <= 5000)
+  );
+}
+
+type ApplicationAnswers = Record<string, string>;
+
+function applicationAnswers(body: {
+  answers?: unknown;
+  portfolioUrl?: unknown;
+  availableStartDate?: unknown;
+}): ApplicationAnswers | undefined {
+  const answers: ApplicationAnswers = {};
+  if (body.answers && typeof body.answers === 'object' && !Array.isArray(body.answers)) {
+    for (const [key, answer] of Object.entries(body.answers as Record<string, unknown>)) {
+      if (typeof answer === 'string' && answer.trim()) answers[key] = answer.trim();
+    }
+  }
+  // Written after the free-form answers so a key of the same name there cannot
+  // stand in for what she entered in the form's own fields.
+  if (typeof body.portfolioUrl === 'string' && body.portfolioUrl.trim()) {
+    answers.portfolioUrl = body.portfolioUrl.trim();
+  }
+  if (typeof body.availableStartDate === 'string' && body.availableStartDate.trim()) {
+    answers.availableStartDate = body.availableStartDate.trim().slice(0, 10);
+  }
+  return Object.keys(answers).length > 0 ? answers : undefined;
+}
+
 router.post(
   '/:id/apply',
   authenticate,
   [
     body('coverLetter').optional().isString().isLength({ max: 20000 }).withMessage('That cover letter is too long. Keep it under 20,000 characters.'),
     body('resumeUrl').optional({ values: 'falsy' }).isString().isLength({ max: 2048 }),
-    body('answers').optional(),
+    body('portfolioUrl')
+      .optional({ values: 'falsy' })
+      .isString()
+      .isLength({ max: 2048 })
+      .isURL({ protocols: ['https'], require_protocol: true })
+      .withMessage('That portfolio link is not a web address. Paste the full link, starting with https://.'),
+    body('availableStartDate')
+      .optional({ values: 'falsy' })
+      .isISO8601({ strict: true })
+      .withMessage('Choose the earliest date you could start.'),
+    body('answers').optional().custom(isApplicationAnswers).withMessage(APPLICATION_ANSWERS_RULE),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
@@ -700,8 +770,12 @@ router.post(
         throw new ApiError(400, errors.array()[0].msg);
       }
 
+      // Her own upload, and nothing else, as the job application route has
+      // always required. See the note on applicationAnswers below for the
+      // link field this replaces.
       const resumeUrl: string | undefined = req.body.resumeUrl || undefined;
-      assertResumeLinkIsHers(resumeUrl, req.user!.id);
+      assertOwnResumeUpload(resumeUrl, req.user!.id);
+      const answers = applicationAnswers(req.body);
 
       const { id } = req.params;
       const apprenticeship = await prisma.apprenticeship.findUnique({ where: { id } });
@@ -732,19 +806,36 @@ router.post(
         where: { apprenticeshipId_userId: { apprenticeshipId: id, userId: req.user!.id } },
       });
 
-      if (existing) {
-        throw new ApiError(400, 'Already applied');
+      // One application per person per listing is a database constraint, and
+      // withdrawing keeps the row so the provider's list keeps its history.
+      // Together those made a withdrawal final: she was told "Already applied"
+      // for ever, even after pulling out by mistake or to fix a wrong résumé.
+      // A withdrawn application is reopened in place with what she sends now,
+      // as the job route does. Anything else is still in progress.
+      if (existing && existing.status !== 'WITHDRAWN') {
+        throw new ApiError(409, 'You have already applied for this apprenticeship. You can follow it from your applications.');
       }
 
-      const created = await prisma.apprenticeshipApplication.create({
-        data: {
-          apprenticeshipId: id,
-          userId: req.user!.id,
-          coverLetter: req.body.coverLetter,
-          resumeUrl,
-          answers: req.body.answers,
-        },
-      });
+      const created = existing
+        ? await prisma.apprenticeshipApplication.update({
+            where: { id: existing.id },
+            data: {
+              status: 'SUBMITTED',
+              coverLetter: req.body.coverLetter ?? null,
+              resumeUrl: resumeUrl ?? null,
+              answers: answers ?? Prisma.DbNull,
+              submittedAt: new Date(),
+            },
+          })
+        : await prisma.apprenticeshipApplication.create({
+            data: {
+              apprenticeshipId: id,
+              userId: req.user!.id,
+              coverLetter: req.body.coverLetter,
+              resumeUrl,
+              ...(answers ? { answers } : {}),
+            },
+          });
 
       // Nobody used to be told anything. The row was written and the 201
       // returned, and the provider found out only if someone happened to open
@@ -757,8 +848,10 @@ router.post(
             notificationService.notify({
               userId: member.userId,
               type: 'APPLICATION_UPDATE',
-              title: 'New apprenticeship application',
-              message: `Someone has applied for ${apprenticeship.title}.`,
+              title: existing ? 'Apprenticeship application resubmitted' : 'New apprenticeship application',
+              message: existing
+                ? `Someone who had withdrawn has applied again for ${apprenticeship.title}.`
+                : `Someone has applied for ${apprenticeship.title}.`,
               link: `/employer/organizations/${member.organizationId}/apprenticeships`,
               channels: ['in-app', 'email'],
             })
@@ -783,39 +876,6 @@ router.post(
     }
   }
 );
-
-/**
- * A résumé link on an apprenticeship application must not point at somebody
- * else's upload.
- *
- * The job application route requires the résumé to be the applicant's own
- * upload. This form still asks for a link to a document held elsewhere (Google
- * Drive and the like), so requiring an upload here would refuse every
- * application that followed the form's own instructions. What is refused is the
- * part that did harm: a path into ATHENA's own résumé store that belongs to a
- * different member, which would attach her résumé to an application in
- * someone else's name. Anything else must be an https link, not an arbitrary
- * string.
- */
-function assertResumeLinkIsHers(resumeUrl: string | undefined, userId: string): void {
-  if (!resumeUrl) return;
-
-  const path = resumeUrl.split(/[?#]/)[0];
-  if (/(^|\/)resumes\//.test(path)) {
-    assertOwnResumeUpload(resumeUrl, userId);
-    return;
-  }
-
-  let parsed: URL;
-  try {
-    parsed = new URL(resumeUrl);
-  } catch {
-    throw new ApiError(400, 'That résumé link is not a web address. Paste the full link, starting with https://.');
-  }
-  if (parsed.protocol !== 'https:') {
-    throw new ApiError(400, 'That résumé link is not a web address. Paste the full link, starting with https://.');
-  }
-}
 
 // ===========================================
 // MY APPLICATIONS

@@ -31,7 +31,6 @@ import {
 } from '@/components/apprenticeships/types';
 import { apprenticeshipApi } from '@/lib/api-extensions';
 import { BackToHome } from '@/components/layout/PageShell';
-import toast from 'react-hot-toast';
 import { cn } from '@/lib/utils';
 
 /**
@@ -155,23 +154,16 @@ export default function ApprenticeshipDetailPage() {
 
   const handleApplicationSubmit = async (data: ApplicationData) => {
     if (!apprenticeship) return;
-    // The modal answers any failure with "Failed to submit application.
-    // Please try again", which is wrong for the refusals that will not change
-    // on a retry — a provider with nobody on ATHENA to receive it, a résumé
-    // link that is not a web address. The server's own words are shown too.
-    try {
-      await apprenticeshipApi.apply(apprenticeship.id, {
-        coverLetter: data.coverLetter,
-        resumeUrl: data.resumeUrl,
-        portfolioUrl: data.portfolioUrl,
-        availableStartDate: data.availableStartDate,
-        answers: data.answers,
-      });
-    } catch (error) {
-      const message = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      if (message) toast.error(message);
-      throw error;
-    }
+    // A refusal is left to the modal, which shows the server's own words in
+    // place; it used to answer every failure with "please try again", so this
+    // page raised a toast beside it, and now that would say the same thing twice.
+    await apprenticeshipApi.apply(apprenticeship.id, {
+      coverLetter: data.coverLetter,
+      resumeUrl: data.resumeUrl,
+      portfolioUrl: data.portfolioUrl,
+      availableStartDate: data.availableStartDate,
+      answers: data.answers,
+    });
   };
 
   if (loading) {

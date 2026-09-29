@@ -211,10 +211,12 @@ export async function getAvailableSlots(
 ): Promise<{ start: Date; end: Date; displayTime: string }[]> {
   const mentor = await prisma.mentorProfile.findUnique({
     where: { id: mentorProfileId },
-    include: { user: { select: { timezone: true } } },
+    include: { user: { select: { timezone: true, isSuspended: true, bannedAt: true } } },
   });
-  
-  if (!mentor || !mentor.isAvailable) {
+
+  // A suspended or banned mentor cannot be booked (mentor.service refuses the
+  // request), so offering her times would only lead a mentee to a refusal.
+  if (!mentor || !mentor.isAvailable || mentor.user?.isSuspended || mentor.user?.bannedAt) {
     return [];
   }
   

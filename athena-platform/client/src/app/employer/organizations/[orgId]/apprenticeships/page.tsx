@@ -15,9 +15,11 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { ArrowLeft, GraduationCap, Globe, Loader2, Plus, Users } from 'lucide-react';
+import { ArrowLeft, Download, ExternalLink, GraduationCap, Globe, Loader2, Mail, Plus, Users } from 'lucide-react';
 import { api } from '@/lib/api';
 import { apprenticeshipApi } from '@/lib/api-extensions';
+import { downloadPrivateUpload } from '@/lib/private-files';
+import { safeHref } from '@/lib/safe-href';
 import { apiMessage } from '@/lib/strategy-api';
 import { Button } from '@/components/ui/button';
 import { cn, formatDate } from '@/lib/utils';
@@ -62,8 +64,85 @@ type ApplicationRow = {
   id: string;
   status: string;
   submittedAt: string;
+  coverLetter?: string | null;
+  resumeUrl?: string | null;
+  answers?: unknown;
   user?: { id: string; displayName?: string | null; email?: string | null } | null;
 };
+
+/**
+ * The start date and portfolio link from an application's answers, where the
+ * apply route stores them. Read defensively: rows written before it did have
+ * whatever the form of the day sent, or nothing.
+ */
+function applicationDetails(application: ApplicationRow): { startDate: string | null; portfolioUrl: string | null } {
+  const answers =
+    application.answers && typeof application.answers === 'object' && !Array.isArray(application.answers)
+      ? (application.answers as Record<string, unknown>)
+      : {};
+  const text = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : null);
+  return { startDate: text(answers.availableStartDate), portfolioUrl: text(answers.portfolioUrl) };
+}
+
+function formatStartDate(value: string): string {
+  const date = new Date(`${value.slice(0, 10)}T00:00:00Z`);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('en-AU', { dateStyle: 'long', timeZone: 'UTC' });
+}
+
+/**
+ * What she sent, for the people deciding on it.
+ *
+ * The list showed a name, a date and a decision menu, and nothing else: the
+ * cover letter the form made her write at a hundred characters or more, her
+ * résumé and her start date were all saved and none of them were ever shown to
+ * the provider, who was deciding on applications she could not read.
+ */
+function ApplicationDetails({ application }: { application: ApplicationRow }) {
+  const [fetchingResume, setFetchingResume] = useState(false);
+  const { startDate, portfolioUrl } = applicationDetails(application);
+  const portfolioHref = safeHref(portfolioUrl);
+  const name = applicantName(application);
+
+  const openResume = async () => {
+    if (!application.resumeUrl) return;
+    setFetchingResume(true);
+    try {
+      await downloadPrivateUpload(application.resumeUrl, `${name.replace(/\s+/g, '-')}-resume`);
+    } catch (error) {
+      toast.error(apiMessage(error, 'The résumé could not be fetched. It may have been removed.'));
+    } finally {
+      setFetchingResume(false);
+    }
+  };
+
+  return (
+    <div className="mt-2 space-y-3 rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-900/40">
+      <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-slate-600 dark:text-slate-300">
+        {application.user?.email && (
+          <a href={`mailto:${application.user.email}`} className="inline-flex items-center gap-1 hover:underline">
+            <Mail className="h-3.5 w-3.5" /> {application.user.email}
+          </a>
+        )}
+        <span>Can start: {startDate ? formatStartDate(startDate) : 'not given'}</span>
+        {portfolioHref && (
+          <a href={portfolioHref} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 hover:underline">
+            <ExternalLink className="h-3.5 w-3.5" /> Portfolio
+          </a>
+        )}
+        {application.resumeUrl && (
+          <button type="button" onClick={openResume} disabled={fetchingResume} className="inline-flex items-center gap-1 hover:underline disabled:opacity-60">
+            {fetchingResume ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Résumé
+          </button>
+        )}
+      </div>
+      {application.coverLetter?.trim() ? (
+        <p className="whitespace-pre-line text-slate-700 dark:text-slate-200">{application.coverLetter}</p>
+      ) : (
+        <p className="text-slate-500 dark:text-slate-400">No cover letter was sent with this application.</p>
+      )}
+    </div>
+  );
+}
 
 /**
  * What a provider may set. WITHDRAWN is missing on purpose: that is the
@@ -315,36 +394,39 @@ export default function ProviderApprenticeshipsPage() {
                   ) : (
                     <ul className="space-y-2 text-sm">
                       {applications.data!.map((application) => (
-                        <li key={application.id} className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="min-w-0">
-                            <span className="text-slate-800 dark:text-slate-200">{applicantName(application)}</span>
-                            <span className="ml-2 text-xs text-slate-500">applied {formatDate(application.submittedAt)}</span>
-                          </span>
-                          {application.status === 'WITHDRAWN' ? (
-                            <span className="text-xs text-slate-500">withdrawn</span>
-                          ) : (
-                            <label className="flex items-center gap-2 text-xs text-slate-500">
-                              <span className="sr-only">Decision for {applicantName(application)}</span>
-                              <select
-                                value={application.status}
-                                disabled={decide.isPending}
-                                onChange={(e) =>
-                                  decide.mutate({ applicationId: application.id, status: e.target.value as Decision })
-                                }
-                                className="input py-1 text-xs"
-                              >
-                                {/* A freshly submitted application has no decision on it yet,
-                                    so its own status has to be selectable or the control would
-                                    open showing somebody else's. */}
-                                {application.status === 'SUBMITTED' && <option value="SUBMITTED">Submitted</option>}
-                                {DECISIONS.map(([value, label]) => (
-                                  <option key={value} value={value}>
-                                    {label}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                          )}
+                        <li key={application.id} className="rounded-lg border border-slate-100 p-2 dark:border-slate-700">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="min-w-0">
+                              <span className="text-slate-800 dark:text-slate-200">{applicantName(application)}</span>
+                              <span className="ml-2 text-xs text-slate-500">applied {formatDate(application.submittedAt)}</span>
+                            </span>
+                            {application.status === 'WITHDRAWN' ? (
+                              <span className="text-xs text-slate-500">withdrawn</span>
+                            ) : (
+                              <label className="flex items-center gap-2 text-xs text-slate-500">
+                                <span className="sr-only">Decision for {applicantName(application)}</span>
+                                <select
+                                  value={application.status}
+                                  disabled={decide.isPending}
+                                  onChange={(e) =>
+                                    decide.mutate({ applicationId: application.id, status: e.target.value as Decision })
+                                  }
+                                  className="input py-1 text-xs"
+                                >
+                                  {/* A freshly submitted application has no decision on it yet,
+                                      so its own status has to be selectable or the control would
+                                      open showing somebody else's. */}
+                                  {application.status === 'SUBMITTED' && <option value="SUBMITTED">Submitted</option>}
+                                  {DECISIONS.map(([value, label]) => (
+                                    <option key={value} value={value}>
+                                      {label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            )}
+                          </div>
+                          {application.status !== 'WITHDRAWN' && <ApplicationDetails application={application} />}
                         </li>
                       ))}
                       {applicantsNotShown > 0 && (

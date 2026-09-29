@@ -111,7 +111,7 @@ function YourMentorProfile() {
         <h2 className="font-semibold text-slate-900 dark:text-white">Your mentor profile</h2>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
           {mine.isAvailable
-            ? 'You are taking new requests. Mentees can see your free times and ask for a session.'
+            ? 'You are taking new requests. Mentees can ask for any unbooked hour from 9 to 5, Monday to Friday, in your time zone, and you accept or decline each one.'
             : 'New requests are paused. Your profile shows you as unavailable and offers no times; sessions already booked are unchanged.'}
         </p>
       </div>

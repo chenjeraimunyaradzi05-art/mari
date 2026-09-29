@@ -42,6 +42,10 @@ import {
 // sitting at AUTHORIZED while the session reads COMPLETED.
 
 const MENTOR_PLATFORM_FEE_RATE = 0.2;
+
+/** The Help & Support page, whose contact card reaches a person on the team. */
+export const MENTEE_SUPPORT_LINK = '/dashboard/settings/help';
+
 const SUPPORTED_SESSION_CURRENCIES = new Set([
   'AUD',
   'USD',
@@ -190,9 +194,24 @@ export function mentorAcceptsBookings(profile: MentorProfileRow): boolean {
   return Boolean(profile.stripeAccountId);
 }
 
+/**
+ * A mentor whose account staff have suspended or banned.
+ *
+ * Suspending an account stopped her signing in and nothing else here: her
+ * profile stayed in the directory, her page still offered times, and a mentee
+ * could raise a booking — and have her card held — against a mentor staff had
+ * just taken off the platform, possibly for how she treated the last mentee.
+ * The mentor agreement says a suspended mentor cannot be booked, and this is
+ * what makes that true. Both columns are read because a ban is recorded
+ * separately from a suspension.
+ */
+const SUSPENDED_MENTOR: Prisma.UserWhereInput = {
+  OR: [{ isSuspended: true }, { bannedAt: { not: null } }],
+};
+
 /** Strips the connected account id and answers the bookability question in its place. */
 function toPublicMentorProfile<T extends MentorProfileRow>(profile: T) {
-  const { stripeAccountId, ...rest } = profile;
+  const { stripeAccountId: _withheld, ...rest } = profile;
   return { ...rest, acceptsBookings: mentorAcceptsBookings(profile) };
 }
 
@@ -235,7 +254,7 @@ export async function getMentors(
   // it that can drift: both stores of the switch, plus blocks in both
   // directions once we know who is asking.
   const viewer = await viewerContextFor(viewerId);
-  where.user = { ...(where.user ?? {}), ...hiddenMemberWhere(viewer) };
+  where.user = { AND: [hiddenMemberWhere(viewer), { NOT: SUSPENDED_MENTOR }] };
 
   const [mentors, total] = await Promise.all([
     prisma.mentorProfile.findMany({
@@ -279,8 +298,10 @@ export async function getMentors(
  * Get a specific mentor profile
  */
 export async function getMentorProfile(userId: string) {
+  // The suspension filter sits beside the unique key (Prisma allows non-unique
+  // filters there); a suspended mentor's profile answers as not found.
   const profile = await prisma.mentorProfile.findUnique({
-    where: { userId },
+    where: { userId, user: { NOT: SUSPENDED_MENTOR } },
     select: PUBLIC_MENTOR_PROFILE_SELECT,
   });
 
@@ -289,7 +310,7 @@ export async function getMentorProfile(userId: string) {
 
 export async function getMentorProfileById(mentorId: string) {
   const profile = await prisma.mentorProfile.findUnique({
-    where: { id: mentorId },
+    where: { id: mentorId, user: { NOT: SUSPENDED_MENTOR } },
     select: PUBLIC_MENTOR_PROFILE_SELECT,
   });
 
@@ -478,9 +499,10 @@ export async function requestSession(
     note?: string;
   }
 ) {
-  // Check if mentor exists
+  // A suspended or banned mentor is reported as missing, the same answer her
+  // profile page now gives, rather than as a mentor who could be booked.
   const mentor = await prisma.mentorProfile.findUnique({
-    where: { id: mentorId },
+    where: { id: mentorId, user: { NOT: SUSPENDED_MENTOR } },
   });
 
   if (!mentor) {
@@ -819,10 +841,11 @@ async function notifyUncollectedSession(mentorUserId: string, sessionId: string)
  *
  * So both moves are now tied to the clock as well as to the caller. Accepting
  * a request is the mentor's move. Completing one can only happen once the hour
- * booked has actually elapsed. Cancelling is free for either side right up to
- * the moment the session is due to end, and after that it is the mentor's to
- * make — she may waive her fee, but the mentee cannot void an hour that has
- * already run.
+ * booked has actually elapsed. Cancelling a confirmed session is free for
+ * either side right up to the moment it is due to end, and after that it is
+ * the mentor's to make — she may waive her fee, but the mentee cannot void an
+ * hour that has already run. A request the mentor never accepted the mentee
+ * can withdraw at any time.
  */
 const SESSION_TRANSITIONS: Record<
   'CONFIRMED' | 'CANCELED' | 'COMPLETED',
@@ -897,7 +920,13 @@ export async function updateSessionStatus(
     throw new ApiError(400, 'A session can only be marked complete once the booked time has passed');
   }
 
-  if (status === 'CANCELED' && hasEnded && actionBy === 'mentee') {
+  // Only a confirmed session. The rule exists because an hour that may have
+  // run is not the mentee's to void; a request the mentor never accepted
+  // cannot have run. Applying it to REQUESTED as well left a mentee whose
+  // mentor ignored her request unable to withdraw it once its date had gone
+  // by, with the authorisation still on her card until it lapsed and the
+  // request sitting on both lists for good.
+  if (status === 'CANCELED' && hasEnded && actionBy === 'mentee' && session.status === 'CONFIRMED') {
     throw new ApiError(
       400,
       'This session\'s time has passed, so it can no longer be cancelled. If it did not go ahead, ask your mentor to cancel it or contact support.'
@@ -1002,6 +1031,11 @@ export async function updateSessionStatus(
   // COMPLETED. She is told what was taken, and where to go if the hour did not
   // happen. (A mentee-side confirmation step before the charge needs somewhere
   // to record a dispute, which MentorSession does not have yet.)
+  //
+  // "Where to go" is the Help & Support page, whose contact card reaches the
+  // team. The notice first linked to /dashboard/support, a route with no page
+  // behind it, so the one member told she might be owed a refund was sent to
+  // a 404 to ask for it.
   const chargedAmount = Number(session.sessionAmount);
   const menteeWasCharged =
     actionBy === 'mentor' &&
@@ -1009,29 +1043,42 @@ export async function updateSessionStatus(
     paymentUpdates.paymentStatus === 'CAPTURED' &&
     chargedAmount > 0;
 
-  // Send notification to other party
+  // Send notification to other party. The email carries the same charge
+  // notice as the in-app one: it used to say only that the session "is now
+  // COMPLETED", so a mentee who reads her email rather than the app learnt
+  // from her bank statement that she had been charged, and not from us where
+  // to go if the hour had not happened.
   const recipientId = actionBy === 'mentor' ? session.menteeId : session.mentorProfile.userId;
+  const sessionDate = session.scheduledAt?.toLocaleDateString() ?? 'its booked date';
+  const chargeNotice = `Your mentor marked your session on ${sessionDate} as complete, and ${chargedAmount.toFixed(2)} ${session.currency} was charged to your card. If the session did not take place, contact our team from Help & Support and they will look at a refund with you.`;
   await notificationService.notify({
     userId: recipientId,
     type: 'MENTOR_SESSION',
     title: menteeWasCharged ? 'Your session was marked complete and paid' : 'Session Updated',
-    message: menteeWasCharged
-      ? `Your mentor marked your session on ${session.scheduledAt?.toLocaleDateString() ?? 'its booked date'} as complete, and ${chargedAmount.toFixed(2)} ${session.currency} was charged to your card. If the session did not take place, tell our support team from Help & Support so it can be refunded.`
-      : `Your mentorship session status has been updated to ${status}`,
-    link: menteeWasCharged ? '/dashboard/support' : `/dashboard/mentors/sessions?session=${sessionId}`,
+    message: menteeWasCharged ? chargeNotice : `Your mentorship session status has been updated to ${status}`,
+    link: menteeWasCharged ? MENTEE_SUPPORT_LINK : `/dashboard/mentors/sessions?session=${sessionId}`,
     channels: ['in-app', 'email'], // Less urgent than new request?
-    emailTemplate: {
-        subject: `Session ${
-           status === 'CONFIRMED' ? 'Confirmed' : 
-           status === 'CANCELED' ? 'Canceled' : 
-           status === 'COMPLETED' ? 'Completed' : 'Updated'
-        }`,
-        html: `
+    emailTemplate: menteeWasCharged
+      ? {
+          subject: 'Your mentoring session was completed and charged',
+          html: `
+            <h2>Session completed</h2>
+            <p>${chargeNotice}</p>
+            <p><a href="${process.env.CLIENT_URL}${MENTEE_SUPPORT_LINK}">Help &amp; Support</a> · <a href="${process.env.CLIENT_URL}/dashboard/mentors/sessions?session=${sessionId}">View the session</a></p>
+          `,
+        }
+      : {
+          subject: `Session ${
+             status === 'CONFIRMED' ? 'Confirmed' :
+             status === 'CANCELED' ? 'Canceled' :
+             status === 'COMPLETED' ? 'Completed' : 'Updated'
+          }`,
+          html: `
             <h2>Session Update</h2>
             <p>Your session scheduled for ${session.scheduledAt?.toLocaleDateString() ?? 'TBD'} is now <strong>${status}</strong>.</p>
             <a href="${process.env.CLIENT_URL}/dashboard/mentors/sessions?session=${sessionId}">View Details</a>
-        `
-    }
+          `,
+        },
   });
 
   return updated;

@@ -307,6 +307,9 @@ describe('A mentor closing a paid session', () => {
 
     const notice: any = notify.mock.calls.find((call: any[]) => call[0].userId === 'mentee-1')?.[0];
     expect(notice.message).toContain('120.00 AUD was charged to your card');
-    expect(notice.link).toBe('/dashboard/support');
+    // A page that exists. The notice used to link to /dashboard/support, a route
+    // with no page, so a mentee told she had been charged for an hour that did
+    // not happen was sent to a 404 to ask about it.
+    expect(notice.link).toBe('/dashboard/settings/help');
   });
 });

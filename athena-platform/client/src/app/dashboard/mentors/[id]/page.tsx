@@ -5,12 +5,16 @@
  * Profile" and "Book Session" here since it was built; the page did not
  * exist, so both buttons ended on a 404.
  *
- * Booking offers the hours the mentor is genuinely free on the chosen day,
- * converted into the viewer's own timezone, rather than a fixed list of times
- * she may never have offered. A length and a note go with it, and the mentor
- * confirms or declines from their sessions page. A mentor who has not set a
- * rate or enabled payments cannot be booked yet, and the page says so instead
- * of failing on submit.
+ * Booking offers ATHENA's standard hours — 9 to 5, Monday to Friday, in the
+ * mentor's own time zone — minus the sessions already booked with her,
+ * converted into the viewer's time zone. Mentors do not set their own hours:
+ * there is no availability model yet, only that fixed grid and the pause
+ * switch. This page used to call the grid "her free hours", which told a
+ * mentee she was booking time the mentor had chosen to offer; she is asking
+ * for an hour inside the standard day, which the mentor then accepts or
+ * declines from her sessions page. A length and a note go with it. A mentor
+ * who has not set a rate or enabled payments cannot be booked yet, and the
+ * page says so instead of failing on submit.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -77,8 +81,8 @@ export default function MentorProfilePage() {
   const isFree = hourlyRate === 0;
   const estimate = hourlyRate !== null ? (hourlyRate * duration) / 60 : null;
 
-  // Which hours this mentor is actually free, rather than a fixed list of times
-  // she may never have offered.
+  // The standard hours on this day that nobody has booked with her yet. See
+  // the note at the top: not hours she chose.
   const {
     data: availability,
     isLoading: slotsLoading,
@@ -247,16 +251,18 @@ export default function MentorProfilePage() {
 
                 {slotsLoading ? (
                   <div className="flex items-center gap-2 py-3 text-slate-500 dark:text-slate-400">
-                    <Loader2 className="h-4 w-4 animate-spin" /> Finding her free hours…
+                    <Loader2 className="h-4 w-4 animate-spin" /> Checking which hours are still open…
                   </div>
                 ) : slotsError ? (
                   <p className="py-3 text-slate-500 dark:text-slate-400">
-                    We could not load her availability just now. Try another day, or refresh.
+                    We could not load her availability just now, so no hours are shown. Try another day, or
+                    refresh.
                   </p>
                 ) : slots.length === 0 ? (
                   <p className="py-3 text-slate-500 dark:text-slate-400">
-                    Nothing free on this day. Try another date, or message her from her profile to ask for a
-                    time that works.
+                    Nothing free on this day within ATHENA&apos;s standard hours, 9 to 5 on weekdays in her time
+                    zone: those hours are already booked or have passed. Try another date, or message her from
+                    her profile to ask for a time that works.
                   </p>
                 ) : (
                   <>
@@ -277,11 +283,11 @@ export default function MentorProfilePage() {
                         </button>
                       ))}
                     </div>
-                    {slotTimezone && (
-                      <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                        Times shown in {slotTimezone.replace(/_/g, ' ')}.
-                      </p>
-                    )}
+                    <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                      These are ATHENA&apos;s standard hours, 9 to 5 in her time zone, minus sessions already
+                      booked. They are not hours she has chosen, so she may decline one that does not suit her.
+                      {slotTimezone ? ` Times shown in ${slotTimezone.replace(/_/g, ' ')}.` : ''}
+                    </p>
                   </>
                 )}
               </fieldset>

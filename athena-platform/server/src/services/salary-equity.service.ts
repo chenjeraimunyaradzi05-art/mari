@@ -8,7 +8,7 @@
  * the pay-gap one took the median of however many women had reported, one
  * included, and handed it back as a potential increase. They were removed with
  * those routes; see the header of salary.routes.ts. Member-reported pay is read
- * and written by ai-algorithms.routes.ts, under its eight-per-gender floor.
+ * and written by ai-algorithms.routes.ts, under its ten-per-gender floor.
  */
 
 import { prisma } from '../utils/prisma';
