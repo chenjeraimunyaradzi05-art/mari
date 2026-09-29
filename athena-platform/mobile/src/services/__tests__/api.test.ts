@@ -72,6 +72,12 @@ describe('mobile API client', () => {
     expect(get).toHaveBeenCalledWith('/auth/me');
     await authApi.forgotPassword('a@b.c');
     expect(post).toHaveBeenCalledWith('/auth/forgot-password', { email: 'a@b.c' });
+    await authApi.suspensionAppeal('a@b.c', 'pw', 'It was a mistake, please look again.');
+    expect(post).toHaveBeenCalledWith('/auth/suspension-appeal', {
+      email: 'a@b.c',
+      password: 'pw',
+      reason: 'It was a mistake, please look again.',
+    });
   });
 
   it('jobs: the list, a job, applying, saving, and the member’s lists under /jobs/me', async () => {
@@ -129,7 +135,9 @@ describe('mobile API client', () => {
 
   it('reads and sends messages on the conversation’s messages path, as the server has it', async () => {
     await messagesApi.getConversations();
-    expect(get).toHaveBeenCalledWith('/messages/conversations');
+    expect(get).toHaveBeenCalledWith('/messages/conversations', undefined);
+    await messagesApi.getConversations({ page: 2 });
+    expect(get).toHaveBeenCalledWith('/messages/conversations', { params: { page: 2 } });
     await messagesApi.getMessages('c1');
     expect(get).toHaveBeenCalledWith('/messages/conversations/c1/messages');
     await messagesApi.send('c1', 'hello');

@@ -201,7 +201,7 @@ export function ServiceDetailScreen() {
       <View style={styles.orderCard}>
         <Text style={styles.orderTitle}>Ordering happens on the web</Text>
         <Text style={styles.orderBody}>
-          When you order, your card is held in escrow and only charged once you approve the delivery. That card step is done on the web, so this button opens the listing there, signed in as you.
+          When you order, your card is held in escrow and only charged once you approve the delivery. That card step is done on the web, so this button opens the listing there; sign in with the same account if it asks.
         </Text>
         <TouchableOpacity
           style={styles.orderButton}

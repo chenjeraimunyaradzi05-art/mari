@@ -3,10 +3,9 @@
  * community tabs. One short row per place, grouped so a member can find the
  * pillar she came for without reading a wall of options.
  *
- * Every row goes somewhere: a native screen where one exists, and where one
- * is still being built, a screen that says so and opens the web page. A row
- * with `web` instead of `screen` opens the web page directly and says so in
- * its caption.
+ * Every row goes to a native screen. A row with `web` instead of `screen`
+ * opens the web page directly and says so in its caption; none does today,
+ * and the type keeps the option honest for one that ever needs to.
  */
 import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
@@ -50,7 +49,8 @@ const SECTIONS: Section[] = [
       { icon: 'storefront-outline', label: 'Business', hint: 'Structures, runway, valuation', screen: (nav) => nav.navigate('Strategy', { area: 'BUSINESS' }) },
       { icon: 'receipt-outline', label: 'Tax', hint: 'Estimate, deductions, super', screen: (nav) => nav.navigate('Strategy', { area: 'TAX' }) },
       { icon: 'trending-up-outline', label: 'Investing', hint: 'Risk profile, projections, net worth', screen: (nav) => nav.navigate('Strategy', { area: 'INVESTMENT' }) },
-      { icon: 'wallet-outline', label: 'Finance', hint: 'Savings goals, super, health score, insurance', screen: (nav) => nav.navigate('Finance') },
+      { icon: 'bookmark-outline', label: 'My plans', hint: 'The money plans you have saved', screen: (nav) => nav.navigate('MyPlans') },
+      { icon: 'wallet-outline', label: 'Finance', hint: 'Savings goals, super and your health score', screen: (nav) => nav.navigate('Finance') },
       { icon: 'business-outline', label: 'Formation', hint: 'Your ABN or company registration', screen: (nav) => nav.navigate('Formation') },
     ],
   },

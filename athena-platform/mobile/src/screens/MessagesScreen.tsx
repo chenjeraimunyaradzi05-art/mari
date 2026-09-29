@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { messagesApi, unwrapApiData } from '../services/api';
@@ -47,6 +48,26 @@ function participantName(c: Conversation): string {
   return p.displayName?.trim() || [p.firstName, p.lastName].filter(Boolean).join(' ').trim() || 'Member';
 }
 
+/**
+ * The first page as it now stands, followed by every older thread already
+ * loaded that is not on it. A new message moves its thread to the top, so a
+ * thread can move from page two onto page one between fetches; each id
+ * appears once.
+ */
+export function mergeFirstPage(fresh: Conversation[], loaded: Conversation[]): Conversation[] {
+  const onFirstPage = new Set(fresh.map((c) => c.id));
+  return [...fresh, ...loaded.filter((c) => !onFirstPage.has(c.id))];
+}
+
+/** A later page appended, skipping any thread already shown. */
+export function appendPage(loaded: Conversation[], page: Conversation[]): Conversation[] {
+  const shown = new Set(loaded.map((c) => c.id));
+  return [...loaded, ...page.filter((c) => !shown.has(c.id))];
+}
+
+const hasMorePages = (payload: unknown): boolean =>
+  Boolean((payload as { pagination?: { hasMore?: unknown } } | null)?.pagination?.hasMore === true);
+
 export function MessagesScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -57,12 +78,32 @@ export function MessagesScreen() {
   // nobody having written to her. On a phone the connection drops constantly,
   // which made that the ordinary case rather than the rare one.
   const [loadError, setLoadError] = useState<string | null>(null);
+  // The server answers at most a hundred threads a page. This screen used to
+  // ask once and show that as the whole inbox, so a member with more threads
+  // than that could never reach her older conversations.
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
 
-  const fetchConversations = useCallback(async () => {
+  // 'reset' starts the list again from the first page, as a pull to refresh
+  // does. 'merge' re-reads only the first page and keeps the older pages she
+  // has already scrolled to, for a new message arriving while she reads.
+  const fetchConversations = useCallback(async (mode: 'reset' | 'merge' = 'reset') => {
     try {
-      const response = await messagesApi.getConversations();
+      const response = await messagesApi.getConversations({ page: 1 });
       const list = unwrapApiData<Conversation[]>(response.data);
-      setConversations(Array.isArray(list) ? list : []);
+      const fresh = Array.isArray(list) ? list : [];
+      const more = hasMorePages(response.data);
+      if (mode === 'reset') {
+        setConversations(fresh);
+        setPage(1);
+        setHasMore(more);
+      } else {
+        setConversations((loaded) => mergeFirstPage(fresh, loaded));
+        setHasMore((current) => current || more);
+      }
+      setLoadMoreError(null);
       setLoadError(null);
     } catch (error: any) {
       setLoadError(
@@ -74,13 +115,33 @@ export function MessagesScreen() {
     }
   }, []);
 
+  const loadMore = useCallback(async () => {
+    if (!hasMore || isLoadingMore) return;
+    setIsLoadingMore(true);
+    const next = page + 1;
+    try {
+      const response = await messagesApi.getConversations({ page: next });
+      const list = unwrapApiData<Conversation[]>(response.data);
+      setConversations((loaded) => appendPage(loaded, Array.isArray(list) ? list : []));
+      setPage(next);
+      setHasMore(hasMorePages(response.data));
+      setLoadMoreError(null);
+    } catch (error: any) {
+      // The threads already on screen are still right; what failed is the
+      // next page, and it says so at the foot of the list with a retry.
+      setLoadMoreError(error?.response?.data?.message || 'Older conversations could not be loaded.');
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [hasMore, isLoadingMore, page]);
+
   useEffect(() => {
     fetchConversations();
 
-    // Listen for new messages
+    // A new message moves its thread to the top: re-read the first page and
+    // keep the older pages already loaded.
     const unsubscribe = socketService.on('messages:new', () => {
-      // Refresh conversations when new message arrives
-      fetchConversations();
+      fetchConversations('merge');
     });
 
     return () => {
@@ -90,7 +151,7 @@ export function MessagesScreen() {
 
   const onRefresh = () => {
     setIsRefreshing(true);
-    fetchConversations();
+    fetchConversations('reset');
   };
 
   const formatTime = (dateString?: string) => {
@@ -171,6 +232,29 @@ export function MessagesScreen() {
           <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />
         }
         contentContainerStyle={styles.listContent}
+        // After a failed page, only her tap on the footer tries again, so a
+        // list resting at its end does not retry on every scroll event.
+        onEndReached={() => {
+          if (!loadMoreError) void loadMore();
+        }}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={
+          conversations.length === 0 ? null : loadMoreError ? (
+            <TouchableOpacity
+              style={styles.footer}
+              onPress={loadMore}
+              accessibilityRole="button"
+              accessibilityLabel="Try loading older conversations again"
+            >
+              <Text style={styles.footerError}>{loadMoreError}</Text>
+              <Text style={styles.footerRetry}>Tap to try again</Text>
+            </TouchableOpacity>
+          ) : isLoadingMore ? (
+            <View style={styles.footer}>
+              <ActivityIndicator color="#6366f1" />
+            </View>
+          ) : null
+        }
         ListEmptyComponent={
           loadError ? (
             <LoadingError message={loadError} onRetry={onRefresh} />
@@ -284,5 +368,20 @@ const styles = StyleSheet.create({
     color: '#bbb',
     fontSize: 14,
     textAlign: 'center',
+  },
+  footer: {
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  footerError: {
+    color: '#b91c1c',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  footerRetry: {
+    marginTop: 4,
+    color: '#6366f1',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

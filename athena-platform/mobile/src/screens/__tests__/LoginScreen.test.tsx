@@ -21,8 +21,16 @@ jest.mock('../../context/AuthContext', () => ({
   useAuth: () => ({ login: mockLogin }),
 }));
 
+const mockSuspensionAppeal = jest.fn<(...args: any[]) => any>();
+jest.mock('../../services/api', () => ({
+  authApi: { suspensionAppeal: (...args: unknown[]) => mockSuspensionAppeal(...args) },
+}));
+
+const SUSPENDED =
+  'This account has been suspended. If you believe this is a mistake, you can appeal from the sign-in page.';
+
 import { LoginScreen } from '../auth/LoginScreen';
-import { press, pressableWithText, renderScreen, unmountScreens } from './renderScreen';
+import { press, pressableWithText, renderScreen, shows, unmountScreens } from './renderScreen';
 import type { ReactTestRenderer } from 'react-test-renderer';
 
 const navigation = { navigate: jest.fn() } as never;
@@ -119,5 +127,72 @@ describe('LoginScreen', () => {
     await press(pressableWithText(screen, 'Sign In')!);
 
     expect(Alert.alert).toHaveBeenCalledWith('Login Failed', 'That email and password do not match.');
+  });
+
+  // The refusal tells her she can appeal from the sign-in page; in the app
+  // that used to be an alert and nothing she could do with it.
+  it('opens the appeal when the account is suspended, instead of an alert', async () => {
+    mockLogin.mockRejectedValueOnce({ response: { status: 403, data: { message: SUSPENDED } } });
+
+    const screen = await renderScreen(<LoginScreen navigation={navigation} />);
+    type(screen, 'Email', 'mara@example.com');
+    type(screen, 'Password', 'correct horse battery');
+    await press(pressableWithText(screen, 'Sign In')!);
+
+    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(shows(screen, 'Your account is suspended')).toBe(true);
+    expect(has(screen, 'Why the suspension should be lifted')).toBe(true);
+  });
+
+  it('sends the appeal with the address and password she typed, and shows the answer', async () => {
+    mockLogin.mockRejectedValueOnce({ response: { status: 403, data: { message: SUSPENDED } } });
+    mockSuspensionAppeal.mockResolvedValueOnce({
+      data: { success: true, message: 'Your appeal has been sent and a person will look at it.' },
+    });
+
+    const screen = await renderScreen(<LoginScreen navigation={navigation} />);
+    type(screen, 'Email', 'mara@example.com');
+    type(screen, 'Password', 'correct horse battery');
+    await press(pressableWithText(screen, 'Sign In')!);
+    type(screen, 'Why the suspension should be lifted', 'I was reported by my ex after I blocked him.');
+    await press(pressableWithText(screen, 'Send appeal')!);
+
+    expect(mockSuspensionAppeal).toHaveBeenCalledWith(
+      'mara@example.com',
+      'correct horse battery',
+      'I was reported by my ex after I blocked him.'
+    );
+    expect(shows(screen, 'a person will look at it')).toBe(true);
+  });
+
+  it('will not send an appeal without at least a sentence, and says why', async () => {
+    mockLogin.mockRejectedValueOnce({ response: { status: 403, data: { message: SUSPENDED } } });
+
+    const screen = await renderScreen(<LoginScreen navigation={navigation} />);
+    type(screen, 'Email', 'mara@example.com');
+    type(screen, 'Password', 'correct horse battery');
+    await press(pressableWithText(screen, 'Sign In')!);
+    type(screen, 'Why the suspension should be lifted', 'no');
+    await press(pressableWithText(screen, 'Send appeal')!);
+
+    expect(mockSuspensionAppeal).not.toHaveBeenCalled();
+    expect(shows(screen, 'at least a sentence')).toBe(true);
+  });
+
+  it("shows the server's reason when the appeal is refused", async () => {
+    mockLogin.mockRejectedValueOnce({ response: { status: 403, data: { message: SUSPENDED } } });
+    mockSuspensionAppeal.mockRejectedValueOnce({
+      response: { status: 409, data: { message: 'Your appeal is already with a reviewer.' } },
+    });
+
+    const screen = await renderScreen(<LoginScreen navigation={navigation} />);
+    type(screen, 'Email', 'mara@example.com');
+    type(screen, 'Password', 'correct horse battery');
+    await press(pressableWithText(screen, 'Sign In')!);
+    type(screen, 'Why the suspension should be lifted', 'Please look at this again, it was a mistake.');
+    await press(pressableWithText(screen, 'Send appeal')!);
+
+    expect(shows(screen, 'already with a reviewer')).toBe(true);
+    expect(has(screen, 'Why the suspension should be lifted')).toBe(true);
   });
 });

@@ -2,8 +2,8 @@
  * Profile: who the member is, her two real counts, and her own settings.
  * Everything else (the pillars, groups, mentors, help) lives under More.
  *
- * The counts are the lengths of GET /jobs/me/applications and
- * GET /jobs/me/saved. Until they load, or if they fail, the tile shows a dash
+ * The counts are the total GET /jobs/me/applications reports (it is paged)
+ * and the length of GET /jobs/me/saved. Until they load, or if they fail, the tile shows a dash
  * rather than a number nobody measured; the server keeps no profile-view
  * counter, so there is no third tile.
  */
@@ -25,6 +25,17 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 
 type Counts = { applications: number | null; saved: number | null };
 
+/**
+ * How many applications she has made. GET /jobs/me/applications is paged at
+ * a hundred, so the length of the page is not the count past that; the
+ * server's pagination.total is. A response without a total is not counted
+ * rather than guessed at.
+ */
+export function applicationTotal(payload: unknown): number | null {
+  const total = (payload as { pagination?: { total?: unknown } } | null)?.pagination?.total;
+  return typeof total === 'number' && Number.isFinite(total) && total >= 0 ? total : null;
+}
+
 export function ProfileScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { user, logout } = useAuth();
@@ -37,12 +48,12 @@ export function ProfileScreen() {
       let cancelled = false;
       (async () => {
         const [applications, saved] = await Promise.all([
-          userApi.getApplications().then((r) => unwrapApiData<unknown[]>(r.data)).catch(() => null),
+          userApi.getApplications().then((r) => applicationTotal(r.data)).catch(() => null),
           userApi.getSavedJobs().then((r) => unwrapApiData<unknown[]>(r.data)).catch(() => null),
         ]);
         if (cancelled) return;
         setCounts({
-          applications: Array.isArray(applications) ? applications.length : null,
+          applications,
           saved: Array.isArray(saved) ? saved.length : null,
         });
       })();

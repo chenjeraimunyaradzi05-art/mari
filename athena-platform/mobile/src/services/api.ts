@@ -33,6 +33,9 @@ const authPathsToSkipRefresh = [
   '/auth/refresh',
   '/auth/forgot-password',
   '/auth/reset-password',
+  // Sent signed out, with her password: a 401 here is a wrong password, not
+  // an expired session, and refreshing would swallow the reason.
+  '/auth/suspension-appeal',
 ];
 
 export const setAuthToken = (token: string | null) => {
@@ -202,6 +205,12 @@ export const authApi = {
   me: () => api.get('/auth/me'),
   forgotPassword: (email: string) =>
     api.post('/auth/forgot-password', { email }),
+  // A suspended account cannot sign in, so it cannot reach the appeals API
+  // behind sign-in either. This route takes the address and password she has
+  // just typed as proof the account is hers, files the appeal for a person to
+  // decide, and issues no session.
+  suspensionAppeal: (email: string, password: string, reason: string) =>
+    api.post('/auth/suspension-appeal', { email, password, reason }),
 };
 
 // Jobs
@@ -299,7 +308,11 @@ export const postsApi = {
 
 // Messages
 export const messagesApi = {
-  getConversations: () => api.get('/messages/conversations'),
+  // Paged: the server answers at most 100 threads a page, with
+  // pagination { page, limit, total, pages, hasMore } and unreadTotal across
+  // every thread, not only the ones on this page.
+  getConversations: (params?: { page?: number; limit?: number }) =>
+    api.get('/messages/conversations', params ? { params } : undefined),
   getMessages: (conversationId: string) =>
     api.get(`/messages/conversations/${conversationId}/messages`),
   send: (conversationId: string, content: string) =>
@@ -427,6 +440,13 @@ export const coursesApi = {
   // Every lesson's content and the learner's progress; enrolled learners only.
   classroom: (courseId: string) => api.get(`/courses/${courseId}/classroom`),
   completeLesson: (courseId: string, lessonId: string) => api.post(`/courses/${courseId}/lessons/${lessonId}/complete`),
+};
+
+/** Product feedback, as the help centre's form sends it. The server attaches her account. */
+export type FeedbackCategory = 'BUG' | 'IDEA' | 'PRAISE' | 'OTHER';
+
+export const feedbackApi = {
+  send: (data: { message: string; category: FeedbackCategory; page?: string }) => api.post('/feedback', data),
 };
 
 export const billingApi = {

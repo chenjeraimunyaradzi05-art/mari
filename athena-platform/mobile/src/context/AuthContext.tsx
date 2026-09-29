@@ -8,6 +8,7 @@ import { api, onSessionExpired, setAuthTokens, unwrapApiData } from '../services
 import { resolvePreferences, setLocalPreferences } from '../utils/preferences';
 import { syncPushToken, unsyncPushToken } from '../services/pushNotifications';
 import { socketService } from '../services/socket';
+import { forgetExitAddress } from '../components/pillar/QuickExit';
 
 interface User {
   id: string;
@@ -207,6 +208,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // messages and presence, and the next person to hold this phone must not
     // be sitting on it.
     socketService.disconnect();
+    // The quick-exit address she chose is hers, and on a shared phone it can
+    // itself say something about her; the next member's exit must not go there.
+    forgetExitAddress();
     try {
       // While still signed in: this device stops receiving this member's push.
       await unsyncPushToken();

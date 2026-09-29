@@ -1,12 +1,16 @@
 /**
- * Help & Support. The help centre and the contact form live on the web; each
- * row here opens the matching page, so the one button a stuck member presses
- * goes somewhere.
+ * Help & Support. Feedback is sent from here, to the same inbox the web
+ * help centre's form uses (POST /feedback), with her account attached so the
+ * team can reply. The help articles and the contact form live on the web;
+ * each of those rows opens the matching page and says so first.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { openOnWeb } from './OpensOnWebScreen';
+import { feedbackApi, type FeedbackCategory } from '../services/api';
+import { apiMessage } from '../utils/apiErrors';
+import { Chips, PrimaryButton, TextField } from '../components/pillar/PillarUi';
 
 // The sections client/src/app/help/page.tsx lists, so every row is a page
 // that exists.
@@ -15,17 +19,69 @@ const TOPICS: Array<{ label: string; path: string; icon: keyof typeof Ionicons.g
   { label: 'Safety centre', path: '/help/safety-center', icon: 'shield-checkmark-outline' },
   { label: 'Community guidelines', path: '/help/community-guidelines', icon: 'people-outline' },
   { label: 'Privacy centre', path: '/privacy-center', icon: 'lock-closed-outline' },
-  { label: 'Give feedback', path: '/help/feedback', icon: 'chatbox-ellipses-outline' },
 ];
 
+const CATEGORIES: ReadonlyArray<{ value: FeedbackCategory; label: string }> = [
+  { value: 'BUG', label: 'Something is broken' },
+  { value: 'IDEA', label: 'An idea' },
+  { value: 'PRAISE', label: 'Something I love' },
+  { value: 'OTHER', label: 'Something else' },
+];
+
+/** The server's own floor, said before she sends rather than after. */
+const MIN_LENGTH = 10;
+
 export function HelpSupportScreen() {
+  const [category, setCategory] = useState<FeedbackCategory>('IDEA');
+  const [message, setMessage] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const send = async () => {
+    if (message.trim().length < MIN_LENGTH) {
+      setError('Say a little more: at least ten characters.');
+      return;
+    }
+    setSending(true);
+    setError(null);
+    try {
+      await feedbackApi.send({ message: message.trim(), category, page: 'mobile:help' });
+      setSent(true);
+      setMessage('');
+    } catch (err) {
+      setError(apiMessage(err, 'Your feedback did not send. Check your connection and try again; nothing you wrote has been lost.'));
+    } finally {
+      setSending(false);
+    }
+  };
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Text style={styles.title}>Help & Support</Text>
-      <Text style={styles.subtitle}>Find answers or reach the ATHENA team. These open in the help centre on the web.</Text>
+      <Text style={styles.subtitle}>Tell us what is working and what is not, or find an answer in the help centre.</Text>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Popular topics</Text>
+        <Text style={styles.cardTitle}>Send feedback</Text>
+        {sent ? (
+          <>
+            <Text style={styles.body}>Thank you. It has reached the ATHENA team, with your account attached so they can reply.</Text>
+            <TouchableOpacity onPress={() => setSent(false)} accessibilityRole="button">
+              <Text style={styles.link}>Send something else</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <Chips options={CATEGORIES} value={category} onChange={setCategory} />
+            <TextField label="What would you like us to know?" value={message} onChangeText={setMessage} multiline maxLength={4000} placeholder="What happened, or what would help" />
+            <PrimaryButton label="Send" icon="send-outline" onPress={() => void send()} busy={sending} />
+            {error ? <Text style={styles.error}>{error}</Text> : null}
+          </>
+        )}
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Help centre</Text>
         {TOPICS.map((topic) => (
           <TouchableOpacity
             key={topic.path}
@@ -50,7 +106,7 @@ export function HelpSupportScreen() {
         <Ionicons name="mail-outline" size={18} color="#fff" />
         <Text style={styles.primaryButtonText}>Contact support</Text>
       </TouchableOpacity>
-      <Text style={styles.footnote}>The contact form opens on the web, signed in as you.</Text>
+      <Text style={styles.footnote}>The contact form opens on the web; sign in with the same account if it asks.</Text>
     </ScrollView>
   );
 }
@@ -85,6 +141,22 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#111827',
     marginBottom: 8,
+  },
+  body: {
+    fontSize: 14,
+    color: '#374151',
+    lineHeight: 20,
+  },
+  link: {
+    marginTop: 10,
+    color: '#4338ca',
+    fontWeight: '600',
+  },
+  error: {
+    marginTop: 10,
+    color: '#b91c1c',
+    fontSize: 13,
+    lineHeight: 19,
   },
   listItem: {
     flexDirection: 'row',

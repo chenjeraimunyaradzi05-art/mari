@@ -19,15 +19,17 @@ import {
   ViewToken,
   Share,
 } from 'react-native';
-import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
+import { useVideoPlayer, VideoView } from 'expo-video';
+import { useEvent, useEventListener } from 'expo';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useNavigation } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { videoApi, VideoPost, type VideoFeedKind } from '../services/api-extensions';
 import { unwrapApiData, webUrl } from '../services/api';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { LoadingError } from '../components/ErrorBoundary';
+import { advanceWatch, startWatch, viewToRecord, type WatchState } from '../utils/watchTime';
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 const VIDEO_HEIGHT = SCREEN_HEIGHT - 80; // Account for tab bar
@@ -49,35 +51,65 @@ interface VideoItemProps {
   onSave: (id: string) => void;
   onComment: (id: string) => void;
   onShare: (video: VideoPost) => void;
+  /** Called when a stretch of watching ends: scrolled away, left the screen, or unmounted. */
+  onViewEnd: (videoId: string, watch: WatchState) => void;
 }
 
-function VideoItem({ video, isActive, onLike, onSave, onComment, onShare }: VideoItemProps) {
-  const videoRef = useRef<Video>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isBuffering, setIsBuffering] = useState(true);
+/**
+ * One reel. Playback is expo-video's player: expo-av, which this used to be
+ * built on, was deprecated in Expo SDK 54 and is removed in SDK 55, so the
+ * next SDK upgrade would have taken the whole Explore tab with it.
+ *
+ * The player reports its time every half second (the cadence utils/watchTime
+ * was written against), whether it is playing, and its status. A reel whose
+ * source cannot be played says so instead of spinning for ever.
+ */
+export function VideoItem({ video, isActive, onLike, onSave, onComment, onShare, onViewEnd }: VideoItemProps) {
+  const player = useVideoPlayer(video.videoUrl, (p) => {
+    p.loop = true;
+    p.timeUpdateEventInterval = 0.5;
+  });
+  const { isPlaying } = useEvent(player, 'playingChange', { isPlaying: player.playing });
+  const { status } = useEvent(player, 'statusChange', { status: player.status });
+  const isBuffering = status === 'loading';
+  const failed = status === 'error';
+  // Counted from the player's own reports, so a paused or buffering reel is
+  // not credited with time nobody spent watching it.
+  const watchRef = useRef<WatchState>(startWatch());
+  const onViewEndRef = useRef(onViewEnd);
+  onViewEndRef.current = onViewEnd;
+  const activeRef = useRef(isActive);
+  activeRef.current = isActive;
 
   useEffect(() => {
     if (isActive) {
-      videoRef.current?.playAsync();
-      setIsPlaying(true);
-    } else {
-      videoRef.current?.pauseAsync();
-      setIsPlaying(false);
+      watchRef.current = startWatch();
+      player.play();
+      // Leaving the reel, by scrolling on, opening its comments or closing
+      // the screen, ends the view; whatever was watched is handed up once.
+      return () => {
+        onViewEndRef.current(video.id, watchRef.current);
+        watchRef.current = startWatch();
+      };
     }
-  }, [isActive]);
+    player.pause();
+    return undefined;
+  }, [isActive, video.id, player]);
 
-  const handlePlaybackStatusUpdate = (status: AVPlaybackStatus) => {
-    if (status.isLoaded) {
-      setIsBuffering(status.isBuffering);
-      setIsPlaying(status.isPlaying);
-    }
-  };
+  useEventListener(player, 'timeUpdate', ({ currentTime }) => {
+    if (!activeRef.current) return;
+    watchRef.current = advanceWatch(watchRef.current, {
+      isPlaying: player.playing,
+      positionMillis: currentTime * 1000,
+      durationMillis: player.duration > 0 ? player.duration * 1000 : undefined,
+    });
+  });
 
   const togglePlayPause = () => {
-    if (isPlaying) {
-      videoRef.current?.pauseAsync();
+    if (player.playing) {
+      player.pause();
     } else {
-      videoRef.current?.playAsync();
+      player.play();
     }
   };
 
@@ -92,15 +124,14 @@ function VideoItem({ video, isActive, onLike, onSave, onComment, onShare }: Vide
   return (
     <View style={styles.videoContainer}>
       <TouchableOpacity activeOpacity={1} onPress={togglePlayPause} style={styles.videoWrapper} accessibilityLabel={isPlaying ? 'Pause' : 'Play'}>
-        <Video
-          ref={videoRef}
-          source={{ uri: video.videoUrl }}
-          style={styles.video}
-          resizeMode={ResizeMode.COVER}
-          isLooping
-          shouldPlay={isActive}
-          onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
-        />
+        <VideoView player={player} style={styles.video} contentFit="cover" nativeControls={false} />
+
+        {failed && (
+          <View style={styles.playOverlay}>
+            <Ionicons name="alert-circle-outline" size={48} color="rgba(255,255,255,0.85)" />
+            <Text style={styles.failedText}>This reel could not be played.</Text>
+          </View>
+        )}
 
         {isBuffering && (
           <View style={styles.bufferingOverlay}>
@@ -108,7 +139,7 @@ function VideoItem({ video, isActive, onLike, onSave, onComment, onShare }: Vide
           </View>
         )}
 
-        {!isPlaying && !isBuffering && (
+        {!isPlaying && !isBuffering && !failed && (
           <View style={styles.playOverlay}>
             <Ionicons name="play" size={60} color="rgba(255,255,255,0.8)" />
           </View>
@@ -192,8 +223,26 @@ function VideoItem({ video, isActive, onLike, onSave, onComment, onShare }: Vide
   );
 }
 
+/**
+ * Tells the server a reel was watched, and for how long. It used to be told
+ * nothing: videoApi.recordView had no caller, so every view from the app went
+ * uncounted. The server counts one view per signed-in viewer a day and limits
+ * how often it is pinged, so a reel watched twice is not two views. Fire and
+ * forget: a view that could not be recorded is not worth interrupting a
+ * member who has already moved on to the next reel.
+ */
+function recordWatchedView(videoId: string, watch: WatchState): void {
+  const view = viewToRecord(watch);
+  if (!view) return;
+  videoApi.recordView(videoId, view.watchDuration, view.completionPct).catch((error: unknown) => {
+    console.warn('Reel view not recorded:', error instanceof Error ? error.message : error);
+  });
+}
+
 export function VideoFeedScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  // Off screen (comments open, another tab) the reel pauses and its view ends.
+  const isFocused = useIsFocused();
   const [videos, setVideos] = useState<VideoPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -322,11 +371,12 @@ export function VideoFeedScreen() {
   const renderItem = ({ item, index }: { item: VideoPost; index: number }) => (
     <VideoItem
       video={item}
-      isActive={index === activeIndex}
+      isActive={isFocused && index === activeIndex}
       onLike={handleLike}
       onSave={handleSave}
       onComment={handleComment}
       onShare={handleShare}
+      onViewEnd={recordWatchedView}
     />
   );
 
@@ -522,6 +572,12 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 12,
     marginTop: 4,
+  },
+  failedText: {
+    color: '#fff',
+    fontSize: 15,
+    marginTop: 10,
+    textAlign: 'center',
   },
   footerLoader: {
     height: 60,

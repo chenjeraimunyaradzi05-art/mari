@@ -7,9 +7,11 @@
  * formation, the marketplace, apprenticeships, messages) and for the rows
  * that used to sit on Profile; Profile keeps identity and settings.
  *
- * Pillar routes whose native screens are still being written are registered
- * now under their final names with an "opens on the web" placeholder, so a
- * tap in More is never dead and the real screen only has to swap the import.
+ * Every pillar route is a native screen. They were registered for a long
+ * time against a single "opens on the web" card, which made most of the
+ * super app a link out; the parts of each pillar that still live on the web
+ * (paying for a car, a registration's fee, the practitioner directory) are
+ * rows inside the native screens that say so before they are tapped.
  */
 import React from 'react';
 import type { NavigatorScreenParams } from '@react-navigation/native';
@@ -57,11 +59,26 @@ import { LearnScreen } from '../screens/LearnScreen';
 import { CourseScreen } from '../screens/CourseScreen';
 import { UpgradeScreen } from '../screens/UpgradeScreen';
 
-// Pillar placeholders: replace each import with the native screen as it lands.
-import { OpensOnWebScreen, opensOnWeb } from '../screens/OpensOnWebScreen';
+// Pillars
+import { WellnessScreen } from '../screens/wellness/WellnessScreen';
+import { WellnessCheckInScreen } from '../screens/wellness/WellnessCheckInScreen';
+import { WellnessK10Screen } from '../screens/wellness/WellnessK10Screen';
+import { CarsScreen } from '../screens/cars/CarsScreen';
+import { CarCatalogueScreen } from '../screens/cars/CarCatalogueScreen';
+import { CarDetailScreen } from '../screens/cars/CarDetailScreen';
+import { CarListingsScreen } from '../screens/cars/CarListingsScreen';
+import { CarListingDetailScreen } from '../screens/cars/CarListingDetailScreen';
+import { StrategyScreen } from '../screens/money/StrategyScreen';
+import { CalculatorScreen } from '../screens/money/CalculatorScreen';
+import { MyPlansScreen } from '../screens/money/MyPlansScreen';
+import { FinanceScreen } from '../screens/money/FinanceScreen';
+import { SavingsGoalScreen } from '../screens/money/SavingsGoalScreen';
+import { FormationScreen } from '../screens/money/FormationScreen';
+import { FormationDetailScreen } from '../screens/money/FormationDetailScreen';
+import { QuickExitButton } from '../components/pillar/QuickExit';
+import type { StrategyArea } from '../services/money';
 
-/** The four strategy plans, as server/src/routes/strategy.routes.ts names them. */
-export type StrategyArea = 'HOUSING' | 'BUSINESS' | 'TAX' | 'INVESTMENT';
+export type { StrategyArea };
 
 // Types
 export type RootStackParamList = {
@@ -89,14 +106,14 @@ export type RootStackParamList = {
   Learn: undefined;
   Course: { courseId: string; title?: string };
   Upgrade: undefined;
-  // Pillars. Registered with placeholders until their native screens land.
+  // Pillars.
   Wellness: undefined;
   WellnessCheckIn: undefined;
   WellnessK10: undefined;
   Cars: undefined;
   CarCatalogue: undefined;
   CarDetail: { slug: string; title?: string };
-  CarListings: undefined;
+  CarListings: { saved?: boolean } | undefined;
   CarListingDetail: { listingId: string; title?: string };
   Strategy: { area?: StrategyArea } | undefined;
   Calculator: { calculator: string; title?: string };
@@ -127,66 +144,8 @@ const RootStack = createNativeStackNavigator<RootStackParamList>();
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
 const MainTab = createBottomTabNavigator<MainTabParamList>();
 
-// ---------------------------------------------------------------------------
-// Pillar placeholders. Each renders the "opens on the web" pattern with the
-// page that pillar lives on today. The wellness, cars, strategy, finance and
-// formation agents replace these with their screens under the same names.
-// ---------------------------------------------------------------------------
-const WellnessPlaceholder = opensOnWeb({
-  title: 'Wellness',
-  blurb: 'Your daily check-in, hydration and cycle trackers, the K10 and the crisis lines.',
-  path: '/wellness',
-  icon: 'heart-outline',
-});
-const CarsPlaceholder = opensOnWeb({
-  title: 'Cars',
-  blurb: 'The new-car catalogue, pre-loved listings, mechanics, and your garage with its rego and service reminders.',
-  path: '/cars',
-  icon: 'car-outline',
-});
-const CarListingsPlaceholder = opensOnWeb({
-  title: 'Pre-loved listings',
-  blurb: 'Cars for sale from other members, with saved listings and inspections.',
-  path: '/cars',
-  icon: 'car-outline',
-});
-const FinancePlaceholder = opensOnWeb({
-  title: 'Finance',
-  blurb: 'Savings goals, super, your money health score and insurance.',
-  path: '/finances',
-  icon: 'wallet-outline',
-});
-const FormationPlaceholder = opensOnWeb({
-  title: 'Formation',
-  blurb: 'Where your ABN or company registration is up to, and the documents generated for it.',
-  path: '/formation',
-  icon: 'business-outline',
-});
-const MyPlansPlaceholder = opensOnWeb({
-  title: 'My plans',
-  blurb: 'The housing, business, tax and investing plans you have saved.',
-  path: '/housing',
-  icon: 'bookmark-outline',
-});
-const CalculatorPlaceholder = opensOnWeb({
-  title: 'Calculators',
-  blurb: 'Mortgage, borrowing power, stamp duty, tax, super and investing estimates.',
-  path: '/finances',
-  icon: 'calculator-outline',
-});
-
-const STRATEGY_WEB: Record<StrategyArea, { title: string; blurb: string; path: string }> = {
-  HOUSING: { title: 'Housing', blurb: 'Rent or buy, borrowing power, stamp duty and a deposit plan.', path: '/housing' },
-  BUSINESS: { title: 'Business', blurb: 'Structures, runway, valuation and a raise plan for your business.', path: '/business' },
-  TAX: { title: 'Tax', blurb: 'An income tax estimate, deductions, super and what to set aside.', path: '/dashboard/finance/tax/plan' },
-  INVESTMENT: { title: 'Investing', blurb: 'Your risk profile, an emergency fund, projections and net worth.', path: '/dashboard/finance/invest' },
-};
-
-function StrategyPlaceholder({ route }: NativeStackScreenProps<RootStackParamList, 'Strategy'>) {
-  const area = route.params?.area ?? 'HOUSING';
-  const copy = STRATEGY_WEB[area] ?? STRATEGY_WEB.HOUSING;
-  return <OpensOnWebScreen title={copy.title} blurb={copy.blurb} path={copy.path} icon="trending-up-outline" />;
-}
+/** Titles for the four money plans, for the Strategy header. */
+const STRATEGY_TITLES: Record<StrategyArea, string> = { HOUSING: 'Housing', BUSINESS: 'Business', TAX: 'Tax', INVESTMENT: 'Investing' };
 
 // Auth Stack Navigator
 function AuthNavigator() {
@@ -371,22 +330,22 @@ export function AppNavigator() {
           <RootStack.Screen name="Course" component={CourseScreen} options={({ route }) => ({ headerShown: true, title: route.params?.title ?? 'Course' })} />
           <RootStack.Screen name="Upgrade" component={UpgradeScreen} options={{ headerShown: true, title: 'Membership' }} />
 
-          {/* Pillars: placeholders until the native screens land. */}
-          <RootStack.Screen name="Wellness" component={WellnessPlaceholder} options={{ headerShown: true, title: 'Wellness' }} />
-          <RootStack.Screen name="WellnessCheckIn" component={WellnessPlaceholder} options={{ headerShown: true, title: 'Check in' }} />
-          <RootStack.Screen name="WellnessK10" component={WellnessPlaceholder} options={{ headerShown: true, title: 'K10' }} />
-          <RootStack.Screen name="Cars" component={CarsPlaceholder} options={{ headerShown: true, title: 'Cars' }} />
-          <RootStack.Screen name="CarCatalogue" component={CarsPlaceholder} options={{ headerShown: true, title: 'Catalogue' }} />
-          <RootStack.Screen name="CarDetail" component={CarsPlaceholder} options={({ route }) => ({ headerShown: true, title: route.params?.title ?? 'Car' })} />
-          <RootStack.Screen name="CarListings" component={CarListingsPlaceholder} options={{ headerShown: true, title: 'Listings' }} />
-          <RootStack.Screen name="CarListingDetail" component={CarListingsPlaceholder} options={({ route }) => ({ headerShown: true, title: route.params?.title ?? 'Listing' })} />
-          <RootStack.Screen name="Strategy" component={StrategyPlaceholder} options={({ route }) => ({ headerShown: true, title: STRATEGY_WEB[route.params?.area ?? 'HOUSING']?.title ?? 'Plans' })} />
-          <RootStack.Screen name="Calculator" component={CalculatorPlaceholder} options={({ route }) => ({ headerShown: true, title: route.params?.title ?? 'Calculator' })} />
-          <RootStack.Screen name="MyPlans" component={MyPlansPlaceholder} options={{ headerShown: true, title: 'My plans' }} />
-          <RootStack.Screen name="Finance" component={FinancePlaceholder} options={{ headerShown: true, title: 'Finance' }} />
-          <RootStack.Screen name="SavingsGoal" component={FinancePlaceholder} options={{ headerShown: true, title: 'Savings goal' }} />
-          <RootStack.Screen name="Formation" component={FormationPlaceholder} options={{ headerShown: true, title: 'Formation' }} />
-          <RootStack.Screen name="FormationDetail" component={FormationPlaceholder} options={({ route }) => ({ headerShown: true, title: route.params?.name ?? 'Registration' })} />
+          {/* Pillars. The wellness screens carry the quick exit the web's wellness pages do. */}
+          <RootStack.Screen name="Wellness" component={WellnessScreen} options={{ headerShown: true, title: 'Wellness', headerRight: () => <QuickExitButton /> }} />
+          <RootStack.Screen name="WellnessCheckIn" component={WellnessCheckInScreen} options={{ headerShown: true, title: 'Check in', headerRight: () => <QuickExitButton /> }} />
+          <RootStack.Screen name="WellnessK10" component={WellnessK10Screen} options={{ headerShown: true, title: 'The last four weeks', headerRight: () => <QuickExitButton /> }} />
+          <RootStack.Screen name="Cars" component={CarsScreen} options={{ headerShown: true, title: 'Cars' }} />
+          <RootStack.Screen name="CarCatalogue" component={CarCatalogueScreen} options={{ headerShown: true, title: 'New cars' }} />
+          <RootStack.Screen name="CarDetail" component={CarDetailScreen} options={({ route }) => ({ headerShown: true, title: route.params?.title ?? 'Car' })} />
+          <RootStack.Screen name="CarListings" component={CarListingsScreen} options={({ route }) => ({ headerShown: true, title: route.params?.saved ? 'Saved listings' : 'Pre-loved' })} />
+          <RootStack.Screen name="CarListingDetail" component={CarListingDetailScreen} options={({ route }) => ({ headerShown: true, title: route.params?.title ?? 'Listing' })} />
+          <RootStack.Screen name="Strategy" component={StrategyScreen} options={({ route }) => ({ headerShown: true, title: STRATEGY_TITLES[route.params?.area ?? 'HOUSING'] ?? 'Plans' })} />
+          <RootStack.Screen name="Calculator" component={CalculatorScreen} options={({ route }) => ({ headerShown: true, title: route.params?.title ?? 'Calculator' })} />
+          <RootStack.Screen name="MyPlans" component={MyPlansScreen} options={{ headerShown: true, title: 'My plans' }} />
+          <RootStack.Screen name="Finance" component={FinanceScreen} options={{ headerShown: true, title: 'Finance' }} />
+          <RootStack.Screen name="SavingsGoal" component={SavingsGoalScreen} options={({ route }) => ({ headerShown: true, title: route.params?.goalId ? 'Savings goal' : 'A new goal' })} />
+          <RootStack.Screen name="Formation" component={FormationScreen} options={{ headerShown: true, title: 'Formation' }} />
+          <RootStack.Screen name="FormationDetail" component={FormationDetailScreen} options={({ route }) => ({ headerShown: true, title: route.params?.name ?? 'Registration' })} />
         </>
       ) : (
         <RootStack.Screen name="Auth" component={AuthNavigator} />
