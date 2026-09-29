@@ -27,7 +27,6 @@ type SalaryAnalysis = {
     p75: number | null;
     p90: number | null;
   };
-  negotiationTips?: Array<{ tip: string; priority: number }>;
   generatedAt: string;
 };
 
@@ -440,28 +439,50 @@ export default function SalaryEquityPage() {
                   </div>
                 )}
 
-                {/* Negotiation Tips */}
-                {analysis.negotiationTips && analysis.negotiationTips.length > 0 && (
-                  <div>
-                    <p className="text-sm font-medium text-slate-900 dark:text-white mb-2 flex items-center gap-1">
-                      <Lightbulb className="w-4 h-4 text-amber-500" />
-                      Negotiation Tips
-                    </p>
-                    <ul className="space-y-1">
-                      {analysis.negotiationTips.map((tip, idx) => (
-                        <li key={idx} className="text-sm text-slate-600 dark:text-slate-400 flex items-start gap-2">
-                          <span className="text-emerald-600 font-medium">{idx + 1}.</span>
-                          {tip.tip}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
               </div>
             ))}
           </div>
         )}
       </div>
+
+      {/* General guidance. Every analysis used to carry the same three
+          "Negotiation Tips" underneath its bands, numbered as though they
+          had been worked out from the figures above them. They were written
+          once and saved into every row, whatever the role. The server no
+          longer stores them, and the advice is shown here once, headed as
+          what it is. */}
+      <section
+        aria-labelledby="salary-general-guidance"
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6"
+      >
+        <h2
+          id="salary-general-guidance"
+          className="text-sm font-medium text-slate-900 dark:text-white flex items-center gap-1"
+        >
+          <Lightbulb className="w-4 h-4 text-amber-500" />
+          General negotiation guidance
+        </h2>
+        <p className="text-xs text-slate-500 mt-1 mb-3">
+          The same for every role. It is not worked out from your analyses.
+        </p>
+        <ul className="space-y-1 text-sm text-slate-600 dark:text-slate-400">
+          <li>Look at what comparable roles at similar employers pay before you name a figure.</li>
+          <li>Lead with what you have delivered, in numbers where you have them.</li>
+          <li>
+            Rehearse the conversation out loud, with a{' '}
+            <Link href="/dashboard/mentors" className="text-emerald-600 hover:underline">
+              mentor
+            </Link>{' '}
+            if you can.
+          </li>
+        </ul>
+        <Link
+          href="/salary-insights"
+          className="inline-block mt-3 text-sm font-medium text-emerald-600 hover:underline"
+        >
+          Look up a role on Salary Insights to draft a negotiation script
+        </Link>
+      </section>
 
       <div className="text-center">
         <Link href="/dashboard/ai" className="text-sm text-primary-600 hover:underline">

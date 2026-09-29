@@ -20,6 +20,7 @@ import {
 import { useResumeOptimizer } from '@/lib/hooks';
 import PremiumGate from '../PremiumGate';
 import { downloadText } from '@/lib/download';
+import { copyFilename, resumeReviewCopy } from '../save-copy';
 
 /** The one shape the analysis arrives in; `score` null means none was made. */
 type ResumeAnalysis = {
@@ -103,8 +104,23 @@ export default function ResumePage() {
     );
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
+  // What "Copy Results" and "Download Report" hand her. Both used to be
+  // JSON.stringify of the response — braces, quoted keys, "simulated": false —
+  // in a file named resume-report.json, for a member who wanted her review.
+  // It is the review as readable text now, and never her résumé itself.
+  const reviewText = () => (result ? resumeReviewCopy(result) : '');
+
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyState('copied');
+    } catch {
+      // Clipboard access is refused in some browsers and embedded views; the
+      // button says so rather than implying the copy happened.
+      setCopyState('failed');
+    }
+    setTimeout(() => setCopyState('idle'), 2500);
   };
 
   return (
@@ -399,24 +415,33 @@ export default function ResumePage() {
                   )}
                 </div>
 
-                {/* Action Buttons */}
+                {/* Action Buttons. Not offered when nothing ran: a file saying
+                    "the model gave no score" is not a review worth keeping. */}
+                {!result.simulated && (
+                <>
                 <div className="flex space-x-4">
                   <button
-                    onClick={() => copyToClipboard(JSON.stringify(result, null, 2))}
+                    onClick={() => void copyToClipboard(reviewText())}
                     className="flex-1 py-3 border border-slate-300 dark:border-slate-600 rounded-xl text-slate-700 dark:text-slate-300 font-semibold hover:bg-slate-50 dark:hover:bg-slate-700/50 flex items-center justify-center space-x-2 transition"
                   >
                     <Copy className="w-5 h-5" />
-                    <span>Copy Results</span>
+                    <span>{copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Could not copy' : 'Copy Results'}</span>
                   </button>
                   <button
                     type="button"
-                    onClick={() => downloadText('resume-report.json', JSON.stringify(result, null, 2), 'application/json')}
+                    onClick={() => downloadText(copyFilename('resume-review'), reviewText())}
                     className="flex-1 py-3 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 flex items-center justify-center space-x-2 transition"
                   >
                     <Download className="w-5 h-5" />
                     <span>Download Report</span>
                   </button>
                 </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  The review is not saved on ATHENA. Download Report saves it as a text file on this
+                  device; your résumé itself is not included.
+                </p>
+                </>
+                )}
               </>
             )}
           </div>

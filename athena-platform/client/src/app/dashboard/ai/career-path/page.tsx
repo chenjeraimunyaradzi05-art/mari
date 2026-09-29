@@ -22,6 +22,8 @@ import { useGenerateCareerPath } from '@/lib/hooks';
 import { aiApi } from '@/lib/api';
 import { cn, formatSalary } from '@/lib/utils';
 import PremiumGate from '../PremiumGate';
+import SaveCopyButton from '../SaveCopyButton';
+import { careerPlanCopy } from '../save-copy';
 
 interface CareerMilestone {
   id: string;
@@ -333,7 +335,7 @@ export default function CareerPathPage() {
             </div>
           </div>
           <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">
-            What you enter is sent to ATHENA&apos;s AI model to write the plan. The plan is not saved; it is gone when you leave this page.
+            What you enter is sent to ATHENA&apos;s AI model to write the plan. ATHENA does not save the plan: it is gone when you leave this page unless you save a copy to your device.
           </p>
         </div>
         </PremiumGate>
@@ -620,9 +622,27 @@ export default function CareerPathPage() {
           </div>
         </div>
       )}
-      <p className="text-xs text-slate-500 dark:text-slate-400">
-        Written by an AI model from what you gave it. It can be wrong, and it is not saved: note down anything you want to keep.
-      </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <p className="text-xs text-slate-500 dark:text-slate-400 sm:max-w-md">
+          Written by an AI model from what you gave it. It can be wrong, and ATHENA does not save it.
+        </p>
+        {milestones.length > 0 && (
+          <SaveCopyButton
+            kind="career-plan"
+            build={() =>
+              careerPlanCopy({
+                from: currentRole,
+                to: targetRole,
+                milestones,
+                readiness: extras.matchScore,
+                recommendedRoles: extras.recommendedRoles,
+                learningPath: extras.learningPath,
+                careerAdvice: extras.careerAdvice,
+              })
+            }
+          />
+        )}
+      </div>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { prisma } from '../utils/prisma';
+import { hiddenMemberWhere, viewerContextFor, type ViewerContext } from './search.service';
 
 export interface CareerCompassResult {
   targetRole: string;
@@ -55,6 +56,17 @@ export interface SalaryEquityResult {
   tips: string[];
 }
 
+/**
+ * Mentors ranked for one member.
+ *
+ * There is no `rating` here any more. `MentorProfile.rating` has no writer
+ * anywhere on the platform (there is no review model, form or endpoint), so
+ * the column holds nothing a mentee ever said: it is null unless a seed or an
+ * admin edit put a number there, and the mentor directory stopped serving it
+ * for that reason. It used to be added straight into `matchScore` and turned
+ * into a "Rated 4.8" reason whenever it was set, which is a quality claim no
+ * mentee made.
+ */
 export interface MentorMatchResult {
   mentors: Array<{
     id: string;
@@ -64,7 +76,6 @@ export interface MentorMatchResult {
     headline: string | null;
     specializations: string[];
     yearsExperience: number | null;
-    rating: number | null;
     matchScore: number;
     matchReasons: string[];
   }>;
@@ -211,8 +222,10 @@ export async function getOpportunityScan(userId?: string): Promise<OpportunitySc
       orderBy: { createdAt: 'desc' },
       take: 6,
     }),
+    // A cancelled event keeps its row, so the women who registered can be
+    // told it is off; it is not an opportunity for anyone else to find.
     prisma.event.findMany({
-      where: { date: { gte: now }, isHidden: false },
+      where: { date: { gte: now }, isHidden: false, cancelledAt: null },
       select: { id: true, title: true, date: true, location: true, isFeatured: true },
       orderBy: [{ isFeatured: 'desc' }, { date: 'asc' }],
       take: 6,
@@ -300,12 +313,29 @@ export async function getSalaryEquity(userId: string, targetRole?: string): Prom
   };
 }
 
-export async function getMentorMatch(userId: string): Promise<MentorMatchResult> {
-  const userSkills = await getUserSkills(userId);
+/**
+ * `viewer` is her block and follow context when the caller has already loaded
+ * it (the cold-start picks do); otherwise it is read here.
+ */
+export async function getMentorMatch(userId: string, viewer?: ViewerContext): Promise<MentorMatchResult> {
+  const [userSkills, context] = await Promise.all([
+    getUserSkills(userId),
+    viewer ?? viewerContextFor(userId),
+  ]);
   const userSkillSet = new Set(userSkills);
 
   const mentors = await prisma.mentorProfile.findMany({
-    where: { isAvailable: true },
+    where: {
+      isAvailable: true,
+      // The mentor directory already leaves out anyone who asked to be hidden
+      // from search and anyone on either side of a block, and this list is
+      // the same people under a friendlier heading. It did not, so a woman who
+      // had blocked a man who mentors was shown him as a mentor "who could be
+      // a good fit", with a link to his profile. Suspended accounts cannot
+      // take a session, and she is not her own mentor.
+      userId: { not: userId },
+      user: { isSuspended: false, ...hiddenMemberWhere(context) },
+    },
     include: {
       user: {
         select: {
@@ -323,9 +353,12 @@ export async function getMentorMatch(userId: string): Promise<MentorMatchResult>
   const ranked = mentors.map((mentor) => {
     const specializations = toStringArray(mentor.specializations).map(normalizeSkill);
     const overlap = specializations.filter((skill) => userSkillSet.has(skill));
-    const ratingValue = mentor.rating ? Number(mentor.rating) : 0;
+    // Two terms, both read from what the mentor and the member wrote down:
+    // the skills they share, and the mentor's years of experience (capped at
+    // five points, so a long career cannot bury a mentor who shares two or
+    // more of her skills). No rating term; see MentorMatchResult.
     const experienceValue = mentor.yearsExperience ? Math.min(mentor.yearsExperience / 5, 5) : 0;
-    const matchScore = overlap.length * 3 + ratingValue + experienceValue;
+    const matchScore = overlap.length * 3 + experienceValue;
 
     const reasons: string[] = [];
     if (overlap.length) {
@@ -333,9 +366,6 @@ export async function getMentorMatch(userId: string): Promise<MentorMatchResult>
     }
     if (mentor.yearsExperience) {
       reasons.push(`${mentor.yearsExperience}+ years experience`);
-    }
-    if (ratingValue) {
-      reasons.push(`Rated ${ratingValue.toFixed(1)}`);
     }
 
     return {
@@ -346,7 +376,6 @@ export async function getMentorMatch(userId: string): Promise<MentorMatchResult>
       headline: mentor.user.headline,
       specializations,
       yearsExperience: mentor.yearsExperience ?? null,
-      rating: mentor.rating ? Number(mentor.rating) : null,
       matchScore,
       matchReasons: reasons,
     };

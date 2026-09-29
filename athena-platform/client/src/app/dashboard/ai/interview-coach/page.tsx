@@ -22,6 +22,8 @@ import {
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import PremiumGate from '../PremiumGate';
+import SaveCopyButton from '../SaveCopyButton';
+import { interviewPracticeCopy } from '../save-copy';
 
 interface Message {
   id: string;
@@ -541,9 +543,9 @@ export default function InterviewCoachPage() {
               is stored on ATHENA's side: the server keeps no record of the
               questions, her answers or the feedback. */}
           <p className="mt-4 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-            Nothing from a practice session is saved. Your answers are sent to ATHENA&apos;s AI
-            model to be marked, and the questions, your answers and the feedback are gone when
-            you leave this page.
+            Nothing from a practice session is saved on ATHENA. Your answers are sent to
+            ATHENA&apos;s AI model to be marked, and the questions, your answers and the feedback
+            are gone when you leave this page unless you save a copy to your device.
           </p>
         </div>
 
@@ -568,7 +570,7 @@ export default function InterviewCoachPage() {
   return (
     <div className="max-w-4xl mx-auto p-6 h-[calc(100vh-120px)] flex flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div className="flex items-center space-x-4">
           <button
             onClick={() => setSessionStarted(false)}
@@ -585,11 +587,25 @@ export default function InterviewCoachPage() {
             </p>
           </div>
         </div>
-        <div className="flex items-center space-x-2">
-          <span className="flex items-center text-sm text-slate-500 dark:text-slate-400">
+        <div className="flex flex-wrap items-start justify-end gap-2">
+          <span className="flex items-center self-center text-sm text-slate-500 dark:text-slate-400">
             <Clock className="w-4 h-4 mr-1" />
             {Math.floor(messages.filter((m) => m.role === 'user').length)} answers
           </span>
+          {messages.some((m) => m.role === 'user') && (
+            <SaveCopyButton
+              kind="interview-practice"
+              label="Save transcript"
+              build={() =>
+                interviewPracticeCopy({
+                  role: jobRole,
+                  interviewType: interviewTypes.find((t) => t.id === interviewType)?.name ?? interviewType,
+                  level: difficultyLevels.find((d) => d.id === difficulty)?.name ?? difficulty,
+                  messages,
+                })
+              }
+            />
+          )}
           <button
             onClick={() => {
               setSessionStarted(false);

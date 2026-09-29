@@ -13,15 +13,20 @@
  *                          Course, UserSkill). /dashboard/ai/career-compass
  *                          reads it. It is a comparison against listings, not
  *                          a forecast; it has no probability, salary or risk.
- *   GET /mentor-match      Available mentors ranked by shared skills, rating
- *                          and years of experience, with the reasons spelled
- *                          out. /dashboard/ai/mentors reads it. `matchScore`
- *                          is an unbounded heuristic (overlap*3 + rating +
+ *   GET /mentor-match      Available mentors ranked by shared skills and
+ *                          years of experience, with the reasons spelled out.
+ *                          /dashboard/ai/mentors reads it. `matchScore` is an
+ *                          unbounded heuristic (overlap*3 + capped
  *                          experience), not a percentage; the client shows the
- *                          reasons and never the number.
+ *                          reasons and never the number. MentorProfile.rating
+ *                          has no writer, so it is neither a term nor a
+ *                          reason. Mentors hidden from search, on either side
+ *                          of a block, or suspended are left out, as the
+ *                          mentor directory leaves them out.
  *   GET /opportunity-scan  The newest active jobs and courses and the next
- *                          events. Not personalised, and
- *                          /dashboard/ai/opportunities says so.
+ *                          events that have not been called off. Not
+ *                          personalised, and /dashboard/ai/opportunities says
+ *                          so.
  *   GET /salary-equity     The median of the ranges employers advertise on
  *                          active listings carrying her title, reported only
  *                          from three listings up (getSalaryEquity).

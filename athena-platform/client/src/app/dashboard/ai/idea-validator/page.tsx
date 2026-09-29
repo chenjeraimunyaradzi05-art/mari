@@ -22,6 +22,8 @@ import {
 } from 'lucide-react';
 import { useIdeaValidator } from '@/lib/hooks';
 import PremiumGate from '../PremiumGate';
+import SaveCopyButton from '../SaveCopyButton';
+import { ideaAssessmentCopy } from '../save-copy';
 import { cn } from '@/lib/utils';
 
 /**
@@ -197,6 +199,15 @@ export default function IdeaValidatorPage() {
   // panel or, as before, the JSON.
   const nothingRan = Boolean(result?.simulated);
 
+  // Her idea and what the model said about it, as text. ATHENA keeps neither.
+  const buildCopy = () =>
+    ideaAssessmentCopy({
+      idea,
+      category: ideaCategories.find((option) => option.id === category)?.name ?? category,
+      targetMarket,
+      result: result ?? {},
+    });
+
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
       {/* Header */}
@@ -304,6 +315,10 @@ export default function IdeaValidatorPage() {
               </>
             )}
           </button>
+          <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+            Your idea is sent to ATHENA&apos;s AI model to be assessed. ATHENA keeps neither the idea
+            nor the assessment; you can save a copy to your device when it comes back.
+          </p>
         </div>
       ) : !scored ? (
         <div className="space-y-6">
@@ -332,13 +347,16 @@ export default function IdeaValidatorPage() {
               </p>
             )}
           </div>
-          <button
-            onClick={() => setResult(null)}
-            className="btn-primary flex items-center space-x-2"
-          >
-            <RefreshCw className="w-4 h-4" />
-            <span>Validate Another Idea</span>
-          </button>
+          <div className="flex flex-wrap items-start gap-4">
+            <button
+              onClick={() => setResult(null)}
+              className="btn-primary flex items-center space-x-2"
+            >
+              <RefreshCw className="w-4 h-4" />
+              <span>Validate Another Idea</span>
+            </button>
+            {!nothingRan && result?.analysis && <SaveCopyButton kind="idea-assessment" build={buildCopy} />}
+          </div>
         </div>
       ) : (
         <div className="space-y-6">
@@ -596,7 +614,7 @@ export default function IdeaValidatorPage() {
           </div>
 
           {/* Action Buttons */}
-          <div className="flex flex-wrap gap-4">
+          <div className="flex flex-wrap items-start gap-4">
             <button
               onClick={() => setResult(null)}
               className="btn-outline flex items-center space-x-2"
@@ -611,7 +629,11 @@ export default function IdeaValidatorPage() {
               <Users className="w-4 h-4" />
               <span>Find a Mentor</span>
             </Link>
+            <SaveCopyButton kind="idea-assessment" build={buildCopy} />
           </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Written by an AI model from your description. It can be wrong, and ATHENA does not save it.
+          </p>
         </div>
       )}
       </PremiumGate>

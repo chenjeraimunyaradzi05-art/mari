@@ -15,6 +15,10 @@ jest.mock('@/lib/api', () => ({
   api: { post: jest.fn() },
 }));
 
+jest.mock('@/lib/download', () => ({
+  downloadText: jest.fn(),
+}));
+
 jest.mock('../PremiumGate', () => ({
   __esModule: true,
   default: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -22,8 +26,10 @@ jest.mock('../PremiumGate', () => ({
 
 import InterviewCoachPage from './page';
 import { api } from '@/lib/api';
+import { downloadText } from '@/lib/download';
 
 const post = api.post as unknown as jest.Mock;
+const download = downloadText as unknown as jest.Mock;
 
 const QUESTIONS = [
   'How have you kept a ward safe when two nurses called in sick?',
@@ -107,5 +113,39 @@ describe('Interview coach', () => {
     expect(post.mock.calls[2][1]).toEqual(expect.objectContaining({ question: QUESTIONS[1] }));
 
     await waitFor(() => expect(screen.getByPlaceholderText('No question to answer')).toBeDisabled());
+  });
+
+  it('offers the transcript once she has answered, as text that stays on her device', async () => {
+    post
+      .mockResolvedValueOnce({ data: { success: true, data: { questions: QUESTIONS, tips: null, simulated: false } } })
+      .mockResolvedValueOnce({
+        data: {
+          success: true,
+          data: {
+            feedback: 'Clear escalation, but say what you did first.',
+            analysis: { rating: 3, strengths: ['Escalated early'], improvements: ['Name the first action'] },
+            nextQuestion: null,
+            simulated: false,
+          },
+        },
+      });
+
+    startWith('Registered Nurse');
+    await screen.findByText(QUESTIONS[0]);
+    // Nothing to keep until she has said something.
+    expect(screen.queryByRole('button', { name: /Save transcript/ })).not.toBeInTheDocument();
+
+    answer('I rang the after-hours manager and split the rooms.');
+    await screen.findByText(QUESTIONS[1]);
+    fireEvent.click(screen.getByRole('button', { name: /Save transcript/ }));
+
+    expect(download).toHaveBeenCalledTimes(1);
+    const [filename, text] = download.mock.calls[0];
+    expect(filename).toMatch(/^athena-interview-practice-\d{4}-\d{2}-\d{2}\.txt$/);
+    expect(text).toContain('Role: Registered Nurse');
+    expect(text).toContain(`Coach: ${QUESTIONS[0]}`);
+    expect(text).toContain('You: I rang the after-hours manager and split the rooms.');
+    expect(text).toContain('Rating: 3 out of 5');
+    expect(text).toContain('• Name the first action');
   });
 });

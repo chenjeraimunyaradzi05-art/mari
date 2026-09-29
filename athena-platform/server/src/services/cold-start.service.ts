@@ -5,8 +5,10 @@
  */
 
 import { prisma } from '../utils/prisma';
-import { logger } from '../utils/logger';
-import { Persona } from '@prisma/client';
+import { Persona, type Prisma } from '@prisma/client';
+import { hiddenMemberWhere, viewerContextFor, type ViewerContext } from './search.service';
+import { authorAudienceWhere } from './audience.service';
+import { getMentorMatch } from './algorithm.service';
 
 // ==========================================
 // TYPES
@@ -168,101 +170,139 @@ export async function getColdStartScore(userId: string): Promise<number> {
 // COLD START RECOMMENDATIONS
 // ==========================================
 
+/** "EARLY_CAREER" -> "early career", every underscore, not just the first. */
+const personaLabel = (persona: Persona) => persona.toLowerCase().split('_').join(' ');
+
 /**
- * Get recommendations for a cold start user
+ * The picks behind "New here? Start with these" on the feed (StartHereRail,
+ * read through GET /api/feed/cold-start).
+ *
+ * ## It failed for everyone, and once it worked it would have shown the wrong people
+ *
+ * The job query filtered on `location` and `experienceLevel`, neither of which
+ * is a Job column. User.country defaults to "Australia", so `location` was set
+ * for every member and Prisma refused every call: the rail never had anything
+ * to show. Fixing that alone would have put four unsafe picks in front of
+ * every new member, so they are fixed with it:
+ *
+ *  - "People to meet" returned any active member of her persona with a post.
+ *    It ignored "hide me from search", blocks in either direction and private
+ *    profiles, so a woman who had hidden herself, or who had blocked the man
+ *    she left, could be offered to him (or him to her) as someone to meet,
+ *    with a link to the profile.
+ *  - "A mentor in your field" had the same gaps, and was ordered by
+ *    MentorProfile.rating, which has no writer. It now comes from
+ *    getMentorMatch, which already leaves those people out and ranks by the
+ *    skills they share and years of experience.
+ *  - "Worth reading" took public posts with no regard for the author's
+ *    audience setting or the viewer's blocks.
+ *  - "A circle to join" could be a group moderators had hidden.
+ *
+ * Every reason now says what the pick was chosen for and nothing more. The
+ * per-type `score` is an ordering between the groups, not a measurement; the
+ * client drops it before anything renders (toStartHerePicks in lib/hooks.ts).
  */
 export async function getColdStartRecommendations(
   userId: string,
   limit: number = 20
 ): Promise<ColdStartRecommendation[]> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: {
-      skills: { include: { skill: true } },
-    },
-  });
-  
+  const [user, viewer] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        skills: { include: { skill: true } },
+      },
+    }),
+    viewerContextFor(userId),
+  ]);
+
   if (!user) return [];
-  
+
   const persona = user.persona || 'EARLY_CAREER';
+  const label = personaLabel(persona);
   const personaDefaults = PERSONA_DEFAULTS[persona];
-  const userSkills = user.skills.map((s: any) => s.skill?.name?.toLowerCase()) || [];
-  const location = user.city || user.country;
-  
+  const userSkills = user.skills.map((s) => s.skill.name.toLowerCase());
+
   const recommendations: ColdStartRecommendation[] = [];
-  
-  // 1. Recommend popular content for persona
-  const popularPosts = await getPopularPostsForPersona(persona, 5);
+
+  // 1. Posts from members at her stage this week
+  const popularPosts = await getPopularPostsForPersona(persona, 5, viewer);
   recommendations.push(...popularPosts.map((post) => ({
     type: 'POST' as const,
     id: post.id,
-    title: post.content?.slice(0, 100) || 'Popular post',
-    reason: `Popular in the ${persona.toLowerCase().replace('_', ' ')} community`,
+    title: post.content?.slice(0, 100) || 'Post',
+    // What the query checked: the author shares her persona and posted in the
+    // last seven days. It was "Popular in the ... community" for a post with
+    // no likes at all.
+    reason: `From the ${label} community this week`,
     score: 80,
     data: post,
   })));
-  
-  // 2. Recommend skill-building courses
+
+  // 2. Courses whose titles name a skill common at her stage that she has not listed
   const recommendedSkills = personaDefaults.recommendedSkills.filter(
     (s) => !userSkills.includes(s.toLowerCase())
   );
-  
+
   if (recommendedSkills.length > 0) {
     const courses = await getCoursesForSkills(recommendedSkills, 3);
-    recommendations.push(...courses.map((course) => ({
-      type: 'COURSE' as const,
-      id: course.id,
-      title: course.title,
-      reason: `Build essential skills for your career`,
-      score: 85,
-      data: course,
-    })));
+    recommendations.push(...courses.map((course) => {
+      const covers = recommendedSkills.find((skill) => course.title.toLowerCase().includes(skill.toLowerCase()));
+      return {
+        type: 'COURSE' as const,
+        id: course.id,
+        title: course.title,
+        reason: covers ? `Covers ${covers}, which is not on your profile yet` : 'Course on ATHENA',
+        score: 85,
+        data: course,
+      };
+    }));
   }
-  
-  // 3. Recommend relevant jobs
-  const jobs = await getJobsForPersona(persona, location, 4);
-  recommendations.push(...jobs.map((job) => ({
+
+  // 3. Roles, in her city first
+  const jobs = await getJobsForPersona(persona, user.city ?? undefined, 4);
+  recommendations.push(...jobs.map(({ job, inHerCity }) => ({
     type: 'JOB' as const,
     id: job.id,
     title: job.title,
-    reason: location ? `Jobs near ${location}` : 'Recommended for your profile',
+    reason: inHerCity && job.city ? `In ${job.city}` : 'Recently posted role',
     score: 75,
     data: job,
   })));
-  
-  // 4. Recommend mentors
-  const mentors = await getMentorsForPersona(persona, 3);
-  recommendations.push(...mentors.map((mentor) => ({
+
+  // 4. Mentors, ranked and filtered exactly as Mentor Match ranks and filters them
+  const { mentors } = await getMentorMatch(userId, viewer);
+  recommendations.push(...mentors.slice(0, 3).map((mentor) => ({
     type: 'MENTOR' as const,
     id: mentor.id,
-    title: `${mentor.user?.firstName} ${mentor.user?.lastName}`,
-    reason: 'Mentor in your field',
+    title: mentor.name,
+    reason: mentor.matchReasons[0] ?? 'Taking new mentees',
     score: 70,
     data: mentor,
   })));
-  
-  // 5. Recommend users to follow (similar persona, active)
-  const usersToFollow = await getSuggestedUsersForPersona(userId, persona, 5);
+
+  // 5. Members at the same stage who post
+  const usersToFollow = await getSuggestedUsersForPersona(userId, persona, 5, viewer);
   recommendations.push(...usersToFollow.map((u) => ({
     type: 'USER' as const,
     id: u.id,
-    title: u.displayName || 'User',
-    reason: 'Active member in your community',
+    title: u.displayName || 'Member',
+    reason: 'Same career stage as you',
     score: 65,
     data: u,
   })));
-  
-  // 6. Recommend groups
-  const groups = await getGroupsForPersona(persona, 3);
+
+  // 6. Public circles on topics common at her stage
+  const groups = await getGroupsForPersona(userId, persona, 3, viewer);
   recommendations.push(...groups.map((group) => ({
     type: 'GROUP' as const,
     id: group.id,
     title: group.name,
-    reason: `Popular ${persona.toLowerCase().replace('_', ' ')} community`,
+    reason: 'Public circle, open to join',
     score: 60,
     data: group,
   })));
-  
+
   // Sort by score and limit
   return recommendations
     .sort((a, b) => b.score - a.score)
@@ -273,13 +313,30 @@ export async function getColdStartRecommendations(
 // DATA FETCHERS
 // ==========================================
 
-async function getPopularPostsForPersona(persona: Persona, limit: number) {
+/**
+ * Who may appear in a new member's picks at all: not her, not anyone on either
+ * side of a block, not anyone who asked to be hidden from search
+ * (hiddenMemberWhere reads both stores of that switch), and not a suspended
+ * account.
+ */
+function discoverableMemberWhere(viewer: ViewerContext): Prisma.UserWhereInput {
+  return {
+    isSuspended: false,
+    ...(viewer.viewerId && { id: { not: viewer.viewerId } }),
+    AND: [hiddenMemberWhere(viewer)],
+  };
+}
+
+async function getPopularPostsForPersona(persona: Persona, limit: number, viewer: ViewerContext) {
   return prisma.post.findMany({
     where: {
       isPublic: true,
       isHidden: false,
       createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
-      author: { persona },
+      author: { persona, ...discoverableMemberWhere(viewer) },
+      // The author's audience setting, as every feed applies it: public
+      // authors, and connections-only authors she follows. Never a group post.
+      AND: [authorAudienceWhere(viewer.viewerId, viewer.followingIds)],
     },
     orderBy: [{ likeCount: 'desc' }, { commentCount: 'desc' }],
     take: limit,
@@ -305,53 +362,64 @@ async function getCoursesForSkills(skills: string[], limit: number) {
   });
 }
 
-async function getJobsForPersona(persona: Persona, location: string | undefined, limit: number) {
-  const where: any = {
-    status: 'ACTIVE',
-  };
-  
-  // Map persona to job types
+/**
+ * Active roles, newest first. An early-career member is shown the kinds of
+ * role that take people starting out, and roles asking for no more than two
+ * years. With a city on her profile, roles there come first, and only those
+ * are described as being there; the rest are topped up from anywhere.
+ */
+async function getJobsForPersona(persona: Persona, city: string | undefined, limit: number) {
+  const base: Prisma.JobWhereInput = { status: 'ACTIVE' };
   if (persona === 'EARLY_CAREER') {
-    where.type = { in: ['FULL_TIME', 'INTERNSHIP', 'APPRENTICESHIP'] };
-    where.experienceLevel = { in: ['ENTRY', 'JUNIOR'] };
+    base.type = { in: ['FULL_TIME', 'INTERNSHIP', 'APPRENTICESHIP'] };
+    base.OR = [{ experienceMin: null }, { experienceMin: { lte: 2 } }];
   }
-  
-  if (location) {
-    where.location = { contains: location, mode: 'insensitive' };
-  }
-  
-  return prisma.job.findMany({
-    where,
-    orderBy: { createdAt: 'desc' },
-    take: limit,
-    include: {
-      organization: { select: { name: true, logo: true } },
-    },
-  });
+
+  const local = city
+    ? await prisma.job.findMany({
+        where: { ...base, city: { equals: city, mode: 'insensitive' } },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        include: { organization: { select: { name: true, logo: true } } },
+      })
+    : [];
+
+  const rest =
+    local.length < limit
+      ? await prisma.job.findMany({
+          where: { ...base, id: { notIn: local.map((job) => job.id) } },
+          orderBy: { createdAt: 'desc' },
+          take: limit - local.length,
+          include: { organization: { select: { name: true, logo: true } } },
+        })
+      : [];
+
+  return [
+    ...local.map((job) => ({ job, inHerCity: true })),
+    ...rest.map((job) => ({ job, inHerCity: false })),
+  ];
 }
 
-async function getMentorsForPersona(persona: Persona, limit: number) {
-  return prisma.mentorProfile.findMany({
-    where: {
-      isAvailable: true,
-      user: { persona },
-    },
-    orderBy: [{ rating: 'desc' }, { sessionCount: 'desc' }],
-    take: limit,
-    include: {
-      user: { select: { firstName: true, lastName: true, avatar: true, headline: true } },
-    },
-  });
-}
-
-async function getSuggestedUsersForPersona(userId: string, persona: Persona, limit: number) {
+async function getSuggestedUsersForPersona(
+  userId: string,
+  persona: Persona,
+  limit: number,
+  viewer: ViewerContext
+) {
   return prisma.user.findMany({
     where: {
-      id: { not: userId },
       persona,
       isActive: true,
       // Has some activity
       posts: { some: {} },
+      AND: [
+        discoverableMemberWhere(viewer),
+        // Someone she already follows is not someone new to meet.
+        { id: { notIn: [userId, ...viewer.followingIds] } },
+        // A private profile is closed to strangers, and offering one to
+        // strangers as a person to meet is the discovery she switched off.
+        { NOT: { safetySettings: { is: { profileVisibility: 'private' } } } },
+      ],
     },
     orderBy: { lastLoginAt: 'desc' },
     take: limit,
@@ -365,19 +433,24 @@ async function getSuggestedUsersForPersona(userId: string, persona: Persona, lim
   });
 }
 
-async function getGroupsForPersona(persona: Persona, limit: number) {
+async function getGroupsForPersona(userId: string, persona: Persona, limit: number, viewer: ViewerContext) {
   // Map persona to group categories
   const categoryMap: Partial<Record<Persona, string[]>> = {
     EARLY_CAREER: ['career', 'networking', 'skills'],
     ENTREPRENEUR: ['startup', 'business', 'funding'],
     CREATOR: ['content', 'creator', 'social media'],
   };
-  
+
   const categories = categoryMap[persona] || ['general'];
-  
+
   return prisma.group.findMany({
     where: {
       privacy: 'PUBLIC',
+      // Hidden by moderators, already hers, or started by someone on the
+      // other side of a block.
+      isHidden: false,
+      members: { none: { userId } },
+      ...(viewer.blockedIds.length > 0 && { createdById: { notIn: viewer.blockedIds } }),
       OR: categories.map((cat) => ({
         name: { contains: cat, mode: 'insensitive' as const },
       })),

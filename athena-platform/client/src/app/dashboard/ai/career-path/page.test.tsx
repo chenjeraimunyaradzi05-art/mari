@@ -33,6 +33,10 @@ jest.mock('@/lib/api', () => ({
   aiApi: { careerPath: jest.fn() },
 }));
 
+jest.mock('@/lib/download', () => ({
+  downloadText: jest.fn(),
+}));
+
 jest.mock('../PremiumGate', () => ({
   __esModule: true,
   default: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -40,8 +44,10 @@ jest.mock('../PremiumGate', () => ({
 
 import CareerPathPage from './page';
 import { aiApi } from '@/lib/api';
+import { downloadText } from '@/lib/download';
 
 const careerPath = aiApi.careerPath as unknown as jest.Mock;
+const download = downloadText as unknown as jest.Mock;
 
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
@@ -98,5 +104,41 @@ describe('Career path planner', () => {
 
     expect(await screen.findByText(/not connected to its AI model/)).toBeInTheDocument();
     expect(screen.queryByText('Your Career Path')).not.toBeInTheDocument();
+  });
+
+  it('hands her the plan as a text file, because ATHENA keeps no copy', async () => {
+    mockMutate.mockImplementation((_vars: unknown, opts: { onSuccess: (data: unknown) => void }) => opts.onSuccess(PLAN));
+    renderPage();
+
+    fireEvent.change(screen.getByPlaceholderText(/Marketing Coordinator/), { target: { value: 'Analyst' } });
+    fireEvent.change(screen.getByPlaceholderText(/VP of Product/), { target: { value: 'Analytics Lead' } });
+    fireEvent.click(screen.getByRole('button', { name: /Generate Career Path/ }));
+    await screen.findByText('Own a reporting stream');
+
+    expect(screen.getByText(/Saves a text file to this device/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Save a copy/ }));
+
+    expect(download).toHaveBeenCalledTimes(1);
+    const [filename, text] = download.mock.calls[0];
+    // The file name carries the tool and the date, never the roles she typed.
+    expect(filename).toMatch(/^athena-career-plan-\d{4}-\d{2}-\d{2}\.txt$/);
+    expect(text).toContain('From: Analyst\nTo: Analytics Lead');
+    expect(text).toContain('1. Own a reporting stream');
+    expect(text).toContain('Put your name on the reports you already carry.');
+    expect(text).toContain('ATHENA does not keep a copy');
+  });
+
+  it('offers no copy of a plan that has no steps', async () => {
+    mockMutate.mockImplementation((_vars: unknown, opts: { onSuccess: (data: unknown) => void }) =>
+      opts.onSuccess({ ...PLAN, milestones: [] })
+    );
+    renderPage();
+
+    fireEvent.change(screen.getByPlaceholderText(/Marketing Coordinator/), { target: { value: 'Analyst' } });
+    fireEvent.change(screen.getByPlaceholderText(/VP of Product/), { target: { value: 'Analytics Lead' } });
+    fireEvent.click(screen.getByRole('button', { name: /Generate Career Path/ }));
+
+    expect(await screen.findByText('Your Career Path')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Save a copy/ })).not.toBeInTheDocument();
   });
 });

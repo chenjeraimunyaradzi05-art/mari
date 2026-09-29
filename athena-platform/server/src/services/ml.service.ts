@@ -152,7 +152,11 @@ export interface SafetyScoreResult {
   user_id: string;
   safety_score: number;
   risk_level: 'low' | 'medium' | 'high' | 'critical';
-  confidence: number;
+  /**
+   * Always null. The Python service sent the literal 0.85 on every result,
+   * whatever the profile, and now sends null because nothing measures one.
+   */
+  confidence: number | null;
   components: Record<string, number>;
   risk_factors: Array<{ factor: string; severity: string }>;
   mitigations: string[];
@@ -382,8 +386,10 @@ class MLServiceClient {
 
         // 501 is in the 5xx band but it is not weather either: the service is
         // saying this endpoint does not exist as a capability, which is the
-        // permanent answer from /api/v1/mentor-match/match now that it no
-        // longer invents mentors. Retrying it only spends the back-off delays.
+        // permanent answer from every endpoint over there that used to invent
+        // its result (mentor-match/match, income-stream, the heavy ranker and
+        // three of the safety-score routes). Retrying it only spends the
+        // back-off delays.
         if (error instanceof MlServiceError && error.status === 501) {
           logger.error('ML Service does not implement this endpoint', {
             endpoint,
@@ -544,30 +550,13 @@ class MLServiceClient {
   // MENTOR MATCH
   // ===========================================
 
-  /**
-   * Answers 501 and will keep doing so. The Python service has no database and
-   * therefore no mentor directory; what it used to return here was five people
-   * who do not exist, scored and given names, ratings and mentee counts. The
-   * mentor matching this platform actually does runs in
-   * algorithm.service getMentorMatch, over live rows, behind
-   * GET /api/algorithms/mentor-match.
-   *
-   * Kept rather than deleted because the ML inference worker still names
-   * 'mentor_match' as an algorithm, and a caller that reaches it should get the
-   * refusal and its explanation rather than a missing-method TypeError.
-   */
-  async findMentorMatches(
-    mentee: MenteeProfile,
-    options?: { mentor_pool?: string[]; max_results?: number; min_score?: number }
-  ): Promise<{ mentee_id: string; matches: MatchScore[]; total_considered: number }> {
-    return this.retryFetch('/api/v1/mentor-match/match', {
-      method: 'POST',
-      body: JSON.stringify({
-        mentee,
-        ...options,
-      }),
-    });
-  }
+  // There is no client for POST /api/v1/mentor-match/match. It answers 501 and
+  // always will: the Python service has no mentor directory, and what it used
+  // to return was five people who do not exist. The method was kept only while
+  // the ML inference worker named 'mentor_match'; that worker and its queue are
+  // gone, so a method whose only possible answer is a refusal is gone with
+  // them. Mentor matching runs in algorithm.service getMentorMatch, over live
+  // rows, behind GET /api/algorithms/mentor-match.
 
   async calculateMentorMatchScore(
     mentee: MenteeProfile,
@@ -590,63 +579,27 @@ class MLServiceClient {
     });
   }
 
-  async evaluateInteractionSafety(
-    initiator_id: string,
-    recipient_id: string,
-    interaction_type: string,
-    context?: Record<string, any>
-  ): Promise<{
-    is_safe: boolean;
-    risk_level: string;
-    risk_score: number;
-    warnings: string[];
-    recommendations: string[];
-  }> {
-    return this.retryFetch('/api/v1/safety-score/interaction', {
-      method: 'POST',
-      body: JSON.stringify({
-        initiator_id,
-        recipient_id,
-        interaction_type,
-        context: context || {},
-      }),
-    });
-  }
-
-  async moderateContent(
-    content_id: string,
-    content_type: string,
-    author_id: string,
-    content_text?: string,
-    content_url?: string
-  ): Promise<{
-    content_id: string;
-    is_approved: boolean;
-    risk_level: string;
-    categories_flagged: string[];
-    requires_human_review: boolean;
-  }> {
-    return this.retryFetch('/api/v1/safety-score/moderate-content', {
-      method: 'POST',
-      body: JSON.stringify({
-        content_id,
-        content_type,
-        author_id,
-        content_text,
-        content_url,
-      }),
-    });
-  }
+  // No clients for /safety-score/interaction, /moderate-content or
+  // /report-signal. All three answer 501 now, because each one used to return a
+  // verdict or a receipt nothing had produced: an interaction was "safe" for
+  // any two members without either being looked up, content containing one of
+  // three keywords was flagged and approved in the same answer, and a reported
+  // signal was acknowledged and discarded. This platform's moderation is
+  // moderation.service; its safety scores are safety-score.service.
 
   // ===========================================
   // RANKER
   // ===========================================
 
+  /**
+   * The light ranker: hand-written scoring over the features sent. There is no
+   * heavy option. The Python service answers 501 for it, because what it
+   * returned was the light score times 1.05 reported as a deeper model.
+   */
   async rankCandidates(
     candidates: RankingCandidate[],
     userContext: UserContext,
     options?: {
-      ranking_model?: 'light' | 'heavy';
       top_k?: number;
       diversity_factor?: number;
     }
@@ -660,7 +613,7 @@ class MLServiceClient {
       body: JSON.stringify({
         candidates,
         user_context: userContext,
-        ranking_model: options?.ranking_model || 'light',
+        ranking_model: 'light',
         top_k: options?.top_k,
         diversity_factor: options?.diversity_factor ?? 0.2,
       }),
@@ -705,56 +658,14 @@ class MLServiceClient {
     });
   }
 
-  async recordEngagement(
-    user_id: string,
-    item_id: string,
-    engagement_type: 'view' | 'like' | 'comment' | 'share' | 'click' | 'dwell',
-    dwell_time_seconds?: number
-  ): Promise<{ status: string }> {
-    return this.retryFetch('/api/v1/feed/engagement-signal', {
-      method: 'POST',
-      body: JSON.stringify({
-        user_id,
-        item_id,
-        engagement_type,
-        dwell_time_seconds,
-      }),
-    });
-  }
+  // No client for /feed/engagement-signal. The method that was here posted a
+  // JSON body to an endpoint that read query parameters, so every call would
+  // have been a 422; the endpoint itself answered "recorded" and kept nothing,
+  // and now answers 501 saying so. Nothing called it.
 
-  // ===========================================
-  // INCOME STREAM
-  // ===========================================
-
-  async predictIncomeOpportunities(profile: {
-    user_id: string;
-    current_income: number;
-    skills: string[];
-    industry: string;
-    experience_years: number;
-    available_hours_per_week?: number;
-    risk_tolerance?: 'low' | 'medium' | 'high';
-  }): Promise<{
-    user_id: string;
-    current_monthly_income: number;
-    predicted_potential: number;
-    income_gap: number;
-    opportunities: Array<{
-      opportunity_id: string;
-      stream_type: string;
-      title: string;
-      estimated_monthly_income: { min: number; max: number; expected: number };
-      time_investment_hours: number;
-      skill_match: number;
-    }>;
-    diversification_score: number;
-    recommendations: string[];
-  }> {
-    return this.retryFetch('/api/v1/income-stream/predict', {
-      method: 'POST',
-      body: JSON.stringify(profile),
-    });
-  }
+  // No client for /income-stream/*, which answers 501: it returned the same
+  // fixed incomes and skill matches to every member. Her real creator earnings
+  // come from algorithm.service getIncomeStream, from live rows.
 }
 
 // ===========================================
@@ -774,17 +685,6 @@ export async function getCareerPrediction(
   return mlService.predictCareerGrowth({ user_id: userId, ...profile });
 }
 
-export async function findMentors(
-  menteeProfile: MenteeProfile,
-  maxResults: number = 10
-): Promise<MatchScore[]> {
-  const result = await mlService.findMentorMatches(menteeProfile, {
-    max_results: maxResults,
-    min_score: 50,
-  });
-  return result.matches;
-}
-
 export async function getUserSafetyScore(
   profile: SafetyProfile
 ): Promise<SafetyScoreResult> {
@@ -794,14 +694,9 @@ export async function getUserSafetyScore(
 export async function rankContent(
   candidates: RankingCandidate[],
   userId: string,
-  persona: string,
-  options?: { useHeavyRanker?: boolean }
+  persona: string
 ): Promise<RankedItem[]> {
-  const result = await mlService.rankCandidates(
-    candidates,
-    { user_id: userId, persona },
-    { ranking_model: options?.useHeavyRanker ? 'heavy' : 'light' }
-  );
+  const result = await mlService.rankCandidates(candidates, { user_id: userId, persona });
   return result.ranked_items;
 }
 

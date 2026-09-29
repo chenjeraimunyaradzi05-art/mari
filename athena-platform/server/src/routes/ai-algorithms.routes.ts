@@ -28,7 +28,6 @@ import { body, validationResult } from 'express-validator';
 import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { aiLimiter } from '../middleware/rateLimiter';
-import { logger } from '../utils/logger';
 import { ApiError } from '../middleware/errorHandler';
 import { creatorTierStanding, refreshCreatorAnalytics } from '../services/creator.service';
 
@@ -500,11 +499,14 @@ router.get('/salary-equity/analyze', async (req: Request, res: Response, next: N
         genderGapPercent,
         sampleSize: salaryData.length,
         salaryBands: { p10, p25, p50: median, p75, p90 },
-        negotiationTips: [
-          { tip: 'Research comparable roles at similar companies', priority: 1 },
-          { tip: 'Highlight your unique skills and accomplishments', priority: 2 },
-          { tip: 'Practice your negotiation with a mentor', priority: 3 },
-        ],
+        // No negotiationTips. Every analysis used to be saved with the same
+        // three lines ("Research comparable roles...", "Highlight your unique
+        // skills...", "Practice your negotiation with a mentor") in the
+        // column beside the bands, so the page listed them under the figures
+        // as though they had been worked out from them. They were not, and a
+        // row is not the place for advice that is the same for every role:
+        // /dashboard/ai/salary now shows general guidance once, headed as
+        // that. The column is left null.
       },
     });
 
@@ -537,10 +539,14 @@ router.get('/salary-equity/my-analyses', async (req: Request, res: Response, nex
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
+    // Analyses saved before the analyze route stopped writing them still
+    // carry the three fixed negotiation tips, and a list that serves them
+    // beside the bands is still presenting them as part of the analysis.
     const analyses = await prisma.salaryAnalysis.findMany({
       where: { userId },
       orderBy: { generatedAt: 'desc' },
       take: 10,
+      omit: { negotiationTips: true },
     });
 
     res.json({ data: analyses });
@@ -556,8 +562,8 @@ router.get('/salary-equity/my-analyses', async (req: Request, res: Response, nex
 // These read mentorMatchScore, which nothing on the server has ever written, so
 // they could only ever answer with nothing — an empty list a member reads as
 // "no mentor suits you". /dashboard/ai/mentors reads /api/algorithms/mentor-
-// match, which ranks the mentors who are actually available by shared skills,
-// rating and years mentoring, with the reasons shown. These answer 410 and say
+// match, which ranks the mentors who are actually available by shared skills
+// and years mentoring, with the reasons shown. These answer 410 and say
 // so, rather than an empty list or a 404 that reads as a broken deploy.
 router.get(['/mentor-match', '/mentor-match/:mentorId'], (_req: Request, _res: Response, next: NextFunction) => {
   next(

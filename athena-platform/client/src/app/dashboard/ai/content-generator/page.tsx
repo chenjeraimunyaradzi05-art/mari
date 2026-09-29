@@ -19,6 +19,8 @@ import {
 } from 'lucide-react';
 import { useContentGenerator } from '@/lib/hooks';
 import PremiumGate from '../PremiumGate';
+import SaveCopyButton from '../SaveCopyButton';
+import { draftCopy } from '../save-copy';
 import { cn } from '@/lib/utils';
 
 const contentTypes = [
@@ -76,6 +78,10 @@ export default function ContentGeneratorPage() {
   const [generatedContent, setGeneratedContent] = useState('');
   const [copied, setCopied] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
+  // What the draft on screen was written for. The form stays editable beside
+  // it, so a saved copy labelled from the form could name a topic the draft
+  // was never about.
+  const [generatedFor, setGeneratedFor] = useState<{ type: string; topic: string; tone: string } | null>(null);
 
   const { mutate: generateContent, isPending } = useContentGenerator();
 
@@ -87,12 +93,14 @@ export default function ContentGeneratorPage() {
     if (!topic.trim()) return;
     setGenerationError(null);
 
+    const request = { type: contentType, topic, tone };
     generateContent(
-      { type: contentType, topic, tone, context: additionalContext },
+      { ...request, context: additionalContext },
       {
         onSuccess: (data) => {
           const content = data?.content || '';
           setGeneratedContent(content);
+          setGeneratedFor(content ? request : null);
           if (!content) {
             setGenerationError(
               data?.simulated
@@ -103,6 +111,7 @@ export default function ContentGeneratorPage() {
         },
         onError: (error: any) => {
           setGeneratedContent('');
+          setGeneratedFor(null);
           setGenerationError(
             error?.response?.data?.message ||
               'Content generation is unavailable right now. Please try again later.'
@@ -335,6 +344,21 @@ export default function ContentGeneratorPage() {
                     </span>
                   )}
                 </div>
+
+                {generatedFor && (
+                  <SaveCopyButton
+                    kind="draft"
+                    className="mt-4"
+                    build={() =>
+                      draftCopy({
+                        contentType: contentTypes.find((t) => t.id === generatedFor.type)?.name ?? generatedFor.type,
+                        tone: tones.find((t) => t.id === generatedFor.tone)?.name ?? generatedFor.tone,
+                        topic: generatedFor.topic,
+                        content: generatedContent,
+                      })
+                    }
+                  />
+                )}
               </div>
 
             </>

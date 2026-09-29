@@ -42,7 +42,7 @@ jest.mock('../../utils/prisma', () => ({
       create: jest.fn(),
       update: jest.fn(),
     },
-    salaryAnalysis: { create: jest.fn() },
+    salaryAnalysis: { create: jest.fn(), findMany: jest.fn() },
     userFeedPreferences: {
       findUnique: jest.fn(),
       create: jest.fn(),
@@ -64,7 +64,7 @@ app.use(errorHandler);
 
 type Mock = jest.Mock<(...args: any[]) => any>;
 const points = prisma.salaryDataPoint as unknown as Record<'findFirst' | 'findMany' | 'count' | 'create' | 'update', Mock>;
-const analyses = prisma.salaryAnalysis as unknown as { create: Mock };
+const analyses = prisma.salaryAnalysis as unknown as { create: Mock; findMany: Mock };
 const feedPrefs = prisma.userFeedPreferences as unknown as Record<'findUnique' | 'create' | 'upsert' | 'updateMany', Mock>;
 
 const submit = (body: Record<string, unknown>) =>
@@ -198,6 +198,29 @@ describe('Salary pool', () => {
 
       // Medians of 74,500 and 94,500 publish as 75,000 and 95,000.
       expect(Number(res.body.data.genderGapAmount)).toBe(20_000);
+    });
+
+    // The same three lines used to be saved into every analysis and listed
+    // under its bands as "Negotiation Tips", as though worked out from them.
+    it('saves no negotiation tips beside the figures', async () => {
+      points.findMany.mockResolvedValue(contributors(10));
+
+      const res = await analyse().expect(200);
+
+      expect(analyses.create.mock.calls[0][0].data).not.toHaveProperty('negotiationTips');
+      expect(res.body.data.negotiationTips).toBeUndefined();
+    });
+  });
+
+  describe('GET /salary-equity/my-analyses', () => {
+    it('does not serve the tips older analyses were saved with', async () => {
+      analyses.findMany.mockResolvedValue([]);
+
+      await request(app).get('/api/ai-algorithms/salary-equity/my-analyses').expect(200);
+
+      const args = analyses.findMany.mock.calls[0][0];
+      expect(args.where).toEqual({ userId: 'member-1' });
+      expect(args.omit).toEqual({ negotiationTips: true });
     });
   });
 

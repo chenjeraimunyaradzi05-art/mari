@@ -2,11 +2,37 @@
  * OpportunityVerse Feed Mixer Service
  * Balances paid content, organic social, and job recommendations
  * Phase 2: Backend Logic & Integrations
+ *
+ * ## Nothing serves this today, and it no longer makes things up for whoever does next
+ *
+ * GET /api/feed and GET /api/feed/opportunities, the two routes that served
+ * getMixedFeed, answer 410 (see retiredMixedFeed in feed.routes.ts). The member
+ * feed is GET /api/posts/feed. The module is kept because the mixer itself, the
+ * interleaving of pools under ratios and spacing rules, is sound, but three
+ * things in it were not, and each would have reached a member again through
+ * the next caller:
+ *
+ *  - Fit that nobody computed. getRelevantOpportunities took the newest active
+ *    jobs and courses and stamped every job `matchScore: 70` ("Would be
+ *    calculated by CareerCompass") and every course 60; the mixer then called
+ *    anything over 80 a "Great match for you" and every course one that would
+ *    "Fill your skill gap", when a course carries no skill data to check that
+ *    against. The skill boost read `requiredSkills` and `skillsTaught`, which
+ *    are not columns, so it never ran. Opportunities are now ranked by the
+ *    skills a job actually lists that she actually has, and the reason says
+ *    exactly that or says only that the listing is recent.
+ *  - Blocks. The posts came from generateFeed and getTrendingPosts without her
+ *    block list, so a woman who had blocked someone could be served his posts
+ *    here when every feed the clients read leaves them out.
+ *  - Reasons for posts. Every organic post was "Popular in your network" and
+ *    every discovery post "Suggested for you", read from fields (authorFollowed,
+ *    trendingRank, similarInterests) that no post carries. The feed service
+ *    already gives every ranked post its reasons, each tied to a factor the
+ *    ranking applied, and those are what is passed on.
  */
 
 import { prisma } from '../utils/prisma';
-import { logger } from '../utils/logger';
-import { cacheGetOrSet, CacheKeys } from '../utils/cache';
+import { viewerContextFor } from './search.service';
 
 // ==========================================
 // MIXER CONFIGURATION
@@ -18,12 +44,12 @@ interface MixerConfig {
   discoveryRatio: number;      // Discovery/trending content
   sponsoredRatio: number;      // Paid/sponsored content
   opportunityRatio: number;    // Jobs & learning opportunities
-  
+
   // Frequency controls
   maxConsecutiveSponsored: number;
   minPostsBetweenSponsored: number;
   maxSponsoredPerSession: number;
-  
+
   // Position rules
   sponsoredStartPosition: number;  // First sponsored can appear after N posts
   opportunityInsertEvery: number;  // Insert opportunity every N posts
@@ -34,11 +60,11 @@ const DEFAULT_CONFIG: MixerConfig = {
   discoveryRatio: 0.30,
   sponsoredRatio: 0.10,
   opportunityRatio: 0.15,
-  
+
   maxConsecutiveSponsored: 1,
   minPostsBetweenSponsored: 4,
   maxSponsoredPerSession: 10,
-  
+
   sponsoredStartPosition: 3,
   opportunityInsertEvery: 6,
 };
@@ -54,8 +80,21 @@ export interface MixedContent {
   type: ContentType;
   contentType: 'POST' | 'JOB' | 'COURSE' | 'EVENT' | 'AD';
   data: any;
+  /** Ordering within this response only. Not a fit, and never to be shown as one. */
   score: number;
-  reason?: string; // Why this content was included
+  reason?: string; // Why this content was included, in words that are true of it
+}
+
+/**
+ * A job or course offered to the mixer. `skillNames` is what the listing
+ * itself says it needs (JobSkill rows, lower-cased); a course has none,
+ * because Course carries no skill data.
+ */
+export interface OpportunityInput {
+  id: string;
+  type: 'JOB' | 'COURSE';
+  skillNames?: string[];
+  [key: string]: unknown;
 }
 
 export interface MixerInput {
@@ -63,7 +102,7 @@ export interface MixerInput {
   organicPosts: any[];
   discoveryPosts: any[];
   sponsoredContent?: any[];
-  opportunities?: any[];
+  opportunities?: OpportunityInput[];
   page: number;
   limit: number;
 }
@@ -85,26 +124,26 @@ export interface MixerOutput {
 
 export class OpportunityVerseMixer {
   private config: MixerConfig;
-  
+
   constructor(config?: Partial<MixerConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
-  
+
   /**
    * Mix content from multiple sources into a unified feed
    */
   async mix(input: MixerInput): Promise<MixerOutput> {
-    const { userId, organicPosts, discoveryPosts, sponsoredContent = [], opportunities = [], page, limit } = input;
-    
+    const { userId, organicPosts, discoveryPosts, sponsoredContent = [], opportunities = [], limit } = input;
+
     const result: MixedContent[] = [];
     const meta = { organicCount: 0, discoveryCount: 0, sponsoredCount: 0, opportunityCount: 0 };
-    
+
     // Create content pools with normalized scores
     const organicPool = this.normalizePool(organicPosts, 'organic');
     const discoveryPool = this.normalizePool(discoveryPosts, 'discovery');
     const sponsoredPool = await this.filterRelevantSponsored(sponsoredContent, userId);
     const opportunityPool = await this.personalizeOpportunities(opportunities, userId);
-    
+
     // Calculate target counts based on ratios
     const targetTotal = limit;
     const targets = {
@@ -116,16 +155,16 @@ export class OpportunityVerseMixer {
       ),
       opportunity: Math.floor(targetTotal * this.config.opportunityRatio),
     };
-    
+
     // Track positions
     let position = 0;
     let lastSponsoredPosition = -999;
     let sponsoredCount = 0;
-    
+
     // Interleave content based on rules
     while (result.length < targetTotal) {
       position++;
-      
+
       // Check if we should insert sponsored content
       if (
         sponsoredPool.length > 0 &&
@@ -142,7 +181,7 @@ export class OpportunityVerseMixer {
           continue;
         }
       }
-      
+
       // Check if we should insert an opportunity
       if (
         opportunityPool.length > 0 &&
@@ -156,12 +195,12 @@ export class OpportunityVerseMixer {
           continue;
         }
       }
-      
+
       // Fill with organic or discovery content
       // Prefer organic if we have more quota remaining
       const organicRemaining = targets.organic - meta.organicCount;
       const discoveryRemaining = targets.discovery - meta.discoveryCount;
-      
+
       if (organicPool.length > 0 && (organicRemaining >= discoveryRemaining || discoveryPool.length === 0)) {
         const organic = organicPool.shift();
         if (organic) {
@@ -170,7 +209,7 @@ export class OpportunityVerseMixer {
           continue;
         }
       }
-      
+
       if (discoveryPool.length > 0) {
         const discovery = discoveryPool.shift();
         if (discovery) {
@@ -179,7 +218,7 @@ export class OpportunityVerseMixer {
           continue;
         }
       }
-      
+
       // Fallback to any remaining content
       const fallback = organicPool.shift() || discoveryPool.shift() || opportunityPool.shift();
       if (fallback) {
@@ -191,14 +230,14 @@ export class OpportunityVerseMixer {
         break; // No more content
       }
     }
-    
+
     return {
       items: result,
       hasMore: organicPool.length > 0 || discoveryPool.length > 0,
       meta,
     };
   }
-  
+
   /**
    * Normalize a content pool with consistent scoring
    */
@@ -212,30 +251,22 @@ export class OpportunityVerseMixer {
       reason: this.getContentReason(item, type),
     }));
   }
-  
+
   /**
-   * Get a human-readable reason for why content was included
+   * Why a post or advert is here.
+   *
+   * A post ranked by the feed service arrives with `reasons`, each one tied to
+   * a factor the ranking applied (reasonsFor in feed.service.ts), so the first
+   * of them is used. Anything without one is described only by where it came
+   * from, which is always true.
    */
   private getContentReason(item: any, type: ContentType): string {
-    switch (type) {
-      case 'organic':
-        if (item.authorFollowed) return 'From someone you follow';
-        return 'Popular in your network';
-      case 'discovery':
-        if (item.trendingRank) return 'Trending now';
-        if (item.similarInterests) return 'Based on your interests';
-        return 'Suggested for you';
-      case 'sponsored':
-        return 'Sponsored';
-      case 'opportunity':
-        if (item.contentType === 'JOB') return 'Job opportunity';
-        if (item.contentType === 'COURSE') return 'Recommended learning';
-        return 'Opportunity for you';
-      default:
-        return '';
-    }
+    if (type === 'sponsored') return 'Sponsored';
+    const given = Array.isArray(item?.reasons) ? item.reasons.find((r: unknown) => typeof r === 'string' && r) : null;
+    if (given) return given;
+    return type === 'discovery' ? 'From across ATHENA' : 'In your feed';
   }
-  
+
   /**
    * Filter and score sponsored content for relevance
    */
@@ -246,7 +277,7 @@ export class OpportunityVerseMixer {
     if (!userId || sponsored.length === 0) {
       return this.normalizePool(sponsored, 'sponsored');
     }
-    
+
     // Get user context for targeting
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -254,22 +285,22 @@ export class OpportunityVerseMixer {
         skills: { include: { skill: true } },
       },
     });
-    
+
     // Score sponsored content based on relevance
     const scored = sponsored.map((ad) => {
       let relevanceScore = ad.baseScore || 100;
-      
+
       // Boost if targeting matches user's persona
       if (ad.targetPersonas?.includes(user?.persona)) {
         relevanceScore *= 1.5;
       }
-      
+
       // Boost if targeting matches location (use city or country from User)
       const userLocation = user?.city || user?.country;
       if (userLocation && ad.targetLocations?.includes(userLocation)) {
         relevanceScore *= 1.3;
       }
-      
+
       // Boost if targeting matches interests (using skills as proxy)
       const userInterests = user?.skills?.map((s: any) => s.skill?.name?.toLowerCase()) || [];
       const adInterests = (ad.targetInterests || []).map((i: string) => i.toLowerCase());
@@ -277,7 +308,7 @@ export class OpportunityVerseMixer {
       if (interestOverlap > 0) {
         relevanceScore *= 1 + (interestOverlap * 0.1);
       }
-      
+
       return {
         id: ad.id,
         type: 'sponsored' as ContentType,
@@ -287,69 +318,56 @@ export class OpportunityVerseMixer {
         reason: 'Sponsored',
       };
     });
-    
+
     // Sort by relevance and return
     return scored.sort((a, b) => b.score - a.score);
   }
-  
+
   /**
-   * Personalize opportunities (jobs, courses) for user
+   * Order jobs and courses for one member, using only what is written down.
+   *
+   * A job is ranked by how many of the skills its listing names are on her
+   * profile, and says so ("Lists 2 of your skills"). Ties, and every course,
+   * keep the order they came in, which is newest first, and are described as
+   * recent rather than as a match: Course has no skill columns, so there is
+   * nothing to match a course against, and a job that shares none of her
+   * skills is not a match either.
    */
   private async personalizeOpportunities(
-    opportunities: any[],
+    opportunities: OpportunityInput[],
     userId?: string
   ): Promise<MixedContent[]> {
-    if (!userId || opportunities.length === 0) {
-      return opportunities.map((opp) => ({
-        id: opp.id,
-        type: 'opportunity' as ContentType,
-        contentType: opp.type || 'JOB',
-        data: opp,
-        score: opp.matchScore || 100,
-        reason: opp.type === 'COURSE' ? 'Recommended learning' : 'Job opportunity',
-      }));
+    if (opportunities.length === 0) return [];
+
+    let userSkills = new Set<string>();
+    if (userId) {
+      const rows = await prisma.userSkill.findMany({
+        where: { userId },
+        select: { skill: { select: { name: true } } },
+      });
+      userSkills = new Set(rows.map((row) => row.skill.name.trim().toLowerCase()));
     }
-    
-    // Get user context
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        skills: { include: { skill: true } },
-        experience: true,
-      },
-    });
-    
-    const userSkills = user?.skills?.map((s: any) => s.skill?.name?.toLowerCase()) || [];
-    
-    // Score opportunities
-    const scored = opportunities.map((opp) => {
-      let score = opp.matchScore || 50;
-      
-      // For jobs, boost based on skill match
-      if (opp.type === 'JOB' && opp.requiredSkills) {
-        const reqSkills = opp.requiredSkills.map((s: string) => s.toLowerCase());
-        const matchCount = reqSkills.filter((s: string) => userSkills.includes(s)).length;
-        score += matchCount * 20;
-      }
-      
-      // For courses, boost if fills skill gap
-      if (opp.type === 'COURSE' && opp.skillsTaught) {
-        const teaches = opp.skillsTaught.map((s: string) => s.toLowerCase());
-        const newSkills = teaches.filter((s: string) => !userSkills.includes(s)).length;
-        score += newSkills * 15;
-      }
-      
+
+    const scored = opportunities.map((opp, index) => {
+      const shared =
+        opp.type === 'JOB' ? (opp.skillNames ?? []).filter((name) => userSkills.has(name)).length : 0;
+      const recency = opportunities.length - index;
       return {
         id: opp.id,
         type: 'opportunity' as ContentType,
-        contentType: opp.type || 'JOB',
+        contentType: opp.type,
         data: opp,
-        score,
-        reason: opp.type === 'COURSE' ? 'Fill your skill gap' : 
-                opp.matchScore > 80 ? 'Great match for you' : 'Job opportunity',
+        // Shared skills first; within the same count, the newer listing.
+        score: shared * opportunities.length + recency,
+        reason:
+          opp.type === 'COURSE'
+            ? 'Recently added course'
+            : shared > 0
+              ? `Lists ${shared} of your skills`
+              : 'Recently posted role',
       };
     });
-    
+
     return scored.sort((a, b) => b.score - a.score);
   }
 }
@@ -368,35 +386,30 @@ export async function getMixedFeed(
 ): Promise<MixerOutput> {
   // Import feed functions (avoid circular dependency)
   const { generateFeed, getTrendingPosts } = await import('./feed.service');
-  
+
+  // Blocking, in both directions and from both stores (the Safety Centre's and
+  // the DV safety page's), removed before the ranking rather than after it.
+  // getTrendingPosts is one cached list shared by everyone, so it cannot take
+  // a viewer's block list and is filtered here instead.
+  const viewer = await viewerContextFor(userId);
+  const blocked = new Set(viewer.blockedIds);
+
   // Fetch content from different sources in parallel
-  const [organicResult, discoveryResult, trending] = await Promise.all([
-    generateFeed({ userId, page: 1, limit: limit * 2, algorithm: 'personalized' }),
-    generateFeed({ userId, page: 1, limit: limit * 2, algorithm: 'engagement' }),
+  const [organicResult, discoveryResult, trending, opportunities] = await Promise.all([
+    generateFeed({ userId, page: 1, limit: limit * 2, algorithm: 'personalized', excludeAuthorIds: viewer.blockedIds }),
+    generateFeed({ userId, page: 1, limit: limit * 2, algorithm: 'engagement', excludeAuthorIds: viewer.blockedIds }),
     getTrendingPosts(24, limit),
+    getRelevantOpportunities(Math.ceil(limit * 0.2)),
   ]);
-  
-  // Fetch opportunities
-  const opportunities = await getRelevantOpportunities(userId, Math.ceil(limit * 0.2));
-  
-  // Fetch sponsored content (if user is on free tier)
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: { subscription: true },
-  });
-  
-  let sponsoredContent: any[] = [];
-  if (!user?.subscription || user.subscription.tier === 'FREE') {
-    sponsoredContent = await getActiveSponsored(limit * 0.1);
-  }
-  
-  // Mix content
+
+  // Mix content. No sponsored pool: ATHENA sells no feed placements, so there
+  // is no inventory to draw one from, and the mixer is given none rather than
+  // an empty stand-in for an ad server.
   const mixer = new OpportunityVerseMixer();
   return mixer.mix({
     userId,
     organicPosts: organicResult.posts,
-    discoveryPosts: [...discoveryResult.posts, ...trending],
-    sponsoredContent,
+    discoveryPosts: [...discoveryResult.posts, ...trending.filter((post) => !blocked.has(post.authorId))],
     opportunities,
     page,
     limit,
@@ -404,53 +417,38 @@ export async function getMixedFeed(
 }
 
 /**
- * Get relevant opportunities for a user
+ * The newest active jobs, with the skills each listing names, and the newest
+ * published courses. Nothing here is scored; see personalizeOpportunities.
  */
-async function getRelevantOpportunities(userId: string, limit: number): Promise<any[]> {
-  const opportunities: any[] = [];
-  
-  // Get matching jobs
-  const jobs = await prisma.job.findMany({
-    where: { status: 'ACTIVE' },
-    orderBy: { createdAt: 'desc' },
-    take: Math.ceil(limit * 0.7),
-    include: {
-      organization: { select: { name: true, logo: true } },
-    },
-  });
-  
-  opportunities.push(...jobs.map((j) => ({
-    ...j,
-    type: 'JOB',
-    matchScore: 70, // Would be calculated by CareerCompass
-  })));
-  
-  // Get recommended courses
-  const courses = await prisma.course.findMany({
-    where: { isActive: true },
-    orderBy: { createdAt: 'desc' },
-    take: Math.ceil(limit * 0.3),
-    include: {
-      organization: { select: { name: true } },
-    },
-  });
-  
-  opportunities.push(...courses.map((c) => ({
-    ...c,
-    type: 'COURSE',
-    matchScore: 60,
-  })));
-  
-  return opportunities;
-}
+async function getRelevantOpportunities(limit: number): Promise<OpportunityInput[]> {
+  const [jobs, courses] = await Promise.all([
+    prisma.job.findMany({
+      where: { status: 'ACTIVE' },
+      orderBy: { createdAt: 'desc' },
+      take: Math.ceil(limit * 0.7),
+      include: {
+        organization: { select: { name: true, logo: true } },
+        skills: { select: { skill: { select: { name: true } } } },
+      },
+    }),
+    prisma.course.findMany({
+      where: { isActive: true },
+      orderBy: { createdAt: 'desc' },
+      take: Math.ceil(limit * 0.3),
+      include: {
+        organization: { select: { name: true } },
+      },
+    }),
+  ]);
 
-/**
- * Get active sponsored content
- */
-async function getActiveSponsored(limit: number): Promise<any[]> {
-  // In production, this would query an ad server or sponsorship table
-  // For now, return empty (no ads)
-  return [];
+  return [
+    ...jobs.map(({ skills, ...job }) => ({
+      ...job,
+      type: 'JOB' as const,
+      skillNames: skills.map((row) => row.skill.name.trim().toLowerCase()),
+    })),
+    ...courses.map((course) => ({ ...course, type: 'COURSE' as const })),
+  ];
 }
 
 export const opportunityVerseMixer = {

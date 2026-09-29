@@ -7,6 +7,7 @@ import OpenAI from 'openai';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import { sanitizeChatHistory, truncate, DEFAULT_MAX_TOKENS } from '../utils/llm';
+import { bestEffort } from '../utils/best-effort';
 
 // Initialize OpenAI client (optional - will skip AI features if not configured)
 const apiKey = process.env.AI_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
@@ -37,17 +38,104 @@ export interface ConciergeAction {
   metadata?: Record<string, any>;
 }
 
-// FAQ Knowledge Base for instant responses
-const FAQ_KNOWLEDGE_BASE: Record<string, string> = {
-  'how to update resume': 'Go to Dashboard → AI Tools → Resume Optimizer. Upload your current resume and target job description for AI-powered suggestions.',
-  'find mentors': 'Visit the Mentors section in your dashboard. You can filter by specialization, rate, and availability. Premium members get priority booking.',
-  'job alerts': 'Set up job alerts in Dashboard → Settings → Notifications. Enable "Job Match" notifications for personalized alerts.',
-  'premium benefits': 'Premium includes: Unlimited AI tools, Priority mentor booking, Advanced job matching, Resume optimization, Interview coaching, and more.',
+/**
+ * Instant answers to the questions members ask most, before anything is sent
+ * to a model.
+ *
+ * These eight used to be the whole of it: a literal in this file, so a new
+ * answer or a corrected one needed a deploy, and three of them said things
+ * the product does not do. "Premium members get priority booking" and
+ * "Priority mentor booking" described a feature no code implements; "Unlimited
+ * AI tools" described a plan with a spending ceiling; and "permanently removed
+ * within 30 days" described a deletion that in fact anonymises the account
+ * the moment she confirms it. Those are corrected below.
+ *
+ * Staff can now add and correct answers without a deploy: a published blog
+ * article tagged `faq` answers the concierge whenever a member's message
+ * contains one of the article's other tags (so an article tagged `faq`,
+ * `job alerts` and `job match` answers either phrase). Its excerpt is the
+ * answer and a link to the article comes with it. Staff answers are checked
+ * before these built-in ones, so an article on the same phrase replaces the
+ * built-in answer. The blog's admin screen, which already audits every edit,
+ * is where they are written.
+ */
+const BUILT_IN_ANSWERS: Record<string, string> = {
+  'how to update resume': 'Go to Dashboard → AI Tools → AI Resume Optimizer. Paste your current resume and the job description you are aiming at for suggestions.',
+  'find mentors': 'Visit the Mentors section in your dashboard. You can filter by specialisation, and each mentor’s profile shows their rate and whether they are taking sessions.',
+  'job alerts': 'Turn on "Job Matches" in Dashboard → Settings → Notifications to hear about new jobs that match your profile.',
+  'premium benefits': 'What each plan includes, and what it costs, is on the Pricing page; your own plan is under Dashboard → Settings → Billing.',
   'cancel subscription': 'Go to Dashboard → Settings → Billing to manage your subscription. You can cancel anytime and retain access until the billing period ends.',
   'privacy settings': 'Visit Safety Center to manage privacy controls, DV-safe mode, profile visibility, and data preferences.',
-  'verification badge': 'Apply for verification at Dashboard → Settings → Verification. You can verify your identity, employer, or professional credentials.',
-  'delete account': 'Go to Settings → Privacy → Delete Account. Your data will be permanently removed within 30 days per our privacy policy.',
+  'verification badge': 'Apply for verification at Dashboard → Settings → Verification. You can verify your identity, or apply for an employer, educator, mentor or creator badge.',
+  'delete account': 'Go to Dashboard → Settings → Privacy & Data → Delete Account. Your personal profile data is removed and you are signed out as soon as you confirm, and it cannot be undone. Download your data first if you want a copy.',
 };
+
+/** The tag that makes a published article a concierge answer. */
+export const FAQ_TAG = 'faq';
+/** How long the staff answers are reused before the articles are read again. */
+const FAQ_CACHE_MS = 5 * 60 * 1000;
+/** A trigger phrase shorter than this would match inside ordinary words. */
+const MIN_PHRASE_LENGTH = 4;
+
+interface FaqAnswer {
+  phrases: string[];
+  answer: string;
+  link: string;
+  title: string;
+}
+
+let faqCache: { at: number; answers: FaqAnswer[] } | null = null;
+
+/** Test-only: forget the cached staff answers. */
+export function resetFaqCache(): void {
+  faqCache = null;
+}
+
+/** The first part of an article body as plain text, for an article with no excerpt. */
+function plainOpening(body: string, max = 400): string {
+  const text = body
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[#>*_`~]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.length > max ? `${text.slice(0, max).replace(/\s+\S*$/, '')}…` : text;
+}
+
+/**
+ * The answers staff have published. A failed read is logged and answered from
+ * the built-in list for this message, and is not cached, so the next message
+ * tries again rather than going five minutes without the staff answers.
+ */
+async function staffAnswers(now: number = Date.now()): Promise<FaqAnswer[]> {
+  if (faqCache && now - faqCache.at < FAQ_CACHE_MS) return faqCache.answers;
+  const articles = await bestEffort(
+    'concierge.faq-articles',
+    () =>
+      prisma.article.findMany({
+        where: { status: 'PUBLISHED', tags: { has: FAQ_TAG } },
+        select: { slug: true, title: true, excerpt: true, body: true, tags: true },
+        orderBy: { publishedAt: 'desc' },
+        take: 100,
+      }),
+    null
+  );
+  if (!articles) return [];
+  const answers = articles
+    .map((a) => ({
+      phrases: a.tags
+        .filter((t) => t !== FAQ_TAG)
+        .map((t) => t.replace(/-/g, ' ').trim().toLowerCase())
+        .filter((p) => p.length >= MIN_PHRASE_LENGTH),
+      answer: a.excerpt?.trim() || plainOpening(a.body),
+      link: `/blog/${a.slug}`,
+      title: a.title,
+    }))
+    .filter((a) => a.phrases.length > 0 && a.answer);
+  faqCache = { at: now, answers };
+  return answers;
+}
 
 /**
  * Main concierge chat handler with context-aware responses
@@ -60,10 +148,11 @@ export async function chat(
   const lowerMessage = message.toLowerCase();
 
   // Check for FAQ matches first (instant response)
-  const faqResponse = checkFAQ(lowerMessage);
+  const faqResponse = await checkFAQ(lowerMessage);
   if (faqResponse) {
     return {
-      message: faqResponse,
+      message: faqResponse.message,
+      ...(faqResponse.link ? { actions: [{ type: 'learn' as const, label: 'Read the full answer', target: faqResponse.link }] } : {}),
       quickReplies: ['Tell me more', 'Something else', 'Talk to support'],
     };
   }
@@ -193,10 +282,16 @@ export async function getProactiveSuggestions(
 
 // Helper functions
 
-function checkFAQ(message: string): string | null {
-  for (const [key, value] of Object.entries(FAQ_KNOWLEDGE_BASE)) {
+/** The staff answer or built-in answer for a message, staff first. `message` is already lower-cased. */
+export async function checkFAQ(message: string): Promise<{ message: string; link?: string } | null> {
+  for (const entry of await staffAnswers()) {
+    if (entry.phrases.some((phrase) => message.includes(phrase))) {
+      return { message: entry.answer, link: entry.link };
+    }
+  }
+  for (const [key, value] of Object.entries(BUILT_IN_ANSWERS)) {
     if (message.includes(key)) {
-      return value;
+      return { message: value };
     }
   }
   return null;

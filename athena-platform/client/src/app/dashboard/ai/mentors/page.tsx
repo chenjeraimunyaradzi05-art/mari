@@ -14,8 +14,10 @@ import { Avatar } from '@/components/ui/avatar';
  * mentorMatchScore table nothing on the server ever wrote, so every member saw
  * "no matches" behind a filter bar. It now reads /api/algorithms/mentor-match:
  * the mentors taking new mentees, ranked by the skills they share with her
- * profile, their rating and their years of experience, each with the reasons
- * spelled out.
+ * profile and their years of experience, each with the reasons spelled out.
+ * Rating is not one of them: no mentee has ever been able to leave one, so
+ * the column it came from is empty or made up. Mentors she has blocked, who
+ * have blocked her, or who asked to be hidden from search are not listed.
  *
  * The ranking is a heuristic, not a percentage, so the number stays off the
  * page; the reasons are the honest part and they are what she sees. Shared
