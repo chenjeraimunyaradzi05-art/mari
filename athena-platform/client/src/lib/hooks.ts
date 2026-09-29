@@ -1,6 +1,6 @@
 'use client';
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import {
   api,
   authApi,
@@ -22,6 +22,7 @@ import {
   paymentsApi,
 } from './api';
 import { useAuthStore, useUIStore, useNotificationStore, useMessageStore } from './store';
+import { socketClient } from './socket';
 // getAccessToken no longer needed here — auth bootstrap handled by AuthInitializer
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
@@ -611,6 +612,67 @@ export function useFeed(params?: any) {
   });
 }
 
+/** One page of a paged list, as the list endpoints answer it. */
+export type PagedRows = {
+  data?: unknown;
+  pagination?: { page: number; hasMore?: boolean };
+};
+
+/**
+ * Every row from every page loaded so far, in order, each id once.
+ *
+ * These lists are paged by offset, and an offset page is a window onto a list
+ * that keeps moving: a thread that gets a new message jumps to the top, a
+ * ranked feed re-scores. The same row can then turn up on two pages, and
+ * rendering it twice gives React two children with one key. The first copy
+ * wins, because it came from the page fetched first.
+ */
+export function flattenPagesById<T extends { id: string }>(pages: ReadonlyArray<PagedRows> | undefined): T[] {
+  const seen = new Set<string>();
+  const rows: T[] = [];
+  for (const page of pages ?? []) {
+    if (!Array.isArray(page?.data)) continue;
+    for (const row of page.data as T[]) {
+      if (!row || typeof row.id !== 'string' || seen.has(row.id)) continue;
+      seen.add(row.id);
+      rows.push(row);
+    }
+  }
+  return rows;
+}
+
+const nextPageOf = (last: PagedRows): number | undefined =>
+  last.pagination?.hasMore ? last.pagination.page + 1 : undefined;
+
+// Declared once at module level on purpose. react-query re-runs `select` when
+// its reference changes, and an inline arrow is a new reference every render:
+// the flattened array would be rebuilt each time, and a component that copies
+// it into a store in an effect would render, copy, render again, forever.
+function selectFlattenedRows<T extends { id: string }>(data: InfiniteData<PagedRows, number>): T[] {
+  return flattenPagesById<T>(data.pages);
+}
+
+/**
+ * The feed, a page at a time. GET /posts/feed answers `pagination.hasMore` on
+ * both tabs, so the next page is asked for only when there is one. `data` is
+ * the posts from every page loaded so far; `fetchNextPage` loads the next.
+ *
+ * useFeed above stays for the places that show a fixed handful of posts.
+ */
+export function useInfiniteFeed<TPost extends { id: string } = { id: string }>(
+  params?: Record<string, string | number | undefined>
+) {
+  const { isAuthenticated, isLoading } = useAuthStore();
+  return useInfiniteQuery({
+    queryKey: ['feed', 'paged', params, isAuthenticated],
+    queryFn: async ({ pageParam }) => (await postApi.getFeed({ ...params, page: pageParam })).data as PagedRows,
+    initialPageParam: 1,
+    getNextPageParam: nextPageOf,
+    enabled: !isLoading,
+    select: selectFlattenedRows as (data: InfiniteData<PagedRows, number>) => TPost[],
+  });
+}
+
 export function usePost(id: string) {
   const { isAuthenticated, isLoading } = useAuthStore();
   return useQuery({
@@ -1037,6 +1099,21 @@ export function useDeleteStatus() {
 // NOTIFICATION HOOKS
 // ============================================
 export function useNotifications(params?: any) {
+  const queryClient = useQueryClient();
+  const paramsKey = JSON.stringify(params ?? null);
+
+  // The socket says when something new arrives, and this list refetches then
+  // rather than on its next poll. Each caller refreshes only its own list (the
+  // bell's five, the page's hundred), so two of them on screen do not each
+  // refetch the other's. The poll stays as the safety net for a dropped socket.
+  useEffect(
+    () =>
+      socketClient.onNotification(() => {
+        queryClient.invalidateQueries({ queryKey: ['notifications', JSON.parse(paramsKey)], exact: true });
+      }),
+    [queryClient, paramsKey]
+  );
+
   return useQuery({
     queryKey: ['notifications', params],
     queryFn: () => notificationApi.getAll(params),
@@ -1094,11 +1171,61 @@ export function useDeleteNotification() {
 // ============================================
 // MESSAGE HOOKS
 // ============================================
+/** One thread in the inbox list, as GET /messages/conversations describes it. */
+export type ConversationRow = {
+  id: string;
+  /** The other member; id 'deleted' once she has closed her account. */
+  participant?: {
+    id: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    displayName?: string | null;
+    avatar?: string | null;
+    isVerified?: boolean;
+  };
+  lastMessage?: {
+    content: string;
+    createdAt: string;
+    senderId: string;
+    isRead?: boolean;
+    deletedAt?: string | null;
+  } | null;
+  unreadCount?: number;
+  updatedAt?: string;
+  disappearingTtlSeconds?: number | null;
+  isPinned?: boolean;
+  isMuted?: boolean;
+  isArchived?: boolean;
+  isRequest?: boolean;
+  requestPending?: boolean;
+  requestDeclined?: boolean;
+};
+
+/**
+ * Her threads, a page at a time: the server caps a page at 100, and a member
+ * with more used to have no way to reach the older ones from the list. `data`
+ * is every thread loaded so far, each once (a thread that jumps to the top
+ * between pages would otherwise appear twice); `hasNextPage` and
+ * `fetchNextPage` load the rest.
+ */
 export function useConversations() {
-  return useQuery({
-    queryKey: ['conversations'],
-    queryFn: messageApi.getConversations,
-    select: (response) => response.data.data,
+  const queryClient = useQueryClient();
+
+  // A new message moves a thread to the top and changes its unread count.
+  useEffect(
+    () =>
+      socketClient.onUnreadChange(() => {
+        queryClient.invalidateQueries({ queryKey: ['conversations', 'list'] });
+      }),
+    [queryClient]
+  );
+
+  return useInfiniteQuery({
+    queryKey: ['conversations', 'list'],
+    queryFn: async ({ pageParam }) => (await messageApi.getConversations({ page: pageParam })).data as PagedRows,
+    initialPageParam: 1,
+    getNextPageParam: nextPageOf,
+    select: selectFlattenedRows as (data: InfiniteData<PagedRows, number>) => ConversationRow[],
     refetchInterval: 30000,
   });
 }
@@ -1220,23 +1347,35 @@ export function useUploadChatAttachment() {
   });
 }
 
-// The unread count on the Messages nav items. Summed from the same
-// conversations query the inbox renders, so the badge and the list it opens
-// cannot disagree. It waits for the session to be restored: fired before that
-// it answers 401 and the header shows a count for nobody.
+// The unread count on the Messages nav items. It used to be summed from the
+// first page of threads the inbox renders, which stopped counting at the
+// hundredth thread. The server now sums every thread under the rules the
+// badge always applied (muted and archived threads, and requests not yet
+// accepted, stay off it) and answers `unreadTotal`; one row is asked for
+// because only the total is read. It waits for the session to be restored:
+// fired before that it answers 401 and the header shows a count for nobody.
 export function useUnreadMessageCount() {
   const { isAuthenticated, isLoading } = useAuthStore();
+  const queryClient = useQueryClient();
+
+  // The socket says when her counts move, so the badge follows at once.
+  useEffect(
+    () =>
+      socketClient.onUnreadChange(() => {
+        queryClient.invalidateQueries({ queryKey: ['conversations', 'unread'] });
+      }),
+    [queryClient]
+  );
+
   return useQuery({
-    queryKey: ['conversations'],
-    queryFn: messageApi.getConversations,
+    queryKey: ['conversations', 'unread'],
+    queryFn: () => messageApi.getConversations({ page: 1, limit: 1 }),
     select: (response) => {
-      const conversations = response.data.data as Array<{ unreadCount?: number; isMuted?: boolean; isArchived?: boolean; isRequest?: boolean }>;
-      if (!Array.isArray(conversations)) return 0;
-      // Muted and archived threads, and requests not yet accepted, stay off the badge.
-      return conversations.reduce(
-        (sum, c) => (c.isMuted || c.isArchived || c.isRequest ? sum : sum + (c.unreadCount || 0)),
-        0
-      );
+      const total = (response.data as { unreadTotal?: unknown }).unreadTotal;
+      // An answer without the total is not "nothing unread". Failing the query
+      // leaves the badge showing nothing, rather than a confident zero.
+      if (typeof total !== 'number') throw new Error('The unread total was missing from the answer');
+      return total;
     },
     enabled: isAuthenticated && !isLoading,
     refetchInterval: 30000,
@@ -1285,29 +1424,11 @@ export function useResumeOptimizer() {
   });
 }
 
-export function useInterviewCoach() {
-  return useMutation({
-    mutationFn: async (data: any) => {
-      const response = await aiApi.interviewCoach(data);
-      return response.data.data || response.data;
-    },
-    onSuccess: () => {
-      toast.success('Interview questions generated!');
-    },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Failed to generate questions');
-    },
-  });
-}
-
-export function useCareerPath() {
-  return useQuery({
-    queryKey: ['career-path'],
-    queryFn: aiApi.careerPath,
-    select: (response) => response.data.data,
-    staleTime: 10 * 60 * 1000, // 10 minutes
-  });
-}
+// useInterviewCoach and useCareerPath were here. Neither had a caller: the
+// interview coach page posts through aiApi itself, and the career-path page
+// runs aiApi.careerPath in a mutation. useCareerPath was also a query, so any
+// screen that picked it up would have spent a paid AI call on mount, before
+// she had asked for anything.
 
 export function useGenerateCareerPath() {
   return useMutation({
@@ -1826,9 +1947,18 @@ export function usePaymentMethods(region?: string) {
 // ============================================
 export type AIChatUsage = {
   tier: string;
+  /** Whether she has an active ATHENA Pro subscription. */
+  premium: boolean;
+  /** Always false now; kept because the server still sends it. */
   unlimited: boolean;
-  /** Null for paid tiers, which have no cap. */
-  usage: { limit: number; remaining: number; resetIn: number; windowSeconds: number } | null;
+  /**
+   * Where she stands in her window. Every tier has one now, ATHENA Pro
+   * included, so this is filled in for everyone; it used to be null for paid
+   * tiers, which read as "no cap" when there always was one.
+   */
+  usage: { limit: number; remaining: number; resetIn: number; windowSeconds: number };
+  /** The ATHENA Pro allowance, offered to a free member; null when she already has it. */
+  premiumLimit: number | null;
 };
 
 /**

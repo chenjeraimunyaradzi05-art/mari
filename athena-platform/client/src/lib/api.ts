@@ -102,8 +102,14 @@ export const authApi = {
     username?: string;
     persona?: string;
     womanSelfAttested: boolean;
+    // Required by the server: ATHENA is for adults and checks it at sign-up, so
+    // an account with no date of birth is refused. The register page always
+    // sent it, through a spread this type did not describe.
+    dateOfBirth: string;
     inviteCode?: string;
     referralCode?: string;
+    // The human check's token, when the check is switched on.
+    humanCheckToken?: string;
   }) => api.post('/auth/register', data),
 
   google: (data: {
@@ -111,6 +117,8 @@ export const authApi = {
     mode?: 'login' | 'register';
     persona?: string;
     womanSelfAttested?: boolean;
+    // Needed when the sign-in creates the account, for the same age check.
+    dateOfBirth?: string;
     inviteCode?: string;
   }) => api.post('/auth/google', data),
 
@@ -119,6 +127,7 @@ export const authApi = {
     mode?: 'login' | 'register';
     persona?: string;
     womanSelfAttested?: boolean;
+    dateOfBirth?: string;
     inviteCode?: string;
   }) => api.post('/auth/facebook', data),
 
@@ -653,7 +662,9 @@ export const aiApi = {
   resumeOptimizer: (data: { resumeText: string; jobDescription?: string; targetJobId?: string }) =>
     api.post('/ai/resume-optimizer', data),
 
-  interviewCoach: (data: { jobId: string; questionType?: string }) =>
+  // A saved job, or just the role she is preparing for: the server takes
+  // either, and `interviewType` as the older name for `questionType`.
+  interviewCoach: (data: { jobId?: string; jobRole?: string; interviewType?: string; questionType?: string }) =>
     api.post('/ai/interview-coach', data),
 
   careerPath: () => api.get('/ai/career-path'),
@@ -667,8 +678,9 @@ export const aiApi = {
   chat: (message: string, context?: any[]) =>
     api.post('/ai/chat', { message, context }),
 
-  // How many free-tier chat messages are left in the window, before she types.
-  // Premium tiers come back `unlimited: true` with `usage: null`.
+  // How many chat messages are left in her window, before she types. Every
+  // tier has a window, ATHENA Pro included (a larger one), so `usage` is always
+  // filled in; `premiumLimit` is the Pro allowance a free member is offered.
   chatUsage: () => api.get('/ai/chat/usage'),
 };
 
@@ -676,12 +688,11 @@ export const aiApi = {
 // MEDIA API
 // ============================================
 export const mediaApi = {
-  getPresignedUrl: (data: {
-    fileType: string;
-    fileName: string;
-    contentType: string;
-  }) => api.post('/media/presigned-url', data),
-
+  // There is no presigned upload any more. The server signed a bare S3 PUT
+  // with no size ceiling and no look at the bytes, so anyone signed in could
+  // put a file of any size and any content into the public bucket past every
+  // check the upload route below applies; nothing here ever called it. Every
+  // upload goes through the server.
   upload: (type: string, file: File) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -766,7 +777,16 @@ export const groupsApi = {
   // Group chat: a room for members, separate from the group's posts.
   chatMessages: (id: string, params?: { before?: string; limit?: number }) => api.get(`/groups/${id}/chat/messages`, { params }),
   pinnedChatMessages: (id: string) => api.get(`/groups/${id}/chat/pinned`),
-  sendChatMessage: (id: string, data: { content: string; replyToId?: string }) => api.post(`/groups/${id}/chat/message`, data),
+  // Files already uploaded through the media service, described the way the
+  // server stores them; up to five, and a message may be only attachments.
+  sendChatMessage: (
+    id: string,
+    data: {
+      content: string;
+      replyToId?: string;
+      attachments?: Array<{ url?: string; key?: string; name?: string; contentType?: string; size?: number }>;
+    }
+  ) => api.post(`/groups/${id}/chat/message`, data),
   deleteChatMessage: (id: string, messageId: string) => api.delete(`/groups/${id}/chat/messages/${messageId}`),
   pinChatMessage: (id: string, messageId: string, pinned: boolean) =>
     api.patch(`/groups/${id}/chat/messages/${messageId}/pin`, { pinned }),
@@ -915,7 +935,14 @@ export const referralApi = {
 // MESSAGE API
 // ============================================
 export const messageApi = {
-  getConversations: () => api.get('/messages/conversations'),
+  // Paged: the server answers up to 100 threads a page with `pagination`
+  // (hasMore), and `unreadTotal` summed over every thread, not just the page.
+  getConversations: (params?: { page?: number; limit?: number }) =>
+    api.get('/messages/conversations', { params }),
+
+  // Which of the people in her threads are online right now, under the same
+  // rules the live presence events follow. Read once when the socket connects.
+  presence: () => api.get('/messages/presence'),
 
   getMessages: (conversationId: string, params?: { limit?: number; before?: string }) =>
     api.get(`/messages/conversations/${conversationId}/messages`, { params }),
@@ -1400,6 +1427,8 @@ export const communitySupportApi = {
   enrollInProgram: (id: string, data?: { goalsSet?: unknown }) =>
     api.post(`/community-support/programs/${id}/enroll`, data),
 
+  leaveProgram: (id: string) => api.delete(`/community-support/programs/${id}/enroll`),
+
   getMyEnrollments: () => api.get('/community-support/my/enrollments'),
 
   updateMilestoneProgress: (enrollmentId: string, data: {
@@ -1415,6 +1444,8 @@ export const communitySupportApi = {
   getIndigenousCommunity: (id: string) => api.get(`/community-support/indigenous/communities/${id}`),
 
   joinIndigenousCommunity: (id: string) => api.post(`/community-support/indigenous/communities/${id}/join`),
+
+  leaveIndigenousCommunity: (id: string) => api.delete(`/community-support/indigenous/communities/${id}/join`),
 
   getIndigenousResources: (params?: { type?: string; national?: boolean; page?: number; limit?: number }) =>
     api.get('/community-support/indigenous/resources', { params }),
@@ -1512,13 +1543,13 @@ export const aiAlgorithmsApi = {
     followedHashtags?: string[];
     blockedHashtags?: string[];
     blockedCreators?: string[];
+    // outNetworkRatio and trendingRatio are gone: the server no longer
+    // accepts or returns them. Search history is no longer recorded either;
+    // POST /feed-preferences/search answers 410.
     inNetworkRatio?: number;
-    outNetworkRatio?: number;
-    trendingRatio?: number;
     preferredDuration?: string;
     autoplayEnabled?: boolean;
   }) => api.patch('/ai-algorithms/feed-preferences', data),
-  recordSearch: (query: string) => api.post('/ai-algorithms/feed-preferences/search', { query }),
 };
 
 // ============================================

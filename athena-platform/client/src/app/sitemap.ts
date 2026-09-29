@@ -65,7 +65,10 @@ const STATIC: Array<[string, Frequency, number]> = [
   ['/vendors', 'monthly', 0.4],
   ['/sounds', 'monthly', 0.3],
   ['/developers', 'monthly', 0.4],
-  ['/changelog', 'weekly', 0.4],
+  // Monthly, not weekly: the changelog is a list written into the page and
+  // changed only when a release is deployed, so "weekly" told crawlers to
+  // come back for updates that were not there.
+  ['/changelog', 'monthly', 0.4],
   ['/help', 'monthly', 0.6],
   ['/safety-center', 'monthly', 0.6],
   ['/trust', 'monthly', 0.5],

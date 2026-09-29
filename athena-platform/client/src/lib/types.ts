@@ -37,6 +37,15 @@ export interface User {
   createdAt: string;
   updatedAt: string;
   lastLoginAt?: string;
+  /**
+   * @deprecated No server response sets this, so it is always undefined: the
+   * dashboard's upgrade card that tests it for 'FREE' never shows, and the
+   * billing page that falls back to 'FREE' tells every subscriber she is on
+   * the free plan. Ask the server instead, through usePremiumAccess() (from
+   * app/dashboard/ai/PremiumGate) or useSubscription(). The field goes once
+   * its last three readers (dashboard/layout.tsx, settings/billing/page.tsx,
+   * components/subscription/PaywallGate.tsx) have moved off it.
+   */
   subscriptionTier?: SubscriptionTier;
   profile?: UserProfile;
   referralCode?: string;

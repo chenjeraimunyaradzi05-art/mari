@@ -125,8 +125,13 @@ const platformAbilities = [
   { icon: Heart, title: 'Social feed', description: 'Post wins, ask questions, follow women building in public.', gradient: 'from-pink-500 to-rose-500' },
   { icon: Video, title: 'Reels', description: 'Short-form career video, salary talk, and founder stories.', gradient: 'from-purple-500 to-fuchsia-500' },
   { icon: Users, title: 'Mentorship', description: 'Find mentors, run 1:1s, and track growth milestones.', gradient: 'from-sky-500 to-cyan-500' },
-  { icon: Briefcase, title: 'Smart job search', description: 'AI-matched roles with salary insight and one-click apply.', gradient: 'from-rose-500 to-pink-500' },
-  { icon: Brain, title: 'AI career coach', description: 'Always-on copilot for interview prep, planning, and mindset.', gradient: 'from-violet-500 to-indigo-500' },
+  // What the jobs board does, and no more. This said "AI-matched roles with
+  // salary insight and one-click apply": listings are not matched to anyone by
+  // a model, and the salary is the range an employer chose to publish, when
+  // they published one. The coach is not "always-on" either: the AI routes
+  // stop for the day once a member or the platform reaches its token budget.
+  { icon: Briefcase, title: 'Job search', description: 'Roles on ATHENA, with the salary where the employer published one.', gradient: 'from-rose-500 to-pink-500' },
+  { icon: Brain, title: 'AI career coach', description: 'A copilot for interview prep, career planning, and mindset.', gradient: 'from-violet-500 to-indigo-500' },
   { icon: GraduationCap, title: 'Learning paths', description: 'Curated courses, micro-credentials, and skills tracks.', gradient: 'from-teal-500 to-emerald-500' },
   { icon: DollarSign, title: 'Earning pathways', description: 'Turn expertise into income as a creator, mentor, or consultant.', gradient: 'from-amber-500 to-orange-500' },
   { icon: ShieldCheck, title: 'Safety first', description: 'Built-in moderation, consent controls, and a safety centre.', gradient: 'from-rose-500 to-red-500' },

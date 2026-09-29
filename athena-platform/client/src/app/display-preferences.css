@@ -1,0 +1,207 @@
+/*
+ * What the appearance settings and the accessibility profile actually change.
+ *
+ * ThemeSync in providers.tsx writes the member's choices onto <html> as
+ * data-accent-color, data-font-size, data-compact, data-reduce-motion and
+ * data-contrast, and these rules are what those attributes do. Before this
+ * file the appearance page said "Changes apply straight away" over four
+ * switches that were saved and applied nowhere, and the accessibility form's
+ * high-contrast and reduced-motion boxes were a record and nothing more.
+ *
+ * The primary palette lives here as well. tailwind.config.ts builds every
+ * primary-* class from --color-primary-50 … --color-primary-950. A commit in
+ * August that set out to add a missing test dependency also took those
+ * definitions out of globals.css, along with the accent rules, so every
+ * bg-primary-500 on the site has since resolved to an undefined variable — a
+ * transparent button with white text on it. Rose is the default, as the
+ * config's own comment says; the other accents are Tailwind's own palettes.
+ * These rules are plain CSS rather than Tailwind layers, so they load after
+ * globals.css and win over it on equal terms.
+ */
+
+:root,
+html[data-accent-color='rose'] {
+  --color-primary-50: 255 241 242;
+  --color-primary-100: 255 228 230;
+  --color-primary-200: 254 205 211;
+  --color-primary-300: 253 164 175;
+  --color-primary-400: 251 113 133;
+  --color-primary-500: 244 63 94;
+  --color-primary-600: 225 29 72;
+  --color-primary-700: 190 18 60;
+  --color-primary-800: 159 18 57;
+  --color-primary-900: 136 19 55;
+  --color-primary-950: 76 5 25;
+}
+
+html[data-accent-color='purple'] {
+  --color-primary-50: 245 243 255;
+  --color-primary-100: 237 233 254;
+  --color-primary-200: 221 214 254;
+  --color-primary-300: 196 181 253;
+  --color-primary-400: 167 139 250;
+  --color-primary-500: 139 92 246;
+  --color-primary-600: 124 58 237;
+  --color-primary-700: 109 40 217;
+  --color-primary-800: 91 33 182;
+  --color-primary-900: 76 29 149;
+  --color-primary-950: 46 16 101;
+}
+
+html[data-accent-color='blue'] {
+  --color-primary-50: 239 246 255;
+  --color-primary-100: 219 234 254;
+  --color-primary-200: 191 219 254;
+  --color-primary-300: 147 197 253;
+  --color-primary-400: 96 165 250;
+  --color-primary-500: 59 130 246;
+  --color-primary-600: 37 99 235;
+  --color-primary-700: 29 78 216;
+  --color-primary-800: 30 64 175;
+  --color-primary-900: 30 58 138;
+  --color-primary-950: 23 37 84;
+}
+
+html[data-accent-color='green'] {
+  --color-primary-50: 236 253 245;
+  --color-primary-100: 209 250 229;
+  --color-primary-200: 167 243 208;
+  --color-primary-300: 110 231 183;
+  --color-primary-400: 52 211 153;
+  --color-primary-500: 16 185 129;
+  --color-primary-600: 5 150 105;
+  --color-primary-700: 4 120 87;
+  --color-primary-800: 6 95 70;
+  --color-primary-900: 6 78 59;
+  --color-primary-950: 2 44 34;
+}
+
+html[data-accent-color='pink'] {
+  --color-primary-50: 253 242 248;
+  --color-primary-100: 252 231 243;
+  --color-primary-200: 251 207 232;
+  --color-primary-300: 249 168 212;
+  --color-primary-400: 244 114 182;
+  --color-primary-500: 236 72 153;
+  --color-primary-600: 219 39 119;
+  --color-primary-700: 190 24 93;
+  --color-primary-800: 157 23 77;
+  --color-primary-900: 131 24 67;
+  --color-primary-950: 80 7 36;
+}
+
+html[data-accent-color='orange'] {
+  --color-primary-50: 255 247 237;
+  --color-primary-100: 255 237 213;
+  --color-primary-200: 254 215 170;
+  --color-primary-300: 253 186 116;
+  --color-primary-400: 251 146 60;
+  --color-primary-500: 249 115 22;
+  --color-primary-600: 234 88 12;
+  --color-primary-700: 194 65 12;
+  --color-primary-800: 154 52 18;
+  --color-primary-900: 124 45 18;
+  --color-primary-950: 67 20 7;
+}
+
+html[data-accent-color='teal'] {
+  --color-primary-50: 240 253 250;
+  --color-primary-100: 204 251 241;
+  --color-primary-200: 153 246 228;
+  --color-primary-300: 94 234 212;
+  --color-primary-400: 45 212 191;
+  --color-primary-500: 20 184 166;
+  --color-primary-600: 13 148 136;
+  --color-primary-700: 15 118 110;
+  --color-primary-800: 17 94 89;
+  --color-primary-900: 19 78 74;
+  --color-primary-950: 4 47 46;
+}
+
+/* Text size. Tailwind sizes everything in rem, so the root size carries the
+   whole page with it: text, spacing and controls together. */
+html[data-font-size='small'] {
+  font-size: 14px;
+}
+
+html[data-font-size='medium'] {
+  font-size: 16px;
+}
+
+html[data-font-size='large'] {
+  font-size: 18px;
+}
+
+/* Compact: less padding inside cards, buttons and form fields. */
+html[data-compact='true'] .card {
+  padding: 1rem;
+}
+
+html[data-compact='true'] :is(.btn, .btn-primary, .btn-secondary, .btn-outline, .btn-ghost) {
+  min-height: 2.25rem;
+  padding: 0.375rem 0.75rem;
+}
+
+html[data-compact='true'] .input {
+  padding-top: 0.375rem;
+  padding-bottom: 0.375rem;
+}
+
+/* Reduced motion, from the appearance switch or the accessibility profile.
+   The device's own setting is honoured separately by the
+   prefers-reduced-motion rules in globals.css. */
+html[data-reduce-motion='true'] {
+  scroll-behavior: auto;
+}
+
+html[data-reduce-motion='true'] *,
+html[data-reduce-motion='true'] *::before,
+html[data-reduce-motion='true'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* High contrast, from the accessibility profile. Softer greys become the
+   strong ones, hairline borders become visible lines, filled buttons move to
+   a deeper shade of the member's accent so white text on them reads clearly,
+   links are underlined, and focus is a thick outline in the text colour. */
+html[data-contrast='high']:not(.dark) :is(.text-slate-400, .text-slate-500, .text-gray-400, .text-gray-500) {
+  color: rgb(51 65 85) !important;
+}
+
+html.dark[data-contrast='high'] :is(.text-slate-400, .text-slate-500, .text-gray-400, .text-gray-500) {
+  color: rgb(226 232 240) !important;
+}
+
+html[data-contrast='high']:not(.dark) :is(.border-slate-100, .border-slate-200, .border-gray-100, .border-gray-200) {
+  border-color: rgb(100 116 139) !important;
+}
+
+html.dark[data-contrast='high'] :is(.border-slate-700, .border-slate-800, .border-gray-700, .border-gray-800) {
+  border-color: rgb(148 163 184) !important;
+}
+
+html[data-contrast='high'] :is(.btn-primary, .bg-primary-500, .bg-primary-600) {
+  background-color: rgb(var(--color-primary-700)) !important;
+  color: rgb(255 255 255) !important;
+}
+
+html[data-contrast='high']:not(.dark) :is(.text-primary-500, .text-primary-600) {
+  color: rgb(var(--color-primary-800)) !important;
+}
+
+html[data-contrast='high'] :is(.link, a.text-primary-600, a.text-primary-500) {
+  text-decoration: underline;
+}
+
+html[data-contrast='high'] :is(input, textarea, select)::placeholder {
+  color: rgb(71 85 105);
+  opacity: 1;
+}
+
+html[data-contrast='high'] :focus-visible {
+  outline: 3px solid currentColor !important;
+  outline-offset: 2px !important;
+}

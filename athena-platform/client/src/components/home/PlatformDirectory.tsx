@@ -23,7 +23,10 @@ import { Rail } from './RailShell';
  *     so a signed-out visitor lands where they meant to go after signing in.
  *     Nothing here is aspirational, and nothing 404s.
  *  2. `gated: true` marks the ones behind sign-in, so the padlock sets the
- *     expectation before the click rather than after it.
+ *     expectation before the click rather than after it. `pro: true` marks
+ *     the ones that also need ATHENA Pro, for the same reason: these tools
+ *     were listed as if they came with a free account, and a member found out
+ *     they did not only once she had clicked through and signed in.
  *
  * When you add a page, add it here. A surface nobody can find is a surface that
  * does not exist.
@@ -34,7 +37,24 @@ type Destination = {
   label: string;
   blurb: string;
   gated?: boolean;
+  /** Needs a paid ATHENA Pro subscription, not just an account. */
+  pro?: boolean;
 };
+
+/** The padlock and the Pro mark, the same in the search results and the tabs. */
+function AccessMarks({ item }: { item: Destination }) {
+  return (
+    <>
+      {item.gated && <Lock className="h-3 w-3 flex-shrink-0 text-slate-400" aria-label="Sign in required" />}
+      {item.pro && (
+        <span className="flex-shrink-0 rounded-full bg-amber-100 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-400/15 dark:text-amber-200">
+          <span aria-hidden>Pro</span>
+          <span className="sr-only">Needs ATHENA Pro</span>
+        </span>
+      )}
+    </>
+  );
+}
 
 type Group = {
   id: string;
@@ -91,7 +111,10 @@ const GROUPS: Group[] = [
       { href: '/groups', label: 'Groups', blurb: 'Join a group, or start one' },
       { href: '/events', label: 'Events', blurb: 'Meetups, workshops and online sessions' },
       { href: '/network', label: 'Network', blurb: 'People worth knowing, near you and in your field' },
-      { href: '/stories', label: 'Member stories', blurb: 'What actually changed for women here' },
+      // Success stories, which live on the blog. /stories is a chooser between
+      // these and the 24-hour stories in the feed; this item already knows
+      // which it means, so it skips the extra click.
+      { href: '/blog', label: 'Member stories', blurb: 'What actually changed for women here' },
       { href: '/dashboard/messages', label: 'Messages', blurb: 'Your conversations, with the safety controls on', gated: true },
     ],
   },
@@ -144,13 +167,13 @@ const GROUPS: Group[] = [
     icon: Bot,
     tint: 'from-sky-400 to-cyan-500',
     items: [
-      { href: '/dashboard/ai/career-compass', label: 'Career Compass', blurb: 'Where your path realistically goes next', gated: true },
+      { href: '/dashboard/ai/career-compass', label: 'Career Compass', blurb: 'Compares the skills employers are advertising with the skills on your profile', gated: true },
       { href: '/dashboard/ai/salary', label: 'Salary check', blurb: 'What you should be asking for, and the evidence', gated: true },
-      { href: '/dashboard/ai/interview-coach', label: 'Interview coach', blurb: 'Practise the questions you are dreading', gated: true },
-      { href: '/dashboard/ai/resume-optimizer', label: 'Résumé help', blurb: 'Rewritten against the role you want', gated: true },
-      { href: '/dashboard/ai/opportunity-radar', label: 'Opportunity radar', blurb: 'Things worth going for, surfaced early', gated: true },
-      { href: '/dashboard/ai/idea-validator', label: 'Idea validator', blurb: 'Pressure-test a business idea before you spend on it', gated: true },
-      { href: '/dashboard/ai/content-generator', label: 'Content help', blurb: 'Drafts for posts, reels and pitches', gated: true },
+      { href: '/dashboard/ai/interview-coach', label: 'Interview coach', blurb: 'Practise the questions you are dreading', gated: true, pro: true },
+      { href: '/dashboard/ai/resume', label: 'Résumé help', blurb: 'Scores your résumé against a role and lists what to change', gated: true, pro: true },
+      { href: '/dashboard/ai/opportunity-radar', label: 'Opportunity radar', blurb: 'Things worth going for, surfaced early', gated: true, pro: true },
+      { href: '/dashboard/ai/idea-validator', label: 'Idea validator', blurb: 'Pressure-test a business idea before you spend on it', gated: true, pro: true },
+      { href: '/dashboard/ai/content-generator', label: 'Content help', blurb: 'Drafts for posts, reels and pitches', gated: true, pro: true },
       { href: '/dashboard/ai/chat', label: 'Ask ATHENA', blurb: 'The general one, for everything else', gated: true },
     ],
   },
@@ -283,13 +306,13 @@ export function PlatformDirectory() {
           {matches.length > 0 && (
             <ul className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
               {matches.map((item) => (
-                <li key={item.href}>
+                <li key={`${item.group.id}:${item.href}`}>
                   <Link href={item.href} className="tile-glass group flex h-full items-start gap-3 p-3.5">
                     <span className={cn('mt-0.5 h-8 w-1 flex-shrink-0 rounded-full bg-gradient-to-b', item.group.tint)} aria-hidden />
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-900 dark:text-white">
                         <span className="truncate">{item.label}</span>
-                        {item.gated && <Lock className="h-3 w-3 flex-shrink-0 text-slate-400" aria-label="Sign in required" />}
+                        <AccessMarks item={item} />
                       </span>
                       <span className="mt-0.5 block text-xs leading-5 text-slate-500 dark:text-slate-400">{item.blurb}</span>
                       <span className="mt-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">{item.group.title}</span>
@@ -350,7 +373,7 @@ export function PlatformDirectory() {
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-900 dark:text-white">
                       <span className="truncate">{item.label}</span>
-                      {item.gated && <Lock className="h-3 w-3 flex-shrink-0 text-slate-400" aria-label="Sign in required" />}
+                      <AccessMarks item={item} />
                     </span>
                     <span className="mt-0.5 block text-xs leading-5 text-slate-500 dark:text-slate-400">{item.blurb}</span>
                   </span>

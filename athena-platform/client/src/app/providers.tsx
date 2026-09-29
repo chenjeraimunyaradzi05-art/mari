@@ -1,10 +1,11 @@
 'use client';
 
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useState, useEffect } from 'react';
+import type { Socket } from 'socket.io-client';
 import { useAuthStore, useUIStore as useAppUIStore } from '@/lib/store';
-import { authApi } from '@/lib/api';
+import { authApi, impactApi } from '@/lib/api';
 import { refreshSession } from '@/lib/session-refresh';
 import { socketClient } from '@/lib/socket';
 import { setTokens, clearTokens } from '@/lib/auth';
@@ -13,8 +14,8 @@ import CookieConsentBanner from '@/components/CookieConsentBanner';
 import { observeTranslations, translateDocument } from '@/i18n/domTranslator';
 import { I18nextProvider } from 'react-i18next';
 import { initializeI18n, setI18nLocale } from '@/i18n/next-i18n';
-import { GDPRProvider } from '@/lib/contexts/GDPRContext';
 import { PWAInstallPrompt } from '@/components/super-app/PWAInstallPrompt';
+import './display-preferences.css';
 import { SkipLinks, AnnouncementProvider, KeyboardShortcutsProvider } from '@/lib/accessibility';
 import { ClientOnly } from '@/components/ClientOnly';
 import { useVideoFeedStore } from '@/lib/stores/video.store';
@@ -101,8 +102,118 @@ function SocketBridge() {
   return null;
 }
 
+/**
+ * Lets the socket tell the bell and the inbox badge that something changed.
+ *
+ * The socket client wrote every new notification into a zustand store that
+ * nothing on screen reads, while the bell and the unread badge read react-query
+ * — ['notifications'] and ['conversations'] — which nothing refreshed until
+ * the next page load. A notification that arrived while she was looking at
+ * the page never appeared. This marks those two queries stale whenever the
+ * server says they are, so they refetch from the server rather than being
+ * patched by hand.
+ *
+ * The socket is replaced on every sign-in and token change, and its listeners
+ * are all removed when it is, so the handlers are attached again each time
+ * the client says the socket changed.
+ */
+function RealtimeQueryBridge() {
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    let attached: Socket | null = null;
+    const refreshNotifications = () => {
+      void queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    };
+    const refreshConversations = () => {
+      void queryClient.invalidateQueries({ queryKey: ['conversations'] });
+    };
+
+    const detach = () => {
+      if (!attached) return;
+      attached.off('notifications:new', refreshNotifications);
+      attached.off('notifications:updated', refreshNotifications);
+      attached.off('notifications:all_read', refreshNotifications);
+      attached.off('messages:unread_count_updated', refreshConversations);
+      attached = null;
+    };
+
+    const attach = () => {
+      const socket = socketClient.getSocket();
+      if (socket === attached) return;
+      detach();
+      if (!socket) return;
+      socket.on('notifications:new', refreshNotifications);
+      socket.on('notifications:updated', refreshNotifications);
+      socket.on('notifications:all_read', refreshNotifications);
+      socket.on('messages:unread_count_updated', refreshConversations);
+      attached = socket;
+    };
+
+    attach();
+    const stopListening = socketClient.onChange(attach);
+    return () => {
+      stopListening();
+      detach();
+    };
+  }, [queryClient]);
+
+  return null;
+}
+
+/** What ThemeSync reads from the accessibility profile; the rest of it is not about display. */
+type AccessibilityDisplay = { highContrastMode?: boolean; reducedMotion?: boolean } | null;
+
+/**
+ * The accessibility page invalidates this key when it saves, so a change to
+ * high contrast or reduced motion shows at once rather than on the next visit.
+ */
+export const ACCESSIBILITY_PROFILE_QUERY_KEY = ['accessibility-profile'] as const;
+
+/**
+ * Applies the member's display choices to the whole page.
+ *
+ * Only the theme used to be applied. The appearance page's accent colour, text
+ * size, compact and reduce-motion switches were saved and read by nothing,
+ * under a line promising "Changes apply straight away"; the accessibility
+ * profile's high contrast and reduced motion likewise. Each is now written onto
+ * <html> as a data attribute, and display-preferences.css is what those
+ * attributes do.
+ *
+ * Reduced motion is on when either the appearance switch or the profile asks
+ * for it. The profile is only fetched for a signed-in member, and a profile
+ * that cannot be read simply leaves contrast as it was: this is a display
+ * preference, not an answer anyone is waiting on.
+ */
 function ThemeSync({ children }: { children: React.ReactNode }) {
-  const { theme } = useAppUIStore();
+  const { theme, accentColor, fontSize, compactMode, reduceMotion } = useAppUIStore();
+  const { isAuthenticated, isLoading: authLoading } = useAuthStore();
+
+  const accessibility = useQuery({
+    queryKey: ACCESSIBILITY_PROFILE_QUERY_KEY,
+    queryFn: async (): Promise<AccessibilityDisplay> => {
+      const response = await impactApi.getAccessibilityProfile();
+      return (response.data?.data as AccessibilityDisplay) ?? null;
+    },
+    enabled: isAuthenticated && !authLoading,
+    staleTime: 5 * 60 * 1000,
+  });
+  const profile = isAuthenticated ? accessibility.data ?? null : null;
+  const highContrast = Boolean(profile?.highContrastMode);
+  const motionReduced = reduceMotion || Boolean(profile?.reducedMotion);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.accentColor = accentColor;
+    root.dataset.fontSize = fontSize;
+    root.dataset.compact = String(compactMode);
+    root.dataset.reduceMotion = String(motionReduced);
+    if (highContrast) {
+      root.dataset.contrast = 'high';
+    } else {
+      delete root.dataset.contrast;
+    }
+  }, [accentColor, fontSize, compactMode, motionReduced, highContrast]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -193,36 +304,41 @@ export function Providers({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // There used to be a GDPRProvider around all of this. It kept a second copy
+  // of the cookie consent, wrote it through a second path to /api/gdpr/cookies,
+  // showed its banner only to visitors it guessed were in the UK or the EU,
+  // and nothing read it. CookieConsentBanner below is the one consent record.
   return (
     <QueryClientProvider client={queryClient}>
       <I18nextProvider i18n={i18n}>
-        <GDPRProvider>
-          <KeyboardShortcutsProvider>
-            <AnnouncementProvider>
-              <ThemeSync>
-                <LocaleSync>
-                  <StoreHydration />
-                  <SkipLinks />
-                  <AuthInitializer>
-                    {children}
-                    <ClientOnly>
-                      <SocketBridge />
-                    </ClientOnly>
-                    <ClientOnly>
-                      <PWAInstallPrompt />
-                    </ClientOnly>
-                    <ClientOnly>
-                      <ServiceWorkerRegister />
-                    </ClientOnly>
-                  </AuthInitializer>
-                </LocaleSync>
-              </ThemeSync>
-            </AnnouncementProvider>
-          </KeyboardShortcutsProvider>
-          <ClientOnly>
-            <CookieConsentBanner />
-          </ClientOnly>
-        </GDPRProvider>
+        <KeyboardShortcutsProvider>
+          <AnnouncementProvider>
+            <ThemeSync>
+              <LocaleSync>
+                <StoreHydration />
+                <SkipLinks />
+                <AuthInitializer>
+                  {children}
+                  <ClientOnly>
+                    <SocketBridge />
+                  </ClientOnly>
+                  <ClientOnly>
+                    <RealtimeQueryBridge />
+                  </ClientOnly>
+                  <ClientOnly>
+                    <PWAInstallPrompt />
+                  </ClientOnly>
+                  <ClientOnly>
+                    <ServiceWorkerRegister />
+                  </ClientOnly>
+                </AuthInitializer>
+              </LocaleSync>
+            </ThemeSync>
+          </AnnouncementProvider>
+        </KeyboardShortcutsProvider>
+        <ClientOnly>
+          <CookieConsentBanner />
+        </ClientOnly>
         <ClientOnly>
           <ReactQueryDevtools initialIsOpen={false} />
         </ClientOnly>

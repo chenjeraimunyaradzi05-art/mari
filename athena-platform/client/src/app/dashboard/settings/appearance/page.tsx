@@ -111,9 +111,11 @@ export default function AppearanceSettingsPage() {
           Customize how ATHENA looks on your device
         </p>
         {/* Every control here writes straight to the persisted UI store, which
-            the theme provider reads — so the change is already live and already
-            saved. Saying so is what replaces the Save button that used to sit
-            at the bottom of this page doing nothing. */}
+            ThemeSync in providers.tsx reads — so the change is already live and
+            already saved. Saying so is what replaces the Save button that used
+            to sit at the bottom of this page doing nothing. For a while only the
+            theme was actually applied; accent, text size, compact and reduce
+            motion now are too, through display-preferences.css. */}
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-2 flex items-center gap-1.5">
           <Check className="w-4 h-4 text-primary-500 flex-shrink-0" />
           Changes apply straight away and are saved on this device.
@@ -279,7 +281,7 @@ export default function AppearanceSettingsPage() {
               Compact Mode
             </h2>
             <p className="text-sm text-slate-500 dark:text-slate-400">
-              Reduce spacing and padding for a more compact view
+              Less padding inside cards, buttons and form fields
             </p>
           </div>
           <Toggle
