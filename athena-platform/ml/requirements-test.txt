@@ -1,0 +1,21 @@
+# ===========================================
+# ATHENA ML SERVICE - TEST DEPENDENCIES
+# ===========================================
+#
+# What the served API (src/api) imports, plus what its tests need, and nothing
+# else. requirements.txt also carries the training stack — torch, xgboost,
+# pandas, scikit-learn — none of which src/api imports, and pulling a CUDA
+# build of torch into every CI run to test six routers would cost minutes and
+# gigabytes for nothing. The version ranges match requirements.txt, so the
+# tests run against what the Dockerfile installs.
+#
+#   cd ml && pip install -r requirements-test.txt && python -m pytest
+
+fastapi>=0.104.0,<1.0.0
+pydantic>=2.5.0,<3.0.0
+joblib>=1.3.0,<2.0.0
+numpy>=1.24.0,<2.0.0
+
+# FastAPI's TestClient drives the app through httpx.
+httpx>=0.25.0,<1.0.0
+pytest>=7.4.0,<8.0.0

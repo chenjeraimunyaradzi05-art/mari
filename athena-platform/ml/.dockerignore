@@ -1,0 +1,10 @@
+# The Dockerfile copies the whole build context into the image with `COPY . .`.
+# The tests and their settings are for CI and a developer's machine; they have
+# no business in the image that serves members, and neither do bytecode caches
+# built by whatever Python happened to run them last.
+tests/
+pytest.ini
+requirements-test.txt
+**/__pycache__/
+*.pyc
+.pytest_cache/

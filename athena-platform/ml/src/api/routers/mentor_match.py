@@ -126,7 +126,7 @@ NO_MENTOR_SOURCE = (
     "and a star rating — over a total_considered of 100 that was also invented. "
     "Real mentor matching runs in the API from live rows: "
     "GET /api/algorithms/mentor-match (algorithm.service getMentorMatch), which "
-    "ranks available mentors by shared skills, rating and years of experience. "
+    "ranks available mentors by shared skills and years of experience. "
     "POST /api/v1/mentor-match/score still works: it scores one mentee against "
     "one mentor profile the caller supplies, and invents nobody."
 )
@@ -174,7 +174,15 @@ async def recommend_mentorship_goals(
     experience_years: float,
     current_challenges: List[str]
 ):
-    """Recommend mentorship goals based on career stage and challenges."""
+    """
+    General mentorship goals for a career stage.
+
+    The goals depend on ``experience_years`` alone: under three years, three to
+    seven, and more. ``industry``, ``role`` and ``current_challenges`` are
+    accepted and not read, so the answer is the same for everyone at the same
+    stage — general guidance, which is what this said it tailored to her
+    challenges while never looking at them.
+    """
     recommendations = []
     
     if experience_years < 3:
@@ -299,9 +307,11 @@ def _generate_match_reasons(mentee: MenteeProfile, mentor: MentorProfile, score:
     if skill_overlap:
         reasons.append(f"Expertise in: {', '.join(list(skill_overlap)[:3])}")
     
-    if mentor.rating >= 4.5:
-        reasons.append(f"Highly rated mentor ({mentor.rating}/5.0)")
-    
+    # No "Highly rated mentor" reason. ATHENA has no way for a mentee to rate
+    # a mentor (MentorProfile.rating has no writer), so any rating a caller
+    # sends here was made up somewhere upstream, and the API's own mentor
+    # match stopped using it for the same reason.
+
     if mentor.success_stories >= 5:
         reasons.append(f"{mentor.success_stories} successful mentoring relationships")
     

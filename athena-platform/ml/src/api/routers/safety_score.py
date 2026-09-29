@@ -1,14 +1,22 @@
 """
 Safety Score API Router
 =======================
-Privacy-preserving safety scoring for users and interactions.
+Hand-written safety scoring over a profile the caller supplies.
+
+``POST /calculate`` is the only endpoint here that answers. The other three
+refuse with 501 and say why: each one used to return a verdict about a member,
+or a receipt for data, that nothing behind it had produced. On a platform whose
+members include women leaving violent relationships, a safety answer that was
+never worked out is worse than no answer, because it will be believed. Nothing
+in the Node API calls any of them; see docs/runbooks/ML-SERVICE.md before
+wiring this router to anything.
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 from enum import Enum
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
@@ -79,8 +87,16 @@ class SafetyScoreResult(BaseModel):
     user_id: str
     safety_score: float = Field(..., ge=0, le=100)
     risk_level: RiskLevel
-    confidence: float = Field(..., ge=0, le=1)
-    
+    # Null, because nothing measures it. This was a required float filled with
+    # the literal 0.85 on every result, whatever the profile, so a caller could
+    # not tell a score built from years of history from one built from a
+    # three-day-old account with every field defaulted. A weighted sum of
+    # hand-picked terms has no confidence to report; career_compass made the
+    # same change for the same reason.
+    confidence: Optional[float] = Field(
+        None, ge=0, le=1, description="Confidence in the score, or null when nothing measures it"
+    )
+
     # Score breakdown
     components: Dict[str, float]
     
@@ -94,45 +110,6 @@ class SafetyScoreResult(BaseModel):
     algorithm_version: str = "1.0"
 
 
-class InteractionSafetyRequest(BaseModel):
-    """Request to evaluate interaction safety."""
-    initiator_id: str
-    recipient_id: str
-    interaction_type: str = Field(..., description="message, meeting, transaction, etc.")
-    context: Dict[str, Any] = Field(default_factory=dict)
-
-
-class InteractionSafetyResult(BaseModel):
-    """Interaction safety evaluation result."""
-    is_safe: bool
-    risk_level: RiskLevel
-    risk_score: float = Field(..., ge=0, le=100)
-    warnings: List[str]
-    recommendations: List[str]
-    requires_verification: bool = False
-
-
-class ContentModerationRequest(BaseModel):
-    """Request to moderate content."""
-    content_id: str
-    content_type: str = Field(..., description="text, image, video, etc.")
-    content_text: Optional[str] = None
-    content_url: Optional[str] = None
-    author_id: str
-    context: Dict[str, Any] = Field(default_factory=dict)
-
-
-class ContentModerationResult(BaseModel):
-    """Content moderation result."""
-    content_id: str
-    is_approved: bool
-    risk_level: RiskLevel
-    categories_flagged: List[str]
-    confidence: float
-    requires_human_review: bool
-    explanation: str
-
-
 # ===========================================
 # ENDPOINTS
 # ===========================================
@@ -140,13 +117,14 @@ class ContentModerationResult(BaseModel):
 @router.post("/calculate", response_model=SafetyScoreResult)
 async def calculate_safety_score(profile: UserSafetyProfile):
     """
-    Calculate comprehensive safety score for a user.
-    
-    Uses privacy-preserving algorithms to assess:
-    - Account authenticity
-    - Behavioral patterns
-    - Interaction history
-    - Community standing
+    Score a safety profile the caller supplies.
+
+    A weighted sum of four hand-written components (verification, behaviour,
+    community and content) over the counts in the request. It reads nothing
+    about the member beyond what it is sent and stores nothing it computes, so
+    the score is only as good as the caller's counts, and ``confidence`` is null
+    because nothing measures one. It was described here as "privacy-preserving
+    algorithms", which is a claim about a method this function does not have.
     """
     try:
         score_result = _calculate_user_safety(profile)
@@ -158,67 +136,63 @@ async def calculate_safety_score(profile: UserSafetyProfile):
         )
 
 
-@router.post("/interaction", response_model=InteractionSafetyResult)
-async def evaluate_interaction_safety(request: InteractionSafetyRequest):
-    """
-    Evaluate safety of a proposed interaction between users.
-    
-    Considers:
-    - Both users' safety scores
-    - Interaction type risks
-    - Historical patterns
-    - Context signals
-    """
-    try:
-        # In production, would fetch both users' safety profiles
-        result = _evaluate_interaction(request)
-        return result
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Interaction evaluation failed: {str(e)}"
-        )
+#: What ``/interaction`` answers, and why.
+INTERACTION_NOT_EVALUATED = (
+    "This service cannot judge whether an interaction between two members is safe. "
+    "It has no database and holds nothing about either of them. The endpoint that "
+    "used to answer read neither id it was given: it started every pair at a risk "
+    "of 20, added a fixed amount for a meeting or a transaction, and returned "
+    "is_safe true for every pair it was ever asked about, meetings included, so it "
+    "would have told a woman that meeting someone was safe without knowing who "
+    "either of them was. Safety decisions "
+    "about members are made in the API from live rows (safety-score.service, "
+    "blocks and reports), where a moderator can see and review them."
+)
+
+#: What ``/moderate-content`` answers, and why.
+CONTENT_NOT_MODERATED = (
+    "This service does not moderate content. The endpoint that used to answer "
+    "described itself as AI-powered and was a check for three words: 'scam', "
+    "'fake' and 'spam'. Text containing one of them was flagged for review and "
+    "approved in the same response, and everything else, threats included, was "
+    "approved with a confidence of 0.9 that nothing had measured. ATHENA's "
+    "moderation runs in the API: moderation.service assertContentAllowed screens "
+    "every write surface with the moderation provider and queues borderline "
+    "content for a person."
+)
+
+#: What ``/report-signal`` answers, and why.
+SIGNAL_NOT_RECORDED = (
+    "This service records no safety signals: it has no database. The endpoint "
+    "used to answer 'signal_recorded' with an impact of 'pending_recalculation' "
+    "while discarding the signal, so a caller reporting something about a member "
+    "was told it had been kept and would count when it had gone nowhere. Reports "
+    "and blocks are recorded by the API (POST /api/safety/reports and "
+    "POST /api/safety/blocks), which is also where they change a member's safety score."
+)
 
 
-@router.post("/moderate-content", response_model=ContentModerationResult)
-async def moderate_content(request: ContentModerationRequest):
+@router.post("/interaction")
+async def evaluate_interaction_safety():
     """
-    AI-powered content moderation.
-    
-    Detects:
-    - Harmful content
-    - Spam/scams
-    - Policy violations
-    - Inappropriate material
+    Refuses: see ``INTERACTION_NOT_EVALUATED``.
+
+    It takes no body on purpose. The answer is the same whatever is sent, and a
+    caller should meet the explanation rather than a validation error.
     """
-    try:
-        result = _moderate_content(request)
-        return result
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Content moderation failed: {str(e)}"
-        )
+    raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=INTERACTION_NOT_EVALUATED)
+
+
+@router.post("/moderate-content")
+async def moderate_content():
+    """Refuses: see ``CONTENT_NOT_MODERATED``."""
+    raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=CONTENT_NOT_MODERATED)
 
 
 @router.post("/report-signal")
-async def report_safety_signal(
-    user_id: str,
-    signal: SafetySignal,
-    reported_by: Optional[str] = None
-):
-    """
-    Report a safety signal that affects user's safety score.
-    
-    Signals are weighted and aggregated to update scores.
-    """
-    # In production, this would persist the signal and trigger recalculation
-    return {
-        "status": "signal_recorded",
-        "user_id": user_id,
-        "signal_type": signal.signal_type,
-        "impact": "pending_recalculation"
-    }
+async def report_safety_signal():
+    """Refuses: see ``SIGNAL_NOT_RECORDED``."""
+    raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=SIGNAL_NOT_RECORDED)
 
 
 @router.get("/thresholds")
@@ -246,8 +220,6 @@ async def get_safety_thresholds():
 
 def _calculate_user_safety(profile: UserSafetyProfile) -> SafetyScoreResult:
     """Calculate comprehensive safety score."""
-    from datetime import timedelta
-    
     components = {}
     risk_factors = []
     mitigations = []
@@ -332,87 +304,21 @@ def _calculate_user_safety(profile: UserSafetyProfile) -> SafetyScoreResult:
     if components["community"] < 60:
         mitigations.append("Engage more with the community")
     
-    now = datetime.utcnow()
-    
+    # An aware UTC clock. datetime.utcnow() is naive, is deprecated from Python
+    # 3.12, and is what made the feed router's age arithmetic fail against the
+    # aware timestamps the Node API sends.
+    now = datetime.now(timezone.utc)
+
     return SafetyScoreResult(
         user_id=profile.user_id,
         safety_score=round(overall_score, 1),
         risk_level=risk_level,
-        confidence=0.85,
+        # See the field: nothing measures it.
+        confidence=None,
         components={k: round(v, 1) for k, v in components.items()},
         risk_factors=risk_factors,
         mitigations=mitigations,
         calculated_at=now,
         valid_until=now + timedelta(hours=24),
         algorithm_version="1.0"
-    )
-
-
-def _evaluate_interaction(request: InteractionSafetyRequest) -> InteractionSafetyResult:
-    """Evaluate interaction safety between two users."""
-    warnings = []
-    recommendations = []
-    
-    # Simplified evaluation - in production would fetch actual profiles
-    base_risk = 20  # Low base risk
-    
-    # Context-based adjustments
-    if request.interaction_type == "transaction":
-        base_risk += 20
-        recommendations.append("Use platform's secure payment system")
-    elif request.interaction_type == "meeting":
-        base_risk += 15
-        recommendations.append("Meet in a public place for first meeting")
-        recommendations.append("Share meeting details with a trusted contact")
-    
-    # Determine safety
-    is_safe = base_risk < 50
-    
-    if base_risk >= 30:
-        warnings.append("Exercise caution with new connections")
-    
-    return InteractionSafetyResult(
-        is_safe=is_safe,
-        risk_level=RiskLevel.LOW if base_risk < 30 else RiskLevel.MEDIUM,
-        risk_score=base_risk,
-        warnings=warnings,
-        recommendations=recommendations,
-        requires_verification=base_risk >= 40
-    )
-
-
-def _moderate_content(request: ContentModerationRequest) -> ContentModerationResult:
-    """Moderate content for policy compliance."""
-    categories_flagged = []
-    is_approved = True
-    requires_human_review = False
-    
-    # Simple keyword-based detection (placeholder for ML model)
-    if request.content_text:
-        text_lower = request.content_text.lower()
-        
-        # Check for potential issues
-        harmful_patterns = ["scam", "fake", "spam"]
-        for pattern in harmful_patterns:
-            if pattern in text_lower:
-                categories_flagged.append("potential_spam")
-                requires_human_review = True
-                break
-    
-    # Determine approval
-    if categories_flagged:
-        is_approved = len(categories_flagged) == 0 or requires_human_review
-    
-    risk_level = RiskLevel.LOW
-    if categories_flagged:
-        risk_level = RiskLevel.MEDIUM if requires_human_review else RiskLevel.HIGH
-    
-    return ContentModerationResult(
-        content_id=request.content_id,
-        is_approved=is_approved,
-        risk_level=risk_level,
-        categories_flagged=categories_flagged,
-        confidence=0.9 if not categories_flagged else 0.7,
-        requires_human_review=requires_human_review,
-        explanation="Content passed automated checks" if is_approved else "Content flagged for review"
     )

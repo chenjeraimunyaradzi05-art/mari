@@ -27,6 +27,40 @@ turning it on would actually require. Read that before starting work here.
 
 Create a Python environment and install dependencies from `requirements.txt`.
 
+## Tests
+
+```bash
+cd ml
+pip install -r requirements-test.txt
+python -m pytest
+```
+
+`requirements-test.txt` is what the served API imports plus pytest and httpx,
+at the same version ranges as `requirements.txt`; it leaves out torch, xgboost
+and the rest of the training stack, which `src/api` never imports. The suite
+needs no model artefact, no network and no database: its conftest gives
+every test an empty `MODEL_PATH` and working directory of its own, and imports
+`src.api.main` afresh under whatever key, `DEBUG` and environment name the test
+is about, because the module reads them once at import.
+
+What it covers: the shared key on every path but `/health` (including `/docs`,
+`/redoc` and the `GET /openapi.json` schema route); `DEBUG` read as a boolean
+and ignored in production; the refusal to start in production without a key;
+the model loader's handling of a missing, synthetic, unservable, unreadable or
+corrupt artefact and of strict startup; Career Compass with and without a
+model; the feed ranker against the exact payload
+`server/src/services/feed-ml.service.ts` sends, and the Node `FeedItemType`
+union against the Python enum; and every endpoint that now refuses rather than
+invents.
+
+Writing the feed tests is what found that the ranker had never once worked for
+its only caller. The Node API sends `created_at` with a `Z`, the router
+subtracted it from a naive `datetime.utcnow()`, and every call ended in a 500
+that the API counted as the service being unavailable and quietly kept the
+engagement order. The same pass found the diversity step dropping one post and
+listing another twice, and the light ranker explaining every item with
+"Recommended because it base and ...".
+
 ## Training
 
 Each algorithm provides a standalone training script.
@@ -68,9 +102,21 @@ the runbook lists it.
 - `GET /ready` — 503 while any such model is missing.
 - `POST /api/v1/career-compass/*` — the only endpoints that read a model. 503
   while there is no artefact, with the full account in the body.
-- `POST /api/v1/mentor-match/*`, `/api/v1/safety-score/*`,
-  `/api/v1/income-stream/*`, `/api/v1/ranker/*`, `/api/v1/feed/*` — hand-written
-  scoring over the request body. No model, so nothing to be missing.
+- `POST /api/v1/feed/generate` — the one endpoint the Node API calls. Hand-written
+  scoring over the candidates in the request; no model.
+- `POST /api/v1/ranker/rank` (light only), `POST /api/v1/mentor-match/score`,
+  `POST /api/v1/mentor-match/recommend-goals` and
+  `POST /api/v1/safety-score/calculate` — hand-written scoring over the request
+  body. No model, so nothing to be missing. Nothing in the Node API calls them.
+- **501, with the reason in `detail`**, wherever an answer would have to be
+  invented: `/api/v1/mentor-match/match` (no mentor directory),
+  `/api/v1/income-stream/*` (no income model; it returned the same fixed
+  incomes to everyone), `/api/v1/safety-score/interaction`,
+  `/moderate-content` and `/report-signal` (no data about either member, a
+  three-word keyword list, and a receipt for a signal that was discarded),
+  `/api/v1/feed/refresh-signal` and `/engagement-signal` (nothing stores them),
+  and `ranking_model: "heavy"` on `/api/v1/ranker/rank` (it was the light score
+  times 1.05). The Node client does not retry a 501.
 
 Set `MODEL_PATH` to the directory holding the artefacts. The loader searches
 `MODEL_PATH` first, then an `artifacts` or `ml/artifacts` directory, so a local
