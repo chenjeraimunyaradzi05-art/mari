@@ -48,16 +48,71 @@ const CLIENT_SRC = path.resolve(__dirname, '..', '..', 'client', 'src');
 const MOBILE_SRC = path.resolve(__dirname, '..', '..', 'mobile', 'src');
 
 // Parts of mobile/src that nothing imports and that call an API that was
-// never built. They are documented as dead in their own headers and are kept
-// only so tsc keeps compiling them; walking them would fail the check on
-// code no screen can reach. Remove an entry when its directory or file is
-// deleted or wired up.
-const MOBILE_SKIP = [
-  ['hooks/', 'react-query hooks for an unbuilt API; see mobile/src/hooks/index.ts header'],
-  ['stores/', 'zustand stores for the same unbuilt API; see mobile/src/stores/index.ts header'],
-  ['services/camera.ts', 'unimported; posts to /upload/* which has no mount'],
-  ['services/socialAuth.ts', 'unimported; posts to /auth/google and /auth/apple which do not exist'],
-];
+// never built, kept only so tsc keeps compiling them; walking them would fail
+// the check on code no screen can reach. Empty now: the hooks, stores and
+// camera and social-auth services that used to sit here were deleted rather
+// than exempted, so every file under mobile/src is checked. Add an entry only
+// with the same justification, as [pathPrefix, reason].
+//
+// An entry is only honest while it is true. If a screen starts importing one
+// of these, its calls are live and this list would hide them, so the check
+// fails and names the import (LIVE EXEMPTIONS below). An entry whose path has
+// gone is reported so it can be taken out.
+const MOBILE_SKIP = [];
+
+const isMobileSkipped = (rel) =>
+  MOBILE_SKIP.some(([prefix]) => rel.startsWith(prefix) || `${rel}/` === prefix);
+
+// The file a relative import names, the way the TypeScript resolver finds it.
+function resolveRelativeImport(fromDir, specifier) {
+  const base = path.resolve(fromDir, specifier);
+  const candidates = [
+    base,
+    `${base}.ts`,
+    `${base}.tsx`,
+    `${base}.js`,
+    path.join(base, 'index.ts'),
+    path.join(base, 'index.tsx'),
+    path.join(base, 'index.js'),
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate) && fs.statSync(candidate).isFile()) || null;
+}
+
+/**
+ * Imports from the app into code MOBILE_SKIP exempts as dead, and entries whose
+ * path no longer exists. Test files are not the app and do not count as
+ * importers; the app's entry point, outside src/, does.
+ */
+function mobileSkipProblems() {
+  if (!fs.existsSync(MOBILE_SRC)) return { live: [], gone: [] };
+
+  const mobileRoot = path.dirname(MOBILE_SRC);
+  const entryPoints = ['App.tsx', 'App.ts', 'index.ts', 'index.js']
+    .map((name) => path.join(mobileRoot, name))
+    .filter((file) => fs.existsSync(file));
+  const importers = [...walk(MOBILE_SRC), ...entryPoints].filter(
+    (file) => !file.split(path.sep).includes('__tests__')
+  );
+
+  const live = [];
+  for (const file of importers) {
+    const rel = path.relative(MOBILE_SRC, file).split(path.sep).join('/');
+    if (!rel.startsWith('..') && isMobileSkipped(rel)) continue;
+    const src = fs.readFileSync(file, 'utf8');
+    for (const m of src.matchAll(/(?:\bfrom\s*|\brequire\s*\(\s*|\bimport\s*\(\s*)(['"])(\.{1,2}\/[^'"]+)\1/g)) {
+      const target = resolveRelativeImport(path.dirname(file), m[2]);
+      if (!target) continue;
+      const targetRel = path.relative(MOBILE_SRC, target).split(path.sep).join('/');
+      if (targetRel.startsWith('..')) continue;
+      if (isMobileSkipped(targetRel)) {
+        live.push({ importer: path.relative(mobileRoot, file).split(path.sep).join('/'), target: targetRel });
+      }
+    }
+  }
+
+  const gone = MOBILE_SKIP.filter(([prefix]) => !fs.existsSync(path.join(MOBILE_SRC, prefix)));
+  return { live, gone };
+}
 
 // Calls that look broken to the static walk but are correct in practice.
 // Keep each entry justified — an unexplained entry is a bug in waiting.
@@ -419,7 +474,21 @@ function main() {
     for (const key of staleAllowances) console.error(`  ${key}`);
   }
 
-  const total = missing.length + shadowed.length + wrongVerb.length + staleAllowances.size;
+  // Exempting code from the walk is safe only while nothing reaches it. An
+  // import from a live file means those calls can run, unchecked.
+  const mobileSkip = mobileSkipProblems();
+  if (mobileSkip.live.length > 0) {
+    console.error(`\nLIVE EXEMPTIONS — remove these from MOBILE_SKIP, so their calls are checked (${mobileSkip.live.length})`);
+    for (const { importer, target } of mobileSkip.live) {
+      console.error(`  mobile:${target}   imported by ${importer}`);
+    }
+  }
+  for (const [prefix] of mobileSkip.gone) {
+    console.log(`MOBILE_SKIP entry "${prefix}" names nothing under mobile/src any more; take it out of the list.`);
+  }
+
+  const total =
+    missing.length + shadowed.length + wrongVerb.length + staleAllowances.size + mobileSkip.live.length;
   const { client: clientCount, mobile: mobileCount } = clientCalls.counts;
   const sites = mobileCount > 0 ? `${clientCount} client and ${mobileCount} mobile call sites` : `${clientCount} client call sites`;
 

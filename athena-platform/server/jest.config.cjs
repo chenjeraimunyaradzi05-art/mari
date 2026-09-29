@@ -18,6 +18,8 @@
  */
 const config = {
   testEnvironment: 'node',
+  // Keeps the unit project off the live moderation provider; see the file.
+  setupFiles: ['<rootDir>/jest.setup.cjs'],
   // Transpile, do not type-check. This used to be `preset: 'ts-jest'`, which
   // type-checks every file it compiles through a language service holding the
   // whole program — and every route suite imports src/index.ts, so every

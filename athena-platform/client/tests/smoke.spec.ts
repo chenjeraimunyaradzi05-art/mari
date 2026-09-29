@@ -1,128 +1,126 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
-test('homepage is the feed, in an Instagram-style three-column shell', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/');
+/**
+ * Does the site render, and does it keep the promises every page has to keep.
+ * This runs on every pull request, in CI's client job, where there is no API.
+ *
+ * The first two tests used to describe the homepage as it was on 24 August
+ * (f5e7a9607) — an Instagram-style three-column feed with a 235px middle
+ * column, an
+ * "Advertise" link and a "Jobs worth a look" rail — and the homepage has been
+ * redesigned since. Both failed on every run, which nobody saw only because
+ * GitHub Actions could not start jobs for this repository. They now check the
+ * structure and the safety line rather than the wording of a page that is
+ * still being worked on, and they replace the API at the browser, so the
+ * answer is the same with or without an API behind the site.
+ */
 
-  // Stories sit above the feed, and the feed column is Instagram's 470px.
-  await expect(page.getByRole('heading', { name: 'Stories' }).first()).toBeVisible();
-  // Feed column is half Instagram's width so the middle column gets the space.
-  await expect(page.locator('main')).toHaveCSS('max-width', '235px');
-
-  // Left rail navigation.
-  for (const label of ['Home', 'Reels', 'Jobs', 'Mentors']) {
-    await expect(page.getByRole('link', { name: label, exact: true }).first()).toBeVisible();
-  }
-
-  // Signed out, the join actions live in the left rail as buttons.
-  await expect(page.getByRole('link', { name: /^sign up$/i }).first()).toBeVisible();
-  await expect(page.getByRole('link', { name: /^log in$/i }).first()).toBeVisible();
-
-  // Middle column opens by talking to the reader, not announcing a product.
-  await expect(
-    page.getByRole('heading', { name: /have to do it alone/i }).first()
-  ).toBeVisible();
-
-  // No campaign to serve means no ad slot at all — an empty placement must not
-  // hold space with a house promo.
-  await expect(page.locator('[data-ad-placement]')).toHaveCount(0);
-
-  // The advertiser ask belongs in the footer, not between the member's results.
-  await expect(page.getByRole('link', { name: /^advertise$/i }).first()).toBeVisible();
-
-  // Five topic circles open themed slices of the reel feed.
-  const topics = page.locator('nav[aria-label="Reel topics"] a');
-  await expect(topics).toHaveCount(5);
-  await expect(topics.first()).toHaveAttribute('href', /\/explore\?topic=/);
-
-  // The feed loads client-side, so wait for a post before asserting on the
-  // affordances that live inside one.
-  await expect(page.locator('article').first()).toBeVisible({ timeout: 15000 });
-
-  // Signed out, save and comment are sign-in prompts rather than doomed API
-  // calls — a 401 would trip the axios interceptor and yank the page to /login.
-  await expect(page.locator('a[aria-label="Sign in to save"]').first()).toBeVisible();
-  await expect(page.getByText(/sign in to join the conversation/i).first()).toBeVisible();
-  await expect(page.locator('button[aria-label="Save"]')).toHaveCount(0);
-
-  // The middle column carries real records, not marketing tiles.
-  await expect(page.getByText(/jobs worth a look/i).first()).toBeVisible();
-  await expect(page.locator('a[href^="/jobs/"]').first()).toBeVisible();
-  await expect(page.getByText(/learn something new/i).first()).toBeVisible();
-  await expect(page.locator('a[href^="/courses/"]').first()).toBeVisible();
-  await expect(page.getByText(/find your people/i).first()).toBeVisible();
-  await expect(page.locator('a[href^="/groups/"]').first()).toBeVisible();
-
-  // The generic ability grid it replaced must not come back.
-  await expect(page.getByText('Everything in one account')).toHaveCount(0);
-
-  // Warm copy has to actually read as warm. These headings used .kicker — 12px
-  // uppercase, letterspaced — so "Find your people" rendered as FIND YOUR PEOPLE
-  // and the whole column read like a B2B dashboard regardless of the wording.
-  const shouted = await page
-    .locator('section[aria-label="Discover"] h2')
-    .evaluateAll((els) => els.filter((e) => getComputedStyle(e).textTransform === 'uppercase').length);
-  expect(shouted).toBe(0);
-
-  // Partner cards must stay labelled as samples, never as real partnerships.
-  await expect(page.getByText('Sample', { exact: true }).first()).toBeVisible();
-  await expect(page.getByRole('link', { name: /tell us about them/i }).first()).toBeVisible();
-
-  // Three columns, tight gutters: the nav must start near the viewport edge.
-  const navLeft = await page.locator('aside').first().evaluate(
-    (el) => el.getBoundingClientRect().left
+// The web tier answers this when the API is down (app/api/[...path]).
+async function apiDown(page: Page): Promise<void> {
+  await page.route('**/api/**', (route) =>
+    route.fulfill({
+      status: 502,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: false, message: 'Backend unavailable' }),
+    })
   );
-  expect(navLeft).toBeLessThan(48);
+}
 
-  // Infrastructure status has no place on a consumer homepage. These came from
-  // the old SignalPanel/LiveOpsRail and must not come back.
-  for (const noise of ['ATHENA Signal Console', 'Neon linked', 'Netlify ready', 'Prod audit clean']) {
-    await expect(page.getByText(noise, { exact: false })).toHaveCount(0);
-  }
-});
+test.describe('the homepage', () => {
+  test.use({ serviceWorkers: 'block' });
 
-test('homepage is navigable by heading and landmark', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/');
+  test('renders its shell, the way in, and the safety line, without the API', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await apiDown(page);
+    await page.goto('/');
 
-  // Deliberately does not wait on feed data: the page structure must be sound
-  // whether or not posts load, and coupling it to the API made this test fail
-  // purely because the rate limiter had tripped.
-  await expect(page.getByRole('heading', { name: 'Jobs worth a look', exact: true })).toBeVisible({
-    timeout: 15000,
+    await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
+
+    const primary = page.getByRole('navigation', { name: 'Primary' });
+    for (const [label, href] of [
+      ['Home', '/'],
+      ['Reels', '/explore'],
+      ['Jobs', '/jobs'],
+      ['Mentors', '/mentors'],
+    ]) {
+      await expect(primary.getByRole('link', { name: label, exact: true })).toHaveAttribute('href', href);
+    }
+
+    // Signed out, the way in is offered, not a dashboard.
+    await expect(page.getByRole('link', { name: /^sign up$/i }).first()).toHaveAttribute('href', '/register');
+    await expect(page.getByRole('link', { name: /^log in$/i }).first()).toHaveAttribute('href', '/login');
+
+    // Five topic circles open themed slices of the reel feed.
+    const topics = page.getByRole('navigation', { name: 'Reel topics' }).getByRole('link');
+    await expect(topics).toHaveCount(5);
+    for (const href of await topics.evaluateAll((links) => links.map((a) => a.getAttribute('href')))) {
+      expect(href).toMatch(/^\/explore\?topic=[a-z-]+$/);
+    }
+
+    // The feed is the main landmark, and with the API down it says so rather
+    // than showing an empty feed.
+    const feed = page.getByRole('main', { name: 'Feed' });
+    await expect(feed).toBeVisible();
+    await expect(feed.getByText(/can.t reach the feed/i)).toBeVisible({ timeout: 15_000 });
+
+    // Every page ends with the emergency numbers, whatever else failed to load.
+    // A member who came here in trouble must find them without the API.
+    const footer = page.getByRole('contentinfo', { name: 'Site links' });
+    await expect(footer.getByText('000', { exact: true })).toBeVisible();
+    await expect(footer.getByText('1800 737 732', { exact: true })).toBeVisible();
+    await expect(footer.getByRole('link', { name: 'Safety centre' }).first()).toBeVisible();
+
+    // No campaign to serve means no ad slot at all — an empty placement must
+    // not hold space with a house promo.
+    await expect(page.locator('[data-ad-placement]')).toHaveCount(0);
+
+    // Infrastructure status has no place on a consumer homepage. These came
+    // from the old SignalPanel/LiveOpsRail and must not come back.
+    for (const noise of ['ATHENA Signal Console', 'Neon linked', 'Netlify ready', 'Prod audit clean']) {
+      await expect(page.getByText(noise, { exact: false })).toHaveCount(0);
+    }
   });
 
-  // Exactly one h1, and every section reachable by heading. These were styled
-  // spans, which left screen-reader users only four headings on the page.
-  await expect(page.locator('h1')).toHaveCount(1);
-  for (const section of ['Jobs worth a look', 'Learn something new', 'Find your people']) {
-    await expect(page.getByRole('heading', { name: section, exact: true })).toHaveCount(1);
-  }
-  // Matched loosely: this heading contains a typographic apostrophe.
-  await expect(page.getByRole('heading', { name: /actually showing up/i })).toHaveCount(1);
+  test('is navigable by heading and landmark', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await apiDown(page);
+    await page.goto('/');
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible({ timeout: 15_000 });
 
-  // Heading levels must not skip.
-  const levels = await page
-    .locator('h1,h2,h3')
-    .evaluateAll((els) =>
-      els.filter((e) => (e as HTMLElement).offsetHeight > 0).map((e) => Number(e.tagName[1]))
-    );
-  levels.reduce((prev, lvl) => {
-    expect(lvl).toBeLessThanOrEqual(prev + 1);
-    return lvl;
-  }, 0);
+    // Exactly one h1, and heading levels that never skip one.
+    await expect(page.locator('h1')).toHaveCount(1);
+    const levels = await page
+      .locator('h1,h2,h3,h4')
+      .evaluateAll((els) =>
+        els.filter((e) => (e as HTMLElement).offsetHeight > 0).map((e) => Number(e.tagName[1]))
+      );
+    expect(levels[0]).toBe(1);
+    levels.reduce((prev, lvl) => {
+      expect(lvl).toBeLessThanOrEqual(prev + 1);
+      return lvl;
+    }, 0);
 
-  // Every landmark is named, so they can be told apart when jumping between them.
-  const unnamed = await page
-    .locator('nav, aside, main')
-    .evaluateAll((els) =>
-      els.filter((e) => (e as HTMLElement).offsetHeight > 0 && !e.getAttribute('aria-label')).length
-    );
-  expect(unnamed).toBe(0);
+    // Every visible landmark is named, so they can be told apart when jumping
+    // between them. An element hidden from assistive technology is not a
+    // landmark to anyone using one (the homepage's empty spacer column is an
+    // aria-hidden <aside>), so it is not counted.
+    const unnamed = await page
+      .locator('nav, aside, main, section[aria-label], footer')
+      .evaluateAll((els) =>
+        els
+          .filter((e) => (e as HTMLElement).offsetHeight > 0)
+          .filter((e) => !e.closest('[aria-hidden="true"]'))
+          .filter((e) => !e.getAttribute('aria-label') && !e.getAttribute('aria-labelledby'))
+          .map((e) => e.tagName.toLowerCase())
+      );
+    expect(unnamed).toEqual([]);
 
-  // Loading more posts is announced rather than happening silently. Counted
-  // loosely: React's streaming buffer keeps a hidden second copy of the shell.
-  await expect(page.locator('[aria-live="polite"]').first()).toBeAttached();
+    // The skip links go somewhere.
+    for (const target of ['#main-content', '#main-nav']) {
+      await expect(page.locator(`a[href="${target}"]`).first()).toBeAttached();
+      await expect(page.locator(target)).toHaveCount(1);
+    }
+  });
 });
 
 test('homepage collapses to a single column with a bottom bar on mobile', async ({ page }) => {
