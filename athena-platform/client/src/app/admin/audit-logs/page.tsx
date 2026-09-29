@@ -8,27 +8,69 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { api } from '@/lib/api';
 
-type AuditAction =
-  | 'DSAR_EXPORT'
-  | 'ACCOUNT_DELETE'
-  | 'ADMIN_USER_UPDATE'
-  | 'ADMIN_USER_DELETE'
-  | 'ADMIN_POST_HIDE'
-  | 'ADMIN_POST_UNHIDE'
-  | 'ADMIN_POST_DELETE'
-  | 'ADMIN_POST_CLEAR_REPORTS'
-  | 'ADMIN_COMMENT_DELETE'
-  | 'ADMIN_GROUP_CREATE'
-  | 'ADMIN_GROUP_UPDATE'
-  | 'ADMIN_GROUP_DELETE'
-  | 'ADMIN_GROUP_MEMBER_ROLE_UPDATE'
-  | 'ADMIN_GROUP_POST_DELETE'
-  | 'ADMIN_EVENT_CREATE'
-  | 'ADMIN_EVENT_UPDATE'
-  | 'ADMIN_EVENT_DELETE'
-  | 'ADMIN_JOB_UPDATE'
-  | 'ADMIN_SUBSCRIPTION_UPDATE'
-  | 'ADMIN_SUBSCRIPTION_GRANT';
+/**
+ * The actions this viewer can filter on, grouped the way a privacy officer
+ * asks the question. The server decides what each one means across old rows:
+ * asking for "Account banned" also finds bans recorded before moderation
+ * decisions had verbs of their own, and asking for a staff change finds the
+ * ones filed as data access before ADMIN_CONFIG_UPDATE and
+ * ADMIN_CONTENT_UPDATE existed. The list used to stop at the original twenty
+ * admin verbs, so none of the moderation, safety or staff-change rows could be
+ * asked for at all.
+ */
+const ACTION_GROUPS: Array<{ label: string; actions: Array<{ value: string; label: string }> }> = [
+  {
+    label: 'Moderation decisions',
+    actions: [
+      { value: 'MODERATION_DISMISS', label: 'Report dismissed' },
+      { value: 'MODERATION_WARN', label: 'Warning issued' },
+      { value: 'MODERATION_REMOVE', label: 'Content removed' },
+      { value: 'MODERATION_SUSPEND', label: 'Account suspended' },
+      { value: 'MODERATION_BAN', label: 'Account banned' },
+      { value: 'MODERATION_ESCALATE', label: 'Sent to senior review' },
+      { value: 'SAFETY_REPORT_DECIDED', label: 'Safety report decided' },
+      { value: 'ADMIN_APPEAL_DECISION', label: 'Appeal decided' },
+    ],
+  },
+  {
+    label: 'Staff changes',
+    actions: [
+      { value: 'ADMIN_CONFIG_UPDATE', label: 'Platform configuration changed' },
+      { value: 'ADMIN_CONTENT_UPDATE', label: 'Catalogue or content changed' },
+      { value: 'ADMIN_USER_UPDATE', label: 'Member account updated' },
+      { value: 'ADMIN_USER_DELETE', label: 'Member account deleted' },
+      { value: 'ADMIN_VERIFICATION_APPROVE', label: 'Verification approved' },
+      { value: 'ADMIN_VERIFICATION_REJECT', label: 'Verification refused' },
+      { value: 'ADMIN_POST_HIDE', label: 'Post hidden' },
+      { value: 'ADMIN_POST_UNHIDE', label: 'Post unhidden' },
+      { value: 'ADMIN_POST_DELETE', label: 'Post deleted' },
+      { value: 'ADMIN_POST_CLEAR_REPORTS', label: 'Post reports cleared' },
+      { value: 'ADMIN_COMMENT_DELETE', label: 'Comment deleted' },
+      { value: 'ADMIN_GROUP_CREATE', label: 'Group created' },
+      { value: 'ADMIN_GROUP_UPDATE', label: 'Group updated' },
+      { value: 'ADMIN_GROUP_DELETE', label: 'Group deleted' },
+      { value: 'ADMIN_GROUP_MEMBER_ROLE_UPDATE', label: 'Group role changed' },
+      { value: 'ADMIN_GROUP_POST_DELETE', label: 'Group post deleted' },
+      { value: 'ADMIN_EVENT_CREATE', label: 'Event created' },
+      { value: 'ADMIN_EVENT_UPDATE', label: 'Event updated' },
+      { value: 'ADMIN_EVENT_DELETE', label: 'Event deleted' },
+      { value: 'ADMIN_JOB_UPDATE', label: 'Job updated' },
+      { value: 'ADMIN_SUBSCRIPTION_UPDATE', label: 'Subscription updated' },
+      { value: 'ADMIN_SUBSCRIPTION_GRANT', label: 'Subscription granted' },
+    ],
+  },
+  {
+    label: 'Privacy and accounts',
+    actions: [
+      { value: 'DATA_ACCESS', label: 'Data access' },
+      { value: 'DSAR_EXPORT', label: 'Data export' },
+      { value: 'ACCOUNT_DELETE', label: 'Account deleted by its owner' },
+      { value: 'USER_APPEAL_SUBMIT', label: 'Appeal submitted' },
+      { value: 'USER_VERIFICATION_SUBMIT', label: 'Verification requested' },
+      { value: 'SIGN_IN_PROVIDER_LINKED', label: 'Sign-in provider linked' },
+    ],
+  },
+];
 
 interface AuditLogUser {
   id: string;
@@ -39,7 +81,7 @@ interface AuditLogUser {
 
 interface AuditLog {
   id: string;
-  action: AuditAction;
+  action: string;
   actorUserId: string | null;
   targetUserId: string | null;
   ipAddress: string | null;
@@ -66,6 +108,21 @@ function formatUser(user: AuditLogUser | null): string {
   return name ? `${name} (${user.email})` : user.email;
 }
 
+/**
+ * The precise verb a staff row carries in its metadata, when it has one: the
+ * enum value says "a catalogue changed", this says which and how.
+ */
+function adminVerbOf(metadata: unknown): string | null {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null;
+  const record = metadata as Record<string, unknown>;
+  const verb = record.adminAction ?? record.moderationAction;
+  return typeof verb === 'string' && verb.trim() ? verb : null;
+}
+
+function statusOf(error: unknown): number | undefined {
+  return (error as { response?: { status?: number } })?.response?.status;
+}
+
 function truncate(value: string, maxLen: number): string {
   if (value.length <= maxLen) return value;
   return `${value.slice(0, maxLen)}…`;
@@ -73,7 +130,7 @@ function truncate(value: string, maxLen: number): string {
 
 export default function AdminAuditLogsPage() {
   const [page, setPage] = useState(1);
-  const [action, setAction] = useState<'' | AuditAction>('');
+  const [action, setAction] = useState('');
   const [actorUserId, setActorUserId] = useState('');
   const [targetUserId, setTargetUserId] = useState('');
 
@@ -88,7 +145,7 @@ export default function AdminAuditLogsPage() {
     return params.toString();
   }, [page, action, actorUserId, targetUserId]);
 
-  const { data, isLoading, error } = useQuery<AuditLogsResponse>({
+  const { data, isLoading, error, refetch } = useQuery<AuditLogsResponse>({
     queryKey: ['admin-audit-logs', page, action, actorUserId, targetUserId],
     queryFn: async () => {
       const response = await api.get(`/admin/audit-logs?${paramsString}`);
@@ -96,14 +153,28 @@ export default function AdminAuditLogsPage() {
     },
   });
 
+  // Only a refusal is "access denied". Every other failure used to show the
+  // same screen, so an outage told an administrator she had lost her
+  // permissions, and a log that failed to load looked like one she was not
+  // allowed to see rather than one that had not arrived.
   if (error) {
+    const denied = statusOf(error) === 401 || statusOf(error) === 403;
     return (
       <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white flex items-center justify-center">
         <div className="text-center">
           <ShieldAlert className="h-12 w-12 text-red-500 mx-auto mb-3" />
-          <h1 className="text-xl font-semibold text-red-600">Access Denied</h1>
-          <p className="text-slate-600 dark:text-slate-400">You don't have permission to access this page.</p>
-          <div className="mt-4">
+          <h1 className="text-xl font-semibold text-red-600">{denied ? 'Access Denied' : 'The audit log could not be loaded'}</h1>
+          <p className="text-slate-600 dark:text-slate-400">
+            {denied
+              ? 'You do not have permission to access this page.'
+              : 'The request did not complete, so nothing here tells you the log is empty. Try again, and tell an engineer if it keeps failing.'}
+          </p>
+          <div className="mt-4 flex justify-center gap-2">
+            {!denied && (
+              <Button variant="outline" onClick={() => void refetch()}>
+                Try again
+              </Button>
+            )}
             <Button asChild variant="outline">
               <Link href="/admin">Back to Admin</Link>
             </Button>
@@ -123,7 +194,7 @@ export default function AdminAuditLogsPage() {
             </Link>
             <div>
               <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Audit Logs</h1>
-              <p className="text-slate-600 dark:text-slate-400">Compliance exports and account deletions</p>
+              <p className="text-slate-600 dark:text-slate-400">Who did what on the platform: moderation, staff changes, and access to member data</p>
             </div>
           </div>
         </div>
@@ -135,32 +206,22 @@ export default function AdminAuditLogsPage() {
             <select
               value={action}
               onChange={(e) => {
-                setAction(e.target.value as '' | AuditAction);
+                setAction(e.target.value);
                 setPage(1);
               }}
+              aria-label="Action"
               className="px-3 py-2 border rounded-md bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
             >
               <option value="">All Actions</option>
-              <option value="DSAR_EXPORT">DSAR Export</option>
-              <option value="ACCOUNT_DELETE">Account Delete</option>
-              <option value="ADMIN_USER_UPDATE">Admin: User Update</option>
-              <option value="ADMIN_USER_DELETE">Admin: User Delete</option>
-              <option value="ADMIN_POST_HIDE">Admin: Post Hide</option>
-              <option value="ADMIN_POST_UNHIDE">Admin: Post Unhide</option>
-              <option value="ADMIN_POST_DELETE">Admin: Post Delete</option>
-              <option value="ADMIN_POST_CLEAR_REPORTS">Admin: Clear Reports</option>
-              <option value="ADMIN_COMMENT_DELETE">Admin: Comment Delete</option>
-              <option value="ADMIN_GROUP_CREATE">Admin: Group Create</option>
-              <option value="ADMIN_GROUP_UPDATE">Admin: Group Update</option>
-              <option value="ADMIN_GROUP_DELETE">Admin: Group Delete</option>
-              <option value="ADMIN_GROUP_MEMBER_ROLE_UPDATE">Admin: Group Role</option>
-              <option value="ADMIN_GROUP_POST_DELETE">Admin: Group Post Delete</option>
-              <option value="ADMIN_EVENT_CREATE">Admin: Event Create</option>
-              <option value="ADMIN_EVENT_UPDATE">Admin: Event Update</option>
-              <option value="ADMIN_EVENT_DELETE">Admin: Event Delete</option>
-              <option value="ADMIN_JOB_UPDATE">Admin: Job Update</option>
-              <option value="ADMIN_SUBSCRIPTION_UPDATE">Admin: Subscription Update</option>
-              <option value="ADMIN_SUBSCRIPTION_GRANT">Admin: Subscription Grant</option>
+              {ACTION_GROUPS.map((group) => (
+                <optgroup key={group.label} label={group.label}>
+                  {group.actions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
             </select>
             <div className="flex-1 min-w-[240px]">
               <Input
@@ -217,6 +278,9 @@ export default function AdminAuditLogsPage() {
                           <FileText className="h-4 w-4 text-slate-500" />
                           <span className="font-medium text-slate-900 dark:text-white">{log.action}</span>
                         </span>
+                        {adminVerbOf(log.metadata) && (
+                          <span className="mt-1 block text-xs text-slate-500">{adminVerbOf(log.metadata)}</span>
+                        )}
                       </td>
                       <td className="px-6 py-4 text-sm text-slate-700 dark:text-slate-300">
                         <div className="max-w-[280px] break-words">

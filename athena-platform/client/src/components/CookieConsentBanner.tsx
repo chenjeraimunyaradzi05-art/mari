@@ -144,11 +144,18 @@ export default function CookieConsentBanner() {
   const applyConsentToServices = (prefs: CookiePreferences) => {
     if (typeof window === 'undefined') return;
 
-    const win = window as Window & {
+    // PostHog is driven from here, so the Analytics switch is the switch. It
+    // used to be driven from nowhere: the choice was recorded and every tool
+    // carried on as configured. Loaded on demand so the banner, which is on
+    // every page, does not carry the analytics library in with it.
+    void import('@/lib/analytics')
+      .then(({ applyAnalyticsConsent }) => applyAnalyticsConsent(prefs.analytics))
+      .catch((error) => console.error('Could not apply the analytics choice', error));
+
+    const win = window as unknown as Window & {
       gtag?: (...args: unknown[]) => void;
       fbq?: (...args: unknown[]) => void;
-      'ga-disable-GA_MEASUREMENT_ID'?: boolean;
-    };
+    } & Record<string, unknown>;
 
     // Google Analytics consent mode
     if (win.gtag) {
@@ -160,8 +167,13 @@ export default function CookieConsentBanner() {
       });
     }
 
-    if (!prefs.analytics) {
-      win['ga-disable-GA_MEASUREMENT_ID'] = true;
+    // Google's opt-out flag is keyed by the property's own measurement id. It
+    // was set on the literal key 'ga-disable-GA_MEASUREMENT_ID', a placeholder
+    // no tag ever reads, so a "no" would have disabled nothing had GA been
+    // loaded. With no id configured there is no GA to switch off.
+    const gaMeasurementId = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
+    if (gaMeasurementId) {
+      win[`ga-disable-${gaMeasurementId}`] = !prefs.analytics;
     }
 
     // Facebook Pixel

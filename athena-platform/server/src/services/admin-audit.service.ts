@@ -13,16 +13,17 @@
  * listing changed. This module is the one way those routers write that row, so
  * the vocabulary stays consistent and no surface is left out again.
  *
- * On the action column: AuditLog.action is the AuditAction enum, and the enum
- * has no verb for administering the platform itself — its ADMIN_ values all
- * name a member, a post, a group, an event, a job or a subscription. Filing a
- * marketing campaign under ADMIN_GROUP_UPDATE would corrupt the moderation
- * history that admin.routes.ts writes, so these rows carry the nearest neutral
- * value and the real verb rides in metadata.adminAction, which is the same
- * compromise REPORT_AUDIT_ACTIONS makes in admin.routes.ts for the moderation
- * outcomes. Adding ADMIN_CONFIG_UPDATE and ADMIN_CONTENT_UPDATE to the enum is
- * a schema change; when it lands, PLATFORM_ADMIN_AUDIT_ACTION below is the one
- * line to change.
+ * On the action column: AuditLog.action is the AuditAction enum. Until the enum
+ * had verbs for administering the platform itself, these rows were filed under
+ * DATA_ACCESS with the real verb in metadata.adminAction, so a privacy officer
+ * asking for data-access events was handed blog edits and flag flips, and "who
+ * changed the platform's configuration" could only be answered by reading the
+ * JSON of every row. Each verb now names the enum value it is filed under —
+ * ADMIN_CONFIG_UPDATE, ADMIN_CONTENT_UPDATE, or SAFETY_REPORT_DECIDED — and the
+ * precise verb still rides in metadata.adminAction, because "a catalogue
+ * changed" is the column's question and "which cohort, and how" is the row's.
+ * Rows written before the change keep DATA_ACCESS; LEGACY_ADMIN_AUDIT_ACTION and
+ * adminVerbsFiledUnder are how the audit-log viewer still finds them.
  */
 
 import { AuditAction, Prisma } from '@prisma/client';
@@ -30,99 +31,170 @@ import { AuthRequest } from '../middleware/auth';
 import { logAudit } from '../utils/audit';
 import { bestEffort } from '../utils/best-effort';
 
-/** See the note above: the enum has no verb of its own for this yet. */
-const PLATFORM_ADMIN_AUDIT_ACTION: AuditAction = AuditAction.DATA_ACCESS;
+/** What these rows were filed under before the enum had verbs of its own. */
+export const LEGACY_ADMIN_AUDIT_ACTION: AuditAction = AuditAction.DATA_ACCESS;
+
+// How the platform itself runs: switches, the accounts seeding mints, and the
+// register of who processes member data on our behalf.
+const CONFIG = AuditAction.ADMIN_CONFIG_UPDATE;
+// Records and catalogues staff maintain, and staff decisions on the queues
+// members file into. The precise verb in metadata says which.
+const CONTENT = AuditAction.ADMIN_CONTENT_UPDATE;
+// A staff decision on a safety report or a safety concern about a member.
+const SAFETY = AuditAction.SAFETY_REPORT_DECIDED;
 
 /**
- * What staff can do on these surfaces, spelled out.
+ * What staff can do on these surfaces, spelled out, and the enum value each is
+ * filed under.
  *
- * A union rather than a free string so the vocabulary cannot drift into six
- * spellings of the same event, which is what makes the log searchable a year
- * from now. Read it as RESOURCE_VERB, past tense: the row is written after the
+ * One table rather than a union beside a switch, so a verb cannot be added
+ * without deciding where it is filed: the type below is derived from these
+ * keys. Read each as RESOURCE_VERB, past tense: the row is written after the
  * change, so it records what happened rather than what was attempted.
  */
-export type AdminAuditAction =
+const ADMIN_AUDIT_ACTIONS = {
   // Platform configuration
-  | 'FEATURE_FLAG_CREATED'
-  | 'FEATURE_FLAG_UPDATED'
-  | 'FEATURE_FLAG_DELETED'
-  | 'MAINTENANCE_MODE_CHANGED'
+  FEATURE_FLAG_CREATED: CONFIG,
+  FEATURE_FLAG_UPDATED: CONFIG,
+  FEATURE_FLAG_DELETED: CONFIG,
+  MAINTENANCE_MODE_CHANGED: CONFIG,
   // Marketing and go-to-market
-  | 'MARKETING_CAMPAIGN_CREATED'
-  | 'MARKETING_CAMPAIGN_UPDATED'
-  | 'MARKETING_CAMPAIGN_DELETED'
-  | 'MARKETING_LEAD_CREATED'
-  | 'MARKETING_LEADS_IMPORTED'
-  | 'MARKETING_LEAD_UPDATED'
-  | 'MARKETING_LEAD_DELETED'
-  | 'GTM_INITIATIVE_CREATED'
-  | 'GTM_INITIATIVE_UPDATED'
-  | 'GTM_INITIATIVE_DELETED'
+  MARKETING_CAMPAIGN_CREATED: CONTENT,
+  MARKETING_CAMPAIGN_UPDATED: CONTENT,
+  MARKETING_CAMPAIGN_DELETED: CONTENT,
+  MARKETING_LEAD_CREATED: CONTENT,
+  MARKETING_LEADS_IMPORTED: CONTENT,
+  MARKETING_LEAD_UPDATED: CONTENT,
+  MARKETING_LEAD_DELETED: CONTENT,
+  GTM_INITIATIVE_CREATED: CONTENT,
+  GTM_INITIATIVE_UPDATED: CONTENT,
+  GTM_INITIATIVE_DELETED: CONTENT,
   // Editorial
-  | 'BLOG_ARTICLE_CREATED'
-  | 'BLOG_ARTICLE_UPDATED'
-  | 'BLOG_ARTICLE_DELETED'
+  BLOG_ARTICLE_CREATED: CONTENT,
+  BLOG_ARTICLE_UPDATED: CONTENT,
+  BLOG_ARTICLE_DELETED: CONTENT,
   // Funding. The decisions are about a named member and move money or cover
   // towards her, so they carry targetUserId; the catalogue edits do not.
-  | 'GRANT_CREATED'
-  | 'GRANT_UPDATED'
-  | 'GRANT_APPLICATION_DECIDED'
-  | 'INSURANCE_APPLICATION_DECIDED'
-  | 'COMPANY_FORMATION_DECIDED'
-  | 'COMPANY_FORMATION_FEE_REFUNDED'
+  GRANT_CREATED: CONTENT,
+  GRANT_UPDATED: CONTENT,
+  GRANT_APPLICATION_DECIDED: CONTENT,
+  INSURANCE_APPLICATION_DECIDED: CONTENT,
+  COMPANY_FORMATION_DECIDED: CONTENT,
+  COMPANY_FORMATION_FEE_REFUNDED: CONTENT,
   // Catalogue
-  | 'ACCELERATOR_COHORT_CREATED'
-  | 'ACCELERATOR_COHORT_UPDATED'
-  | 'ACCELERATOR_COHORT_DELETED'
-  | 'ACCELERATOR_SESSION_CREATED'
-  | 'ACCELERATOR_SESSION_UPDATED'
-  | 'ACCELERATOR_SESSION_DELETED'
-  | 'INVESTOR_CREATED'
-  | 'INVESTOR_UPDATED'
-  | 'INVESTOR_DELETED'
-  | 'INVESTOR_INTRODUCTION_UPDATED'
-  | 'INSURANCE_PRODUCT_CREATED'
-  | 'INSURANCE_PRODUCT_UPDATED'
-  | 'INSURANCE_PRODUCT_DELETED'
+  ACCELERATOR_COHORT_CREATED: CONTENT,
+  ACCELERATOR_COHORT_UPDATED: CONTENT,
+  ACCELERATOR_COHORT_DELETED: CONTENT,
+  ACCELERATOR_SESSION_CREATED: CONTENT,
+  ACCELERATOR_SESSION_UPDATED: CONTENT,
+  ACCELERATOR_SESSION_DELETED: CONTENT,
+  // A member's place on a cohort, released, revoked or refunded by staff. These
+  // were filed as ACCELERATOR_COHORT_UPDATED with a `change` field, the nearest
+  // name there was, so a search for what happened to her place found a cohort
+  // edit instead.
+  ACCELERATOR_ENROLLMENT_RELEASED: CONTENT,
+  ACCELERATOR_ENROLLMENT_REVOKED: CONTENT,
+  ACCELERATOR_ENROLLMENT_REFUND_RECORDED: CONTENT,
+  COURSE_UNPUBLISHED: CONTENT,
+  INVESTOR_CREATED: CONTENT,
+  INVESTOR_UPDATED: CONTENT,
+  INVESTOR_DELETED: CONTENT,
+  INVESTOR_INTRODUCTION_UPDATED: CONTENT,
+  INSURANCE_PRODUCT_CREATED: CONTENT,
+  INSURANCE_PRODUCT_UPDATED: CONTENT,
+  INSURANCE_PRODUCT_DELETED: CONTENT,
   // Impact programmes, including the domestic violence service directory
-  | 'IMPACT_PROGRAM_CREATED'
-  | 'IMPACT_PROGRAM_UPDATED'
-  | 'IMPACT_PROGRAM_DELETED'
-  | 'IMPACT_MILESTONE_CREATED'
-  | 'IMPACT_MILESTONE_UPDATED'
-  | 'IMPACT_MILESTONE_DELETED'
-  | 'BRIDGING_PROGRAM_CREATED'
-  | 'BRIDGING_PROGRAM_UPDATED'
-  | 'BRIDGING_PROGRAM_DELETED'
-  | 'DV_SERVICE_CREATED'
-  | 'DV_SERVICE_UPDATED'
-  | 'DV_SERVICE_DELETED'
-  | 'IMPACT_PARTNER_CREATED'
-  | 'IMPACT_PARTNER_UPDATED'
-  | 'IMPACT_PARTNER_DELETED'
-  | 'INDIGENOUS_COMMUNITY_CREATED'
-  | 'INDIGENOUS_COMMUNITY_UPDATED'
-  | 'INDIGENOUS_COMMUNITY_DELETED'
-  | 'INDIGENOUS_RESOURCE_CREATED'
-  | 'INDIGENOUS_RESOURCE_UPDATED'
-  | 'INDIGENOUS_RESOURCE_DELETED'
-  | 'CREDENTIAL_ASSESSMENT_UPDATED'
+  IMPACT_PROGRAM_CREATED: CONTENT,
+  IMPACT_PROGRAM_UPDATED: CONTENT,
+  IMPACT_PROGRAM_DELETED: CONTENT,
+  IMPACT_MILESTONE_CREATED: CONTENT,
+  IMPACT_MILESTONE_UPDATED: CONTENT,
+  IMPACT_MILESTONE_DELETED: CONTENT,
+  BRIDGING_PROGRAM_CREATED: CONTENT,
+  BRIDGING_PROGRAM_UPDATED: CONTENT,
+  BRIDGING_PROGRAM_DELETED: CONTENT,
+  DV_SERVICE_CREATED: CONTENT,
+  DV_SERVICE_UPDATED: CONTENT,
+  DV_SERVICE_DELETED: CONTENT,
+  IMPACT_PARTNER_CREATED: CONTENT,
+  IMPACT_PARTNER_UPDATED: CONTENT,
+  IMPACT_PARTNER_DELETED: CONTENT,
+  INDIGENOUS_COMMUNITY_CREATED: CONTENT,
+  INDIGENOUS_COMMUNITY_UPDATED: CONTENT,
+  INDIGENOUS_COMMUNITY_DELETED: CONTENT,
+  INDIGENOUS_RESOURCE_CREATED: CONTENT,
+  INDIGENOUS_RESOURCE_UPDATED: CONTENT,
+  INDIGENOUS_RESOURCE_DELETED: CONTENT,
+  CREDENTIAL_ASSESSMENT_UPDATED: CONTENT,
+  // Automotive: the workshop and dealership directory, listings, reviews,
+  // finance enquiries, referrals, and staff decisions on a purchase. These rows
+  // were written in this exact shape by a helper of the automotive router's
+  // own, because this list had no car verbs; they belong here so there is one
+  // place staff audit rows are written.
+  CAR_WORKSHOP_UPDATED: CONTENT,
+  CAR_DEALERSHIP_UPDATED: CONTENT,
+  CAR_LISTING_REVIEWED: CONTENT,
+  CAR_LISTING_EDITED_BY_ADMIN: CONTENT,
+  CAR_REVIEW_MODERATED: CONTENT,
+  CAR_WORKSHOP_REVIEW_MODERATED: CONTENT,
+  CAR_FINANCE_ENQUIRY_UPDATED: CONTENT,
+  CAR_REFERRAL_CREATED: CONTENT,
+  CAR_REFERRAL_UPDATED: CONTENT,
+  CAR_PURCHASE_RELEASED_BY_ADMIN: CONTENT,
+  CAR_PURCHASE_CANCELLED_BY_ADMIN: CONTENT,
+  CAR_PURCHASE_DISPUTE_RESOLVED: CONTENT,
+  CAR_INSPECTION_UPDATED_BY_ADMIN: CONTENT,
   // Member-facing queues
-  | 'FEEDBACK_UPDATED'
+  FEEDBACK_UPDATED: CONTENT,
   // A data-subject request taken, handed on, noted or closed by staff
-  | 'DSAR_REQUEST_UPDATED'
+  DSAR_REQUEST_UPDATED: CONTENT,
   // Public disclosures: who compiled and published the transparency report,
   // and who changed the register of providers members are pointed to
-  | 'TRANSPARENCY_REPORT_COMPILED'
-  | 'TRANSPARENCY_REPORT_PUBLISHED'
-  | 'SUBPROCESSOR_CREATED'
-  | 'SUBPROCESSOR_UPDATED'
+  TRANSPARENCY_REPORT_COMPILED: CONTENT,
+  TRANSPARENCY_REPORT_PUBLISHED: CONTENT,
+  SUBPROCESSOR_CREATED: CONFIG,
+  SUBPROCESSOR_UPDATED: CONFIG,
+  // Safety: a concern about a member closed, or a safety report upheld or
+  // dismissed. Filed under the safety verb rather than a staff-content one,
+  // because these move a member's safety score and are what an appeal answers.
+  SAFETY_FLAG_RESOLVED: SAFETY,
+  SAFETY_REPORT_UPHELD: SAFETY,
+  SAFETY_REPORT_DISMISSED: SAFETY,
   // Seeding. Hard-blocked in production, but a demo or CI environment that
   // mints an administrator account and hands back its password should still be
   // able to say when that happened and from where.
-  | 'SEED_ADMIN_ACCOUNT_CREATED'
-  | 'SEED_ADMIN_PASSWORD_ROTATED'
-  | 'SEED_CONTENT_RUN';
+  SEED_ADMIN_ACCOUNT_CREATED: CONFIG,
+  SEED_ADMIN_PASSWORD_ROTATED: CONFIG,
+  SEED_CONTENT_RUN: CONFIG,
+} as const satisfies Record<string, AuditAction>;
+
+/**
+ * What staff can do on these surfaces. A union rather than a free string so the
+ * vocabulary cannot drift into six spellings of the same event, which is what
+ * makes the log searchable a year from now.
+ */
+export type AdminAuditAction = keyof typeof ADMIN_AUDIT_ACTIONS;
+
+/** Every verb, for validating a filter the audit-log viewer is sent. */
+export const ADMIN_AUDIT_ACTION_NAMES = Object.keys(ADMIN_AUDIT_ACTIONS) as AdminAuditAction[];
+
+export function isAdminAuditAction(value: string): value is AdminAuditAction {
+  return Object.prototype.hasOwnProperty.call(ADMIN_AUDIT_ACTIONS, value);
+}
+
+/** The enum value a verb is filed under. */
+export function auditActionFor(action: AdminAuditAction): AuditAction {
+  return ADMIN_AUDIT_ACTIONS[action];
+}
+
+/**
+ * The verbs filed under this enum value today, so a filter on it can also
+ * reach the rows written before it existed, which carry the same verb in
+ * metadata under LEGACY_ADMIN_AUDIT_ACTION.
+ */
+export function adminVerbsFiledUnder(action: AuditAction): AdminAuditAction[] {
+  return ADMIN_AUDIT_ACTION_NAMES.filter((verb) => ADMIN_AUDIT_ACTIONS[verb] === action);
+}
 
 export interface AdminAuditDetail {
   /** The Prisma model the row belongs to, e.g. 'FeatureFlag'. */
@@ -176,7 +248,7 @@ export async function recordAdminAction(
   await bestEffort(
     `admin audit ${action}`,
     logAudit({
-      action: PLATFORM_ADMIN_AUDIT_ACTION,
+      action: auditActionFor(action),
       actorUserId: req.user?.id ?? null,
       targetUserId: targetUserId ?? null,
       ipAddress: req.ip ?? null,

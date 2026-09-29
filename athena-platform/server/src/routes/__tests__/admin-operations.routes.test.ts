@@ -25,6 +25,9 @@ jest.mock('../../utils/prisma', () => ({
     contentReport: {
       findMany: jest.fn(),
     },
+    safetyIncident: {
+      findMany: jest.fn(),
+    },
     moderationLog: {
       create: jest.fn(),
       findMany: jest.fn(),
@@ -131,9 +134,30 @@ const oaicStatement = {
   recommendedSteps: 'Watch for unexpected recruiter contact and report anything odd through the privacy centre.',
 };
 
+/** A legal hold as prisma returns it. */
+const holdRow = (overrides: Record<string, unknown> = {}) => ({
+  id: 'hold-1',
+  name: 'Smith v ATHENA',
+  reason: 'Preservation notice served on 2 September 2026.',
+  caseReference: 'QLD-2026-114',
+  affectedUserIds: ['user-1'],
+  affectedDataTypes: [],
+  startDate: new Date(Date.now() - 10 * DAY_MS),
+  endDate: null,
+  isActive: true,
+  authorizedBy: 'admin-123',
+  authorizedAt: new Date(Date.now() - 10 * DAY_MS),
+  releasedBy: null,
+  releasedAt: null,
+  releaseReason: null,
+  ...overrides,
+});
+
 describe('Admin operational routes', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    prismaAny.safetyIncident.findMany.mockResolvedValue([]);
+    prismaAny.user.findMany.mockResolvedValue([]);
     // The maintenance gate runs ahead of every /api route, so each test starts
     // from a platform that is open rather than from the previous test's state.
     resetMaintenanceCache();
@@ -551,8 +575,8 @@ describe('Admin operational routes', () => {
 
     it('GET /api/admin/legal-holds flags an active hold whose end date has passed', async () => {
       prismaAny.legalHold.findMany.mockResolvedValue([
-        { id: 'hold-1', isActive: true, endDate: new Date(Date.now() - 24 * HOUR_MS) },
-        { id: 'hold-2', isActive: true, endDate: null },
+        holdRow({ id: 'hold-1', endDate: new Date(Date.now() - 24 * HOUR_MS) }),
+        holdRow({ id: 'hold-2', endDate: null }),
       ]);
       prismaAny.legalHold.count.mockResolvedValue(2);
 
@@ -560,6 +584,141 @@ describe('Admin operational routes', () => {
 
       expect(response.body.holds[0].expired).toBe(true);
       expect(response.body.holds[1].expired).toBe(false);
+    });
+
+    it('GET /api/admin/legal-holds names who authorised each hold and offers the data types the purge answers to', async () => {
+      prismaAny.legalHold.findMany.mockResolvedValue([holdRow({ affectedDataTypes: ['messages', 'photos'] })]);
+      prismaAny.legalHold.count.mockResolvedValue(1);
+      prismaAny.user.findMany.mockResolvedValue([
+        { id: 'admin-123', email: 'privacy@athena.test', displayName: 'Mere', firstName: null, lastName: null },
+      ]);
+
+      const response = await request(app).get('/api/admin/legal-holds').expect(200);
+
+      expect(response.body.holds[0].authorizedByName).toBe('Mere');
+      expect(response.body.holds[0].unrecognisedDataTypes).toEqual(['photos']);
+      const offered = response.body.dataTypes.map((type: { value: string }) => type.value);
+      expect(offered).toEqual(expect.arrayContaining(['messages', 'notifications', 'sessions', 'users']));
+      // Nothing stores analytics events, so a hold on them would keep nothing.
+      expect(offered).not.toContain('analytics');
+    });
+
+    it('POST /api/admin/legal-holds takes the members by the address staff actually have', async () => {
+      prismaAny.user.findMany.mockResolvedValue([{ id: 'user-7', email: 'Aroha@Example.org' }]);
+      prismaAny.legalHold.create.mockResolvedValue(holdRow({ affectedUserIds: ['user-7'] }));
+      prismaAny.privacyAuditLog.create.mockResolvedValue({});
+
+      await request(app)
+        .post('/api/admin/legal-holds')
+        .send({
+          name: 'Preservation notice',
+          reason: 'Notice served by the member\'s solicitor.',
+          affectedUserEmails: ['aroha@example.org'],
+        })
+        .expect(201);
+
+      expect(prisma.legalHold.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ affectedUserIds: ['user-7'] }) })
+      );
+    });
+
+    it('POST /api/admin/legal-holds refuses an address no account uses', async () => {
+      prismaAny.user.findMany.mockResolvedValue([]);
+
+      const response = await request(app)
+        .post('/api/admin/legal-holds')
+        .send({ name: 'Notice', reason: 'Served.', affectedUserEmails: ['nobody@example.org'] })
+        .expect(400);
+
+      expect(response.body.message).toContain('nobody@example.org');
+      expect(prisma.legalHold.create).not.toHaveBeenCalled();
+    });
+
+    it('POST /api/admin/legal-holds recognises every spelling the purge honours', async () => {
+      prismaAny.legalHold.create.mockImplementation(async ({ data }: any) => holdRow(data));
+      prismaAny.privacyAuditLog.create.mockResolvedValue({});
+
+      const response = await request(app)
+        .post('/api/admin/legal-holds')
+        .send({ name: 'Notice', reason: 'Served.', affectedDataTypes: ['Direct messages', 'Notifications'] })
+        .expect(201);
+
+      // "notifications" used to be reported as covering nothing, though the purge
+      // has always honoured it.
+      expect(response.body.affectedDataTypes).toEqual(['direct_messages', 'notifications']);
+      expect(response.body.unrecognisedDataTypes).toEqual([]);
+    });
+
+    it('POST /api/admin/legal-holds refuses an end date that has already passed', async () => {
+      await request(app)
+        .post('/api/admin/legal-holds')
+        .send({ name: 'Notice', reason: 'Served.', affectedDataTypes: ['messages'], endDate: '2020-01-01' })
+        .expect(400);
+      expect(prisma.legalHold.create).not.toHaveBeenCalled();
+    });
+
+    it('POST /api/admin/legal-holds still answers 201 when the audit row cannot be written', async () => {
+      prismaAny.legalHold.create.mockResolvedValue(holdRow());
+      prismaAny.privacyAuditLog.create.mockRejectedValue(new Error('audit table locked'));
+
+      // The hold exists. A 500 here would have the operator place it twice.
+      await request(app)
+        .post('/api/admin/legal-holds')
+        .send({ name: 'Notice', reason: 'Served.', affectedDataTypes: ['messages'] })
+        .expect(201);
+    });
+
+    it('PATCH /api/admin/legal-holds/:id moves the review date and widens the hold', async () => {
+      prismaAny.legalHold.findUnique.mockResolvedValue(holdRow({ affectedDataTypes: ['messages'] }));
+      prismaAny.user.findMany.mockResolvedValue([{ id: 'user-2' }]);
+      prismaAny.legalHold.update.mockImplementation(async ({ data }: any) => holdRow(data));
+      prismaAny.privacyAuditLog.create.mockResolvedValue({});
+      const endDate = new Date(Date.now() + 90 * DAY_MS).toISOString();
+
+      await request(app)
+        .patch('/api/admin/legal-holds/hold-1')
+        .send({ endDate, addUserIds: ['user-2'], addDataTypes: ['Notifications'] })
+        .expect(200);
+
+      expect(prisma.legalHold.update).toHaveBeenCalledWith({
+        where: { id: 'hold-1' },
+        data: {
+          affectedUserIds: ['user-1', 'user-2'],
+          affectedDataTypes: ['messages', 'notifications'],
+          endDate: new Date(endDate),
+        },
+      });
+      expect(prisma.privacyAuditLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ action: 'LEGAL_HOLD_UPDATED' }) })
+      );
+    });
+
+    it('PATCH /api/admin/legal-holds/:id will not change a released hold', async () => {
+      prismaAny.legalHold.findUnique.mockResolvedValue(holdRow({ isActive: false }));
+
+      await request(app).patch('/api/admin/legal-holds/hold-1').send({ endDate: null }).expect(409);
+      expect(prisma.legalHold.update).not.toHaveBeenCalled();
+    });
+
+    it('PATCH /api/admin/legal-holds/:id needs something to change', async () => {
+      await request(app).patch('/api/admin/legal-holds/hold-1').send({}).expect(400);
+      expect(prisma.legalHold.update).not.toHaveBeenCalled();
+    });
+
+    it('GET /api/admin/legal-holds/:id names the members the hold covers', async () => {
+      prismaAny.legalHold.findUnique.mockResolvedValue(holdRow({ affectedUserIds: ['user-1', 'gone-1'] }));
+      prismaAny.user.findMany.mockResolvedValue([
+        { id: 'user-1', email: 'aroha@example.org', displayName: null, firstName: 'Aroha', lastName: 'Ngata' },
+      ]);
+
+      const response = await request(app).get('/api/admin/legal-holds/hold-1').expect(200);
+
+      expect(response.body.affectedUserCount).toBe(2);
+      expect(response.body.affectedUsers).toEqual([
+        { id: 'user-1', email: 'aroha@example.org', name: 'Aroha Ngata' },
+        // An account erased since keeps its place in the list, by id.
+        { id: 'gone-1', email: null, name: null },
+      ]);
     });
   });
 
@@ -657,6 +816,61 @@ describe('Admin operational routes', () => {
         acknowledged: 0,
         resolved: 0,
       });
+    });
+
+    it('GET /api/admin/moderation/escalations finds a referral raised from the anonymous form', async () => {
+      prismaAny.authorityEscalation.findMany.mockResolvedValue([escalation]);
+      prismaAny.authorityEscalation.count.mockResolvedValue(1);
+      prismaAny.contentReport.findMany.mockResolvedValue([]);
+      prismaAny.safetyIncident.findMany.mockResolvedValue([
+        {
+          id: 'incident-4',
+          type: 'USER_REPORT',
+          userId: 'user-9',
+          contentType: 'POST',
+          contentId: 'post-1',
+          reason: 'csam',
+          severity: 'CRITICAL',
+          resolvedAt: null,
+          resolvedById: null,
+          createdAt: new Date(Date.now() - 6 * HOUR_MS),
+          metadata: { anonymous: true, ticketId: 'RPT-ABC-1234', description: 'Found on a public post' },
+        },
+      ]);
+
+      const response = await request(app).get('/api/admin/moderation/escalations').expect(200);
+
+      // Only named reports used to be found, so a referral from the door a
+      // frightened reporter is most likely to use showed no report at all.
+      expect(response.body.escalations[0].report).toMatchObject({
+        source: 'anonymous',
+        id: 'incident-4',
+        status: 'PENDING',
+        reportedUserId: 'user-9',
+      });
+    });
+
+    it('GET /api/admin/moderation/escalations/:id names who did what in its history', async () => {
+      prismaAny.authorityEscalation.findUnique.mockResolvedValue(escalation);
+      prismaAny.contentReport.findMany.mockResolvedValue([]);
+      prismaAny.moderationLog.findMany.mockResolvedValue([
+        {
+          id: 'log-1',
+          ticketId: 'RPT-ABC-1234',
+          action: 'escalation_acknowledged',
+          moderatorId: 'admin-123',
+          notes: 'Filed.',
+          timestamp: new Date(),
+        },
+      ]);
+      prismaAny.user.findMany.mockResolvedValue([
+        { id: 'admin-123', email: 'safety@athena.test', displayName: null, firstName: 'Mere', lastName: 'Tipene' },
+      ]);
+
+      const response = await request(app).get('/api/admin/moderation/escalations/esc-1').expect(200);
+
+      expect(response.body.report).toBeNull();
+      expect(response.body.history[0].moderatorName).toBe('Mere Tipene');
     });
 
     it('PATCH /api/admin/moderation/escalations/:id will not acknowledge without a reference number', async () => {

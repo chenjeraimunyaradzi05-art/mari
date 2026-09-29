@@ -184,6 +184,29 @@ export default function AdminWomenGatePage() {
       }),
   });
 
+  // Requests that are back in the queue because an appeal against a refusal
+  // was upheld. The appeal does not verify her: it sends the request back here
+  // to be decided again, and the reviewer should read what she wrote in her
+  // appeal before deciding, not only the original submission. The newest
+  // hundred upheld verification appeals cover everyone the appeal route can
+  // have put back in this queue recently.
+  const { data: reopenedOnAppeal } = useQuery({
+    queryKey: ['admin-verification-appeals-upheld'],
+    enabled: verificationStatus === 'PENDING',
+    queryFn: () =>
+      api.get('/appeals', { params: { type: 'VERIFICATION_DECISION', status: 'APPROVED', limit: 100 } }),
+    select: (response) => {
+      const rows = Array.isArray(response.data?.data)
+        ? (response.data.data as Array<{ userId: string; reason: string; reviewedAt: string | null }>)
+        : [];
+      const byUser = new Map<string, { reason: string; reviewedAt: string | null }>();
+      for (const row of rows) {
+        if (!byUser.has(row.userId)) byUser.set(row.userId, { reason: row.reason, reviewedAt: row.reviewedAt });
+      }
+      return byUser;
+    },
+  });
+
   const updateVerificationMutation = useMutation({
     mutationFn: ({ userId, status, reason }: { userId: string; status: 'VERIFIED' | 'REJECTED'; reason?: string }) =>
       womanGateApi.review(userId, { status, ...(reason ? { reason } : {}) }),
@@ -367,6 +390,12 @@ export default function AdminWomenGatePage() {
                             Joined {new Date(user.createdAt).toLocaleDateString()} ·{' '}
                             {user.subscription?.tier || 'FREE'}
                           </div>
+                          {user.womanVerificationStatus === 'PENDING' && reopenedOnAppeal?.get(user.id) && (
+                            <div className="mt-2 max-w-xs rounded-md bg-violet-50 p-2 text-xs text-violet-900 dark:bg-violet-950/30 dark:text-violet-200">
+                              <div className="font-semibold">Back in the queue on appeal</div>
+                              <p className="mt-1 whitespace-pre-wrap">{reopenedOnAppeal.get(user.id)!.reason}</p>
+                            </div>
+                          )}
                         </td>
                         <td className="px-4 py-3 align-top text-sm text-slate-600 dark:text-slate-300">
                           <SubmissionCell evidence={evidence} ageVerifiedAt={user.ageVerifiedAt} />

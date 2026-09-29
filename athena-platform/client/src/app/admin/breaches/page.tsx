@@ -313,6 +313,16 @@ export default function BreachRegisterPage() {
             <div className="flex justify-center py-12">
               <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
             </div>
+          ) : register.isError ? (
+            // A register that failed to load is not an empty one; reading it
+            // as "No incidents recorded" mid-incident would be the worst answer.
+            <div className="card flex flex-col items-start gap-3 border-red-200 bg-red-50 p-6 dark:border-red-900 dark:bg-red-900/20" role="alert">
+              <p className="font-medium text-red-800 dark:text-red-200">The breach register could not be loaded.</p>
+              <p className="text-sm text-red-700 dark:text-red-300">{errorMessage(register.error) ?? 'The server did not answer.'} Do not read this as no incidents.</p>
+              <button type="button" onClick={() => register.refetch()} className="btn-outline text-sm">
+                Try again
+              </button>
+            </div>
           ) : (register.data?.breaches.length ?? 0) === 0 ? (
             <div className="card p-10 text-center text-slate-500">No incidents recorded.</div>
           ) : (

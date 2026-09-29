@@ -34,7 +34,8 @@ process.env.AI_OPENAI_API_KEY = 'test-key';
 
 import { prisma as prismaTyped } from '../../utils/prisma';
 import { recordFailure } from '../../utils/ops-metrics';
-import { assertContentAllowed, CONTENT_REVIEW_FLAG } from '../moderation.service';
+import { cacheGet } from '../../utils/cache';
+import { assertContentAllowed, CONTENT_REVIEW_FLAG, MESSAGE_CHECK_UNAVAILABLE, moderateText } from '../moderation.service';
 
 const prisma: any = prismaTyped;
 
@@ -103,5 +104,49 @@ describe('Borderline content goes in front of a person', () => {
 
     const notes: string = prisma.adminFlag.create.mock.calls[0][0].data.notes;
     expect(notes.length).toBeLessThan(700);
+  });
+});
+
+describe('A provider outage on the conversational surfaces', () => {
+  it.each(['message', 'group_message', 'channel_message', 'live_chat'] as const)(
+    'holds a %s back with a 503 instead of delivering it unscreened',
+    async (kind) => {
+      moderationsCreate.mockRejectedValue(new Error('provider timed out') as never);
+
+      await expect(assertContentAllowed('see you soon', { kind, userId: 'sender-1' })).rejects.toMatchObject({
+        statusCode: 503,
+        message: MESSAGE_CHECK_UNAVAILABLE,
+      });
+      // Counted once, where the outage happened, and never filed against her.
+      expect(recordFailure).toHaveBeenCalledWith('moderation.provider_unavailable', expect.any(Error));
+      expect(prisma.adminFlag.create).not.toHaveBeenCalled();
+    }
+  );
+
+  it('still publishes a post during the same outage', async () => {
+    moderationsCreate.mockRejectedValue(new Error('provider timed out') as never);
+
+    await expect(assertContentAllowed('a post', { kind: 'post', userId: 'author-1' })).resolves.toBeUndefined();
+  });
+
+  it('marks the unanswered verdict as unavailable so callers can tell it from a judgement', async () => {
+    moderationsCreate.mockRejectedValue(new Error('provider timed out') as never);
+
+    await expect(moderateText('anything')).resolves.toMatchObject({ action: 'review', unavailable: true });
+  });
+});
+
+describe('The verdict cache', () => {
+  it('keys verdicts by a SHA-256 of the text under a versioned prefix', async () => {
+    providerAnswer({ harassment: 0.01 });
+
+    await moderateText('Aa');
+    await moderateText('BB');
+
+    // 'Aa' and 'BB' shared a key under the old 31-bit hash, so a cached allow
+    // for one was served for the other.
+    const keys = jest.mocked(cacheGet).mock.calls.map((call) => String(call[0]));
+    expect(keys[0]).toMatch(/^moderation:v2:[0-9a-f]{64}$/);
+    expect(keys[0]).not.toBe(keys[1]);
   });
 });

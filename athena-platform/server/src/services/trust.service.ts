@@ -3,6 +3,7 @@ import { prisma } from '../utils/prisma';
 export interface TrustScoreResult {
   score: number;
   factors: Array<{ label: string; points: number }>;
+  /** When these factors were read. The factor score is worked out on request and never stored. */
   updatedAt: string;
 }
 
@@ -117,17 +118,15 @@ export async function calculateTrustScore(userId: string): Promise<TrustScoreRes
   }
 
   score = clamp(score, 0, 100);
-  const updatedAt = new Date().toISOString();
 
-  await prisma.user.update({
-    where: { id: userId },
-    data: {
-      trustScore: score,
-      trustScoreUpdatedAt: updatedAt,
-    },
-  });
-
-  return { score, factors, updatedAt };
+  // Computed, not stored. This used to write the result over User.trustScore
+  // on every read, so each visit to the trust page cost four counts and a
+  // write, and — worse — replaced the value applyTrustDelta keeps, which is the
+  // one that carries the penalties from reports and blocks. A member reported
+  // for harassment had her score put back to its profile-completeness figure
+  // the next time she opened the page. The stored score now changes only
+  // through applyTrustDelta; this answers what her profile earns, as of now.
+  return { score, factors, updatedAt: new Date().toISOString() };
 }
 
 export async function recordSafetyReport(reporterId: string, reportedUserId?: string | null) {

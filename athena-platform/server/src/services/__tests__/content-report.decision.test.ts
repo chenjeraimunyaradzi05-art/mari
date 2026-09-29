@@ -18,8 +18,11 @@ jest.mock('../../utils/prisma', () => ({
     notification: { create: jest.fn() },
     user: { findUnique: jest.fn(), update: jest.fn() },
     post: { update: jest.fn() },
+    bannedIdentity: { upsert: jest.fn(), deleteMany: jest.fn() },
   },
 }));
+
+process.env.BANNED_IDENTITY_HASH_KEY = 'test-ban-key';
 
 jest.mock('../../utils/email', () => ({
   sendEmail: jest.fn(async () => true),
@@ -60,8 +63,28 @@ describe('Deciding a report', () => {
     prismaAny.moderationLog.create.mockResolvedValue({ id: 'log-1' });
     prismaAny.notification.create.mockResolvedValue({ id: 'notification-1' });
     prismaAny.user.findUnique.mockResolvedValue({ id: 'reporter-1' });
-    prismaAny.user.update.mockResolvedValue({ id: 'reported-1' });
+    prismaAny.user.update.mockResolvedValue({ id: 'reported-1', email: 'reported@example.org' });
     prismaAny.post.update.mockResolvedValue({ id: 'post-1' });
+    prismaAny.bannedIdentity.upsert.mockResolvedValue({ id: 'ban-1' });
+  });
+
+  it('records why, when and by whom an account was suspended', async () => {
+    await processReportById('report-1', 'suspend', 'moderator-1', 'Repeated abuse');
+
+    const data = prismaAny.user.update.mock.calls[0][0].data;
+    expect(data).toMatchObject({ isSuspended: true, suspensionReason: 'Repeated abuse', suspendedById: 'moderator-1' });
+    expect(data.suspendedAt).toBeInstanceOf(Date);
+    // A suspension is not a ban, and does not bar the address.
+    expect(data.bannedAt).toBeUndefined();
+    expect(prismaAny.bannedIdentity.upsert).not.toHaveBeenCalled();
+  });
+
+  it('gives a suspension without notes the report it was decided on as its reason', async () => {
+    await processReportById('report-1', 'suspend', 'moderator-1');
+
+    expect(prismaAny.user.update.mock.calls[0][0].data.suspensionReason).toBe(
+      'Decided on a post report for harassment, with no notes'
+    );
   });
 
   it('tells the reporter the outcome even though her report carries no ticket and no email', async () => {
@@ -114,11 +137,11 @@ describe('Deciding a report', () => {
     expect(outcome.action).toBe('remove');
   });
 
-  // Ban runs the same lock as suspend — there is no ban record, no permanence
-  // and nothing that stops a new registration — so what distinguishes it is
-  // the record and what everybody is told. It used to tell the reporter the
-  // account had been "removed" and "permanently banned".
-  it('bans by locking the account, records it as a ban, and tells the reporter no more than that', async () => {
+  // A ban locks the account, marks it banned, and bars the address from
+  // registering again. It still does not remove the account, and an upheld
+  // appeal can lift it, so the reporter is told no more than that. It used to
+  // tell her the account had been "removed" and "permanently banned".
+  it('bans the account and the address, records it as a ban, and tells the reporter no more than that', async () => {
     prismaAny.contentReport.findUnique.mockResolvedValue({
       ...REPORT,
       evidence: { ticketId: 'RPT-X-1', contactEmail: 'reporter@example.org' },
@@ -126,10 +149,22 @@ describe('Deciding a report', () => {
 
     const outcome = await processReportById('report-1', 'ban', 'moderator-1', 'Stalking across accounts');
 
-    expect(prismaAny.user.update).toHaveBeenCalledWith({
-      where: { id: 'reported-1' },
-      data: { isSuspended: true },
+    const lock = prismaAny.user.update.mock.calls[0][0];
+    expect(lock.where).toEqual({ id: 'reported-1' });
+    expect(lock.data).toMatchObject({
+      isSuspended: true,
+      banReason: 'Stalking across accounts',
+      bannedById: 'moderator-1',
+      suspensionReason: 'Stalking across accounts',
     });
+    expect(lock.data.bannedAt).toBeInstanceOf(Date);
+
+    const identity = prismaAny.bannedIdentity.upsert.mock.calls[0][0];
+    expect(identity.create).toMatchObject({ userId: 'reported-1', reportId: 'report-1', createdById: 'moderator-1' });
+    // Kept as a keyed hash of the address, never the address itself.
+    expect(JSON.stringify(identity)).not.toContain('example.org');
+    expect(outcome.banIdentityRecorded).toBe(true);
+
     expect(prismaAny.contentReport.update.mock.calls[0][0].data).toMatchObject({ status: 'RESOLVED', action: 'BAN' });
     expect(prismaAny.moderationLog.create.mock.calls[0][0].data).toMatchObject({ action: 'ban', ticketId: 'RPT-X-1' });
     expect(outcome.action).toBe('ban');
@@ -143,6 +178,15 @@ describe('Deciding a report', () => {
     const email = sendEmailMock.mock.calls.map((call: any[]) => call[0]).find((mail: any) => mail.to === 'reporter@example.org');
     expect(email.html).toContain('banned the account');
     expect(email.html).not.toMatch(/permanent/i);
+  });
+
+  it('keeps the ban on the account and tells the moderator when the address could not be barred', async () => {
+    prismaAny.bannedIdentity.upsert.mockRejectedValue(new Error('database refused'));
+
+    const outcome = await processReportById('report-1', 'ban', 'moderator-1', 'Stalking across accounts');
+
+    expect(prismaAny.user.update.mock.calls[0][0].data.bannedAt).toBeInstanceOf(Date);
+    expect(outcome.banIdentityRecorded).toBe(false);
   });
 });
 
@@ -164,8 +208,17 @@ describe('Reversing enforcement on a successful appeal', () => {
 
     const result = await reverseEnforcement({ userId: 'reported-1', reportId: 'report-1' });
 
-    expect(result).toEqual({ suspensionLifted: true, contentRestored: true, reportCleared: true });
-    expect(prismaAny.user.update).toHaveBeenCalledWith({ where: { id: 'reported-1' }, data: { isSuspended: false } });
+    expect(result).toEqual({
+      suspensionLifted: true,
+      banLifted: false,
+      banKept: false,
+      contentRestored: true,
+      reportCleared: true,
+    });
+    expect(prismaAny.user.update).toHaveBeenCalledWith({
+      where: { id: 'reported-1' },
+      data: { isSuspended: false, suspensionReason: null, suspendedAt: null, suspendedById: null },
+    });
     expect(prismaAny.post.updateMany).toHaveBeenCalledWith({ where: { id: 'post-1' }, data: { isHidden: false } });
     expect(prismaAny.contentReport.update.mock.calls[0][0].data).toMatchObject({
       status: 'DISMISSED',
@@ -183,6 +236,31 @@ describe('Reversing enforcement on a successful appeal', () => {
     expect(prismaAny.user.update).not.toHaveBeenCalled();
     expect(result.contentRestored).toBe(true);
     expect(result.reportCleared).toBe(false);
+  });
+
+  it('lifts a ban, and the bar on the address, only when the appeal was about the ban', async () => {
+    prismaAny.contentReport.findUnique.mockResolvedValue(null);
+    prismaAny.user.findUnique.mockResolvedValue({ isSuspended: true, bannedAt: new Date() });
+    prismaAny.bannedIdentity.deleteMany.mockResolvedValue({ count: 1 });
+
+    const kept = await reverseEnforcement({ userId: 'reported-1' });
+    expect(kept).toMatchObject({ suspensionLifted: false, banLifted: false, banKept: true });
+    expect(prismaAny.user.update).not.toHaveBeenCalled();
+
+    const lifted = await reverseEnforcement({ userId: 'reported-1', liftBan: true });
+    expect(lifted).toMatchObject({ suspensionLifted: true, banLifted: true, banKept: false });
+    expect(prismaAny.user.update.mock.calls[0][0].data).toMatchObject({ isSuspended: false, bannedAt: null, banReason: null });
+    expect(prismaAny.bannedIdentity.deleteMany).toHaveBeenCalledWith({ where: { userId: 'reported-1' } });
+  });
+
+  it('leaves the report that recorded a ban alone while the ban stands', async () => {
+    prismaAny.contentReport.findUnique.mockResolvedValue({ ...REPORT, status: 'RESOLVED', action: 'BAN' });
+    prismaAny.user.findUnique.mockResolvedValue({ isSuspended: true, bannedAt: new Date() });
+
+    const result = await reverseEnforcement({ userId: 'reported-1', reportId: 'report-1' });
+
+    expect(result.reportCleared).toBe(false);
+    expect(prismaAny.contentReport.update).not.toHaveBeenCalled();
   });
 
   it('says a deleted message could not be restored rather than pretending it was', async () => {

@@ -20,7 +20,7 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
-import { Building2, ChevronLeft, GitCommit, Loader2, Plug, Shield, Wrench, HardDrive } from 'lucide-react';
+import { Building2, ChevronLeft, GitCommit, Loader2, Plug, Shield, ShieldAlert, Wrench, HardDrive } from 'lucide-react';
 import { adminOpsApi, type OpsSummary, type RuntimeConfig } from '@/lib/admin-ops-api';
 import { contactEmail, HAS_LEGAL_IDENTITY, HAS_OWNED_DOMAIN, ORGANISATION } from '@/lib/contact';
 import { cn } from '@/lib/utils';
@@ -95,6 +95,25 @@ function Card({ icon: Icon, title, description, children }: { icon: typeof Shiel
 
 const NOT_RECORDED = <span className="text-slate-500">Not recorded</span>;
 
+/**
+ * The safety half of the config answer. The server reports where content
+ * reports and authority referrals are alerted, whether member content is
+ * screened, and what happens when it cannot be; this page showed none of it,
+ * so a deployment emailing its CSAM referral alerts nowhere, or refusing every
+ * post because a key had lapsed, looked no different here from a healthy one.
+ * Typed on this page because the shared RuntimeConfig does not carry these yet.
+ */
+type SafetyConfig = {
+  integrations: { trustSafetyAlerts?: boolean; authorityReferralAlerts?: boolean };
+  moderation?: { text: boolean; images: boolean; whenUnscreened: 'off' | 'public' | 'all' };
+};
+
+const WHEN_UNSCREENED: Record<'off' | 'public' | 'all', string> = {
+  off: 'Published unscreened, and counted',
+  public: 'Posts, profiles and images refused; conversations stay open',
+  all: 'Everything refused, conversations included',
+};
+
 export default function AdminSettingsPage() {
   const summary = useQuery({
     queryKey: ['admin-ops-summary'],
@@ -104,7 +123,7 @@ export default function AdminSettingsPage() {
   const config = useQuery({
     queryKey: ['admin-ops-config'],
     queryFn: () => adminOpsApi.config(),
-    select: (r) => r.data as RuntimeConfig,
+    select: (r) => r.data as RuntimeConfig & SafetyConfig,
   });
   const flags = useQuery({
     queryKey: ['feature-flags'],
@@ -173,11 +192,15 @@ export default function AdminSettingsPage() {
                   NOT_RECORDED
                 )}
               </Row>
-              <Row label="Legal holds active" hint={<Link href="/admin/compliance" className="text-primary-600 hover:underline">Compliance</Link>}>
+              <Row label="Legal holds active" hint={<Link href="/admin/legal-holds" className="text-primary-600 hover:underline">Legal holds</Link>}>
                 {s ? s.legalHolds.active : NOT_RECORDED}
               </Row>
-              <Row label="Authority referrals awaiting filing" hint={<Link href="/admin/moderation" className="text-primary-600 hover:underline">Report queue</Link>}>
-                {s ? s.authorityEscalations.awaitingFiling : NOT_RECORDED}
+              <Row label="Authority referrals awaiting filing" hint={<Link href="/admin/referrals" className="text-primary-600 hover:underline">Authority referrals</Link>}>
+                {s ? (
+                  <span className={s.authorityEscalations.awaitingFiling > 0 ? 'text-red-600' : undefined}>{s.authorityEscalations.awaitingFiling}</span>
+                ) : (
+                  NOT_RECORDED
+                )}
               </Row>
               <Row label="Feature flags" hint={<Link href="/admin/feature-flags" className="text-primary-600 hover:underline">Feature flags</Link>}>
                 {flags.data === null || flags.data === undefined ? NOT_RECORDED : flags.data}
@@ -235,6 +258,38 @@ export default function AdminSettingsPage() {
               <Row label="Live-stream ingest" hint="Hosts paste a playback URL without it"><Configured ok={Boolean(c?.integrations.livestreamIngest)} /></Row>
               <Row label="Live-stream playback template"><Configured ok={Boolean(c?.integrations.livestreamPlayback)} /></Row>
               <Row label="Error reporting (Sentry)"><Configured ok={Boolean(c?.integrations.sentry)} /></Row>
+            </Card>
+
+            <Card icon={ShieldAlert} title="Safety" description="Screening, and where safety alerts go">
+              <Row label="Text screening" hint="AI_OPENAI_API_KEY">
+                {c?.moderation ? <Configured ok={c.moderation.text} yes="Screened before it publishes" no="No provider" /> : NOT_RECORDED}
+              </Row>
+              <Row label="Image screening" hint="AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY">
+                {c?.moderation ? <Configured ok={c.moderation.images} yes="Screened before it publishes" no="No provider" /> : NOT_RECORDED}
+              </Row>
+              <Row label="When nothing can screen it" hint="MODERATION_REQUIRED: off, public or all">
+                {c?.moderation ? (
+                  <span className={cn((!c.moderation.text || !c.moderation.images) && 'text-amber-700 dark:text-amber-300')}>
+                    {WHEN_UNSCREENED[c.moderation.whenUnscreened]}
+                  </span>
+                ) : (
+                  NOT_RECORDED
+                )}
+              </Row>
+              <Row label="Trust & Safety alerts" hint="TRUST_SAFETY_EMAIL, or the support address of CONTACT_DOMAIN">
+                {c?.integrations.trustSafetyAlerts === undefined ? (
+                  NOT_RECORDED
+                ) : (
+                  <Configured ok={c.integrations.trustSafetyAlerts} yes="Sent" no="Not sent: no mailbox" />
+                )}
+              </Row>
+              <Row label="Authority referral alerts" hint="AUTHORITY_ESCALATION_EMAIL, falling back to the Trust & Safety mailbox">
+                {c?.integrations.authorityReferralAlerts === undefined ? (
+                  NOT_RECORDED
+                ) : (
+                  <Configured ok={c.integrations.authorityReferralAlerts} yes="Sent" no="Not sent: no mailbox" />
+                )}
+              </Row>
             </Card>
 
             <Card icon={Building2} title="Contact and legal identity" description="What the web build publishes about the organisation">

@@ -209,8 +209,9 @@ describe('Admin Routes', () => {
           type: 'webinar',
           format: 'in-person',
           date: '2026-01-20T00:00:00.000Z',
-          startTime: '10:00 AM',
-          endTime: '11:00 AM',
+          // HH:MM, the rule the member-facing event routes hold hosts to.
+          startTime: '10:00',
+          endTime: '11:00',
           image: 'https://img',
           host: { name: 'Host', title: 'Title', avatar: 'https://ava' },
           tags: ['Tech'],

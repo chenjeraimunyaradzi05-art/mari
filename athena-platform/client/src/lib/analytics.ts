@@ -3,11 +3,19 @@
  * Step 97: Analytics Integration - User Journey KPIs
  */
 import posthog from 'posthog-js';
+import { readCachedCookieChoices } from './cookie-consent';
 
 const POSTHOG_KEY = process.env.NEXT_PUBLIC_POSTHOG_KEY || '';
 const POSTHOG_HOST = process.env.NEXT_PUBLIC_POSTHOG_HOST || 'https://app.posthog.com';
 
 let initialized = false;
+
+/**
+ * The visitor's analytics choice from the cookie banner. False until she says
+ * yes, and remembered across initAnalytics so a choice made before PostHog
+ * loads is applied the moment it does.
+ */
+let analyticsConsented = false;
 
 type AnalyticsEvent = {
   name: string;
@@ -15,7 +23,21 @@ type AnalyticsEvent = {
 };
 
 /**
- * Initialize PostHog analytics
+ * Initialize PostHog analytics.
+ *
+ * Nothing calls this today, and the cookie policy says no measurement tool is
+ * loaded; whoever wires it up must name PostHog in that policy first. It is
+ * written so that wiring it cannot capture anyone who has not agreed. It used
+ * to initialise with capturing on by default, autocapture on and session
+ * recording configured, so the first person to call it would have recorded
+ * sessions whatever a visitor chose in the banner.
+ *
+ * Capturing and persistence are now off until the analytics choice is yes,
+ * and session recording and autocapture stay off even then. Autocapture
+ * records the text of whatever is clicked and a session recording replays the
+ * screen; on a platform where members write about abuse and plan how to leave,
+ * neither is something an analytics switch should turn on. What is measured
+ * after consent is the named events below, and nothing else.
  */
 export function initAnalytics(): void {
   if (typeof window === 'undefined' || initialized || !POSTHOG_KEY) {
@@ -32,29 +54,51 @@ export function initAnalytics(): void {
     },
     capture_pageview: true,
     capture_pageleave: true,
-    autocapture: true,
+    autocapture: false,
     persistence: 'localStorage+cookie',
-    // Respect user privacy preferences
-    opt_out_capturing_by_default: false,
-    // Session recording settings
-    session_recording: {
-      maskAllInputs: true,
-      maskTextSelector: '[data-mask]',
-    },
+    // Nothing is sent, and nothing is stored in her browser, until she agrees.
+    opt_out_capturing_by_default: true,
+    opt_out_persistence_by_default: true,
+    disable_session_recording: true,
   });
 
   initialized = true;
+  // The banner may have been answered before this module was ever loaded, in
+  // which case the choice is in the browser's consent cache rather than here.
+  applyAnalyticsConsent(analyticsConsented || readCachedCookieChoices()?.analytics === true);
 }
 
 /**
- * Identify a user
+ * Carry the banner's analytics choice to PostHog.
+ *
+ * Called by the cookie banner every time a choice is made or read back, so the
+ * switch the visitor sees is the switch that decides. Before PostHog is loaded
+ * the choice is remembered and applied by initAnalytics.
+ */
+export function applyAnalyticsConsent(granted: boolean): void {
+  analyticsConsented = granted;
+  if (!initialized) return;
+  if (granted) {
+    posthog.opt_in_capturing();
+  } else {
+    posthog.opt_out_capturing();
+  }
+}
+
+/**
+ * Identify a user, by account id and nothing that names her.
+ *
+ * This took her email address and her first and last names and sent them to
+ * the analytics provider as person properties. Agreeing to analytics is
+ * agreeing to be counted, not to have her identity copied to a measurement
+ * service overseas — and for a member hiding from somebody, an email address
+ * sitting in a third party's dashboard is one more place it can leak from.
+ * The account id is enough to tie her events together; the rest is the kind of
+ * thing a funnel is cut by, never who she is.
  */
 export function identifyUser(
   userId: string,
   properties?: {
-    email?: string;
-    firstName?: string;
-    lastName?: string;
     persona?: string;
     subscriptionTier?: string;
     country?: string;
@@ -63,8 +107,12 @@ export function identifyUser(
 ): void {
   if (!initialized) return;
 
+  const { persona, subscriptionTier, country, createdAt } = properties ?? {};
   posthog.identify(userId, {
-    ...properties,
+    persona,
+    subscriptionTier,
+    country,
+    createdAt,
     $set_once: {
       first_seen: new Date().toISOString(),
     },

@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 import Link from 'next/link';
 import { 
   Users, 
@@ -15,8 +14,6 @@ import {
   Megaphone,
   Target,
   AlertTriangle,
-  CheckCircle,
-  XCircle,
   Calendar,
   Car,
   Stethoscope,
@@ -27,6 +24,11 @@ import {
   Wallet,
   HeartHandshake,
   Award,
+  BookOpen,
+  GraduationCap,
+  FileWarning,
+  Gavel,
+  Scale,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
@@ -44,6 +46,7 @@ const partnerLinks = [
   { href: '/admin/housing', label: 'Housing', icon: Home, description: 'Review DV-safe listings before they go live' },
   { href: '/admin/grants', label: 'Grants', icon: Landmark, description: 'Programmes and what the providers decided' },
   { href: '/admin/accelerator', label: 'Accelerator', icon: Rocket, description: 'Cohorts and applications' },
+  { href: '/admin/courses', label: 'Courses', icon: GraduationCap, description: 'Every course listing, drafts included, with the fees and outcomes it prints' },
   { href: '/admin/investors', label: 'Investors', icon: Wallet, description: 'The investor directory' },
   { href: '/admin/impact', label: 'Impact', icon: HeartHandshake, description: 'Community programmes and impact reports' },
   { href: '/admin/credentials', label: 'Credentials', icon: Award, description: 'Certifications and the bodies that issue them' },
@@ -128,7 +131,7 @@ export default function AdminDashboardPage() {
       <div className="flex flex-col items-center justify-center min-h-screen gap-4">
         <AlertTriangle className="h-16 w-16 text-red-500" />
         <h1 className="text-xl font-semibold text-slate-900 dark:text-white">Access Denied</h1>
-        <p className="text-slate-600 dark:text-slate-400">You don't have permission to access the admin dashboard.</p>
+        <p className="text-slate-600 dark:text-slate-400">You don&apos;t have permission to access the admin dashboard.</p>
         <Button asChild>
           <Link href="/dashboard">Return to Dashboard</Link>
         </Button>
@@ -151,11 +154,15 @@ export default function AdminDashboardPage() {
     { href: '/admin/moderation', label: 'Report Queue', icon: AlertTriangle, description: 'Work user reports: claim, decide, enforce' },
     { href: '/admin/appeals', label: 'Appeals', icon: Shield, description: 'Review appeals against moderation decisions' },
     { href: '/admin/content', label: 'Content Moderation', icon: Shield, description: 'Review reported posts and comments' },
+    { href: '/admin/referrals', label: 'Authority Referrals', icon: FileWarning, description: 'Child abuse and violent extremism reports to file with the AFP' },
     { href: '/admin/groups', label: 'Group Moderation', icon: Users, description: 'Feature, pin, or hide groups' },
     { href: '/admin/events', label: 'Event Moderation', icon: Calendar, description: 'Feature, pin, or hide events' },
     { href: '/admin/compliance', label: 'Privacy & Compliance', icon: Shield, description: 'Privacy requests and their 30-day clock, the consent ledger, region readiness' },
     { href: '/admin/disclosures', label: 'Public Disclosures', icon: FileText, description: 'Compile and publish the transparency report; keep the service provider register' },
     { href: '/admin/breaches', label: 'Data Breach Register', icon: AlertTriangle, description: 'Record incidents, run the notification clocks, notify the regulator' },
+    { href: '/admin/legal-holds', label: 'Legal Holds', icon: Gavel, description: 'Keep members’ data from deletion while a legal matter needs it' },
+    { href: '/admin/ropa', label: 'Processing Register', icon: BookOpen, description: 'What we do with personal information, why, and for how long' },
+    { href: '/admin/dpia', label: 'Impact Assessments', icon: Scale, description: 'Weigh a feature’s privacy risks before it ships, and sign off what is left' },
     { href: '/admin/audit-logs', label: 'Audit Logs', icon: FileText, description: 'Who did what: staff changes, moderation decisions, exports and deletions' },
     { href: '/admin/jobs', label: 'Job Management', icon: Briefcase, description: 'Approve, feature, or remove job listings' },
     { href: '/admin/grants', label: 'Grant Applications', icon: FileText, description: 'Record what the grant providers decided' },

@@ -4,30 +4,51 @@
  * Phase 4: GDPR Compliance - Automated Purge Jobs
  */
 
-import { DataCategory, LegalBasis, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
-import { queueAnalyticsEvent } from '../utils/queue';
 import { logger } from '../utils/logger';
+import { EXECUTED_RETENTION_SCHEDULE } from '../services/gdpr.service';
 
-// Default retention periods (in days)
-const DEFAULT_RETENTION_PERIODS: Record<string, number> = {
-  messages: 1095,           // 3 years
-  audit_logs: 2555,         // 7 years (legal requirement)
-  payment_records: 2555,    // 7 years (legal requirement)
-  marketing_data: 730,      // 2 years
-  analytics_events: 395,    // 13 months
-  session_data: 30,         // 30 days
-  verification_tokens: 1,   // 1 day
-  password_reset_tokens: 1, // 1 day
-  soft_deleted_users: 30,   // 30 days after deletion request
-  inactive_accounts: 730,   // 2 years of inactivity
-};
+/**
+ * How many days a line of the published schedule keeps its data.
+ *
+ * The cut-offs used to live here twice over — in a DEFAULT_RETENTION_PERIODS
+ * table that listed ten periods the job mostly did not use, and as literals
+ * typed into the jobs themselves — while members were shown a third copy in
+ * gdpr.service. Three copies of one promise is how they drift. The published
+ * schedule is now the only place a period is written, and every job reads its
+ * cut-off from it, so changing what is published changes what is done.
+ *
+ * Read at call time rather than at module load, so the order in which the two
+ * modules are first imported can never leave a job without its number.
+ */
+function publishedRetentionDays(dataType: string): number {
+  const policy = EXECUTED_RETENTION_SCHEDULE.find((entry) => entry.dataType === dataType);
+  if (!policy) {
+    // Refusing is the safe answer: a purge that guessed its own period would
+    // be deleting on a promise nobody made.
+    throw new Error(`The published retention schedule has no line for ${dataType}`);
+  }
+  return policy.retentionDays;
+}
+
+function cutoffFor(dataType: string): Date {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - publishedRetentionDays(dataType));
+  return cutoff;
+}
 
 interface PurgeResult {
   dataType: string;
   recordsPurged: number;
   errors: string[];
   executedAt: Date;
+  /**
+   * Why the job did nothing, when it did nothing by design rather than because
+   * there was nothing old enough. The compliance record says so in words, so a
+   * zero is never read as a purge that ran and found nothing.
+   */
+  skipped?: string;
 }
 
 interface PurgeJobSummary {
@@ -61,13 +82,106 @@ const EMPTY_HOLD_SCOPE: LegalHoldScope = {
   holdsEverything: false,
 };
 
-function normalizeDataType(value: string): string {
+/** How a typed data type is compared: case, spaces and hyphens do not matter. */
+export function normalizeHeldDataType(value: string): string {
   return value.trim().toLowerCase().replace(/[\s-]+/g, '_');
 }
 
-function isHeld(scope: LegalHoldScope, ...aliases: string[]): boolean {
+/** One kind of record a legal hold can keep out of the automated purges. */
+export interface LegalHoldDataType {
+  /** What the console stores when this is ticked. */
+  value: string;
+  label: string;
+  /** What the purge would otherwise do to it, in words the person placing the hold reads. */
+  purge: string;
+  /** Every spelling the purge answers to, already normalised. */
+  aliases: readonly string[];
+}
+
+/**
+ * What a legal hold can name, and every spelling each purge answers to.
+ *
+ * The console used to check a typed data type against a list of two, messages
+ * and analytics, while the purges below answered to more than a dozen
+ * spellings across seven jobs. A hold on "notifications" or "direct messages"
+ * was therefore reported to the person placing it as covering nothing, when it
+ * did hold. One list now serves both sides: each purge tests holds against its
+ * own entry here, and the console offers and checks the same entries.
+ *
+ * Analytics is not offered. Nothing on the platform stores analytics events, so
+ * a hold on them would keep nothing; its purge still honours the word, so a
+ * hold typed that way is recorded and simply has nothing to protect.
+ */
+export const LEGAL_HOLD_DATA_TYPES: readonly LegalHoldDataType[] = [
+  {
+    value: 'messages',
+    label: 'Direct messages',
+    purge: 'Direct messages past the retention period are deleted',
+    aliases: ['messages', 'user_messages', 'direct_messages'],
+  },
+  {
+    value: 'notifications',
+    label: 'Notifications',
+    purge: 'Old notifications are deleted',
+    aliases: ['notifications'],
+  },
+  {
+    value: 'sessions',
+    label: 'Sign-in sessions',
+    purge: 'Expired sessions, with the device and address each was used from, are deleted',
+    aliases: ['sessions', 'session_data'],
+  },
+  {
+    value: 'verification_tokens',
+    label: 'Verification and reset tokens',
+    purge: 'Expired email-verification and password-reset tokens are deleted',
+    aliases: ['verification_tokens', 'credentials'],
+  },
+  {
+    value: 'users',
+    label: 'Accounts awaiting final erasure',
+    purge: 'Accounts whose owners asked to be erased are deleted for good once the grace period ends',
+    aliases: ['users', 'accounts'],
+  },
+  {
+    value: 'dsar_exports',
+    label: 'Data export links',
+    purge: 'Expired download links to members’ data exports are withdrawn',
+    aliases: ['dsar_exports', 'dsar'],
+  },
+  {
+    value: 'audit_logs',
+    label: 'Audit logs',
+    purge: 'Old audit rows have the network address and device stripped from them',
+    aliases: ['audit_logs', 'audit'],
+  },
+];
+
+/** The words that make one hold freeze every purge. */
+export const HOLD_EVERYTHING_VALUES: readonly string[] = ['*', 'all'];
+
+/** True when some purge answers to this data type, or it holds everything. */
+export function isRecognisedHeldDataType(value: string): boolean {
+  const normalized = normalizeHeldDataType(value);
+  return (
+    HOLD_EVERYTHING_VALUES.includes(normalized) ||
+    LEGAL_HOLD_DATA_TYPES.some((type) => type.aliases.includes(normalized))
+  );
+}
+
+function aliasesOf(value: string): readonly string[] {
+  const entry = LEGAL_HOLD_DATA_TYPES.find((type) => type.value === value);
+  if (!entry) {
+    // A purge naming a type the catalogue does not have would be a purge no
+    // hold could ever stop, so it refuses to run rather than guess.
+    throw new Error(`No legal hold data type is defined for ${value}`);
+  }
+  return entry.aliases;
+}
+
+function isHeld(scope: LegalHoldScope, ...aliases: readonly string[]): boolean {
   if (scope.holdsEverything) return true;
-  return aliases.some((alias) => scope.dataTypes.has(normalizeDataType(alias)));
+  return aliases.some((alias) => scope.dataTypes.has(normalizeHeldDataType(alias)));
 }
 
 function heldResult(dataType: string): PurgeResult {
@@ -175,14 +289,17 @@ export class DataRetentionService {
    * Collapse every active hold into one scope the purge jobs can consult.
    */
   private async loadActiveHolds(): Promise<LegalHoldScope> {
-    const now = new Date();
+    // A hold stands until somebody releases it, whatever its end date says.
+    // This used to treat a hold past its end date as lapsed, while the erasure
+    // path went on refusing deletions under the same hold and the console told
+    // admins that "lifting a hold is a decision, not a timeout" — so on the
+    // night after an end date nobody had revisited, the purge began deleting
+    // the messages a court had asked to be kept while the rest of the platform
+    // still said they were held. Destroying evidence cannot be undone; keeping
+    // it a few days longer can. The end date is a date to review the hold by,
+    // and the console lists holds past it first so somebody does.
     const activeHolds = await prisma.legalHold.findMany({
-      // A hold with a past endDate has lapsed even if nobody flipped isActive,
-      // and one with no endDate runs until it is released.
-      where: {
-        isActive: true,
-        OR: [{ endDate: null }, { endDate: { gt: now } }],
-      },
+      where: { isActive: true },
     });
 
     const scope: LegalHoldScope = {
@@ -194,8 +311,8 @@ export class DataRetentionService {
     for (const hold of activeHolds) {
       hold.affectedUserIds.forEach((id) => scope.userIds.add(id));
       for (const type of hold.affectedDataTypes) {
-        const normalized = normalizeDataType(type);
-        if (normalized === '*' || normalized === 'all') {
+        const normalized = normalizeHeldDataType(type);
+        if (HOLD_EVERYTHING_VALUES.includes(normalized)) {
           scope.holdsEverything = true;
         }
         scope.dataTypes.add(normalized);
@@ -218,7 +335,7 @@ export class DataRetentionService {
    * Purge expired verification tokens
    */
   async purgeExpiredVerificationTokens(holds: LegalHoldScope = EMPTY_HOLD_SCOPE): Promise<PurgeResult> {
-    if (isHeld(holds, 'verification_tokens', 'credentials')) {
+    if (isHeld(holds, ...aliasesOf('verification_tokens'))) {
       return heldResult('verification_tokens');
     }
 
@@ -252,7 +369,7 @@ export class DataRetentionService {
    * Purge expired sessions
    */
   async purgeExpiredSessions(holds: LegalHoldScope = EMPTY_HOLD_SCOPE): Promise<PurgeResult> {
-    if (isHeld(holds, 'sessions', 'session_data')) {
+    if (isHeld(holds, ...aliasesOf('sessions'))) {
       return heldResult('sessions');
     }
 
@@ -275,12 +392,11 @@ export class DataRetentionService {
    * Purge old messages beyond retention period
    */
   async purgeOldMessages(holds: LegalHoldScope = EMPTY_HOLD_SCOPE): Promise<PurgeResult> {
-    if (isHeld(holds, 'messages', 'user_messages', 'direct_messages')) {
+    if (isHeld(holds, ...aliasesOf('messages'))) {
       return heldResult('messages');
     }
 
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - DEFAULT_RETENTION_PERIODS.messages);
+    const cutoffDate = cutoffFor('direct_messages');
 
     const whereClause: any = {
       createdAt: { lt: cutoffDate },
@@ -307,52 +423,40 @@ export class DataRetentionService {
   }
 
   /**
-   * Purge old analytics events
+   * Analytics events: there is nothing to purge.
+   *
+   * This used to enqueue an 'analytics.purge.requested' job and report the
+   * analytics purge as done. Nothing on the platform stores analytics events —
+   * no table, no provider — and the worker that received the request says as
+   * much, so the retention record described a purge of a store that does not
+   * exist. The line stays in the report so its absence is not mistaken for a
+   * forgotten job, and it says in words that nothing was purged and why.
    */
   async purgeOldAnalyticsEvents(holds: LegalHoldScope = EMPTY_HOLD_SCOPE): Promise<PurgeResult> {
+    // Reported as held under a hold that covers it, like every other line, so
+    // the record of which categories a hold froze stays complete.
     if (isHeld(holds, 'analytics', 'analytics_events')) {
       return heldResult('analytics_events');
     }
 
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - DEFAULT_RETENTION_PERIODS.analytics_events);
-
-    try {
-      await queueAnalyticsEvent({
-        eventType: 'analytics.purge.requested',
-        properties: {
-          cutoffDate: cutoffDate.toISOString(),
-          reason: 'retention_policy',
-        },
-        timestamp: new Date(),
-      });
-
-      return {
-        dataType: 'analytics_events',
-        recordsPurged: 0,
-        errors: [],
-        executedAt: new Date(),
-      };
-    } catch (error: any) {
-      return {
-        dataType: 'analytics_events',
-        recordsPurged: 0,
-        errors: [`Failed to enqueue analytics purge: ${error?.message || 'unknown error'}`],
-        executedAt: new Date(),
-      };
-    }
+    return {
+      dataType: 'analytics_events',
+      recordsPurged: 0,
+      errors: [],
+      skipped: 'No analytics events are stored on this platform, so there is nothing to purge.',
+      executedAt: new Date(),
+    };
   }
 
   /**
    * Permanently delete users who requested deletion 30+ days ago
    */
   async purgeSoftDeletedUsers(holds: LegalHoldScope = EMPTY_HOLD_SCOPE): Promise<PurgeResult> {
-    if (isHeld(holds, 'users', 'accounts')) {
+    if (isHeld(holds, ...aliasesOf('users'))) {
       return heldResult('soft_deleted_users');
     }
 
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - DEFAULT_RETENTION_PERIODS.soft_deleted_users);
+    const cutoffDate = cutoffFor('erased_accounts');
 
     // Find completed deletion DSARs older than retention period
     const pendingDeletions = await prisma.dSARRequest.findMany({
@@ -426,7 +530,7 @@ export class DataRetentionService {
    * Purge expired DSAR export files
    */
   async purgeExpiredDSARExports(holds: LegalHoldScope = EMPTY_HOLD_SCOPE): Promise<PurgeResult> {
-    if (isHeld(holds, 'dsar_exports', 'dsar')) {
+    if (isHeld(holds, ...aliasesOf('dsar_exports'))) {
       return heldResult('dsar_exports');
     }
 
@@ -446,7 +550,9 @@ export class DataRetentionService {
       },
     });
 
-    // In production, also delete the actual files from S3/storage
+    // Nothing else is left to delete: an export is assembled afresh from the
+    // database each time its link is opened and is never written to storage,
+    // so withdrawing the link is the whole of the purge.
 
     return {
       dataType: 'dsar_exports',
@@ -460,12 +566,11 @@ export class DataRetentionService {
    * Purge old notifications
    */
   async purgeOldNotifications(holds: LegalHoldScope = EMPTY_HOLD_SCOPE): Promise<PurgeResult> {
-    if (isHeld(holds, 'notifications')) {
+    if (isHeld(holds, ...aliasesOf('notifications'))) {
       return heldResult('notifications');
     }
 
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - 90); // 90 days
+    const cutoffDate = cutoffFor('read_notifications');
 
     const result = await prisma.notification.deleteMany({
       where: {
@@ -498,12 +603,11 @@ export class DataRetentionService {
    * after one pass.
    */
   async anonymizeOldAuditLogs(holds: LegalHoldScope = EMPTY_HOLD_SCOPE): Promise<PurgeResult> {
-    if (isHeld(holds, 'audit_logs', 'audit')) {
+    if (isHeld(holds, ...aliasesOf('audit_logs'))) {
       return heldResult('audit_logs_anonymized');
     }
 
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - 365); // Anonymize after 1 year, keep 7 years total
+    const cutoffDate = cutoffFor('audit_logs');
 
     const marker = JSON.stringify({ anonymized: true, anonymizedAt: new Date().toISOString() });
 
@@ -556,79 +660,13 @@ export class DataRetentionService {
     });
   }
 
-  /**
-   * Get retention policies for transparency
-   */
-  async getRetentionPolicies() {
-    return prisma.retentionPolicy.findMany({
-      orderBy: { dataType: 'asc' },
-    });
-  }
-
-  /**
-   * Initialize default retention policies
-   */
-  async initializeRetentionPolicies(): Promise<void> {
-    const policies = [
-      {
-        dataType: 'user_messages',
-        description: 'Direct messages between users',
-        dataCategory: DataCategory.UGC,
-        retentionDays: 1095,
-        retentionReason: 'Business requirement for dispute resolution',
-        legalBasis: LegalBasis.LEGITIMATE_INTERESTS,
-        automatedPurge: true,
-        purgeJobName: 'purgeOldMessages',
-      },
-      {
-        dataType: 'audit_logs',
-        description: 'System and admin audit logs',
-        dataCategory: DataCategory.TECHNICAL,
-        retentionDays: 2555,
-        retentionReason: 'Legal compliance requirement',
-        legalBasis: LegalBasis.LEGAL_OBLIGATION,
-        automatedPurge: false,
-        purgeJobName: 'anonymizeOldAuditLogs',
-      },
-      {
-        dataType: 'payment_records',
-        description: 'Payment and billing records',
-        dataCategory: DataCategory.FINANCIAL,
-        retentionDays: 2555,
-        retentionReason: 'Tax and financial compliance',
-        legalBasis: LegalBasis.LEGAL_OBLIGATION,
-        automatedPurge: false,
-      },
-      {
-        dataType: 'session_data',
-        description: 'User login sessions',
-        dataCategory: DataCategory.TECHNICAL,
-        retentionDays: 30,
-        retentionReason: 'Security and authentication',
-        legalBasis: LegalBasis.CONTRACT,
-        automatedPurge: true,
-        purgeJobName: 'purgeExpiredSessions',
-      },
-      {
-        dataType: 'notifications',
-        description: 'User notifications',
-        dataCategory: DataCategory.UGC,
-        retentionDays: 90,
-        retentionReason: 'User experience',
-        legalBasis: LegalBasis.LEGITIMATE_INTERESTS,
-        automatedPurge: true,
-        purgeJobName: 'purgeOldNotifications',
-      },
-    ];
-
-    for (const policy of policies) {
-      await prisma.retentionPolicy.upsert({
-        where: { dataType: policy.dataType },
-        update: policy,
-        create: policy,
-      });
-    }
-  }
+  // getRetentionPolicies and initializeRetentionPolicies used to live here. The
+  // first read a RetentionPolicy table and the second was the only thing that
+  // ever wrote one — with its own third set of periods — and nothing called
+  // it, so the table was empty everywhere and the reader returned nothing. The
+  // schedule members are shown is gdprService.getRetentionPolicies, which
+  // publishes EXECUTED_RETENTION_SCHEDULE: the same list these jobs take their
+  // cut-offs from.
 }
 
 export const dataRetentionService = new DataRetentionService();

@@ -4,7 +4,7 @@
  * Creates or updates the platform administrator account.
  *
  * Credentials are environment-driven and never hardcoded:
- *   ADMIN_EMAIL     - defaults to admin@athena.com
+ *   ADMIN_EMAIL     - defaults to admin@athena.invalid (see DEFAULT_ADMIN_EMAIL)
  *   ADMIN_PASSWORD  - if unset, a strong random password is generated and
  *                     returned to the caller exactly once, then discarded.
  *
@@ -19,6 +19,22 @@ import crypto from 'crypto';
 
 const BCRYPT_ROUNDS = 12;
 const MIN_PASSWORD_LENGTH = 12;
+
+/**
+ * The address the administrator gets when nobody chose one.
+ *
+ * It used to be admin@athena.com. athena.com is not ATHENA's domain, and the
+ * account is verified on creation, so a password reset requested for the
+ * seeded administrator — by anyone, since the address was in the source — was
+ * a reset link for the most powerful account on the platform delivered to a
+ * mail server somebody else runs. `.invalid` is reserved (RFC 2606) and can
+ * never receive mail, so the worst a reset can do is go nowhere. Set
+ * ADMIN_EMAIL to an inbox staff actually hold.
+ */
+export const DEFAULT_ADMIN_EMAIL = 'admin@athena.invalid';
+
+/** The old default, kept only so a re-run can move an account off it. */
+const LEGACY_ADMIN_EMAIL = 'admin@athena.com';
 
 /** Character set excludes look-alike glyphs (0/O, 1/l/I) for transcription safety. */
 const PASSWORD_ALPHABET =
@@ -70,9 +86,24 @@ export async function seedAdmin(
   prisma: PrismaClient,
   options: AdminSeedOptions = {}
 ): Promise<AdminSeedResult> {
-  const email = (options.email ?? process.env.ADMIN_EMAIL ?? 'admin@athena.com')
-    .trim()
-    .toLowerCase();
+  const chosenEmail = options.email ?? process.env.ADMIN_EMAIL;
+  const email = (chosenEmail ?? DEFAULT_ADMIN_EMAIL).trim().toLowerCase();
+
+  // An environment seeded before the default changed has its administrator at
+  // the old address. Left alone, a re-run would mint a second administrator
+  // here and leave the first one exactly as exposed as before, so when nobody
+  // has chosen an address and the old account is the only one, it is moved to
+  // the reserved address instead. Nothing else about it changes, and the
+  // address it now signs in with is what this function returns.
+  if (!chosenEmail) {
+    const [atDefault, legacy] = await Promise.all([
+      prisma.user.findUnique({ where: { email }, select: { id: true } }),
+      prisma.user.findUnique({ where: { email: LEGACY_ADMIN_EMAIL }, select: { id: true, role: true } }),
+    ]);
+    if (!atDefault && legacy?.role === UserRole.ADMIN) {
+      await prisma.user.update({ where: { id: legacy.id }, data: { email } });
+    }
+  }
 
   const suppliedPassword = options.password ?? process.env.ADMIN_PASSWORD;
 

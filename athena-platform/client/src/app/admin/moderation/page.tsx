@@ -36,8 +36,18 @@ import { AlertTriangle, ArrowLeft, Clock, HeartPulse, Loader2, ShieldAlert, User
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
+import { MemberSafetyScore, SafetyIncidentsPanel } from './SafetyIncidents';
 
-type Person = { id: string; firstName: string | null; lastName: string | null; displayName: string | null; email: string; isSuspended?: boolean };
+type Person = {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  displayName: string | null;
+  email: string;
+  isSuspended?: boolean;
+  bannedAt?: string | null;
+};
+type ReportPriority = 'URGENT' | 'HIGH' | 'NORMAL';
 type ReportStatus = 'PENDING' | 'REVIEWING' | 'RESOLVED' | 'DISMISSED';
 type Report = {
   id: string;
@@ -52,6 +62,7 @@ type Report = {
   actionTakenAt: string | null;
   createdAt: string;
   reviewDeadline: string;
+  priority: ReportPriority;
   overdue: boolean;
   reporter: Person;
   reportedUser: Person;
@@ -133,7 +144,7 @@ const ACTIONS: Array<{ value: string; label: string; tone: string; help: string;
     value: 'ban',
     label: 'Ban',
     tone: 'btn-outline text-red-600',
-    help: 'Lock the account and record the decision as a ban. It can still be lifted on appeal, and it does not stop the same person registering again with another email address.',
+    help: 'Lock the account, record the decision as a ban, and bar its email address from registering again. It can be lifted by upholding an appeal against it. It cannot stop someone who opens a new mailbox.',
     confirm: true,
   },
   {
@@ -144,6 +155,12 @@ const ACTIONS: Array<{ value: string; label: string; tone: string; help: string;
     confirm: true,
   },
 ];
+
+const PRIORITY_TONE: Record<ReportPriority, string> = {
+  URGENT: 'bg-rose-600 text-white',
+  HIGH: 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-200',
+  NORMAL: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
+};
 
 const STATUS_TONE: Record<ReportStatus, string> = {
   PENDING: 'bg-amber-100 text-amber-800',
@@ -207,13 +224,15 @@ export default function ModerationQueuePage() {
   const { user } = useAuthStore();
   const queryClient = useQueryClient();
   const [queueKind, setQueueKind] = useState<'named' | 'anonymous'>('named');
-  const [status, setStatus] = useState<'open' | ReportStatus>('open');
+  const [status, setStatus] = useState<'open' | 'overdue' | ReportStatus>('open');
   const [anonymousStatus, setAnonymousStatus] = useState<'PENDING' | 'ACTIONED'>('PENDING');
   const [assigned, setAssigned] = useState<'all' | 'me' | 'unclaimed'>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [closingFlagId, setClosingFlagId] = useState<string | null>(null);
   const [flagNote, setFlagNote] = useState('');
+  // Whose safety score is open beside the queues, if anyone's.
+  const [scoreUserId, setScoreUserId] = useState<string | null>(null);
 
   const flags = useQuery({
     queryKey: ['admin-safety-flags'],
@@ -299,9 +318,20 @@ export default function ModerationQueuePage() {
         anonymous ? `/admin/moderation/anonymous-reports/${id}/action` : `/admin/moderation/reports/${id}/action`,
         { action, notes: notes.trim() || undefined }
       ),
-    onSuccess: (_res, { action }) => {
+    onSuccess: (response, { action }) => {
       refresh();
       setNotes('');
+      // A ban locks the account first and then bars the address. When the
+      // second half fails the account is still banned, but the person could
+      // register again, and the moderator has to know that rather than read
+      // the decision as complete.
+      if (action === 'ban' && response.data?.banIdentityRecorded === false) {
+        toast.error(
+          'The account is banned, but its email address could not be barred from registering again. Tell an administrator before closing this case.',
+          { duration: 10000 }
+        );
+        return;
+      }
       toast.success(`Report ${action === 'dismiss' ? 'dismissed' : 'actioned'}`);
     },
     onError: (error) => toast.error(errorMessage(error) || 'Could not action that report'),
@@ -350,11 +380,23 @@ export default function ModerationQueuePage() {
             )}
             {' '}· claim a report before you decide it, so nobody works the same case twice.
           </p>
+          {/* Child abuse and violent extremism reports are queued for referral
+              to the AFP as they are filed. Filing them is an admin's job and
+              has its own screen, which this queue used to be the only pointer
+              towards without ever listing them. */}
+          {user?.role === 'ADMIN' && (
+            <p className="mt-1 text-sm">
+              <Link href="/admin/referrals" className="text-primary-600 hover:underline">
+                Authority referrals waiting to be filed
+              </Link>
+            </p>
+          )}
         </div>
         {queueKind === 'named' ? (
           <div className="flex flex-wrap gap-2">
             <select value={status} onChange={(e) => setStatus(e.target.value as typeof status)} className="input py-1.5 text-sm" aria-label="Status">
               <option value="open">Open, soonest due first</option>
+              <option value="overdue">Past their review deadline</option>
               <option value="PENDING">Unclaimed</option>
               <option value="REVIEWING">Being reviewed</option>
               <option value="RESOLVED">Resolved</option>
@@ -450,6 +492,15 @@ export default function ModerationQueuePage() {
                   {flag.reason ? ` — ${flag.reason}` : ''}
                 </p>
                 {flag.notes && <p className="mt-1 whitespace-pre-wrap text-xs text-slate-500">{flag.notes}</p>}
+                {flag.member && (flag.type === 'SAFETY_CRITICAL' || flag.type === 'SAFETY_CONCERN') && (
+                  <button
+                    type="button"
+                    onClick={() => setScoreUserId(flag.member!.id)}
+                    className="mt-2 text-sm font-medium text-violet-700 hover:underline dark:text-violet-300"
+                  >
+                    Why her safety score is what it is
+                  </button>
+                )}
 
                 {closingFlagId === flag.id ? (
                   <div className="mt-3 space-y-2">
@@ -501,6 +552,14 @@ export default function ModerationQueuePage() {
         )}
       </section>
 
+      {scoreUserId && (
+        <div className="mb-8">
+          <MemberSafetyScore userId={scoreUserId} onClose={() => setScoreUserId(null)} />
+        </div>
+      )}
+
+      <SafetyIncidentsPanel onShowScore={setScoreUserId} />
+
       <div className="mb-4 flex flex-wrap gap-2" role="tablist" aria-label="Which reports">
         <button
           type="button"
@@ -536,7 +595,9 @@ export default function ModerationQueuePage() {
                 moderator or admin.
               </div>
             ) : reports.length === 0 ? (
-              <div className="card p-10 text-center text-slate-500">Nothing waiting.</div>
+              <div className="card p-10 text-center text-slate-500">
+                {status === 'overdue' ? 'Nothing is past its review deadline.' : 'Nothing waiting.'}
+              </div>
             ) : (
               <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-700 dark:bg-slate-900">
                 {reports.map((report) => (
@@ -552,6 +613,9 @@ export default function ModerationQueuePage() {
                           <span className="font-medium text-slate-900 dark:text-white">{report.reason}</span>
                           <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300">{report.contentType}</span>
                           <span className={cn('rounded-full px-2 py-0.5 text-[11px] font-medium', STATUS_TONE[report.status])}>{report.status.toLowerCase()}</span>
+                          {report.priority && report.priority !== 'NORMAL' && (
+                            <span className={cn('rounded-full px-2 py-0.5 text-[11px] font-semibold', PRIORITY_TONE[report.priority])}>{report.priority.toLowerCase()}</span>
+                          )}
                           <DeadlineBadge deadline={report.reviewDeadline} overdue={report.overdue} status={report.status} />
                           {report.reviewerId === user?.id && <span className="text-[11px] text-blue-600">yours</span>}
                         </span>
@@ -646,7 +710,11 @@ export default function ModerationQueuePage() {
                         <Link href={`/profile/${current.reportedUser.id}`} className="font-medium text-slate-900 hover:underline dark:text-white">
                           {nameOf(current.reportedUser)}
                         </Link>
-                        {current.reportedUser.isSuspended && <span className="ml-1 text-xs text-red-600">suspended</span>}
+                        {current.reportedUser.bannedAt ? (
+                          <span className="ml-1 text-xs text-red-600">banned</span>
+                        ) : current.reportedUser.isSuspended ? (
+                          <span className="ml-1 text-xs text-red-600">suspended</span>
+                        ) : null}
                       </dd>
                     </div>
                     <div>

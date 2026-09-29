@@ -27,7 +27,12 @@ jest.mock('../../utils/logger', () => ({
   },
 }));
 
-import { dataRetentionService } from '../data-retention';
+import {
+  dataRetentionService,
+  isRecognisedHeldDataType,
+  LEGAL_HOLD_DATA_TYPES,
+  normalizeHeldDataType,
+} from '../data-retention';
 import { prisma } from '../../utils/prisma';
 import { logger } from '../../utils/logger';
 
@@ -155,13 +160,36 @@ describe('DataRetentionService.runAllPurgeJobs', () => {
     ]);
   });
 
-  it('ignores a hold whose end date has passed', async () => {
+  it('keeps honouring a hold past its end date until somebody releases it', async () => {
+    // This used to read a past end date as the hold lapsing, so the night after
+    // an unrevisited end date the purge deleted what the erasure path and the
+    // console still said was held.
+    prismaAny.legalHold.findMany.mockResolvedValue([
+      hold({ affectedDataTypes: ['messages'], endDate: new Date(Date.now() - 24 * 60 * 60 * 1000) }),
+    ]);
+
     await dataRetentionService.runAllPurgeJobs();
 
-    const where = prismaAny.legalHold.findMany.mock.calls[0][0].where;
-    expect(where.isActive).toBe(true);
-    expect(where.OR[0]).toEqual({ endDate: null });
-    expect(where.OR[1].endDate.gt).toBeInstanceOf(Date);
+    expect(prismaAny.legalHold.findMany.mock.calls[0][0].where).toEqual({ isActive: true });
+    expect(prismaAny.message.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('honours every spelling the console offers, so a hold is never reported as matching nothing', async () => {
+    prismaAny.legalHold.findMany.mockResolvedValue([
+      hold({ affectedDataTypes: ['Direct Messages', 'notifications', 'session-data'] }),
+    ]);
+
+    await dataRetentionService.runAllPurgeJobs();
+
+    expect(prismaAny.message.deleteMany).not.toHaveBeenCalled();
+    expect(prismaAny.notification.deleteMany).not.toHaveBeenCalled();
+    expect(prismaAny.session.deleteMany).not.toHaveBeenCalled();
+    for (const type of LEGAL_HOLD_DATA_TYPES) {
+      expect(isRecognisedHeldDataType(type.value)).toBe(true);
+      expect(type.aliases).toContain(normalizeHeldDataType(type.value));
+    }
+    expect(isRecognisedHeldDataType('All')).toBe(true);
+    expect(isRecognisedHeldDataType('photos')).toBe(false);
   });
 
   it('hard-deletes a user once even when they filed several deletion requests', async () => {
@@ -218,5 +246,25 @@ describe('DataRetentionService.runAllPurgeJobs', () => {
 
     releaseHolds([]);
     await expect(first).resolves.toMatchObject({ skipped: false });
+  });
+});
+
+describe('The analytics line of the retention report', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    stubEmptyDatabase();
+  });
+
+  it('says there is nothing to purge rather than reporting a purge of a store that does not exist', async () => {
+    const { queueAnalyticsEvent } = jest.requireMock('../../utils/queue') as { queueAnalyticsEvent: jest.Mock };
+
+    const summary = await dataRetentionService.runAllPurgeJobs();
+    const analytics = summary.results.find((result: any) => result.dataType === 'analytics_events');
+
+    // It used to enqueue analytics.purge.requested for a worker with no store
+    // behind it, and the report read as though a purge had run.
+    expect(queueAnalyticsEvent).not.toHaveBeenCalled();
+    expect(analytics).toMatchObject({ recordsPurged: 0, errors: [] });
+    expect(analytics?.skipped).toMatch(/no analytics events are stored/i);
   });
 });

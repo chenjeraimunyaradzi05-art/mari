@@ -68,5 +68,8 @@ describe('Trust Score Routes', () => {
     expect(response.body.success).toBe(true);
     expect(response.body.data.score).toBeGreaterThan(0);
     expect(response.body.data.factors.length).toBeGreaterThan(0);
+    // Reading the page used to write this figure over User.trustScore, wiping
+    // the penalties reports and blocks had applied. It is computed, not stored.
+    expect(prismaAny.user.update).not.toHaveBeenCalled();
   });
 });

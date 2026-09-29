@@ -16,6 +16,7 @@ import {
   XCircle,
   Users,
   BarChart3,
+  Ban,
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -86,15 +87,19 @@ interface User {
   persona: string;
   emailVerified: boolean;
   isSuspended: boolean;
+  /** A ban is a suspension that also bars the address from registering again. */
+  banned?: boolean;
   /**
-   * Why the account is locked, read back from the audit row that locked it.
-   * null when no reason was ever recorded; absent when the reasons could not
-   * be read this time, which the table says rather than showing a blank.
+   * Why the account is locked: from the account itself for every lock since it
+   * carried a reason, or from the audit row for older ones. null when no reason
+   * was ever recorded; absent when an older reason could not be read this
+   * time, which the table says rather than showing a blank.
    */
   suspension?: {
     reason: string | null;
-    source: 'admin' | 'moderation';
+    source: 'account' | 'admin' | 'moderation';
     moderationAction: string | null;
+    banned?: boolean;
     at: string;
   } | null;
   createdAt: string;
@@ -164,6 +169,41 @@ export default function AdminUsersPage() {
       return;
     }
     suspendMutation.mutate({ userId: user.id, isSuspended: true, suspensionReason: reason.trim() });
+  };
+
+  // A ban locks the account and bars its address from registering again. It
+  // is not undone from this screen: it is lifted by upholding the member's
+  // appeal against it, where the decision is written down and she is told.
+  const banMutation = useMutation({
+    mutationFn: async ({ userId, banReason }: { userId: string; banReason: string }) => {
+      const response = await api.patch(`/admin/users/${userId}`, { isBanned: true, banReason });
+      return response.data as { banIdentityRecorded?: boolean };
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+      setSelectedUser(null);
+      if (result?.banIdentityRecorded === false) {
+        window.alert(
+          'The account is banned, but its email address could not be barred from registering again. Tell an engineer: the ban hash key may not be configured.'
+        );
+      }
+    },
+    onError: (err: unknown) => {
+      const message = (err as { response?: { data?: { error?: string; message?: string } } })?.response?.data;
+      window.alert(message?.error || message?.message || 'The ban could not be saved.');
+    },
+  });
+
+  const ban = (user: User) => {
+    const reason = window.prompt(
+      `Why are you banning ${user.firstName} ${user.lastName}? A ban locks the account and stops this email address registering again. The reason is kept with the ban and read on appeal.`
+    );
+    if (reason === null) return;
+    if (!reason.trim()) {
+      window.alert('A ban needs a reason.');
+      return;
+    }
+    banMutation.mutate({ userId: user.id, banReason: reason.trim() });
   };
 
   const updateRoleMutation = useMutation({
@@ -248,6 +288,7 @@ export default function AdminUsersPage() {
               <option value="">All Status</option>
               <option value="active">Active</option>
               <option value="suspended">Suspended</option>
+              <option value="banned">Banned</option>
             </select>
           </div>
         </div>
@@ -334,7 +375,7 @@ export default function AdminUsersPage() {
                                 : user.suspension?.reason ?? 'No reason was recorded'
                             }
                           >
-                            <XCircle className="h-3 w-3" /> {user.suspension?.moderationAction === 'ban' ? 'Banned' : 'Suspended'}
+                            <XCircle className="h-3 w-3" /> {user.banned || user.suspension?.banned || user.suspension?.moderationAction === 'ban' ? 'Banned' : 'Suspended'}
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
@@ -354,7 +395,7 @@ export default function AdminUsersPage() {
                           {user.suspension === undefined
                             ? 'Suspension reason could not be loaded.'
                             : user.suspension?.reason
-                              ? `${user.suspension.source === 'moderation' ? 'From a report' : 'By an admin'}: ${user.suspension.reason}`
+                              ? `${user.suspension.source === 'account' ? (user.banned ? 'Banned' : 'Suspended') : user.suspension.source === 'moderation' ? 'From a report' : 'By an admin'}: ${user.suspension.reason}`
                               : 'No reason was recorded for this suspension.'}
                         </div>
                       )}
@@ -384,11 +425,20 @@ export default function AdminUsersPage() {
                         >
                           <Eye className="h-4 w-4" />
                         </Link>
-                        {user.isSuspended ? (
+                        {user.banned ? (
+                          <Link
+                            href="/admin/appeals"
+                            className="p-2 text-xs text-slate-500 hover:underline"
+                            title="A ban is lifted by upholding the member's appeal against it"
+                          >
+                            Lifted on appeal
+                          </Link>
+                        ) : user.isSuspended ? (
                           <button
                             onClick={() => suspendMutation.mutate({ userId: user.id, isSuspended: false })}
                             className="p-2 text-green-600 hover:text-green-800"
                             title="Unsuspend User"
+                            aria-label={`Unsuspend ${user.firstName} ${user.lastName}`}
                           >
                             <Shield className="h-4 w-4" />
                           </button>
@@ -397,8 +447,20 @@ export default function AdminUsersPage() {
                             onClick={() => suspend(user)}
                             className="p-2 text-red-600 hover:text-red-800"
                             title="Suspend User"
+                            aria-label={`Suspend ${user.firstName} ${user.lastName}`}
                           >
                             <ShieldOff className="h-4 w-4" />
+                          </button>
+                        )}
+                        {!user.banned && (
+                          <button
+                            onClick={() => ban(user)}
+                            disabled={banMutation.isPending}
+                            className="p-2 text-red-700 hover:text-red-900"
+                            title="Ban User"
+                            aria-label={`Ban ${user.firstName} ${user.lastName}`}
+                          >
+                            <Ban className="h-4 w-4" />
                           </button>
                         )}
                       </div>

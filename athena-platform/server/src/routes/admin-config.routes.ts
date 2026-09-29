@@ -30,6 +30,11 @@ import { staffTwoFactorRequired } from '../middleware/roles';
 import { getMaintenanceState } from '../services/feature-flags.service';
 import { ingestConfig } from '../services/livestream.service';
 import { authorityReferralMailbox, trustAndSafetyMailbox } from '../services/content-report.service';
+import {
+  isImageModerationConfigured,
+  isTextModerationConfigured,
+  moderationRequirement,
+} from '../services/moderation.service';
 import { decodeToken, generateAccessToken, generateRefreshToken } from '../utils/jwt';
 import { bestEffort } from '../utils/best-effort';
 
@@ -176,6 +181,14 @@ router.get('/ops/config', ...adminOnly, async (_req: AuthRequest, res: Response,
         // the report, but nobody is told it is there.
         trustSafetyAlerts: Boolean(trustAndSafetyMailbox()),
         authorityReferralAlerts: Boolean(authorityReferralMailbox()),
+      },
+      // Whether member content is screened, and what happens when it cannot
+      // be. The switch is MODERATION_REQUIRED; the screen says what it means in
+      // this deployment, because 'public' with no provider refuses every post.
+      moderation: {
+        text: isTextModerationConfigured(),
+        images: isImageModerationConfigured(),
+        whenUnscreened: moderationRequirement(),
       },
       checkedAt: new Date().toISOString(),
     });

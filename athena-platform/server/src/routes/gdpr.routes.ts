@@ -1081,6 +1081,100 @@ const PROCESSING_ACTIVITY_SCALAR_FIELDS = [
 // the rest of the system would not recognise.
 const DPIA_STATUSES = ['DRAFT', 'PENDING_REVIEW', 'APPROVED', 'REJECTED'];
 const RESIDUAL_RISK_LEVELS = ['LOW', 'MEDIUM', 'HIGH'];
+const MITIGATION_STATUSES = ['PLANNED', 'IN_PROGRESS', 'IN_PLACE'];
+
+/**
+ * A risk as the model's own comment describes it: what could happen, how
+ * likely, how bad. Risks and mitigations are JSON columns and were accepted as
+ * "a list" of anything, so an assessment could be approved holding a list of
+ * numbers, and the screen that reads it back would have nothing to show. Each
+ * entry is now held to its shape, and the score is worked out here from the
+ * two ratings rather than typed in, so the same risk always scores the same.
+ */
+const RISK_RANK: Record<string, number> = { LOW: 1, MEDIUM: 2, HIGH: 3 };
+
+function isRiskList(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (entry) =>
+        entry !== null &&
+        typeof entry === 'object' &&
+        typeof (entry as { description?: unknown }).description === 'string' &&
+        (entry as { description: string }).description.trim().length > 0 &&
+        RESIDUAL_RISK_LEVELS.includes((entry as { likelihood?: string }).likelihood ?? '') &&
+        RESIDUAL_RISK_LEVELS.includes((entry as { impact?: string }).impact ?? '')
+    )
+  );
+}
+
+function isMitigationList(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.every((entry) => {
+      if (entry === null || typeof entry !== 'object') return false;
+      const { measure, status, risk, owner } = entry as Record<string, unknown>;
+      return (
+        typeof measure === 'string' &&
+        measure.trim().length > 0 &&
+        MITIGATION_STATUSES.includes(String(status)) &&
+        (risk === undefined || risk === null || typeof risk === 'string') &&
+        (owner === undefined || owner === null || typeof owner === 'string')
+      );
+    })
+  );
+}
+
+const RISK_SHAPE_MESSAGE = `Each risk needs a description and a likelihood and impact of ${RESIDUAL_RISK_LEVELS.join(', ')}`;
+const MITIGATION_SHAPE_MESSAGE = `Each mitigation needs a measure and a status of ${MITIGATION_STATUSES.join(', ')}`;
+
+function normaliseRisks(risks: Array<{ description: string; likelihood: string; impact: string }>) {
+  return risks.map(({ description, likelihood, impact }) => ({
+    description: description.trim(),
+    likelihood,
+    impact,
+    score: RISK_RANK[likelihood] * RISK_RANK[impact],
+  }));
+}
+
+function normaliseMitigations(
+  mitigations: Array<{ measure: string; status: string; risk?: string | null; owner?: string | null }>
+) {
+  return mitigations.map(({ measure, status, risk, owner }) => ({
+    measure: measure.trim(),
+    status,
+    risk: typeof risk === 'string' && risk.trim() ? risk.trim() : null,
+    owner: typeof owner === 'string' && owner.trim() ? owner.trim() : null,
+  }));
+}
+
+/**
+ * A processing activity can point at the assessment behind it. The id was
+ * stored as typed, so a record could claim a DPIA that never existed — the
+ * one field a regulator follows to see that the high-risk processing was
+ * actually assessed.
+ */
+async function assertDpiaExists(dpiaId: unknown): Promise<void> {
+  if (dpiaId === undefined || dpiaId === null) return;
+  const found = await prisma.dPIA.findUnique({ where: { id: String(dpiaId) }, select: { id: true } });
+  if (!found) throw new ApiError(400, 'dpiaId does not match any impact assessment');
+}
+
+/** The staff names behind approval ids, so a signed-off assessment says who signed it. */
+async function approverNames(ids: Array<string | null>): Promise<Map<string, string>> {
+  const unique = Array.from(new Set(ids.filter((id): id is string => Boolean(id))));
+  if (unique.length === 0) return new Map();
+  const people = await prisma.user.findMany({
+    where: { id: { in: unique } },
+    select: { id: true, email: true, displayName: true, firstName: true, lastName: true },
+  });
+  return new Map(
+    people.map((person) => [
+      person.id,
+      person.displayName?.trim() || [person.firstName, person.lastName].filter(Boolean).join(' ').trim() || person.email,
+    ])
+  );
+}
 
 /**
  * The columns a RoPA write may set, taken off an already-validated body.
@@ -1105,6 +1199,12 @@ function buildProcessingActivityData(
 
   if (body.lastReviewDate) data.lastReviewDate = new Date(body.lastReviewDate);
   if (body.nextReviewDate) data.nextReviewDate = new Date(body.nextReviewDate);
+  else if (body.nextReviewDate === null) data.nextReviewDate = null;
+
+  // "Reviewed today" is a statement about now, so the server writes the date
+  // rather than trusting a client clock with the one field that shows the
+  // record is kept up to date.
+  if (body.reviewed === true) data.lastReviewDate = new Date();
 
   return data;
 }
@@ -1177,7 +1277,7 @@ router.post(
     body('retentionJustification').optional().isString(),
     body('transferSafeguards').optional().isString(),
     body('dpiaRequired').optional().isBoolean(),
-    body('dpiaId').optional().isString(),
+    body('dpiaId').optional({ values: 'null' }).isString(),
     body('nextReviewDate').optional().isISO8601(),
     optionalDataCategories,
     ...PROCESSING_ACTIVITY_LIST_FIELDS.map(optionalStringList),
@@ -1185,6 +1285,7 @@ router.post(
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       rejectInvalid(req);
+      await assertDpiaExists(req.body.dpiaId);
 
       // The cast is safe because every field was validated one by one above;
       // the builder returns a plain object so create and update can share it.
@@ -1224,14 +1325,15 @@ router.patch(
     body('department').optional().isString().trim().notEmpty(),
     body('legalBasis').optional().isIn(Object.keys(LegalBasis)),
     body('retentionPeriod').optional().isString().trim().notEmpty(),
-    body('legalBasisDetails').optional().isString(),
-    body('retentionJustification').optional().isString(),
-    body('transferSafeguards').optional().isString(),
+    body('legalBasisDetails').optional({ values: 'null' }).isString(),
+    body('retentionJustification').optional({ values: 'null' }).isString(),
+    body('transferSafeguards').optional({ values: 'null' }).isString(),
     body('dpiaRequired').optional().isBoolean(),
-    body('dpiaId').optional().isString(),
+    body('dpiaId').optional({ values: 'null' }).isString(),
     body('isActive').optional().isBoolean(),
-    body('nextReviewDate').optional().isISO8601(),
+    body('nextReviewDate').optional({ values: 'null' }).isISO8601(),
     body('lastReviewDate').optional().isISO8601(),
+    body('reviewed').optional().isBoolean(),
     optionalDataCategories,
     ...PROCESSING_ACTIVITY_LIST_FIELDS.map(optionalStringList),
   ],
@@ -1241,6 +1343,7 @@ router.patch(
 
       const existing = await prisma.processingActivity.findUnique({ where: { id: req.params.id } });
       if (!existing) throw new ApiError(404, 'Processing activity not found');
+      await assertDpiaExists(req.body.dpiaId);
 
       const activity = await prisma.processingActivity.update({
         where: { id: req.params.id },
@@ -1254,8 +1357,20 @@ router.patch(
         action: 'ROPA_ACTIVITY_UPDATED',
         resourceType: 'ProcessingActivity',
         resourceId: activity.id,
-        previousValue: { name: existing.name, legalBasis: existing.legalBasis, isActive: existing.isActive },
-        newValue: { name: activity.name, legalBasis: activity.legalBasis, isActive: activity.isActive },
+        previousValue: {
+          name: existing.name,
+          legalBasis: existing.legalBasis,
+          isActive: existing.isActive,
+          lastReviewDate: existing.lastReviewDate,
+          dpiaId: existing.dpiaId,
+        },
+        newValue: {
+          name: activity.name,
+          legalBasis: activity.legalBasis,
+          isActive: activity.isActive,
+          lastReviewDate: activity.lastReviewDate,
+          dpiaId: activity.dpiaId,
+        },
         ipAddress: auditIpAddress(req) ?? undefined,
         userAgent: req.get('user-agent'),
       });
@@ -1320,10 +1435,14 @@ router.get('/dpia', adminOnly, async (req: AuthRequest, res: Response, next: Nex
       prisma.dPIA.findMany({ where, orderBy: { updatedAt: 'desc' }, skip, take: limit }),
       prisma.dPIA.count({ where }),
     ]);
+    const names = await approverNames(assessments.map((assessment) => assessment.approvedBy));
 
     res.json({
       success: true,
-      data: assessments,
+      data: assessments.map((assessment) => ({
+        ...assessment,
+        approvedByName: assessment.approvedBy ? names.get(assessment.approvedBy) ?? null : null,
+      })),
       pagination: buildPaginationMeta(total, page, limit),
     });
   } catch (error) {
@@ -1339,8 +1458,15 @@ router.get('/dpia/:id', adminOnly, async (req: AuthRequest, res: Response, next:
   try {
     const assessment = await prisma.dPIA.findUnique({ where: { id: req.params.id } });
     if (!assessment) throw new ApiError(404, 'DPIA not found');
+    const names = await approverNames([assessment.approvedBy]);
 
-    res.json({ success: true, data: assessment });
+    res.json({
+      success: true,
+      data: {
+        ...assessment,
+        approvedByName: assessment.approvedBy ? names.get(assessment.approvedBy) ?? null : null,
+      },
+    });
   } catch (error) {
     next(error);
   }
@@ -1366,8 +1492,8 @@ router.post(
     body('residualRiskLevel')
       .isIn(RESIDUAL_RISK_LEVELS)
       .withMessage(`Residual risk must be one of: ${RESIDUAL_RISK_LEVELS.join(', ')}`),
-    body('risks').isArray().withMessage('Risks must be a list'),
-    body('mitigations').isArray().withMessage('Mitigations must be a list'),
+    body('risks').custom(isRiskList).withMessage(RISK_SHAPE_MESSAGE),
+    body('mitigations').custom(isMitigationList).withMessage(MITIGATION_SHAPE_MESSAGE),
     optionalDataCategories,
     optionalStringList('processingOperations'),
   ],
@@ -1383,8 +1509,8 @@ router.post(
           necessity: req.body.necessity,
           proportionality: req.body.proportionality,
           residualRiskLevel: req.body.residualRiskLevel,
-          risks: req.body.risks,
-          mitigations: req.body.mitigations,
+          risks: normaliseRisks(req.body.risks),
+          mitigations: normaliseMitigations(req.body.mitigations),
           dataCategories: (req.body.dataCategories ?? []) as DataCategory[],
           processingOperations: req.body.processingOperations ?? [],
         },
@@ -1422,8 +1548,8 @@ router.patch(
     body('proportionality').optional().isString().trim().notEmpty(),
     body('residualRiskLevel').optional().isIn(RESIDUAL_RISK_LEVELS),
     body('residualRiskAccepted').optional().isBoolean(),
-    body('risks').optional().isArray(),
-    body('mitigations').optional().isArray(),
+    body('risks').optional().custom(isRiskList).withMessage(RISK_SHAPE_MESSAGE),
+    body('mitigations').optional().custom(isMitigationList).withMessage(MITIGATION_SHAPE_MESSAGE),
     body('dpoConsulted').optional().isBoolean(),
     body('dpoComments').optional().isString(),
     body('regulatorConsulted').optional().isBoolean(),
@@ -1461,13 +1587,31 @@ router.patch(
       ]) {
         if (req.body[field] !== undefined) data[field] = req.body[field];
       }
+      if (req.body.risks !== undefined) data.risks = normaliseRisks(req.body.risks);
+      if (req.body.mitigations !== undefined) data.mitigations = normaliseMitigations(req.body.mitigations);
       if (req.body.nextReviewDate) data.nextReviewDate = new Date(req.body.nextReviewDate);
 
       // Sign-off is the moment the assessment starts carrying weight, so who
       // approved it and when is recorded by the server, not sent by the client.
       if (req.body.status === 'APPROVED' && existing.status !== 'APPROVED') {
+        // An assessment that ends at high residual risk can only be signed off
+        // by somebody who says, on the record, that the risk is accepted. It
+        // could be approved without that, which made "approved" mean nothing
+        // for exactly the assessments where it matters most.
+        const residual = (data.residualRiskLevel as string | undefined) ?? existing.residualRiskLevel;
+        const accepted = (data.residualRiskAccepted as boolean | undefined) ?? existing.residualRiskAccepted;
+        if (residual === 'HIGH' && !accepted) {
+          throw new ApiError(409, 'Accept the high residual risk before approving this assessment');
+        }
         data.approvedBy = req.user!.id;
         data.approvedAt = new Date();
+      }
+
+      // Moving an approved assessment off APPROVED withdraws the sign-off, so
+      // it no longer names an approver it no longer has.
+      if (req.body.status && req.body.status !== 'APPROVED' && existing.status === 'APPROVED') {
+        data.approvedBy = null;
+        data.approvedAt = null;
       }
 
       const assessment = await prisma.dPIA.update({

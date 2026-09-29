@@ -47,6 +47,27 @@ const REPORT_REASONS = [
   { value: 'other', label: 'Other', description: 'Other violations not listed above', priority: 'medium' },
 ];
 
+/** What the server said when it filed the report. */
+interface ReportReceipt {
+  /** The RPT- reference the acknowledgment email quotes. */
+  reference: string | null;
+  /** The server's own sentence, which names the review clock it stamped. */
+  message: string | null;
+  reviewDeadline: string | null;
+}
+
+function formatDeadline(iso: string): string {
+  const due = new Date(iso);
+  if (Number.isNaN(due.getTime())) return 'the time given above';
+  return due.toLocaleString('en-AU', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 export default function ReportContentPage() {
   return (
     <Suspense fallback={null}>
@@ -73,14 +94,15 @@ function ReportContent() {
   const [newEvidenceUrl, setNewEvidenceUrl] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const [ticketId, setTicketId] = useState<string | null>(null);
+  // What the server stamped on the report, shown back exactly as it was
+  // stamped. This screen used to keep a clock of its own — one hour for a
+  // critical report, 72 for anything low — and to show the row id as the
+  // reference, while the server stamped 24 or 48 hours and emailed an RPT-
+  // number. A woman quoting the number on this screen was quoting one the
+  // acknowledgment email had never mentioned, against a deadline nobody kept.
+  const [receipt, setReceipt] = useState<ReportReceipt | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [needsSignIn, setNeedsSignIn] = useState(false);
-
-  // Get expected response time based on reason priority
-  const selectedReason = REPORT_REASONS.find(r => r.value === formData.reason);
-  const expectedResponse = selectedReason?.priority === 'critical' ? '1 hour' :
-                          selectedReason?.priority === 'high' ? '24 hours' : '72 hours';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -118,7 +140,11 @@ function ReportContent() {
       }
 
       const report = response.data?.data;
-      setTicketId(report?.reportId || report?.id || null);
+      setReceipt({
+        reference: typeof report?.reference === 'string' ? report.reference : null,
+        message: typeof response.data?.message === 'string' ? response.data.message : null,
+        reviewDeadline: typeof report?.reviewDeadline === 'string' ? report.reviewDeadline : null,
+      });
       setSubmitted(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to submit report');
@@ -159,20 +185,32 @@ function ReportContent() {
               Thank you for helping keep ATHENA safe. Your report has been received and will be reviewed by our Trust & Safety team.
             </p>
             
-            {ticketId && (
+            {receipt?.reference && (
               <div className="bg-slate-100 dark:bg-slate-800 rounded-lg p-4 mb-6">
                 <p className="text-sm text-slate-600 dark:text-slate-400">Your reference number:</p>
-                <p className="text-lg font-mono font-bold text-slate-900 dark:text-white">{ticketId}</p>
+                <p className="text-lg font-mono font-bold text-slate-900 dark:text-white">{receipt.reference}</p>
               </div>
             )}
 
             <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-8 text-left">
               <h3 className="font-semibold text-blue-900 dark:text-blue-100 mb-2">What happens next?</h3>
               <ul className="text-sm text-blue-800 dark:text-blue-200 space-y-2">
-                <li>• Our Trust &amp; Safety team will review your report within 24-72 hours</li>
-                <li>• For critical reports (illegal content, CSAM, terrorism), we aim to respond within 24 hours</li>
-                <li>• If we need more information, we&apos;ll contact you at the email provided</li>
-                <li>• Keep your reference number so you can quote it if you contact us about this report</li>
+                {receipt?.message && <li>• {receipt.message}</li>}
+                {receipt?.reviewDeadline && (
+                  <li>• A person will have looked at it by {formatDeadline(receipt.reviewDeadline)}</li>
+                )}
+                {formData.contactEmail.trim() && (
+                  <li>• We&apos;ll write to {formData.contactEmail.trim()} with the outcome</li>
+                )}
+                {receipt?.reference && (
+                  <li>
+                    • Keep your reference number. You can{' '}
+                    <Link href={`/report/status?reference=${encodeURIComponent(receipt.reference)}`} className="underline">
+                      check on this report
+                    </Link>{' '}
+                    with it, and quote it if you contact us about this report
+                  </li>
+                )}
               </ul>
             </div>
 
@@ -187,7 +225,7 @@ function ReportContent() {
               <button
                 onClick={() => {
                   setSubmitted(false);
-                  setTicketId(null);
+                  setReceipt(null);
                   setError(null);
                   setNeedsSignIn(false);
                   setFormData({

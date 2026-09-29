@@ -90,6 +90,25 @@ describe('Admin settings page', () => {
     expect(await screen.findByText(/^On, since/)).toBeInTheDocument();
   });
 
+  it('says where safety alerts go and what happens to content nothing can screen', async () => {
+    const base = config().data;
+    mocked.config.mockResolvedValue(
+      config({
+        integrations: { ...base.integrations, trustSafetyAlerts: false, authorityReferralAlerts: true },
+        moderation: { text: false, images: true, whenUnscreened: 'public' },
+      })
+    );
+    renderPage();
+
+    expect(await screen.findByText('Posts, profiles and images refused; conversations stay open')).toBeInTheDocument();
+    expect(screen.getByText('No provider')).toBeInTheDocument();
+    expect(screen.getByText('Not sent: no mailbox')).toBeInTheDocument();
+    expect(screen.getByText('Sent')).toBeInTheDocument();
+    // The referral and hold counts lead to the screens that work them.
+    expect(screen.getByRole('link', { name: 'Authority referrals' })).toHaveAttribute('href', '/admin/referrals');
+    expect(screen.getByRole('link', { name: 'Legal holds' })).toHaveAttribute('href', '/admin/legal-holds');
+  });
+
   it('says so when the API refuses', async () => {
     mocked.config.mockRejectedValue({ response: { data: { error: 'Forbidden' } } });
     renderPage();

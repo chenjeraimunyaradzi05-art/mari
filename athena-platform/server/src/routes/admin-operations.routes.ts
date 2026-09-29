@@ -11,7 +11,7 @@
  */
 
 import { Router, Response, NextFunction, RequestHandler } from 'express';
-import { BreachSeverity, BreachStatus, DataCategory } from '@prisma/client';
+import { BreachSeverity, BreachStatus, DataCategory, Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest, requireRole } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
@@ -35,6 +35,12 @@ import {
 } from '../services/content-report.service';
 import { getMaintenanceState, setMaintenanceState } from '../services/feature-flags.service';
 import { recordAdminAction } from '../services/admin-audit.service';
+import {
+  isRecognisedHeldDataType,
+  LEGAL_HOLD_DATA_TYPES,
+  normalizeHeldDataType,
+} from '../scripts/data-retention';
+import { bestEffort } from '../utils/best-effort';
 import { logger } from '../utils/logger';
 
 const router = Router();
@@ -579,10 +585,138 @@ router.post(
 // LEGAL HOLDS
 // ============================================================================
 
-// The retention purge and the erasure worker both test membership of this set
-// with exact lowercase strings, so a hold recorded as "Messages" would quietly
-// protect nothing. Everything is normalised on the way in.
-const KNOWN_HELD_DATA_TYPES = ['messages', 'analytics'];
+/**
+ * The data types a hold names, normalised the way the purge compares them.
+ *
+ * This used to lower-case the words and check them against a list of two, so
+ * "Direct messages" was stored with its space and reported as unrecognised,
+ * and "notifications", which the purge has always honoured, was reported as
+ * covering nothing. The catalogue both sides read now lives beside the purge.
+ */
+function parseHeldDataTypes(value: unknown, field: string): string[] {
+  return Array.from(new Set(parseStringArray(value, field).map(normalizeHeldDataType)));
+}
+
+/** The data types on a hold that no purge answers to, named so the operator can fix them now. */
+const unrecognisedDataTypesOf = (types: string[]) => types.filter((type) => !isRecognisedHeldDataType(type));
+
+/**
+ * Members a hold names, by account id or by the address staff actually have.
+ *
+ * A preservation notice names people, not database ids, and the only way in
+ * used to take ids alone, so placing a hold meant looking every person up
+ * somewhere else first, under exactly the kind of deadline a notice brings.
+ * Every id and every address must match an account: a hold on somebody who is
+ * not there looks like protection and is not, which is the worst failure a
+ * litigation hold has.
+ */
+async function resolveHeldMembers(idsValue: unknown, emailsValue: unknown, fields: { ids: string; emails: string }): Promise<string[]> {
+  const ids = Array.from(new Set(parseStringArray(idsValue, fields.ids)));
+  const emails = Array.from(
+    new Set(parseStringArray(emailsValue, fields.emails).map((email) => email.toLowerCase()))
+  );
+  const resolved = new Set<string>();
+
+  if (emails.length > 0) {
+    const found = await prisma.user.findMany({
+      where: { OR: emails.map((email) => ({ email: { equals: email, mode: 'insensitive' as const } })) },
+      select: { id: true, email: true },
+    });
+    const foundEmails = new Set(found.map((user) => user.email.toLowerCase()));
+    const unknown = emails.filter((email) => !foundEmails.has(email));
+    if (unknown.length > 0) {
+      throw new ApiError(400, `No account uses: ${unknown.join(', ')}`);
+    }
+    found.forEach((user) => resolved.add(user.id));
+  }
+
+  if (ids.length > 0) {
+    const found = await prisma.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true },
+    });
+    const known = new Set(found.map((user) => user.id));
+    const unknown = ids.filter((id) => !known.has(id));
+    if (unknown.length > 0) {
+      throw new ApiError(400, `Unknown user ids: ${unknown.join(', ')}`);
+    }
+    ids.forEach((id) => resolved.add(id));
+  }
+
+  return Array.from(resolved);
+}
+
+/** A hold's end date, which has to lie ahead: it is the date the hold is next reviewed by. */
+const parseHoldEndDate = (value: unknown): Date | undefined => {
+  const endDate = parseDate(value, 'endDate');
+  if (endDate && endDate.getTime() <= Date.now()) {
+    throw new ApiError(400, 'endDate must be in the future');
+  }
+  return endDate;
+};
+
+type PersonSummary = { id: string; name: string; email: string };
+
+/**
+ * Who the ids on a hold are.
+ *
+ * The record named the admin who authorised a hold, the one who released it
+ * and every member it covered by database id alone, which answers nobody who
+ * is reading it — least of all the lawyer who needs to know whose data is kept.
+ */
+async function peopleById(ids: Array<string | null | undefined>): Promise<Map<string, PersonSummary>> {
+  const unique = Array.from(new Set(ids.filter((id): id is string => Boolean(id))));
+  if (unique.length === 0) return new Map();
+
+  const people = await prisma.user.findMany({
+    where: { id: { in: unique } },
+    select: { id: true, email: true, displayName: true, firstName: true, lastName: true },
+  });
+
+  return new Map(
+    people.map((person) => [
+      person.id,
+      {
+        id: person.id,
+        email: person.email,
+        name:
+          person.displayName?.trim() ||
+          [person.firstName, person.lastName].filter(Boolean).join(' ').trim() ||
+          person.email,
+      },
+    ])
+  );
+}
+
+/** How many of a hold's members the detail view names; the count is always complete. */
+const HOLD_MEMBER_PREVIEW = 200;
+
+/**
+ * A hold's audit row. Written after the change it describes, so a failed insert
+ * is logged rather than turned into a 500 for a hold that was placed: an
+ * operator who saw an error would place it again, and two holds for one notice
+ * is its own confusion.
+ */
+async function auditHold(
+  req: AuthRequest,
+  action: string,
+  holdId: string,
+  details: Record<string, unknown>
+): Promise<void> {
+  await bestEffort(`legal hold audit ${action}`, () =>
+    prisma.privacyAuditLog.create({
+      data: {
+        adminId: req.user!.id,
+        action,
+        resourceType: 'LegalHold',
+        resourceId: holdId,
+        details: details as Prisma.InputJsonValue,
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent') || undefined,
+      },
+    })
+  );
+}
 
 /**
  * POST /admin/legal-holds
@@ -599,36 +733,17 @@ router.post('/legal-holds', ...adminOnly, async (req: AuthRequest, res: Response
       throw new ApiError(400, 'reason is required');
     }
 
-    const affectedUserIds = Array.from(
-      new Set(parseStringArray(req.body?.affectedUserIds, 'affectedUserIds'))
-    );
-    const affectedDataTypes = Array.from(
-      new Set(
-        parseStringArray(req.body?.affectedDataTypes, 'affectedDataTypes').map((type) =>
-          type.toLowerCase()
-        )
-      )
-    );
+    const affectedDataTypes = parseHeldDataTypes(req.body?.affectedDataTypes, 'affectedDataTypes');
+    const affectedUserIds = await resolveHeldMembers(req.body?.affectedUserIds, req.body?.affectedUserEmails, {
+      ids: 'affectedUserIds',
+      emails: 'affectedUserEmails',
+    });
 
     if (affectedUserIds.length === 0 && affectedDataTypes.length === 0) {
-      throw new ApiError(400, 'A hold must name at least one user or one data type');
+      throw new ApiError(400, 'A hold must name at least one member or one data type');
     }
 
-    // A hold placed on an id that does not exist looks like protection and is
-    // not, which is the worst failure mode a litigation hold has.
-    if (affectedUserIds.length > 0) {
-      const found = await prisma.user.findMany({
-        where: { id: { in: affectedUserIds } },
-        select: { id: true },
-      });
-      const known = new Set(found.map((user) => user.id));
-      const unknown = affectedUserIds.filter((id) => !known.has(id));
-      if (unknown.length > 0) {
-        throw new ApiError(400, `Unknown user ids: ${unknown.join(', ')}`);
-      }
-    }
-
-    const endDate = parseDate(req.body?.endDate, 'endDate');
+    const endDate = parseHoldEndDate(req.body?.endDate);
 
     const hold = await prisma.legalHold.create({
       data: {
@@ -643,21 +758,11 @@ router.post('/legal-holds', ...adminOnly, async (req: AuthRequest, res: Response
       },
     });
 
-    await prisma.privacyAuditLog.create({
-      data: {
-        adminId: req.user!.id,
-        action: 'LEGAL_HOLD_CREATED',
-        resourceType: 'LegalHold',
-        resourceId: hold.id,
-        details: {
-          name: hold.name,
-          caseReference: hold.caseReference,
-          affectedUserCount: affectedUserIds.length,
-          affectedDataTypes,
-        },
-        ipAddress: req.ip,
-        userAgent: req.get('user-agent') || undefined,
-      },
+    await auditHold(req, 'LEGAL_HOLD_CREATED', hold.id, {
+      name: hold.name,
+      caseReference: hold.caseReference,
+      affectedUserCount: affectedUserIds.length,
+      affectedDataTypes,
     });
 
     logger.warn('Legal hold placed', {
@@ -670,9 +775,7 @@ router.post('/legal-holds', ...adminOnly, async (req: AuthRequest, res: Response
       ...hold,
       // Named so the operator finds out now, not at the next purge run, that a
       // data type they typed is not one any purge job checks.
-      unrecognisedDataTypes: affectedDataTypes.filter(
-        (type) => !KNOWN_HELD_DATA_TYPES.includes(type)
-      ),
+      unrecognisedDataTypes: unrecognisedDataTypesOf(affectedDataTypes),
     });
   } catch (error) {
     next(error);
@@ -681,8 +784,13 @@ router.post('/legal-holds', ...adminOnly, async (req: AuthRequest, res: Response
 
 /**
  * GET /admin/legal-holds
- * List holds. Holds whose end date has passed are flagged rather than
- * auto-released: lifting a hold is a decision, not a timeout.
+ * List holds, the ones most in need of review first.
+ *
+ * A hold whose end date has passed is flagged `expired` and still holds: the
+ * purge, the erasure path and this console all treat a hold as standing until
+ * somebody releases it, because lifting one is a decision and not a timeout.
+ * The data types a hold can name come back with the list, so the form offers
+ * exactly the words the purge answers to.
  */
 router.get('/legal-holds', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
@@ -697,7 +805,9 @@ router.get('/legal-holds', ...adminOnly, async (req: AuthRequest, res: Response,
     const [holds, total, activeCount] = await Promise.all([
       prisma.legalHold.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        // Standing holds first, soonest review date first; a hold with no end
+        // date sorts after those that have one, and released holds come last.
+        orderBy: [{ isActive: 'desc' }, { endDate: 'asc' }, { createdAt: 'desc' }],
         skip: (page - 1) * limit,
         take: limit,
       }),
@@ -706,13 +816,18 @@ router.get('/legal-holds', ...adminOnly, async (req: AuthRequest, res: Response,
     ]);
 
     const now = Date.now();
+    const people = await peopleById(holds.flatMap((hold) => [hold.authorizedBy, hold.releasedBy]));
 
     res.json({
       holds: holds.map((hold) => ({
         ...hold,
         expired: Boolean(hold.isActive && hold.endDate && new Date(hold.endDate).getTime() < now),
+        authorizedByName: people.get(hold.authorizedBy)?.name ?? null,
+        releasedByName: hold.releasedBy ? people.get(hold.releasedBy)?.name ?? null : null,
+        unrecognisedDataTypes: unrecognisedDataTypesOf(hold.affectedDataTypes),
       })),
       activeCount,
+      dataTypes: LEGAL_HOLD_DATA_TYPES.map(({ value, label, purge }) => ({ value, label, purge })),
       pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
     });
   } catch (error) {
@@ -722,6 +837,7 @@ router.get('/legal-holds', ...adminOnly, async (req: AuthRequest, res: Response,
 
 /**
  * GET /admin/legal-holds/:id
+ * One hold, with the members it covers named.
  */
 router.get('/legal-holds/:id', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
@@ -729,7 +845,85 @@ router.get('/legal-holds/:id', ...adminOnly, async (req: AuthRequest, res: Respo
     if (!hold) {
       throw new ApiError(404, 'Legal hold not found');
     }
-    res.json(hold);
+
+    const shown = hold.affectedUserIds.slice(0, HOLD_MEMBER_PREVIEW);
+    const people = await peopleById([...shown, hold.authorizedBy, hold.releasedBy]);
+
+    res.json({
+      ...hold,
+      expired: Boolean(hold.isActive && hold.endDate && new Date(hold.endDate).getTime() < Date.now()),
+      authorizedByName: people.get(hold.authorizedBy)?.name ?? null,
+      releasedByName: hold.releasedBy ? people.get(hold.releasedBy)?.name ?? null : null,
+      unrecognisedDataTypes: unrecognisedDataTypesOf(hold.affectedDataTypes),
+      // An account erased since the hold was placed has no row to name; it is
+      // listed by id so the gap is visible rather than silently shortened.
+      affectedUsers: shown.map((id) => people.get(id) ?? { id, name: null, email: null }),
+      affectedUserCount: hold.affectedUserIds.length,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PATCH /admin/legal-holds/:id
+ * Move a hold's review date, or widen it to more members or data types.
+ *
+ * A hold can grow and its review date can move, but nothing here narrows one:
+ * taking a member or a data type out of a hold makes deletions possible again,
+ * which is a release, and a release has to say on whose authority and why.
+ */
+router.patch('/legal-holds/:id', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const body = req.body ?? {};
+    const endDateGiven = Object.prototype.hasOwnProperty.call(body, 'endDate');
+    const endDate = endDateGiven && body.endDate !== null ? parseHoldEndDate(body.endDate) : null;
+    const addDataTypes = parseHeldDataTypes(body.addDataTypes, 'addDataTypes');
+    const addUserIds = await resolveHeldMembers(body.addUserIds, body.addUserEmails, {
+      ids: 'addUserIds',
+      emails: 'addUserEmails',
+    });
+
+    if (!endDateGiven && addDataTypes.length === 0 && addUserIds.length === 0) {
+      throw new ApiError(400, 'Provide an endDate, or members or data types to add');
+    }
+
+    const hold = await prisma.legalHold.findUnique({ where: { id: req.params.id } });
+    if (!hold) {
+      throw new ApiError(404, 'Legal hold not found');
+    }
+    if (!hold.isActive) {
+      throw new ApiError(409, 'A released hold cannot be changed; place a new one');
+    }
+
+    const affectedUserIds = Array.from(new Set([...hold.affectedUserIds, ...addUserIds]));
+    const affectedDataTypes = Array.from(new Set([...hold.affectedDataTypes, ...addDataTypes]));
+
+    const updated = await prisma.legalHold.update({
+      where: { id: hold.id },
+      data: {
+        affectedUserIds,
+        affectedDataTypes,
+        ...(endDateGiven ? { endDate } : {}),
+      },
+    });
+
+    await auditHold(req, 'LEGAL_HOLD_UPDATED', hold.id, {
+      name: hold.name,
+      caseReference: hold.caseReference,
+      addedUserCount: affectedUserIds.length - hold.affectedUserIds.length,
+      addedDataTypes: affectedDataTypes.filter((type) => !hold.affectedDataTypes.includes(type)),
+      ...(endDateGiven
+        ? { previousEndDate: hold.endDate?.toISOString() ?? null, endDate: endDate?.toISOString() ?? null }
+        : {}),
+    });
+
+    logger.warn('Legal hold changed', { holdId: hold.id, adminId: req.user?.id });
+
+    res.json({
+      ...updated,
+      unrecognisedDataTypes: unrecognisedDataTypesOf(updated.affectedDataTypes),
+    });
   } catch (error) {
     next(error);
   }
@@ -770,21 +964,11 @@ router.post(
         },
       });
 
-      await prisma.privacyAuditLog.create({
-        data: {
-          adminId: req.user!.id,
-          action: 'LEGAL_HOLD_RELEASED',
-          resourceType: 'LegalHold',
-          resourceId: hold.id,
-          details: {
-            name: hold.name,
-            caseReference: hold.caseReference,
-            releaseReason: releaseReason.trim(),
-            affectedUserCount: hold.affectedUserIds.length,
-          },
-          ipAddress: req.ip,
-          userAgent: req.get('user-agent') || undefined,
-        },
+      await auditHold(req, 'LEGAL_HOLD_RELEASED', hold.id, {
+        name: hold.name,
+        caseReference: hold.caseReference,
+        releaseReason: releaseReason.trim(),
+        affectedUserCount: hold.affectedUserIds.length,
       });
 
       logger.warn('Legal hold released', { holdId: hold.id, adminId: req.user?.id });
@@ -869,7 +1053,8 @@ const isEscalationStatus = (value: unknown): value is EscalationStatus =>
 
 /**
  * GET /admin/moderation/escalations
- * Referrals to IWF / CTIRU that a person still has to file or close out
+ * Referrals to the Australian Federal Police that a person still has to file
+ * or close out
  */
 router.get(
   '/moderation/escalations',

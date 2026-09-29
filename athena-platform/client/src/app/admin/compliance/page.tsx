@@ -49,6 +49,14 @@ const LEDGER_TYPES: Array<{ key: string; label: string }> = [
   { key: 'COOKIE_FUNCTIONAL', label: 'Cookies: functional' },
 ];
 
+/** The compliance records kept elsewhere in the console, reached from here. */
+const RECORD_LINKS: Array<{ href: string; label: string; description: string }> = [
+  { href: '/admin/ropa', label: 'Processing register', description: 'What we do with personal information, and why' },
+  { href: '/admin/dpia', label: 'Impact assessments', description: 'The risks behind the riskier processing, signed off' },
+  { href: '/admin/legal-holds', label: 'Legal holds', description: 'Data kept back from deletion for a legal matter' },
+  { href: '/admin/breaches', label: 'Data breaches', description: 'Incidents and their notification clocks' },
+];
+
 interface ConsentUser {
   id: string;
   email: string;
@@ -153,6 +161,20 @@ export default function AdminCompliancePage() {
             />
           </div>
         </div>
+
+        {/* The records a regulator asks for, each kept on its own screen. */}
+        <nav aria-label="Compliance records" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {RECORD_LINKS.map((record) => (
+            <Link
+              key={record.href}
+              href={record.href}
+              className="rounded-lg bg-white p-4 shadow transition-shadow hover:shadow-md dark:bg-slate-800"
+            >
+              <p className="font-medium text-slate-900 dark:text-white">{record.label}</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{record.description}</p>
+            </Link>
+          ))}
+        </nav>
 
         {summaryQuery.isError && (
           <p className="rounded-lg bg-amber-50 p-4 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">

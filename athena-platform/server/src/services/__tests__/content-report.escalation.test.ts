@@ -78,12 +78,19 @@ describe('Authority referrals', () => {
     process.env = { ...savedEnv };
   });
 
-  it('queues a CSAM report for referral to the IWF', async () => {
+  // ATHENA is a Queensland company. The Criminal Code's referral duties
+  // (s 474.25 for child abuse material, s 474.33 for abhorrent violent
+  // material) run to the Australian Federal Police; these used to queue for
+  // the UK's IWF and CTIRU, which would have sent the filing abroad.
+  it('queues a CSAM report for referral to the AFP through the ACCCE', async () => {
     await submitContentReport(report('csam'));
 
     expect(prisma.authorityEscalation.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ reportedTo: 'IWF', status: 'reported' }),
+        data: expect.objectContaining({
+          reportedTo: 'Australian Federal Police (ACCCE)',
+          status: 'reported',
+        }),
       })
     );
   });
@@ -94,11 +101,22 @@ describe('Authority referrals', () => {
     expect(prisma.authorityEscalation.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          reportedTo: 'Counter Terrorism Internet Referral Unit',
+          reportedTo: 'Australian Federal Police',
           reason: 'terrorism',
         }),
       })
     );
+  });
+
+  it('never queues a referral for a UK body', async () => {
+    await submitContentReport(report('csam'));
+    await submitContentReport(report('terrorism'));
+
+    const bodies = (prisma.authorityEscalation.create as jest.Mock).mock.calls.map(
+      (call: any[]) => call[0].data.reportedTo
+    );
+    expect(bodies).not.toContain('IWF');
+    expect(bodies).not.toContain('Counter Terrorism Internet Referral Unit');
   });
 
   it('alerts someone that a referral is waiting to be filed', async () => {
@@ -108,6 +126,22 @@ describe('Authority referrals', () => {
     expect(subjects.some((subject: string) => subject.includes('AUTHORITY REFERRAL REQUIRED'))).toBe(
       true
     );
+  });
+
+  it('escapes what the reporter typed before it reaches a staff inbox', async () => {
+    // A reporter with no account could otherwise put a link or a fake sign-in
+    // form into the Trust & Safety mailbox, dressed as ATHENA's own alert.
+    await submitContentReport(
+      report('csam', { description: '<a href="https://evil.example/login">Sign in again</a>', contentId: '<img src=x>' })
+    );
+
+    const bodies = sendEmailMock.mock.calls.map((call: any[]) => String(call[0].html));
+    expect(bodies.length).toBeGreaterThan(0);
+    for (const html of bodies) {
+      expect(html).not.toContain('<a href="https://evil.example');
+      expect(html).not.toContain('<img src=x>');
+    }
+    expect(bodies.some((html) => html.includes('&lt;a href=&quot;https://evil.example/login&quot;&gt;'))).toBe(true);
   });
 
   it('does not refer a report that is only a moderation matter', async () => {

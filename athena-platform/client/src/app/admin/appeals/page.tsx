@@ -13,7 +13,7 @@ import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { formatDistanceToNow } from 'date-fns';
-import { ArrowLeft, Loader2, Scale, X } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, Loader2, Scale, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -50,16 +50,51 @@ function nameOf(a: Appeal): string {
   return [a.user.firstName, a.user.lastName].filter(Boolean).join(' ').trim() || a.user.email;
 }
 
+/** What the server says it undid when an appeal was upheld. */
+type Reversal = {
+  suspensionLifted?: boolean;
+  banLifted?: boolean;
+  banKept?: boolean;
+  contentRestored?: boolean;
+  reportCleared?: boolean;
+  verificationReopened?: boolean;
+};
+
+/**
+ * The toast after an upheld appeal says what actually changed. It used to say
+ * "the enforcement reversed" whenever anything came back, including when the
+ * account stayed banned because the appeal was only about a post.
+ */
+function upheldMessage(reversal: Reversal | null | undefined): string {
+  if (!reversal) return 'Appeal upheld. The member has been told.';
+  if (reversal.verificationReopened) return 'Appeal upheld. Her verification is back in the women-only review queue.';
+  if (reversal.banLifted) return 'Appeal upheld. The ban is lifted and her address may register again.';
+  if (reversal.banKept) return 'Appeal upheld for the content. The account stays banned: that is a separate decision.';
+  if (reversal.suspensionLifted) return 'Appeal upheld. The suspension is lifted.';
+  if (reversal.contentRestored) return 'Appeal upheld. The content is restored.';
+  return 'Appeal upheld. Nothing needed reversing on the account.';
+}
+
+const PAGE_SIZE = 50;
+
 export default function AppealsPage() {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<'all' | Appeal['status']>('PENDING');
+  const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [note, setNote] = useState('');
 
+  // One page at a time: the list used to fetch every appeal ever filed on
+  // every load.
   const appeals = useQuery({
-    queryKey: ['admin-appeals', status],
-    queryFn: () => api.get('/appeals', { params: status === 'all' ? {} : { status } }),
-    select: (response) => (Array.isArray(response.data?.data) ? (response.data.data as Appeal[]) : []),
+    queryKey: ['admin-appeals', status, page],
+    queryFn: () =>
+      api.get('/appeals', { params: { page, limit: PAGE_SIZE, ...(status === 'all' ? {} : { status }) } }),
+    select: (response) => ({
+      appeals: Array.isArray(response.data?.data) ? (response.data.data as Appeal[]) : [],
+      totalPages: Number(response.data?.pagination?.totalPages ?? 1),
+      total: Number(response.data?.pagination?.total ?? 0),
+    }),
   });
 
   const decide = useMutation({
@@ -68,21 +103,19 @@ export default function AppealsPage() {
     onSuccess: (response, { next }) => {
       queryClient.invalidateQueries({ queryKey: ['admin-appeals'] });
       setNote('');
-      const reversal = response.data?.reversal;
       toast.success(
         next === 'APPROVED'
-          ? reversal
-            ? 'Appeal upheld and the enforcement reversed'
-            : 'Appeal upheld'
+          ? upheldMessage(response.data?.reversal as Reversal | null | undefined)
           : next === 'REJECTED'
-            ? 'Appeal rejected'
+            ? 'Appeal rejected. The member has been told.'
             : 'Taken under review'
       );
     },
     onError: (error) => toast.error(errorMessage(error) || 'Could not update the appeal'),
   });
 
-  const current = appeals.data?.find((a) => a.id === selectedId) ?? null;
+  const list = appeals.data?.appeals ?? [];
+  const current = list.find((a) => a.id === selectedId) ?? null;
   const decided = current?.status === 'APPROVED' || current?.status === 'REJECTED';
 
   return (
@@ -95,9 +128,9 @@ export default function AppealsPage() {
           <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900 dark:text-white">
             <Scale className="h-7 w-7 text-indigo-600" /> Appeals
           </h1>
-          <p className="mt-1 text-slate-600 dark:text-slate-400">Upholding an appeal reverses what was done to the account. The note you write is shown to the member.</p>
+          <p className="mt-1 text-slate-600 dark:text-slate-400">Upholding an appeal reverses what was done to the account. The member is told the decision in the app and by email, with the note you write.</p>
         </div>
-        <select value={status} onChange={(e) => setStatus(e.target.value as typeof status)} className="input py-1.5 text-sm" aria-label="Status">
+        <select value={status} onChange={(e) => { setStatus(e.target.value as typeof status); setPage(1); setSelectedId(null); }} className="input py-1.5 text-sm" aria-label="Status">
           <option value="PENDING">Waiting</option>
           <option value="UNDER_REVIEW">Under review</option>
           <option value="APPROVED">Upheld</option>
@@ -113,12 +146,15 @@ export default function AppealsPage() {
               <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
             </div>
           ) : appeals.isError ? (
-            <div className="card p-8 text-center text-slate-500">Could not load appeals. You may not have access.</div>
-          ) : (appeals.data?.length ?? 0) === 0 ? (
+            <div className="card p-8 text-center text-slate-500">
+              {errorMessage(appeals.error) || 'Could not load appeals.'} Do not read that as nothing waiting: refresh, and tell an
+              administrator if it keeps failing.
+            </div>
+          ) : list.length === 0 ? (
             <div className="card p-10 text-center text-slate-500">Nothing here.</div>
           ) : (
             <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-700 dark:bg-slate-900">
-              {appeals.data!.map((appeal) => (
+              {list.map((appeal) => (
                 <li key={appeal.id}>
                   <button
                     type="button"
@@ -139,6 +175,33 @@ export default function AppealsPage() {
                 </li>
               ))}
             </ul>
+          )}
+          {appeals.data && appeals.data.totalPages > 1 && (
+            <div className="mt-4 flex items-center justify-between text-sm text-slate-500">
+              <span>
+                Page {page} of {appeals.data.totalPages} · {appeals.data.total} appeals
+              </span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                  className="btn-outline px-2 py-1"
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => p + 1)}
+                  disabled={page >= appeals.data.totalPages}
+                  className="btn-outline px-2 py-1"
+                  aria-label="Next page"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
           )}
         </div>
 
@@ -202,7 +265,15 @@ export default function AppealsPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      if (window.confirm('Uphold this appeal? Any enforcement it concerns is reversed.')) decide.mutate({ id: current.id, next: 'APPROVED' });
+                      const consequence =
+                        current.type === 'ACCOUNT_SUSPENSION'
+                          ? 'The account is unlocked. If it was banned, the ban is lifted and its address may register again.'
+                          : current.type === 'VERIFICATION_DECISION'
+                            ? 'Her verification goes back to the women-only review queue to be decided again.'
+                            : current.type === 'CONTENT_MODERATION'
+                              ? 'The content decision is reversed. A banned account stays banned.'
+                              : 'Nothing on the account changes automatically.';
+                      if (window.confirm(`Uphold this appeal? ${consequence}`)) decide.mutate({ id: current.id, next: 'APPROVED' });
                     }}
                     disabled={decide.isPending}
                     className="btn-primary px-3 py-2 text-sm"

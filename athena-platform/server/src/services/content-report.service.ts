@@ -13,17 +13,28 @@ import crypto from 'crypto';
 import type { ContentReport, Prisma, SafetyIncident } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { sendEmail } from '../utils/email';
+// Report text is written by whoever filed it, including people with no
+// account, and it lands in staff inboxes. Interpolated raw, a reporter could
+// put a link or a fake "sign in again" form into the Trust & Safety mailbox
+// dressed as ATHENA's own alert. Everything a reporter typed is escaped.
+import { escapeHtml } from './email.service';
 import { logger } from '../utils/logger';
 import { recordFailure } from '../utils/ops-metrics';
 import { AU_ONLINE_SAFETY_CONFIG, resolveContactEmail } from '../config/region.config';
 import { notifyAdmins } from './admin-notify.service';
+import { recordBannedIdentity } from './banned-identity.service';
 
 export type ContentType = 'post' | 'message' | 'profile' | 'comment' | 'job' | 'other';
 export type ReportReason = 'illegal' | 'harmful' | 'harassment' | 'hate_speech' | 'spam' | 'misinformation' | 'csam' | 'terrorism' | 'fraud' | 'other';
 export type ReportPriority = 'low' | 'medium' | 'high' | 'critical';
+/** The priority as ContentReport.priority stores it, which the queue sorts and filters on. */
+export type ReportPriorityLevel = 'URGENT' | 'HIGH' | 'NORMAL';
 export type ReportStatus = 'PENDING' | 'REVIEWING' | 'RESOLVED' | 'DISMISSED';
 export type ModerationAction = 'dismiss' | 'warn' | 'remove' | 'suspend' | 'ban' | 'escalate';
 export type EscalationStatus = 'reported' | 'acknowledged' | 'resolved';
+
+/** The report statuses that are still waiting on a person. */
+export const OPEN_REPORT_STATUSES = ['PENDING', 'REVIEWING'];
 
 export interface ModerationOutcome {
   reportId: string;
@@ -33,6 +44,12 @@ export interface ModerationOutcome {
   contentType: string;
   contentId: string;
   reportedUserId: string;
+  /**
+   * Set on a ban only: whether the person was also barred from registering
+   * again. False means the account is locked but the door is not closed, which
+   * the moderator is told rather than left to assume.
+   */
+  banIdentityRecorded?: boolean;
 }
 
 // The value stored on ContentReport.action, which is the column the queue and
@@ -50,11 +67,31 @@ const ACTION_OUTCOMES: Record<ModerationAction, string> = {
 // action ourselves, and who each one goes to.
 export const AUTHORITY_REPORTABLE_REASONS: ReportReason[] = ['csam', 'terrorism'];
 
-const DEFAULT_AUTHORITY = 'Counter Terrorism Internet Referral Unit';
+/**
+ * Who a referral is filed with.
+ *
+ * These named the Internet Watch Foundation and the UK Counter Terrorism
+ * Internet Referral Unit, the bodies a British host would use. ATHENA is a
+ * Queensland company, and the duty it actually carries is Australian: the
+ * Criminal Code Act 1995 (Cth) requires a content host that becomes aware its
+ * service can be used to reach child abuse material (s 474.25), or abhorrent
+ * violent material recording conduct in Australia (s 474.33), to refer the
+ * details to the Australian Federal Police within a reasonable time. Child
+ * exploitation reports reach the AFP through the ACCCE, the centre it runs for
+ * them. The referral screen tells the operator where to file from this value,
+ * so a queue that named a UK body would have sent an Australian filing to the
+ * wrong country. Referrals already queued keep the body they were queued for.
+ */
+export const REFERRAL_AUTHORITY = {
+  childAbuse: 'Australian Federal Police (ACCCE)',
+  violentExtremism: 'Australian Federal Police',
+} as const;
+
+const DEFAULT_AUTHORITY = REFERRAL_AUTHORITY.violentExtremism;
 
 const AUTHORITY_FOR_REASON: Partial<Record<ReportReason, string>> = {
-  csam: 'IWF',
-  terrorism: DEFAULT_AUTHORITY,
+  csam: REFERRAL_AUTHORITY.childAbuse,
+  terrorism: REFERRAL_AUTHORITY.violentExtremism,
 };
 
 // An escalation is filed by hand, so its lifecycle is: we recorded it
@@ -158,6 +195,21 @@ export function reportPriorityFor(reason: string, isUrgent?: boolean): ReportPri
 }
 
 /**
+ * The priority in the three words ContentReport.priority holds. Alerting keeps
+ * its four levels; the queue needs only to know what is urgent, what is high,
+ * and what can wait its turn, and low and medium are both the last of those.
+ */
+export function priorityLevelFor(priority: ReportPriority): ReportPriorityLevel {
+  return priority === 'critical' ? 'URGENT' : priority === 'high' ? 'HIGH' : 'NORMAL';
+}
+
+const PRIORITY_LEVELS: ReadonlySet<string> = new Set<ReportPriorityLevel>(['URGENT', 'HIGH', 'NORMAL']);
+
+export function isReportPriorityLevel(value: unknown): value is ReportPriorityLevel {
+  return typeof value === 'string' && PRIORITY_LEVELS.has(value);
+}
+
+/**
  * The review clock a report runs on, in hours.
  *
  * There are two, and only two: the Online Safety Act targets the platform
@@ -219,23 +271,114 @@ export function newReportTicketId(): string {
  * The public form computed these inline and the in-app dialog never computed
  * them at all, so a report filed from inside the app had no reference, no
  * deadline and no alert. A route that files a report calls this first, writes
- * `evidence` onto the row, and then hands the same numbers to
- * runReportIntakeConsequences.
+ * reviewDeadline and priorityLevel into the ContentReport columns of the same
+ * names, and then hands the same numbers to runReportIntakeConsequences.
  */
 export function openReportIntake(input: { reason: string; isUrgent?: boolean; now?: Date }): {
   ticketId: string;
   priority: ReportPriority;
+  /** What ContentReport.priority stores. */
+  priorityLevel: ReportPriorityLevel;
   reviewHours: number;
   reviewDeadline: Date;
 } {
   const now = input.now ?? new Date();
   const reviewHours = reviewHoursFor(input.reason, input.isUrgent);
+  const priority = reportPriorityFor(input.reason, input.isUrgent);
   return {
     ticketId: generateTicketId(),
-    priority: reportPriorityFor(input.reason, input.isUrgent),
+    priority,
+    priorityLevel: priorityLevelFor(priority),
     reviewHours,
     reviewDeadline: new Date(now.getTime() + reviewHours * 60 * 60 * 1000),
   };
+}
+
+/**
+ * When a named report is due, reading the column first.
+ *
+ * reviewDeadline is the column the queue sorts on and what the reporter was
+ * told. A row can still lack it — one filed by a door that does not stamp it
+ * yet, or an old row whose evidence held a malformed date the migration left
+ * alone — and then the deadline is worked out from the evidence and the clock
+ * its reason runs on, exactly as the queue always has.
+ */
+export function namedReportDeadline(report: {
+  createdAt: Date;
+  reason: string | null;
+  reviewDeadline?: Date | null;
+  evidence?: unknown;
+}): Date {
+  if (report.reviewDeadline) return report.reviewDeadline;
+  const evidence = evidenceObject(report.evidence);
+  return reviewDeadlineFor({
+    createdAt: report.createdAt,
+    reason: report.reason,
+    stamped: evidence.reviewDeadline,
+    isUrgent: evidence.isUrgent,
+  });
+}
+
+/** The priority a named report is worked at, reading the column first. */
+export function namedReportPriority(report: {
+  reason: string | null;
+  priority?: string | null;
+  evidence?: unknown;
+}): ReportPriorityLevel {
+  if (isReportPriorityLevel(report.priority)) return report.priority;
+  const evidence = evidenceObject(report.evidence);
+  // The public form wrote its four-level priority into the evidence before the
+  // column existed. The migration copied across only the values already in the
+  // column's words, so a 'critical' report would otherwise be re-derived here
+  // and could come out lower than the reporter was promised.
+  const stamped = typeof evidence.priority === 'string' ? evidence.priority.toLowerCase() : null;
+  if (stamped === 'critical' || stamped === 'high' || stamped === 'medium' || stamped === 'low') {
+    return priorityLevelFor(stamped);
+  }
+  return priorityLevelFor(reportPriorityFor(report.reason ?? 'other', evidence.isUrgent === true));
+}
+
+function evidenceObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+/** How many unstamped open reports one pass will stamp. */
+const STAMP_BATCH = 200;
+
+/**
+ * Give every open report a deadline and a priority in the columns.
+ *
+ * The public form stamps both when it writes the row. The in-app dialog and
+ * the other doors did not, and a report with no deadline in the column cannot
+ * be put in its place by a database sort: it would sit at the end of the queue
+ * however late it was. So before the queue is read, and before the overdue
+ * sweep runs, any open report still missing either is given the deadline the
+ * queue already showed for it — arrival plus the clock its reason runs on —
+ * and from then on the column is the single answer. Bounded, and a no-op once
+ * every door stamps its own rows.
+ */
+export async function stampMissingReviewClocks(): Promise<number> {
+  const unstamped = await prisma.contentReport.findMany({
+    where: {
+      status: { in: OPEN_REPORT_STATUSES },
+      OR: [{ reviewDeadline: null }, { priority: null }],
+    },
+    select: { id: true, createdAt: true, reason: true, reviewDeadline: true, priority: true, evidence: true },
+    orderBy: { createdAt: 'asc' },
+    take: STAMP_BATCH,
+  });
+
+  for (const report of unstamped) {
+    await prisma.contentReport.update({
+      where: { id: report.id },
+      data: {
+        reviewDeadline: namedReportDeadline(report),
+        priority: namedReportPriority(report),
+      },
+    });
+  }
+
+  return unstamped.length;
 }
 
 export interface IntakeRecord {
@@ -363,6 +506,8 @@ async function applyReportDecision(
 
   // The reported account is recorded on the report itself, so enforcement never
   // has to guess an owner back out of the content it points at.
+  let banIdentityRecorded: boolean | undefined;
+  const enforcementReason = decisionReason(notes, report.contentType, report.reason);
   switch (action) {
     case 'remove':
       await removeContent(report.contentType, report.contentId);
@@ -371,8 +516,14 @@ async function applyReportDecision(
       await warnUser(report.reportedUserId, report.contentType, report.contentId);
       break;
     case 'suspend':
+      await suspendAccount(report.reportedUserId, { moderatorId, reason: enforcementReason });
+      break;
     case 'ban':
-      await suspendUser(report.reportedUserId);
+      banIdentityRecorded = await banAccount(report.reportedUserId, {
+        moderatorId,
+        reason: enforcementReason,
+        reportId: report.id,
+      });
       break;
     case 'escalate':
       await escalateReport(ticketId, report);
@@ -399,19 +550,36 @@ async function applyReportDecision(
     contentType: report.contentType,
     contentId: report.contentId,
     reportedUserId: report.reportedUserId,
+    ...(banIdentityRecorded === undefined ? {} : { banIdentityRecorded }),
   };
 }
 
 /**
  * Undo the enforcement a moderator applied, used when an appeal succeeds.
  * Returns what was actually reversed so the caller can record it.
+ *
+ * A ban is lifted only when the caller says the decision was about the ban
+ * itself (liftBan) — an upheld appeal against the account's suspension. An
+ * appeal about a single post does not reopen a banned account on the way past:
+ * the ban was a separate decision about the person, and on this platform the
+ * person may be someone a member is hiding from. When a ban is lifted, the
+ * record that stops the address registering again goes with it, because the
+ * decision it recorded has been overturned.
  */
 export async function reverseEnforcement(input: {
   userId: string;
   reportId?: string | null;
   contentType?: string | null;
   contentId?: string | null;
-}): Promise<{ suspensionLifted: boolean; contentRestored: boolean; reportCleared: boolean }> {
+  liftBan?: boolean;
+}): Promise<{
+  suspensionLifted: boolean;
+  banLifted: boolean;
+  /** True when the account is banned and this appeal was not about the ban, so it stays locked. */
+  banKept: boolean;
+  contentRestored: boolean;
+  reportCleared: boolean;
+}> {
   const report = input.reportId
     ? await prisma.contentReport.findUnique({ where: { id: input.reportId } })
     : null;
@@ -421,16 +589,30 @@ export async function reverseEnforcement(input: {
 
   const user = await prisma.user.findUnique({
     where: { id: input.userId },
-    select: { isSuspended: true },
+    select: { isSuspended: true, bannedAt: true },
   });
 
   let suspensionLifted = false;
-  if (user?.isSuspended) {
+  let banLifted = false;
+  const banned = Boolean(user?.bannedAt);
+  const banKept = banned && !input.liftBan;
+
+  if (user?.isSuspended && !banKept) {
     await prisma.user.update({
       where: { id: input.userId },
-      data: { isSuspended: false },
+      data: {
+        isSuspended: false,
+        suspensionReason: null,
+        suspendedAt: null,
+        suspendedById: null,
+        ...(banned ? { bannedAt: null, banReason: null, bannedById: null } : {}),
+      },
     });
     suspensionLifted = true;
+    if (banned) {
+      await prisma.bannedIdentity.deleteMany({ where: { userId: input.userId } });
+      banLifted = true;
+    }
   }
 
   let contentRestored = false;
@@ -439,7 +621,9 @@ export async function reverseEnforcement(input: {
   }
 
   let reportCleared = false;
-  if (report) {
+  // The report that recorded a ban stays as it is while the ban stands, or the
+  // queue would describe as reversed a decision that is still in force.
+  if (report && !(banKept && report.action === ACTION_OUTCOMES.ban)) {
     await prisma.contentReport.update({
       where: { id: report.id },
       data: {
@@ -451,7 +635,7 @@ export async function reverseEnforcement(input: {
     reportCleared = true;
   }
 
-  return { suspensionLifted, contentRestored, reportCleared };
+  return { suspensionLifted, banLifted, banKept, contentRestored, reportCleared };
 }
 
 /**
@@ -668,10 +852,10 @@ export async function alertTrustAndSafety(
     html: `
       <h2>New Content Report Requires Attention</h2>
       <p><strong>Priority:</strong> ${priority.toUpperCase()}</p>
-      <p><strong>Ticket ID:</strong> ${ticketId}</p>
-      <p><strong>Content Type:</strong> ${report.contentType}</p>
-      <p><strong>Reason:</strong> ${report.reason}</p>
-      <p><strong>Description:</strong> ${report.description || 'N/A'}</p>
+      <p><strong>Ticket ID:</strong> ${escapeHtml(ticketId)}</p>
+      <p><strong>Content Type:</strong> ${escapeHtml(String(report.contentType))}</p>
+      <p><strong>Reason:</strong> ${escapeHtml(String(report.reason))}</p>
+      <p><strong>Description:</strong> ${report.description ? escapeHtml(report.description) : 'N/A'}</p>
       <p><strong>Urgent Flag:</strong> ${report.isUrgent ? 'Yes' : 'No'}</p>
       <br>
       <p>Please review this report in the moderation dashboard.</p>
@@ -682,7 +866,7 @@ export async function alertTrustAndSafety(
 /**
  * Escalate to authorities (for CSAM, terrorism)
  *
- * The row this writes is the queue item: nothing is transmitted to IWF or CTIRU
+ * The row this writes is the queue item: nothing is transmitted to the AFP
  * automatically, so the escalation stays at "reported" until a named operator
  * files it and records the authority's reference number. The alert below is what
  * tells that operator the queue has something in it.
@@ -731,13 +915,13 @@ async function notifyEscalationQueue(
     subject: `[AUTHORITY REFERRAL REQUIRED] ${ticketId} - ${report.reason}`,
     html: `
       <h2>Authority Referral Required</h2>
-      <p>A report is queued for referral to <strong>${reportedTo}</strong>. Nothing has been transmitted to them automatically.</p>
-      <p><strong>Ticket ID:</strong> ${ticketId}</p>
-      <p><strong>Reason:</strong> ${report.reason}</p>
-      <p><strong>Content Type:</strong> ${report.contentType}</p>
-      <p><strong>Content ID:</strong> ${report.contentId}</p>
+      <p>A report is queued for referral to <strong>${escapeHtml(reportedTo)}</strong>. Nothing has been transmitted to them automatically.</p>
+      <p><strong>Ticket ID:</strong> ${escapeHtml(ticketId)}</p>
+      <p><strong>Reason:</strong> ${escapeHtml(String(report.reason))}</p>
+      <p><strong>Content Type:</strong> ${escapeHtml(String(report.contentType))}</p>
+      <p><strong>Content ID:</strong> ${escapeHtml(String(report.contentId))}</p>
       <br>
-      <p>File the referral, then record the authority's reference number against this escalation in the admin console so the queue can be closed.</p>
+      <p>File the referral, then record the authority's reference number against it on the Authority referrals screen of the admin console, so the referral can be followed to its end. Do not open, copy or forward the reported content.</p>
     `,
   });
 }
@@ -862,19 +1046,95 @@ async function warnUser(userId: string, contentType: string, contentId: string):
   });
 }
 
-// Suspend and ban both come here, and that is deliberate rather than an
-// oversight to be hidden: the schema has no ban record, no permanence and no
-// way to refuse the same person a new account, so the only enforcement either
-// verb can carry is the lock. What distinguishes a ban is the record —
-// ContentReport.action BAN, the ModerationLog verb and the audit metadata — and
-// every screen and message that describes one now says exactly that much.
-async function suspendUser(userId: string): Promise<void> {
+/**
+ * What an enforcement is recorded as having been for.
+ *
+ * The moderator's notes when she wrote any, because that is the reason an
+ * appeal has to answer. Otherwise the report it was decided on, so the account
+ * never carries a lock with no explanation at all — which is what isSuspended
+ * on its own used to be.
+ */
+function decisionReason(notes: string | undefined, contentType: string, reason: string | null): string {
+  const written = typeof notes === 'string' ? notes.trim() : '';
+  if (written) return written.slice(0, 1000);
+  return `Decided on a ${contentType.toLowerCase()} report for ${(reason ?? 'other').toLowerCase()}, with no notes`;
+}
+
+/**
+ * Lock an account, and say why, when and by whom.
+ *
+ * isSuspended alone recorded that an account was shut and nothing else, so an
+ * appeal had nothing to answer and a reviewer could not tell a cooling-off from
+ * a lock for threatening a member.
+ */
+export async function suspendAccount(userId: string, context: { moderatorId: string; reason: string }): Promise<void> {
   logger.info(`Suspending user ${userId}`);
 
   await prisma.user.update({
     where: { id: userId },
-    data: { isSuspended: true },
+    data: {
+      isSuspended: true,
+      suspensionReason: context.reason,
+      suspendedAt: new Date(),
+      suspendedById: context.moderatorId,
+    },
   });
+}
+
+/**
+ * Ban an account, and the person behind it.
+ *
+ * A ban used to be the same lock as a suspension and nothing more: the person
+ * banned for threatening a member could register again the same afternoon with
+ * the same address. The account is now locked and marked banned, and the
+ * address is recorded so that every registration path refuses it.
+ *
+ * Returns whether the address was recorded. The lock is applied first and is
+ * never undone by a failure after it; if the address cannot be recorded — no
+ * hash key configured, or the write refused — the ban still stands on the
+ * account, the failure is counted where the operations screen shows it, and
+ * the moderator is told, rather than the decision reading as complete when the
+ * door is still open.
+ */
+export async function banAccount(
+  userId: string,
+  context: { moderatorId: string; reason: string; reportId: string | null }
+): Promise<boolean> {
+  logger.info(`Banning user ${userId}`);
+
+  const now = new Date();
+  const user = await prisma.user.update({
+    where: { id: userId },
+    data: {
+      isSuspended: true,
+      suspensionReason: context.reason,
+      suspendedAt: now,
+      suspendedById: context.moderatorId,
+      bannedAt: now,
+      banReason: context.reason,
+      bannedById: context.moderatorId,
+    },
+    select: { email: true },
+  });
+
+  try {
+    await recordBannedIdentity({
+      email: user.email,
+      userId,
+      reportId: context.reportId,
+      createdById: context.moderatorId,
+      reason: context.reason,
+    });
+    return true;
+  } catch (error) {
+    logger.error('A banned account was locked but its address could not be barred from registering again', {
+      userId,
+      reportId: context.reportId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    recordFailure('moderation.ban_identity', error);
+    return false;
+  }
 }
 
 // Takes the fields rather than a ContentReport row, because an anonymous report
@@ -1144,6 +1404,8 @@ export async function resolveAnonymousReport(
   const status: ReportStatus =
     action === 'dismiss' ? 'DISMISSED' : action === 'escalate' ? 'REVIEWING' : 'RESOLVED';
 
+  let banIdentityRecorded: boolean | undefined;
+  const enforcementReason = decisionReason(notes, contentType, incident.reason);
   switch (action) {
     case 'remove':
       if (contentId) await removeContent(contentType, contentId);
@@ -1152,8 +1414,16 @@ export async function resolveAnonymousReport(
       await warnUser(incident.userId, contentType, contentId);
       break;
     case 'suspend':
+      await suspendAccount(incident.userId, { moderatorId, reason: enforcementReason });
+      break;
     case 'ban':
-      await suspendUser(incident.userId);
+      // BannedIdentity.reportId names a ContentReport, and an anonymous report
+      // is a SafetyIncident, so the incident is carried in the reason instead.
+      banIdentityRecorded = await banAccount(incident.userId, {
+        moderatorId,
+        reason: `${enforcementReason} (anonymous report ${incident.id})`,
+        reportId: null,
+      });
       break;
     case 'escalate':
       await escalateReport(null, {
@@ -1225,6 +1495,7 @@ export async function resolveAnonymousReport(
     contentType,
     contentId,
     reportedUserId: incident.userId,
+    ...(banIdentityRecorded === undefined ? {} : { banIdentityRecorded }),
   };
 }
 
@@ -1269,71 +1540,155 @@ export async function listAuthorityEscalations(filters: {
     prisma.authorityEscalation.count({ where: { status: 'resolved' } }),
   ]);
 
-  const reportsByTicket = await findReportsForTickets(rows.map((row) => row.ticketId));
+  const reportsByTicket = await findReportOrigins(rows.map((row) => row.ticketId));
   const now = Date.now();
 
   return {
-    escalations: rows.map((row) => {
-      const linked = reportsByTicket.get(row.ticketId) || null;
-      return {
-        ...row,
-        ageHours: Math.round((now - new Date(row.escalatedAt).getTime()) / (1000 * 60 * 60)),
-        report: linked
-          ? {
-              id: linked.id,
-              status: linked.status,
-              action: linked.action,
-              reviewerId: linked.reviewerId,
-              reportedUserId: linked.reportedUserId,
-              description: linked.description,
-            }
-          : null,
-      };
-    }),
+    escalations: rows.map((row) => ({
+      ...row,
+      ageHours: Math.round((now - new Date(row.escalatedAt).getTime()) / (1000 * 60 * 60)),
+      report: reportsByTicket.get(row.ticketId) ?? null,
+    })),
     summary: { total, reported, acknowledged, resolved },
     pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
   };
 }
 
 /**
- * The ticket reference lives inside the report's evidence JSON rather than a
- * column, so the whole page is looked up in one OR'd query instead of one query
- * per escalation.
+ * The report a referral came from, in one shape whichever door it came through.
+ *
+ * Only named reports used to be found. A report filed on the public form
+ * without an account is a SafetyIncident, not a ContentReport, and its
+ * reference sits in the incident's metadata rather than the report's evidence,
+ * so a CSAM referral raised from the anonymous form showed no report at all —
+ * and the anonymous form is the door a frightened reporter is most likely to
+ * use. Both are looked up now, and each says which it is.
+ *
+ * The reported content itself is never part of this. For child abuse material
+ * above all, the referral carries the reference and the authority takes it from
+ * there; a console that rendered the material would be the platform
+ * redistributing it.
  */
-async function findReportsForTickets(ticketIds: string[]) {
-  const unique = Array.from(new Set(ticketIds.filter(Boolean)));
-  if (unique.length === 0) return new Map<string, ContentReport>();
+export interface ReferralOrigin {
+  /** 'named' is a ContentReport; 'anonymous' was filed on the public form without an account. */
+  source: 'named' | 'anonymous';
+  id: string;
+  status: string;
+  action: string | null;
+  reviewerId: string | null;
+  reportedUserId: string | null;
+  description: string | null;
+  createdAt: Date;
+}
 
-  const reports = await prisma.contentReport.findMany({
-    where: {
-      OR: unique.map((ticketId) => ({
-        evidence: { path: ['ticketId'], equals: ticketId },
-      })),
-    },
+/**
+ * The ticket reference lives inside JSON rather than a column on both tables,
+ * so the whole page is looked up in one OR'd query per table instead of one
+ * query per escalation.
+ */
+async function findReportOrigins(ticketIds: string[]): Promise<Map<string, ReferralOrigin>> {
+  const unique = Array.from(new Set(ticketIds.filter(Boolean)));
+  const byTicket = new Map<string, ReferralOrigin>();
+  if (unique.length === 0) return byTicket;
+
+  const [named, anonymous] = await Promise.all([
+    prisma.contentReport.findMany({
+      where: {
+        OR: unique.map((ticketId) => ({
+          evidence: { path: ['ticketId'], equals: ticketId },
+        })),
+      },
+    }),
+    prisma.safetyIncident.findMany({
+      where: {
+        ...ANONYMOUS_REPORT_WHERE,
+        OR: unique.map((ticketId) => ({
+          metadata: { path: ['ticketId'], equals: ticketId },
+        })),
+      },
+    }),
+  ]);
+
+  for (const report of named) {
+    const ticketId = (report.evidence as { ticketId?: string } | null)?.ticketId;
+    if (!ticketId) continue;
+    byTicket.set(ticketId, {
+      source: 'named',
+      id: report.id,
+      status: report.status,
+      action: report.action,
+      reviewerId: report.reviewerId,
+      reportedUserId: report.reportedUserId,
+      description: report.description,
+      createdAt: report.createdAt,
+    });
+  }
+
+  for (const incident of anonymous) {
+    const ticketId = metadataString(incidentMetadata(incident.metadata), 'ticketId');
+    if (!ticketId || byTicket.has(ticketId)) continue;
+    const view = toAnonymousReportView(incident, null);
+    byTicket.set(ticketId, {
+      source: 'anonymous',
+      id: view.id,
+      status: view.status,
+      action: view.action,
+      reviewerId: view.reviewerId,
+      reportedUserId: incident.userId,
+      description: view.description,
+      createdAt: view.createdAt,
+    });
+  }
+
+  return byTicket;
+}
+
+/**
+ * The names staff will recognise, for ids written into logs.
+ *
+ * A referral's history is who filed it, who recorded the authority's
+ * reference and who closed it. As bare ids the record answered none of those
+ * for the person reading it.
+ */
+async function staffNames(ids: string[]): Promise<Map<string, string>> {
+  const unique = Array.from(new Set(ids.filter((id) => id && id !== 'system')));
+  if (unique.length === 0) return new Map();
+
+  const people = await prisma.user.findMany({
+    where: { id: { in: unique } },
+    select: { id: true, displayName: true, firstName: true, lastName: true, email: true },
   });
 
-  const byTicket = new Map<string, ContentReport>();
-  for (const report of reports) {
-    const ticketId = (report.evidence as { ticketId?: string } | null)?.ticketId;
-    if (ticketId) byTicket.set(ticketId, report);
-  }
-  return byTicket;
+  return new Map(
+    people.map((person) => [
+      person.id,
+      person.displayName?.trim() ||
+        [person.firstName, person.lastName].filter(Boolean).join(' ').trim() ||
+        person.email,
+    ])
+  );
 }
 
 export async function getAuthorityEscalation(id: string) {
   const escalation = await prisma.authorityEscalation.findUnique({ where: { id } });
   if (!escalation) return null;
 
-  const reportsByTicket = await findReportsForTickets([escalation.ticketId]);
-  const history = await prisma.moderationLog.findMany({
-    where: { ticketId: escalation.ticketId },
-    orderBy: { timestamp: 'asc' },
-  });
+  const [reportsByTicket, history] = await Promise.all([
+    findReportOrigins([escalation.ticketId]),
+    prisma.moderationLog.findMany({
+      where: { ticketId: escalation.ticketId },
+      orderBy: { timestamp: 'asc' },
+    }),
+  ]);
+  const names = await staffNames(history.map((entry) => entry.moderatorId));
 
   return {
     ...escalation,
-    report: reportsByTicket.get(escalation.ticketId) || null,
-    history,
+    report: reportsByTicket.get(escalation.ticketId) ?? null,
+    history: history.map((entry) => ({
+      ...entry,
+      moderatorName: entry.moderatorId === 'system' ? 'ATHENA' : names.get(entry.moderatorId) ?? null,
+    })),
   };
 }
 
@@ -1423,12 +1778,33 @@ export async function updateAuthorityEscalationStatus(
  * missing mailbox is put on the operations screen.
  */
 export async function alertOverdueReports(now: Date = new Date()): Promise<{ overdue: number; alerted: boolean }> {
-  const [named, anonymous] = await Promise.all([
+  // Any open report another door filed without a deadline gets one first, so
+  // the sweep below can ask the column alone. A failure here is counted and the
+  // sweep still runs: the unstamped rows are caught by the null branch below.
+  try {
+    await stampMissingReviewClocks();
+  } catch (error) {
+    logger.error('Open reports could not be given a review deadline before the overdue sweep', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    recordFailure('content-report.stamp-review-clock', error);
+  }
+
+  const [namedLate, namedUnstamped, namedLateTotal, anonymous] = await Promise.all([
     prisma.contentReport.findMany({
-      where: { status: { in: ['PENDING', 'REVIEWING'] } },
-      select: { id: true, createdAt: true, reason: true, evidence: true },
+      where: { status: { in: OPEN_REPORT_STATUSES }, reviewDeadline: { lt: now } },
+      select: { id: true, createdAt: true, reason: true, reviewDeadline: true, evidence: true },
+      orderBy: { reviewDeadline: 'asc' },
+      take: DEADLINE_SORT_WINDOW,
+    }),
+    prisma.contentReport.findMany({
+      where: { status: { in: OPEN_REPORT_STATUSES }, reviewDeadline: null },
+      select: { id: true, createdAt: true, reason: true, reviewDeadline: true, evidence: true },
       orderBy: { createdAt: 'asc' },
       take: DEADLINE_SORT_WINDOW,
+    }),
+    prisma.contentReport.count({
+      where: { status: { in: OPEN_REPORT_STATUSES }, reviewDeadline: { lt: now } },
     }),
     prisma.safetyIncident.findMany({
       where: { ...ANONYMOUS_REPORT_WHERE, resolvedAt: null },
@@ -1438,17 +1814,16 @@ export async function alertOverdueReports(now: Date = new Date()): Promise<{ ove
   ]);
 
   const late: Array<{ reference: string; reason: string; due: Date; anonymous: boolean }> = [];
-  for (const report of named) {
-    const evidence = (report.evidence ?? null) as { reviewDeadline?: unknown; isUrgent?: unknown; ticketId?: unknown } | null;
-    const due = reviewDeadlineFor({
-      createdAt: report.createdAt,
-      reason: report.reason,
-      stamped: evidence?.reviewDeadline,
-      isUrgent: evidence?.isUrgent,
-    });
+  // Overdue named reports beyond the window are still counted, though only the
+  // oldest are listed: an alert that under-reported the backlog would be worse
+  // than no alert.
+  const uncountedNamed = Math.max(0, namedLateTotal - namedLate.length);
+  for (const report of [...namedLate, ...namedUnstamped]) {
+    const due = namedReportDeadline(report);
     if (due.getTime() < now.getTime()) {
+      const ticketId = evidenceObject(report.evidence).ticketId;
       late.push({
-        reference: typeof evidence?.ticketId === 'string' ? evidence.ticketId : report.id,
+        reference: typeof ticketId === 'string' ? ticketId : report.id,
         reason: report.reason,
         due,
         anonymous: false,
@@ -1467,7 +1842,8 @@ export async function alertOverdueReports(now: Date = new Date()): Promise<{ ove
     }
   }
 
-  if (late.length === 0) return { overdue: 0, alerted: false };
+  const overdue = late.length + uncountedNamed;
+  if (overdue === 0) return { overdue: 0, alerted: false };
 
   late.sort((a, b) => a.due.getTime() - b.due.getTime());
   const hoursLate = (due: Date) => Math.max(1, Math.round((now.getTime() - due.getTime()) / (60 * 60 * 1000)));
@@ -1476,20 +1852,20 @@ export async function alertOverdueReports(now: Date = new Date()): Promise<{ ove
   const to = trustAndSafetyMailbox();
   let alerted = false;
   if (!to) {
-    reportAlertUndeliverable('overdue-reports', `${late.length} overdue`);
+    reportAlertUndeliverable('overdue-reports', `${overdue} overdue`);
   } else {
     try {
       await sendEmail({
         to,
-        subject: `[OVERDUE] ${late.length} report${late.length === 1 ? '' : 's'} past the review deadline`,
+        subject: `[OVERDUE] ${overdue} report${overdue === 1 ? '' : 's'} past the review deadline`,
         html: `
-          <h2>${late.length} report${late.length === 1 ? ' is' : 's are'} past the review deadline</h2>
+          <h2>${overdue} report${overdue === 1 ? ' is' : 's are'} past the review deadline</h2>
           <p>Reporters were told 24 hours for illegal content and 48 hours for everything else. The oldest:</p>
           <ul>
             ${oldest
               .map(
                 (item) =>
-                  `<li>${item.reference} — ${item.reason}${item.anonymous ? ' (filed without an account)' : ''} — ${hoursLate(item.due)} hours late</li>`
+                  `<li>${escapeHtml(item.reference)} — ${escapeHtml(String(item.reason))}${item.anonymous ? ' (filed without an account)' : ''} — ${hoursLate(item.due)} hours late</li>`
               )
               .join('')}
           </ul>
@@ -1499,7 +1875,7 @@ export async function alertOverdueReports(now: Date = new Date()): Promise<{ ove
       alerted = true;
     } catch (error) {
       logger.error('Overdue-report alert could not be sent', {
-        overdue: late.length,
+        overdue,
         error: error instanceof Error ? error.message : String(error),
       });
       recordFailure('content-report.overdue-alert', error);
@@ -1507,13 +1883,13 @@ export async function alertOverdueReports(now: Date = new Date()): Promise<{ ove
   }
 
   await notifyAdmins({
-    title: `${late.length} report${late.length === 1 ? '' : 's'} past the review deadline`,
+    title: `${overdue} report${overdue === 1 ? '' : 's'} past the review deadline`,
     message: `The oldest is ${hoursLate(oldest[0].due)} hours late.`,
     link: '/admin/moderation',
-    data: { overdue: late.length },
+    data: { overdue },
   });
 
-  return { overdue: late.length, alerted };
+  return { overdue, alerted };
 }
 
 // ============================================

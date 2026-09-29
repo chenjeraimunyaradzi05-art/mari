@@ -924,18 +924,20 @@ router.post('/report-content', optionalAuth, reportRateLimit, reportIntakeCeilin
     // stamped with 48 hours under a confirmation screen promising 24.
     // openReportIntake is the one place the clock is chosen, and the
     // acknowledgment email quotes the same number.
-    const { ticketId, priority, reviewHours, reviewDeadline } = openReportIntake({
+    const { ticketId, priority, priorityLevel, reviewHours, reviewDeadline } = openReportIntake({
       reason: normalizedReason,
       isUrgent: urgent,
     });
     const reporterId = req.user?.id;
     const description = typeof details === 'string' && details.trim() ? details.trim() : undefined;
 
+    // The deadline and the priority are ContentReport columns now, which the
+    // queue sorts on and the overdue sweep reads; they used to live only in
+    // this JSON, where nothing could sort by them. The evidence keeps what the
+    // reporter gave us and the reference she was sent.
     const evidence = {
       ticketId,
-      reviewDeadline: reviewDeadline.toISOString(),
       reviewHours,
-      priority,
       source: 'ONLINE_SAFETY_REPORT',
       urls: parsedEvidence,
       contactEmail: parsedContactEmail ?? undefined,
@@ -965,6 +967,8 @@ router.post('/report-content', optionalAuth, reportRateLimit, reportIntakeCeilin
           reason: normalizedReason,
           description,
           evidence,
+          reviewDeadline,
+          priority: priorityLevel,
           status: 'PENDING',
         },
       });
@@ -1015,8 +1019,13 @@ router.post('/report-content', optionalAuth, reportRateLimit, reportIntakeCeilin
         reason: normalizedReason,
         contentType: normalizedType,
         contentId: String(contentId),
+        // SafetyIncident has no deadline or priority columns, so for a report
+        // filed without an account the metadata is still where they live, and
+        // where the anonymous queue and the status lookup read them.
         metadata: {
           ...evidence,
+          reviewDeadline: reviewDeadline.toISOString(),
+          priority,
           description: description ?? null,
           anonymous: true,
         },
@@ -1076,14 +1085,22 @@ router.get('/report-status/:reference', publicFormLimiter, async (req: Request, 
       return res.status(400).json({ success: false, error: 'A report reference is required.' });
     }
 
+    const statusSelect = {
+      id: true,
+      status: true,
+      action: true,
+      updatedAt: true,
+      evidence: true,
+      reviewDeadline: true,
+    } as const;
     const report =
       (await prisma.contentReport.findFirst({
         where: { evidence: { path: ['ticketId'], equals: reference } },
-        select: { id: true, status: true, action: true, updatedAt: true, evidence: true },
+        select: statusSelect,
       })) ??
       (await prisma.contentReport.findUnique({
         where: { id: reference },
-        select: { id: true, status: true, action: true, updatedAt: true, evidence: true },
+        select: statusSelect,
       }));
 
     if (report) {
@@ -1094,7 +1111,10 @@ router.get('/report-status/:reference', publicFormLimiter, async (req: Request, 
           reference: evidence?.ticketId ?? report.id,
           status: report.status,
           outcome: describeReportOutcome(report.action),
-          reviewDeadline: evidence?.reviewDeadline ?? null,
+          // The column is the deadline the queue works to. Reports filed before
+          // it existed carried the deadline in their evidence, and those are
+          // still answered from there rather than as having none.
+          reviewDeadline: report.reviewDeadline?.toISOString() ?? evidence?.reviewDeadline ?? null,
           lastUpdated: report.updatedAt,
         },
       });

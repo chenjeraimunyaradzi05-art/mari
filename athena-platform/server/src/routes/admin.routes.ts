@@ -18,19 +18,27 @@ import { ApiError } from '../middleware/errorHandler';
 import {
   DEADLINE_SORT_WINDOW,
   ModerationAction,
+  OPEN_REPORT_STATUSES,
+  banAccount,
   getAnonymousReport,
   listAnonymousReports,
+  namedReportDeadline,
+  namedReportPriority,
   processReportById,
   resolveAnonymousReport,
-  reviewDeadlineFor,
-  sortByDeadline,
+  stampMissingReviewClocks,
 } from '../services/content-report.service';
 import { gdprService } from '../services/gdpr.service';
 import { consentService } from '../services/consent.service';
 // Every audit row on this router is written after the change it records has
 // committed, so it goes through auditAfterCommit: a failed insert must not turn
 // a finished suspension or erasure into a 500. See admin-audit.service.
-import { auditAfterCommit, recordAdminAction } from '../services/admin-audit.service';
+import {
+  LEGACY_ADMIN_AUDIT_ACTION,
+  adminVerbsFiledUnder,
+  auditAfterCommit,
+  recordAdminAction,
+} from '../services/admin-audit.service';
 import { bestEffort } from '../utils/best-effort';
 import { logger } from '../utils/logger';
 import { sendEmail } from '../utils/email';
@@ -84,6 +92,61 @@ function parseOr400<T>(schema: { safeParse(input: unknown): { success: true; dat
     throw new ApiError(400, parsed.error.issues.map((issue) => `${issue.path.join('.') || 'body'}: ${issue.message}`).join('; '));
   }
   return parsed.data;
+}
+
+type SortOrder = 'asc' | 'desc';
+
+/**
+ * A list's sort column and direction, checked against what that list can sort
+ * by.
+ *
+ * These lists passed ?sortBy and ?sortOrder straight into
+ * `orderBy: { [sortBy]: sortOrder }`, so a mistyped column or a direction of
+ * "up" came back from Prisma as a 500, and the console reported a broken page
+ * for what was a bad link. Each list now names the columns it can be sorted on
+ * and anything else is a 400 that says which ones those are.
+ */
+function parseSort<C extends string>(
+  query: Record<string, unknown>,
+  columns: readonly C[],
+  defaults: { sortBy: C; sortOrder: SortOrder }
+): { sortBy: C; sortOrder: SortOrder } {
+  const rawBy = query.sortBy;
+  const rawOrder = query.sortOrder;
+
+  let sortBy = defaults.sortBy;
+  if (rawBy !== undefined) {
+    const found = typeof rawBy === 'string' ? columns.find((column) => column === rawBy) : undefined;
+    if (!found) {
+      throw new ApiError(400, `sortBy must be one of: ${columns.join(', ')}`);
+    }
+    sortBy = found;
+  }
+
+  let sortOrder = defaults.sortOrder;
+  if (rawOrder !== undefined) {
+    if (rawOrder !== 'asc' && rawOrder !== 'desc') {
+      throw new ApiError(400, 'sortOrder must be asc or desc');
+    }
+    sortOrder = rawOrder;
+  }
+
+  return { sortBy, sortOrder };
+}
+
+const listPagingSchema = z.object({
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+/**
+ * page and limit for the console's lists. A bare parseInt turned ?limit=abc
+ * into NaN and ?page=0 into a negative skip, both of which reached Prisma as a
+ * 500, and nothing stopped one request asking for every row at once.
+ */
+function parsePaging(query: Record<string, unknown>): { page: number; limit: number; skip: number } {
+  const { page, limit } = parseOr400(listPagingSchema, { page: query.page, limit: query.limit });
+  return { page, limit, skip: (page - 1) * limit };
 }
 
 // All admin routes require authentication and ADMIN role
@@ -197,22 +260,13 @@ router.get('/stats', async (_req: AuthRequest, res: Response, next: NextFunction
  * GET /admin/users
  * List all users with pagination and filters
  */
+const USER_SORT_COLUMNS = ['createdAt', 'lastLoginAt', 'email', 'firstName', 'lastName', 'role', 'persona'] as const;
+
 router.get('/users', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const {
-      page = '1',
-      limit = '20',
-      search = '',
-      role,
-      persona,
-      status,
-      sortBy = 'createdAt',
-      sortOrder = 'desc',
-    } = req.query;
-
-    const pageNum = parseInt(page as string, 10);
-    const limitNum = parseInt(limit as string, 10);
-    const skip = (pageNum - 1) * limitNum;
+    const { search = '', role, persona, status } = req.query;
+    const { page: pageNum, limit: limitNum, skip } = parsePaging(req.query);
+    const { sortBy, sortOrder } = parseSort(req.query, USER_SORT_COLUMNS, { sortBy: 'createdAt', sortOrder: 'desc' });
 
     // Build where clause
     const where: any = {};
@@ -235,6 +289,8 @@ router.get('/users', async (req: AuthRequest, res: Response, next: NextFunction)
 
     if (status === 'suspended') {
       where.isSuspended = true;
+    } else if (status === 'banned') {
+      where.bannedAt = { not: null };
     } else if (status === 'active') {
       where.isSuspended = false;
     }
@@ -254,6 +310,7 @@ router.get('/users', async (req: AuthRequest, res: Response, next: NextFunction)
           isSuspended: true,
           createdAt: true,
           lastLoginAt: true,
+          ...SUSPENSION_COLUMNS,
           _count: {
             select: {
               posts: true,
@@ -263,25 +320,33 @@ router.get('/users', async (req: AuthRequest, res: Response, next: NextFunction)
         },
         skip,
         take: limitNum,
-        orderBy: { [sortBy as string]: sortOrder },
+        orderBy: { [sortBy]: sortOrder } as Prisma.UserOrderByWithRelationInput,
       }),
       prisma.user.count({ where }),
     ]);
 
+    // Accounts locked before User carried a reason have theirs only in the
+    // audit trail, so the trail is read for those and no others.
     const suspensions = await bestEffort(
       'admin users suspension reasons',
-      () => latestSuspensions(users.filter((user) => user.isSuspended).map((user) => user.id)),
+      () => latestSuspensions(users.filter((user) => user.isSuspended && !recordedSuspension(user)).map((user) => user.id)),
       null
     );
 
     res.json({
-      users: users.map((user) => ({
-        ...user,
-        // Left undefined when the reasons could not be read, so the screen can
-        // say so rather than showing a suspended account as though no reason
-        // had ever been given.
-        suspension: user.isSuspended ? (suspensions ? suspensions.get(user.id) ?? null : undefined) : null,
-      })),
+      users: users.map(({ suspensionReason, suspendedAt, suspendedById, bannedAt, banReason, bannedById, ...user }) => {
+        const columns = { suspensionReason, suspendedAt, suspendedById, bannedAt, banReason, bannedById };
+        return {
+          ...user,
+          banned: Boolean(bannedAt),
+          // Left undefined when an older reason could not be read, so the screen
+          // can say so rather than showing a suspended account as though no
+          // reason had ever been given.
+          suspension: user.isSuspended
+            ? recordedSuspension(columns) ?? (suspensions ? suspensions.get(user.id) ?? null : undefined)
+            : null,
+        };
+      }),
       suspensionReasonsUnavailable: suspensions === null,
       pagination: {
         page: pageNum,
@@ -297,29 +362,87 @@ router.get('/users', async (req: AuthRequest, res: Response, next: NextFunction)
 
 type SuspensionRecord = {
   reason: string | null;
-  source: 'admin' | 'moderation';
+  /** Where the reason was read from: the account itself, or for older locks the admin or moderation audit row. */
+  source: 'account' | 'admin' | 'moderation';
   moderationAction: string | null;
+  banned: boolean;
   at: Date;
   byUserId: string | null;
 };
 
+/** The suspension and ban columns every admin read of an account includes. */
+const SUSPENSION_COLUMNS = {
+  suspensionReason: true,
+  suspendedAt: true,
+  suspendedById: true,
+  bannedAt: true,
+  banReason: true,
+  bannedById: true,
+} as const;
+
+type SuspensionColumns = {
+  suspensionReason: string | null;
+  suspendedAt: Date | null;
+  suspendedById: string | null;
+  bannedAt: Date | null;
+  banReason: string | null;
+  bannedById: string | null;
+};
+
 /**
- * Why each of these accounts was suspended, from the audit trail.
+ * Why, when and by whom an account was locked, from the account itself.
  *
- * suspensionReason used to go to logger.info and nowhere a person could read
- * it back: User has no column for it, so no admin screen, moderation view or
- * appeal could say why an account had been locked. The reason is written into
- * the audit row that records the suspension — by PATCH /users/:id here, and by
- * the report decision routes as the moderator's notes — so the latest such row
- * for each account is the answer. Until User carries a reason of its own, this
- * is the one place it is kept.
+ * Null for a lock written before User carried these columns; those are read
+ * back from the audit trail by latestSuspensions instead.
+ */
+function recordedSuspension(user: SuspensionColumns): SuspensionRecord | null {
+  if (user.bannedAt) {
+    return {
+      reason: user.banReason ?? user.suspensionReason,
+      source: 'account',
+      moderationAction: 'ban',
+      banned: true,
+      at: user.bannedAt,
+      byUserId: user.bannedById,
+    };
+  }
+  if (user.suspensionReason && user.suspendedAt) {
+    return {
+      reason: user.suspensionReason,
+      source: 'account',
+      moderationAction: null,
+      banned: false,
+      at: user.suspendedAt,
+      byUserId: user.suspendedById,
+    };
+  }
+  return null;
+}
+
+// The audit verbs a lock was ever written under: the admin toggle and, before
+// moderation decisions had verbs of their own, every report outcome.
+const SUSPENSION_AUDIT_ACTIONS: AuditAction[] = [
+  AuditAction.ADMIN_USER_UPDATE,
+  AuditAction.MODERATION_SUSPEND,
+  AuditAction.MODERATION_BAN,
+];
+
+/**
+ * Why each of these older locks was put on, from the audit trail.
+ *
+ * Before User had suspensionReason, the reason was written only into the audit
+ * row that recorded the suspension — by PATCH /users/:id here, and by the
+ * report decision routes as the moderator's notes — so the latest such row for
+ * each account is the answer for a lock put on before the columns existed.
+ * Every lock since then carries its reason on the account and is answered by
+ * recordedSuspension without reading the log at all.
  */
 async function latestSuspensions(userIds: string[]): Promise<Map<string, SuspensionRecord>> {
   const found = new Map<string, SuspensionRecord>();
   if (userIds.length === 0) return found;
 
   const rows = await prisma.auditLog.findMany({
-    where: { targetUserId: { in: userIds }, action: 'ADMIN_USER_UPDATE' },
+    where: { targetUserId: { in: userIds }, action: { in: SUSPENSION_AUDIT_ACTIONS } },
     orderBy: { createdAt: 'desc' },
     select: { targetUserId: true, actorUserId: true, createdAt: true, metadata: true },
     take: Math.min(userIds.length * 25, 2000),
@@ -339,6 +462,7 @@ async function latestSuspensions(userIds: string[]): Promise<Map<string, Suspens
         reason: text(meta.suspensionReason),
         source: 'admin',
         moderationAction: null,
+        banned: false,
         at: row.createdAt,
         byUserId: row.actorUserId,
       });
@@ -347,6 +471,7 @@ async function latestSuspensions(userIds: string[]): Promise<Map<string, Suspens
         reason: text(meta.notes) ?? `Decided on a ${text(meta.contentType)?.toLowerCase() ?? 'content'} report with no notes`,
         source: 'moderation',
         moderationAction,
+        banned: moderationAction === 'ban',
         at: row.createdAt,
         byUserId: row.actorUserId,
       });
@@ -378,6 +503,7 @@ router.get('/users/:id', async (req: AuthRequest, res: Response, next: NextFunct
         persona: true,
         emailVerified: true,
         isSuspended: true,
+        ...SUSPENSION_COLUMNS,
         createdAt: true,
         updatedAt: true,
         lastLoginAt: true,
@@ -421,11 +547,13 @@ router.get('/users/:id', async (req: AuthRequest, res: Response, next: NextFunct
       return res.status(404).json({ error: 'User not found' });
     }
 
-    const suspension = user.isSuspended
-      ? await bestEffort('admin user suspension reason', async () => (await latestSuspensions([user.id])).get(user.id) ?? null, undefined)
-      : null;
+    const recorded = recordedSuspension(user);
+    const suspension = !user.isSuspended
+      ? null
+      : recorded ??
+        (await bestEffort('admin user suspension reason', async () => (await latestSuspensions([user.id])).get(user.id) ?? null, undefined));
 
-    res.json({ ...user, suspension });
+    res.json({ ...user, banned: Boolean(user.bannedAt), suspension });
   } catch (error) {
     next(error);
   }
@@ -438,9 +566,17 @@ router.get('/users/:id', async (req: AuthRequest, res: Response, next: NextFunct
 router.patch('/users/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    const { role, isSuspended, emailVerified, suspensionReason } = req.body;
+    const { role, isSuspended, isBanned, emailVerified, suspensionReason, banReason } = req.body ?? {};
 
-    const updateData: any = {};
+    const existing = await prisma.user.findUnique({
+      where: { id },
+      select: { id: true, isSuspended: true, bannedAt: true },
+    });
+    if (!existing) {
+      throw new ApiError(404, 'User not found');
+    }
+
+    const updateData: Prisma.UserUpdateInput = {};
 
     if (role !== undefined) {
       // A role the enum does not know used to reach Prisma and come back as a 500.
@@ -454,15 +590,38 @@ router.patch('/users/:id', async (req: AuthRequest, res: Response, next: NextFun
       updateData.role = role;
     }
 
+    if (isBanned !== undefined && isBanned !== true) {
+      // A ban is lifted by upholding the member's appeal against it, where the
+      // decision is written down and she is told. A toggle here would lift it
+      // with neither, and would leave her address barred from registering.
+      throw new ApiError(400, 'A ban is lifted by upholding the appeal against it, in the appeals queue.');
+    }
+    const banning = isBanned === true;
+    if (banning && isSuspended === false) {
+      throw new ApiError(400, 'An account cannot be banned and unsuspended at once');
+    }
+
     let reason: string | undefined;
-    if (isSuspended !== undefined) {
+    if (banning) {
+      // A ban is the one decision here that also reaches past the account, so
+      // it is never made without a reason an appeal can be read against.
+      reason = typeof banReason === 'string' ? banReason.trim().slice(0, 1000) : '';
+      if (!reason) {
+        throw new ApiError(400, 'Say why the account is being banned');
+      }
+      if (req.params.id === req.user!.id) {
+        throw new ApiError(400, 'You cannot ban your own account');
+      }
+      if (existing.bannedAt) {
+        throw new ApiError(409, 'This account is already banned');
+      }
+    } else if (isSuspended !== undefined) {
       if (typeof isSuspended !== 'boolean') {
         throw new ApiError(400, 'isSuspended must be true or false');
       }
       // A suspension nobody can explain afterwards cannot be reviewed on appeal
-      // or answered for, so locking an account now requires saying why. The
-      // reason is kept on the audit row below, which is where latestSuspensions
-      // reads it back for the admin screens.
+      // or answered for, so locking an account requires saying why. The reason
+      // is kept on the account, and on the audit row below.
       if (isSuspended) {
         reason = typeof suspensionReason === 'string' ? suspensionReason.trim().slice(0, 1000) : '';
         if (!reason) {
@@ -471,17 +630,47 @@ router.patch('/users/:id', async (req: AuthRequest, res: Response, next: NextFun
         if (req.params.id === req.user!.id) {
           throw new ApiError(400, 'You cannot suspend your own account');
         }
+        updateData.isSuspended = true;
+        updateData.suspensionReason = reason;
+        updateData.suspendedAt = new Date();
+        updateData.suspendedById = req.user!.id;
+      } else {
+        // The ordinary unsuspend does not lift a ban. It used to, because a ban
+        // was only ever the same flag, so one click in the member list undid a
+        // decision made on a report about someone threatening a member.
+        if (existing.bannedAt) {
+          throw new ApiError(
+            409,
+            'This account is banned, not only suspended. A ban is lifted by upholding the appeal against it, in the appeals queue.'
+          );
+        }
+        updateData.isSuspended = false;
+        updateData.suspensionReason = null;
+        updateData.suspendedAt = null;
+        updateData.suspendedById = null;
       }
-      updateData.isSuspended = isSuspended;
     }
 
     if (emailVerified !== undefined) {
+      if (typeof emailVerified !== 'boolean') {
+        throw new ApiError(400, 'emailVerified must be true or false');
+      }
       updateData.emailVerified = emailVerified;
     }
 
-    const user = await prisma.user.update({
+    if (Object.keys(updateData).length > 0) {
+      await prisma.user.update({ where: { id }, data: updateData, select: { id: true } });
+    }
+
+    // Banning goes through the same path a report decision does, so the account
+    // is marked banned and the address is barred from registering again.
+    let banIdentityRecorded: boolean | undefined;
+    if (banning && reason) {
+      banIdentityRecorded = await banAccount(id, { moderatorId: req.user!.id, reason, reportId: null });
+    }
+
+    const user = await prisma.user.findUniqueOrThrow({
       where: { id },
-      data: updateData,
       select: {
         id: true,
         email: true,
@@ -490,25 +679,33 @@ router.patch('/users/:id', async (req: AuthRequest, res: Response, next: NextFun
         role: true,
         emailVerified: true,
         isSuspended: true,
+        ...SUSPENSION_COLUMNS,
       },
     });
 
+    const updatedFields = [...Object.keys(updateData), ...(banning ? ['bannedAt', 'banReason', 'bannedById'] : [])];
     await auditAfterCommit({
-      action: 'ADMIN_USER_UPDATE',
+      action: banning ? AuditAction.MODERATION_BAN : isSuspended === true ? AuditAction.MODERATION_SUSPEND : AuditAction.ADMIN_USER_UPDATE,
       actorUserId: req.user?.id ?? null,
       targetUserId: id,
       ipAddress: req.ip,
       userAgent: req.get('user-agent') || undefined,
       metadata: {
-        updatedFields: Object.keys(updateData),
+        updatedFields,
         role,
-        isSuspended,
+        isSuspended: banning ? true : isSuspended,
+        ...(banning ? { isBanned: true, banReason: reason, banIdentityRecorded } : {}),
         emailVerified,
-        suspensionReason: reason,
+        suspensionReason: banning ? undefined : reason,
+        source: 'admin',
       },
     });
 
-    res.json(user);
+    res.json({
+      ...user,
+      banned: Boolean(user.bannedAt),
+      ...(banIdentityRecorded === undefined ? {} : { banIdentityRecorded }),
+    });
   } catch (error) {
     next(error);
   }
@@ -587,11 +784,15 @@ router.delete('/users/:id', async (req: AuthRequest, res: Response, next: NextFu
       });
     }
 
-    // Soft delete - suspend and anonymize
+    // Soft delete - suspend and anonymize. The lock says why, like every other
+    // lock, so the member list does not show a suspended shell with no reason.
     await prisma.user.update({
       where: { id },
       data: {
         isSuspended: true,
+        suspensionReason: 'Account deleted by an administrator',
+        suspendedAt: new Date(),
+        suspendedById: req.user?.id ?? null,
         email: gdprService.suspensionTombstoneEmail(id),
         firstName: 'Deleted',
         lastName: 'User',
@@ -617,23 +818,18 @@ router.delete('/users/:id', async (req: AuthRequest, res: Response, next: NextFu
 // CONTENT MODERATION
 // ============================================================================
 
+const POST_SORT_COLUMNS = ['createdAt', 'reportCount', 'likeCount', 'commentCount'] as const;
+
 /**
  * GET /admin/content/posts
  * List posts with moderation info
  */
 router.get('/content/posts', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const {
-      page = '1',
-      limit = '20',
-      reported = 'false',
-      sortBy = 'createdAt',
-      sortOrder = 'desc',
-    } = req.query;
+    const { reported = 'false' } = req.query;
 
-    const pageNum = parseInt(page as string, 10);
-    const limitNum = parseInt(limit as string, 10);
-    const skip = (pageNum - 1) * limitNum;
+    const { page: pageNum, limit: limitNum, skip } = parsePaging(req.query);
+    const { sortBy, sortOrder } = parseSort(req.query, POST_SORT_COLUMNS, { sortBy: 'createdAt', sortOrder: 'desc' });
 
     const where: any = {};
 
@@ -665,7 +861,7 @@ router.get('/content/posts', async (req: AuthRequest, res: Response, next: NextF
         },
         skip,
         take: limitNum,
-        orderBy: { [sortBy as string]: sortOrder },
+        orderBy: { [sortBy]: sortOrder } as Prisma.PostOrderByWithRelationInput,
       }),
       prisma.post.count({ where }),
     ]);
@@ -761,15 +957,9 @@ router.patch('/content/posts/:id', async (req: AuthRequest, res: Response, next:
  */
 router.get('/content/comments', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const {
-      page = '1',
-      limit = '20',
-      reported = 'false',
-    } = req.query;
+    const { reported = 'false' } = req.query;
 
-    const pageNum = parseInt(page as string, 10);
-    const limitNum = parseInt(limit as string, 10);
-    const skip = (pageNum - 1) * limitNum;
+    const { page: pageNum, limit: limitNum, skip } = parsePaging(req.query);
 
     const where: any = {};
 
@@ -852,16 +1042,34 @@ router.delete('/content/comments/:id', async (req: AuthRequest, res: Response, n
 const REPORT_STATUSES = ['PENDING', 'REVIEWING', 'RESOLVED', 'DISMISSED'];
 const MODERATION_ACTIONS: ModerationAction[] = ['dismiss', 'warn', 'remove', 'suspend', 'ban', 'escalate'];
 
-// AuditAction has no moderation verbs of its own, so each outcome is logged
-// under the closest existing action and the report details ride in metadata.
-const REPORT_AUDIT_ACTIONS = {
-  dismiss: 'ADMIN_POST_CLEAR_REPORTS',
-  warn: 'ADMIN_USER_UPDATE',
-  remove: 'ADMIN_POST_HIDE',
-  suspend: 'ADMIN_USER_UPDATE',
-  ban: 'ADMIN_USER_UPDATE',
-  escalate: 'ADMIN_USER_UPDATE',
-} as const;
+/**
+ * The audit verb each report outcome is filed under.
+ *
+ * AuditAction had no moderation verbs of its own, so a moderator's decision was
+ * filed under the nearest admin value — a ban as ADMIN_USER_UPDATE, a dismissal
+ * as ADMIN_POST_CLEAR_REPORTS — with the real outcome in metadata, and "who
+ * banned this account" could only be answered by reading every row's JSON.
+ * Each outcome now has its own verb. LEGACY_REPORT_AUDIT_ACTIONS is what the
+ * same outcome was filed under before, so the audit-log viewer still finds
+ * those rows when it is asked for the new verb.
+ */
+const REPORT_AUDIT_ACTIONS: Record<ModerationAction, AuditAction> = {
+  dismiss: AuditAction.MODERATION_DISMISS,
+  warn: AuditAction.MODERATION_WARN,
+  remove: AuditAction.MODERATION_REMOVE,
+  suspend: AuditAction.MODERATION_SUSPEND,
+  ban: AuditAction.MODERATION_BAN,
+  escalate: AuditAction.MODERATION_ESCALATE,
+};
+
+const LEGACY_REPORT_AUDIT_ACTIONS: Record<ModerationAction, AuditAction> = {
+  dismiss: AuditAction.ADMIN_POST_CLEAR_REPORTS,
+  warn: AuditAction.ADMIN_USER_UPDATE,
+  remove: AuditAction.ADMIN_POST_HIDE,
+  suspend: AuditAction.ADMIN_USER_UPDATE,
+  ban: AuditAction.ADMIN_USER_UPDATE,
+  escalate: AuditAction.ADMIN_USER_UPDATE,
+};
 
 const reportQueueSelect = {
   id: true,
@@ -874,31 +1082,45 @@ const reportQueueSelect = {
   reviewerId: true,
   reviewNotes: true,
   actionTakenAt: true,
+  reviewDeadline: true,
+  priority: true,
   createdAt: true,
   updatedAt: true,
   reporter: {
     select: { id: true, firstName: true, lastName: true, displayName: true, email: true },
   },
   reportedUser: {
-    select: { id: true, firstName: true, lastName: true, displayName: true, email: true, isSuspended: true },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      displayName: true,
+      email: true,
+      isSuspended: true,
+      bannedAt: true,
+    },
   },
-};
+} satisfies Prisma.ContentReportSelect;
 
-const OPEN_REPORT_STATUSES = ['PENDING', 'REVIEWING'];
-
-type EvidenceClock = { reviewDeadline?: unknown; isUrgent?: unknown } | null;
-
-/** When a report is due and whether it is late, from what was stamped on it or the clock its reason runs on. */
-function reportClock(report: { createdAt: Date; reason: string; status: string; evidence: unknown }) {
-  const evidence = (report.evidence ?? null) as EvidenceClock;
-  const deadline = reviewDeadlineFor({
-    createdAt: report.createdAt,
-    reason: report.reason,
-    stamped: evidence?.reviewDeadline,
-    isUrgent: evidence?.isUrgent,
-  });
+/**
+ * When a report is due, how urgent it is, and whether it is late.
+ *
+ * Read from the reviewDeadline and priority columns. A row that reached the
+ * queue before it could be stamped is worked out from its evidence and the
+ * clock its reason runs on, the same answer stampMissingReviewClocks writes.
+ */
+function reportClock(report: {
+  createdAt: Date;
+  reason: string;
+  status: string;
+  reviewDeadline: Date | null;
+  priority: string | null;
+  evidence: unknown;
+}) {
+  const deadline = namedReportDeadline(report);
   return {
     reviewDeadline: deadline.toISOString(),
+    priority: namedReportPriority(report),
     overdue: OPEN_REPORT_STATUSES.includes(report.status) && deadline.getTime() < Date.now(),
   };
 }
@@ -909,35 +1131,53 @@ const moderationQueueQuerySchema = z.object({
   status: z.string().trim().toUpperCase().optional(),
   contentType: z.string().trim().max(40).optional(),
   reason: z.string().trim().max(60).optional(),
+  priority: z.enum(['URGENT', 'HIGH', 'NORMAL']).optional(),
   assigned: z.enum(['me', 'unclaimed']).optional(),
 });
+
+// Soonest due first. A row the stamping pass could not reach has no deadline in
+// the column, and it goes to the top rather than the bottom: an unknown
+// deadline is looked at early, never left behind every stamped report.
+const DEADLINE_ORDER: Prisma.ContentReportOrderByWithRelationInput[] = [
+  { reviewDeadline: { sort: 'asc', nulls: 'first' } },
+  { createdAt: 'asc' },
+];
 
 /**
  * GET /admin/moderation/reports
  * Work queue of user reports.
  *
- * The open queue (?status=open) is ordered by review deadline, soonest first,
- * and every row says when it is due and whether it is already late. It used to
- * be newest first with no deadline at all: the platform promised reporters 24
- * and 48 hours and had no screen that could say whether it had kept either, and
- * the page asked for "open" by fetching the newest fifty of everything and
- * filtering on the client, so a busy day of resolved reports pushed older open
- * ones off the page entirely. The deadline lives in the evidence JSON, which
- * Postgres cannot sort on through Prisma, so the open set is read and ordered
- * here; every other view is history and stays newest first.
+ * The open queue (?status=open) and the overdue view (?status=overdue) are
+ * ordered by review deadline, soonest first, and every row says when it is due,
+ * how urgent it is and whether it is already late. It used to be newest first
+ * with no deadline at all; later the deadline was read out of the evidence JSON
+ * and the open set sorted in memory, two thousand rows at a time, because
+ * Postgres could not sort on it. reviewDeadline and priority are columns now,
+ * so the database orders and pages the queue and counts what is overdue
+ * exactly. Every other view is history and stays newest first.
  */
 router.get('/moderation/reports', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { page: pageNum, limit: limitNum, status, contentType, reason, assigned } = parseOr400(
+    const { page: pageNum, limit: limitNum, status, contentType, reason, priority, assigned } = parseOr400(
       moderationQueueQuerySchema,
       req.query
     );
 
+    // Reports filed by a door that does not stamp its own clock are given one
+    // before the queue is read, so the sort below is the whole answer. A
+    // failure is logged and the queue still loads: those rows sort first.
+    await bestEffort('moderation queue review clocks', () => stampMissingReviewClocks());
+
+    const now = new Date();
     const where: Prisma.ContentReportWhereInput = {};
     const openView = status === 'OPEN';
+    const overdueView = status === 'OVERDUE';
 
     if (openView) {
       where.status = { in: OPEN_REPORT_STATUSES };
+    } else if (overdueView) {
+      where.status = { in: OPEN_REPORT_STATUSES };
+      where.reviewDeadline = { lt: now };
     } else if (status && REPORT_STATUSES.includes(status)) {
       where.status = status;
     }
@@ -949,6 +1189,9 @@ router.get('/moderation/reports', async (req: AuthRequest, res: Response, next: 
     if (reason) {
       where.reason = { contains: reason, mode: 'insensitive' };
     }
+    if (priority) {
+      where.priority = priority;
+    }
     if (assigned === 'me') {
       where.reviewerId = req.user?.id;
     } else if (assigned === 'unclaimed') {
@@ -957,49 +1200,28 @@ router.get('/moderation/reports', async (req: AuthRequest, res: Response, next: 
 
     const openWhere: Prisma.ContentReportWhereInput = { status: { in: OPEN_REPORT_STATUSES } };
 
-    // Every open report's clock, oldest first, so the overdue count covers the
-    // whole queue rather than the page on screen.
-    const openClocks = await prisma.contentReport.findMany({
-      where: openWhere,
-      select: { id: true, createdAt: true, reason: true, status: true, evidence: true },
-      orderBy: { createdAt: 'asc' },
-      take: DEADLINE_SORT_WINDOW,
-    });
-    const overdueCount = openClocks.filter((row) => reportClock(row).overdue).length;
-
-    let reports;
-    let total: number;
-    if (openView) {
-      const matching = await prisma.contentReport.findMany({
+    const [reports, total, openCount, overdueStamped, unstamped] = await Promise.all([
+      prisma.contentReport.findMany({
         where,
-        select: { id: true, createdAt: true, reason: true, status: true, evidence: true },
+        select: { ...reportQueueSelect, evidence: true },
+        skip: (pageNum - 1) * limitNum,
+        take: limitNum,
+        orderBy: openView || overdueView ? DEADLINE_ORDER : { createdAt: 'desc' },
+      }),
+      prisma.contentReport.count({ where }),
+      prisma.contentReport.count({ where: openWhere }),
+      prisma.contentReport.count({ where: { ...openWhere, reviewDeadline: { lt: now } } }),
+      // Any open report still without a deadline in the column, so the overdue
+      // figure can include it. Normally none: the stamping pass above runs first.
+      prisma.contentReport.findMany({
+        where: { ...openWhere, reviewDeadline: null },
+        select: { id: true, createdAt: true, reason: true, status: true, reviewDeadline: true, priority: true, evidence: true },
         orderBy: { createdAt: 'asc' },
         take: DEADLINE_SORT_WINDOW,
-      });
-      total = await prisma.contentReport.count({ where });
-      const pageIds = sortByDeadline(matching, (row) => new Date(reportClock(row).reviewDeadline))
-        .slice((pageNum - 1) * limitNum, pageNum * limitNum)
-        .map((row) => row.id);
-      const rows = await prisma.contentReport.findMany({
-        where: { id: { in: pageIds } },
-        select: { ...reportQueueSelect, evidence: true },
-      });
-      const byId = new Map(rows.map((row) => [row.id, row]));
-      reports = pageIds.map((id) => byId.get(id)).filter((row): row is (typeof rows)[number] => Boolean(row));
-    } else {
-      [reports, total] = await Promise.all([
-        prisma.contentReport.findMany({
-          where,
-          select: { ...reportQueueSelect, evidence: true },
-          skip: (pageNum - 1) * limitNum,
-          take: limitNum,
-          orderBy: { createdAt: 'desc' },
-        }),
-        prisma.contentReport.count({ where }),
-      ]);
-    }
+      }),
+    ]);
 
-    const openCount = await prisma.contentReport.count({ where: openWhere });
+    const overdueUnstamped = unstamped.filter((row) => reportClock(row).overdue).length;
 
     res.json({
       // The evidence JSON is read for its clock and not sent on: it carries the
@@ -1009,10 +1231,10 @@ router.get('/moderation/reports', async (req: AuthRequest, res: Response, next: 
         ...reportClock({ ...report, evidence }),
       })),
       openCount,
-      overdueCount,
-      // True when the open queue is longer than one deadline pass reads, so the
-      // overdue figure is a floor rather than the whole count.
-      overdueCountIsPartial: openCount > openClocks.length,
+      overdueCount: overdueStamped + overdueUnstamped,
+      // True only when more open reports lack a deadline than one pass reads,
+      // so the overdue figure is a floor rather than the whole count.
+      overdueCountIsPartial: unstamped.length >= DEADLINE_SORT_WINDOW,
       pagination: {
         page: pageNum,
         limit: limitNum,
@@ -1033,14 +1255,16 @@ router.get('/moderation/reports/:id', async (req: AuthRequest, res: Response, ne
   try {
     const { id } = req.params;
 
-    const report = await prisma.contentReport.findUnique({
+    const found = await prisma.contentReport.findUnique({
       where: { id },
-      select: reportQueueSelect,
+      select: { ...reportQueueSelect, evidence: true },
     });
 
-    if (!report) {
+    if (!found) {
       return res.status(404).json({ error: 'Report not found' });
     }
+
+    const { evidence, ...report } = found;
 
     const relatedReports = await prisma.contentReport.findMany({
       where: {
@@ -1052,7 +1276,7 @@ router.get('/moderation/reports/:id', async (req: AuthRequest, res: Response, ne
       take: 20,
     });
 
-    res.json({ report, relatedReports });
+    res.json({ report: { ...report, ...reportClock({ ...report, evidence }) }, relatedReports });
   } catch (error) {
     next(error);
   }
@@ -1110,6 +1334,12 @@ router.post('/moderation/reports/:id/action', async (req: AuthRequest, res: Resp
     if (!MODERATION_ACTIONS.includes(action)) {
       return res.status(400).json({ error: 'Invalid action' });
     }
+    // Notes become the recorded reason for a suspension or a ban and are what an
+    // appeal is read against, so they are text or nothing. Anything else used
+    // to reach the reviewNotes column and come back as a 500.
+    if (notes !== undefined && notes !== null && (typeof notes !== 'string' || notes.length > 2000)) {
+      return res.status(400).json({ error: 'Notes must be text of 2000 characters or fewer' });
+    }
 
     const existing = await prisma.contentReport.findUnique({
       where: { id },
@@ -1127,7 +1357,7 @@ router.post('/moderation/reports/:id/action', async (req: AuthRequest, res: Resp
     const outcome = await processReportById(id, action, req.user!.id, notes);
 
     await auditAfterCommit({
-      action: REPORT_AUDIT_ACTIONS[action as ModerationAction],
+      action: REPORT_AUDIT_ACTIONS[outcome.action],
       actorUserId: req.user?.id ?? null,
       targetUserId: outcome.reportedUserId,
       ipAddress: req.ip,
@@ -1139,6 +1369,7 @@ router.post('/moderation/reports/:id/action', async (req: AuthRequest, res: Resp
         contentType: outcome.contentType,
         contentId: outcome.contentId,
         notes: notes ?? null,
+        ...(outcome.banIdentityRecorded === undefined ? {} : { banIdentityRecorded: outcome.banIdentityRecorded }),
       },
     });
 
@@ -1230,11 +1461,17 @@ router.post('/moderation/anonymous-reports/:id/action', async (req: AuthRequest,
     if (!MODERATION_ACTIONS.includes(action)) {
       return res.status(400).json({ error: 'Invalid action' });
     }
+    // Notes become the recorded reason for a suspension or a ban and are what an
+    // appeal is read against, so they are text or nothing. Anything else used
+    // to reach the reviewNotes column and come back as a 500.
+    if (notes !== undefined && notes !== null && (typeof notes !== 'string' || notes.length > 2000)) {
+      return res.status(400).json({ error: 'Notes must be text of 2000 characters or fewer' });
+    }
 
     const outcome = await resolveAnonymousReport(req.params.id, action, req.user!.id, notes);
 
     await auditAfterCommit({
-      action: REPORT_AUDIT_ACTIONS[action as ModerationAction],
+      action: REPORT_AUDIT_ACTIONS[outcome.action],
       actorUserId: req.user?.id ?? null,
       targetUserId: outcome.reportedUserId,
       ipAddress: req.ip,
@@ -1246,6 +1483,7 @@ router.post('/moderation/anonymous-reports/:id/action', async (req: AuthRequest,
         contentType: outcome.contentType,
         contentId: outcome.contentId,
         notes: notes ?? null,
+        ...(outcome.banIdentityRecorded === undefined ? {} : { banIdentityRecorded: outcome.banIdentityRecorded }),
       },
     });
 
@@ -1282,10 +1520,9 @@ router.post('/moderation/anonymous-reports/:id/action', async (req: AuthRequest,
  * row. An action the enum does not know reached the column and came back as a
  * Prisma 500 rather than a 400 that says what was wrong.
  *
- * adminAction filters on the verb recordAdminAction writes into metadata. Those
- * rows are filed under DATA_ACCESS until the enum has platform-admin verbs of
- * its own, so without it a privacy officer asking for data-access events gets
- * blog edits and flag flips mixed in and has no way to separate them.
+ * adminAction filters on the precise verb recordAdminAction writes into
+ * metadata, which every staff row carries whichever enum value it is filed
+ * under.
  */
 const auditLogQuerySchema = z.object({
   page: z.coerce.number().int().min(1).max(10_000).default(1),
@@ -1295,6 +1532,55 @@ const auditLogQuerySchema = z.object({
   actorUserId: z.string().trim().min(1).max(100).optional(),
   targetUserId: z.string().trim().min(1).max(100).optional(),
 });
+
+/**
+ * What asking for one action means, across the rows written before that action
+ * existed.
+ *
+ * Moderation decisions were filed under the nearest admin verb with the outcome
+ * in metadata.moderationAction, and staff configuration and catalogue changes
+ * — and safety decisions — under DATA_ACCESS with the verb in
+ * metadata.adminAction. Those rows are still true records and are never
+ * rewritten, so asking for MODERATION_BAN also finds a ban recorded the old way,
+ * and asking for ADMIN_CONTENT_UPDATE finds a blog edit filed as a data access.
+ *
+ * Asking for DATA_ACCESS still returns those older staff rows as well. Leaving
+ * them out would take a NOT over a JSON path, and in SQL that comparison is
+ * unknown — not false — for every row without the key, so the filter would
+ * have dropped the genuine data-access records along with the staff ones. A
+ * viewer that hid who read member data would be worse than one that shows a
+ * few blog edits beside it; the viewer shows each row's adminAction, so the
+ * two are told apart on screen.
+ */
+function auditActionWhere(action: AuditAction): Prisma.AuditLogWhereInput {
+  const moderation = MODERATION_ACTIONS.find((outcome) => REPORT_AUDIT_ACTIONS[outcome] === action);
+  if (moderation) {
+    return {
+      OR: [
+        { action },
+        {
+          action: LEGACY_REPORT_AUDIT_ACTIONS[moderation],
+          metadata: { path: ['moderationAction'], equals: moderation },
+        },
+      ],
+    };
+  }
+
+  const verbs = adminVerbsFiledUnder(action);
+  if (verbs.length > 0) {
+    return {
+      OR: [
+        { action },
+        ...verbs.map((verb) => ({
+          action: LEGACY_ADMIN_AUDIT_ACTION,
+          metadata: { path: ['adminAction'], equals: verb },
+        })),
+      ],
+    };
+  }
+
+  return { action };
+}
 
 router.get('/audit-logs', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
@@ -1308,11 +1594,12 @@ router.get('/audit-logs', async (req: AuthRequest, res: Response, next: NextFunc
     } = parseOr400(auditLogQuerySchema, req.query);
     const skip = (pageNum - 1) * limitNum;
 
-    const where: Prisma.AuditLogWhereInput = {};
-    if (action) where.action = action;
-    if (adminAction) where.metadata = { path: ['adminAction'], equals: adminAction };
-    if (actorUserId) where.actorUserId = actorUserId;
-    if (targetUserId) where.targetUserId = targetUserId;
+    const clauses: Prisma.AuditLogWhereInput[] = [];
+    if (action) clauses.push(auditActionWhere(action));
+    if (adminAction) clauses.push({ metadata: { path: ['adminAction'], equals: adminAction } });
+    if (actorUserId) clauses.push({ actorUserId });
+    if (targetUserId) clauses.push({ targetUserId });
+    const where: Prisma.AuditLogWhereInput = clauses.length > 0 ? { AND: clauses } : {};
 
     const [logs, total] = await Promise.all([
       prisma.auditLog.findMany({
@@ -1436,10 +1723,9 @@ router.get('/gdpr/summary', async (req: AuthRequest, res: Response, next: NextFu
  */
 router.get('/gdpr/consents', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { page = '1', limit = '25', region } = req.query;
-    const pageNum = Math.max(1, parseInt(page as string, 10));
-    const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10)));
-    const skip = (pageNum - 1) * limitNum;
+    const { region } = req.query;
+    // Math.max(1, NaN) is NaN, so ?page=abc still reached Prisma as a 500.
+    const { page: pageNum, limit: limitNum, skip } = parsePaging({ page: req.query.page, limit: req.query.limit ?? '25' });
 
     const where: any = {};
     if (region) where.region = region;
@@ -1739,16 +2025,9 @@ router.patch('/gdpr/dsar-requests/:id', async (req: AuthRequest, res: Response, 
  */
 router.get('/jobs', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const {
-      page = '1',
-      limit = '20',
-      status,
-      search = '',
-    } = req.query;
+    const { status, search = '' } = req.query;
 
-    const pageNum = parseInt(page as string, 10);
-    const limitNum = parseInt(limit as string, 10);
-    const skip = (pageNum - 1) * limitNum;
+    const { page: pageNum, limit: limitNum, skip } = parsePaging(req.query);
 
     const where: any = {};
 
@@ -1859,16 +2138,9 @@ router.patch('/jobs/:id', async (req: AuthRequest, res: Response, next: NextFunc
  */
 router.get('/subscriptions', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const {
-      page = '1',
-      limit = '20',
-      tier,
-      status,
-    } = req.query;
+    const { tier, status } = req.query;
 
-    const pageNum = parseInt(page as string, 10);
-    const limitNum = parseInt(limit as string, 10);
-    const skip = (pageNum - 1) * limitNum;
+    const { page: pageNum, limit: limitNum, skip } = parsePaging(req.query);
 
     const where: any = {};
 
@@ -2014,15 +2286,9 @@ router.post('/subscriptions/grant', async (req: AuthRequest, res: Response, next
  */
 router.get('/invite-codes', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const {
-      page = '1',
-      limit = '20',
-      active,
-    } = req.query;
+    const { active } = req.query;
 
-    const pageNum = parseInt(page as string, 10);
-    const limitNum = parseInt(limit as string, 10);
-    const skip = (pageNum - 1) * limitNum;
+    const { page: pageNum, limit: limitNum, skip } = parsePaging(req.query);
 
     const where: any = {};
     if (active === 'true') where.isActive = true;
@@ -2122,98 +2388,12 @@ router.patch('/invite-codes/:id', async (req: AuthRequest, res: Response, next: 
   }
 });
 
-/**
- * GET /admin/woman-verifications
- * List women verification requests
- */
-router.get('/woman-verifications', async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    const { status = 'PENDING', page = '1', limit = '20' } = req.query;
-    const pageNum = parseInt(page as string, 10);
-    const limitNum = parseInt(limit as string, 10);
-    const skip = (pageNum - 1) * limitNum;
-
-    const where: any = {
-      womanVerificationStatus: status,
-    };
-
-    const [users, total] = await Promise.all([
-      prisma.user.findMany({
-        where,
-        select: {
-          id: true,
-          email: true,
-          firstName: true,
-          lastName: true,
-          womanSelfAttested: true,
-          womanVerificationStatus: true,
-          womanVerifiedAt: true,
-          createdAt: true,
-          subscription: { select: { tier: true, status: true } },
-        },
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take: limitNum,
-      }),
-      prisma.user.count({ where }),
-    ]);
-
-    res.json({
-      users,
-      pagination: {
-        page: pageNum,
-        limit: limitNum,
-        total,
-        totalPages: Math.ceil(total / limitNum),
-      },
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * PATCH /admin/woman-verifications/:userId
- * Approve or reject women verification
- */
-router.patch('/woman-verifications/:userId', async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    const { userId } = req.params;
-    const { status } = req.body;
-
-    if (!['VERIFIED', 'REJECTED'].includes(status)) {
-      return res.status(400).json({ error: 'status must be VERIFIED or REJECTED' });
-    }
-
-    const updateData: any = {
-      womanVerificationStatus: status,
-      womanVerifiedAt: status === 'VERIFIED' ? new Date() : null,
-    };
-
-    const user = await prisma.user.update({
-      where: { id: userId },
-      data: updateData,
-      select: {
-        id: true,
-        womanVerificationStatus: true,
-        womanVerifiedAt: true,
-      },
-    });
-
-    await auditAfterCommit({
-      action: status === 'VERIFIED' ? 'ADMIN_VERIFICATION_APPROVE' : 'ADMIN_VERIFICATION_REJECT',
-      actorUserId: req.user?.id ?? null,
-      targetUserId: userId,
-      ipAddress: req.ip,
-      userAgent: req.get('user-agent') || undefined,
-      metadata: { verificationType: 'WOMAN_ONLY', status },
-    });
-
-    res.json(user);
-  } catch (error) {
-    next(error);
-  }
-});
+// GET and PATCH /admin/woman-verifications used to live here: an older copy of
+// the women-only review with nothing checking the status it was sent, no
+// notification to the member, and no refusal to approve a request that had no
+// evidence on it — the checks /api/verification/woman-gate makes. Nothing in
+// the console called them any more, so they were a second, weaker door to the
+// same decision, and they were removed rather than repaired.
 
 // ============================================================================
 // ANALYTICS
@@ -2375,26 +2555,17 @@ function normalizeEventFormat(input: any): EventFormat | null {
   return null;
 }
 
+const GROUP_SORT_COLUMNS = ['createdAt', 'updatedAt', 'name'] as const;
+
 /**
  * GET /admin/groups
  */
 router.get('/groups', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const {
-      page = '1',
-      limit = '20',
-      search = '',
-      privacy,
-      featured,
-      pinned,
-      hidden,
-      sortBy = 'createdAt',
-      sortOrder = 'desc',
-    } = req.query;
+    const { search = '', privacy, featured, pinned, hidden } = req.query;
 
-    const pageNum = parseInt(page as string, 10);
-    const limitNum = parseInt(limit as string, 10);
-    const skip = (pageNum - 1) * limitNum;
+    const { page: pageNum, limit: limitNum, skip } = parsePaging(req.query);
+    const { sortBy, sortOrder } = parseSort(req.query, GROUP_SORT_COLUMNS, { sortBy: 'createdAt', sortOrder: 'desc' });
 
     const where: any = {};
     if (search) {
@@ -2417,7 +2588,7 @@ router.get('/groups', async (req: AuthRequest, res: Response, next: NextFunction
         where,
         skip,
         take: limitNum,
-        orderBy: { [sortBy as string]: sortOrder },
+        orderBy: { [sortBy]: sortOrder } as Prisma.GroupOrderByWithRelationInput,
         select: {
           id: true,
           name: true,
@@ -2629,27 +2800,65 @@ router.delete('/groups/:id/posts/:postId', async (req: AuthRequest, res: Respons
   }
 });
 
+const EVENT_SORT_COLUMNS = ['date', 'createdAt', 'updatedAt', 'title'] as const;
+
+// The same HH:MM rule the member-facing event routes hold hosts to.
+const EVENT_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/**
+ * A whole number within bounds, or null where the column allows it.
+ *
+ * The admin event routes took baseAttendees, maxAttendees and price as
+ * whatever arrived: a string reached Prisma as a 500, and a negative price or
+ * a capacity of a million was published to members as though someone had meant
+ * it. Undefined means the field was not sent.
+ */
+function eventWholeNumber(
+  value: unknown,
+  field: string,
+  bounds: { min: number; max: number; nullable: boolean }
+): number | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null && bounds.nullable) return null;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < bounds.min || value > bounds.max) {
+    throw new ApiError(
+      400,
+      `${field} must be a whole number from ${bounds.min.toLocaleString('en-AU')} to ${bounds.max.toLocaleString('en-AU')}${bounds.nullable ? ', or empty' : ''}`
+    );
+  }
+  return value;
+}
+
+const EVENT_NUMBER_BOUNDS = {
+  baseAttendees: { min: 0, max: 100_000, nullable: false },
+  maxAttendees: { min: 1, max: 100_000, nullable: true },
+  price: { min: 0, max: 1_000_000, nullable: true },
+} as const;
+
+function eventTime(value: unknown, field: 'startTime' | 'endTime'): string {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!EVENT_TIME_PATTERN.test(text)) {
+    throw new ApiError(400, `${field} must be a time written HH:MM`);
+  }
+  return text;
+}
+
+/** An event cannot finish before it starts; the times are compared on the same day. */
+function assertEventEndsAfterStart(startTime: string, endTime: string): void {
+  if (endTime <= startTime) {
+    throw new ApiError(400, 'The event has to end after it starts');
+  }
+}
+
 /**
  * GET /admin/events
  */
 router.get('/events', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const {
-      page = '1',
-      limit = '20',
-      search = '',
-      type,
-      format,
-      featured,
-      pinned,
-      hidden,
-      sortBy = 'date',
-      sortOrder = 'asc',
-    } = req.query;
+    const { search = '', type, format, featured, pinned, hidden } = req.query;
 
-    const pageNum = parseInt(page as string, 10);
-    const limitNum = parseInt(limit as string, 10);
-    const skip = (pageNum - 1) * limitNum;
+    const { page: pageNum, limit: limitNum, skip } = parsePaging(req.query);
+    const { sortBy, sortOrder } = parseSort(req.query, EVENT_SORT_COLUMNS, { sortBy: 'date', sortOrder: 'asc' });
 
     const where: any = {};
     if (search) {
@@ -2680,7 +2889,7 @@ router.get('/events', async (req: AuthRequest, res: Response, next: NextFunction
         where,
         skip,
         take: limitNum,
-        orderBy: { [sortBy as string]: sortOrder },
+        orderBy: { [sortBy]: sortOrder } as Prisma.EventOrderByWithRelationInput,
       }),
       prisma.event.count({ where }),
     ]);
@@ -2710,8 +2919,6 @@ router.post('/events', async (req: AuthRequest, res: Response, next: NextFunctio
     const format = normalizeEventFormat(req.body?.format);
     const dateValue = req.body?.date;
     const date = new Date(dateValue);
-    const startTime = typeof req.body?.startTime === 'string' ? req.body.startTime.trim() : '';
-    const endTime = typeof req.body?.endTime === 'string' ? req.body.endTime.trim() : '';
     const image = typeof req.body?.image === 'string' ? req.body.image.trim() : '';
 
     const hostName = typeof req.body?.hostName === 'string' ? req.body.hostName.trim() : req.body?.host?.name;
@@ -2722,10 +2929,21 @@ router.post('/events', async (req: AuthRequest, res: Response, next: NextFunctio
     if (!description) return res.status(400).json({ error: 'Description is required' });
     if (!type) return res.status(400).json({ error: 'Invalid type' });
     if (!format) return res.status(400).json({ error: 'Invalid format' });
-    if (Number.isNaN(date.getTime())) return res.status(400).json({ error: 'Invalid date' });
-    if (!startTime || !endTime) return res.status(400).json({ error: 'Start/end time is required' });
+    if (dateValue === undefined || dateValue === null || Number.isNaN(date.getTime())) {
+      return res.status(400).json({ error: 'Invalid date' });
+    }
+    if (req.body?.startTime === undefined || req.body?.endTime === undefined) {
+      return res.status(400).json({ error: 'Start/end time is required' });
+    }
+    const startTime = eventTime(req.body.startTime, 'startTime');
+    const endTime = eventTime(req.body.endTime, 'endTime');
+    assertEventEndsAfterStart(startTime, endTime);
     if (!image) return res.status(400).json({ error: 'Image is required' });
     if (!hostName || !hostTitle || !hostAvatar) return res.status(400).json({ error: 'Host is required' });
+
+    const baseAttendees = eventWholeNumber(req.body?.baseAttendees, 'baseAttendees', EVENT_NUMBER_BOUNDS.baseAttendees);
+    const maxAttendees = eventWholeNumber(req.body?.maxAttendees, 'maxAttendees', EVENT_NUMBER_BOUNDS.maxAttendees);
+    const price = eventWholeNumber(req.body?.price, 'price', EVENT_NUMBER_BOUNDS.price);
 
     const tags = Array.isArray(req.body?.tags) ? req.body.tags.filter((t: any) => typeof t === 'string') : [];
 
@@ -2747,9 +2965,9 @@ router.post('/events', async (req: AuthRequest, res: Response, next: NextFunctio
         hostName,
         hostTitle,
         hostAvatar,
-        baseAttendees: typeof req.body?.baseAttendees === 'number' ? req.body.baseAttendees : 0,
-        maxAttendees: typeof req.body?.maxAttendees === 'number' ? req.body.maxAttendees : null,
-        price: typeof req.body?.price === 'number' ? req.body.price : 0,
+        baseAttendees: baseAttendees ?? 0,
+        maxAttendees: maxAttendees ?? null,
+        price: price === undefined ? 0 : price,
         tags,
       },
     });
@@ -2781,7 +2999,7 @@ router.post('/events', async (req: AuthRequest, res: Response, next: NextFunctio
 router.patch('/events/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    const existing = await prisma.event.findUnique({ where: { id }, select: { id: true } });
+    const existing = await prisma.event.findUnique({ where: { id }, select: { id: true, startTime: true, endTime: true } });
     if (!existing) return res.status(404).json({ error: 'Event not found' });
 
     const data: any = {};
@@ -2799,11 +3017,17 @@ router.patch('/events/:id', async (req: AuthRequest, res: Response, next: NextFu
     }
     if (req.body?.date !== undefined) {
       const d = new Date(req.body.date);
-      if (Number.isNaN(d.getTime())) return res.status(400).json({ error: 'Invalid date' });
+      // new Date(null) is 1 January 1970, which is valid and not what anyone meant.
+      if (req.body.date === null || Number.isNaN(d.getTime())) return res.status(400).json({ error: 'Invalid date' });
       data.date = d;
     }
-    if (typeof req.body?.startTime === 'string') data.startTime = req.body.startTime.trim();
-    if (typeof req.body?.endTime === 'string') data.endTime = req.body.endTime.trim();
+    if (req.body?.startTime !== undefined) data.startTime = eventTime(req.body.startTime, 'startTime');
+    if (req.body?.endTime !== undefined) data.endTime = eventTime(req.body.endTime, 'endTime');
+    // Changing one end of the event is checked against the other as it stands,
+    // so moving the start past the finish is refused as well.
+    if (data.startTime !== undefined || data.endTime !== undefined) {
+      assertEventEndsAfterStart(data.startTime ?? existing.startTime, data.endTime ?? existing.endTime);
+    }
     if (req.body?.location !== undefined) data.location = typeof req.body.location === 'string' ? req.body.location.trim() : null;
     if (req.body?.link !== undefined) data.link = typeof req.body.link === 'string' ? req.body.link.trim() : null;
     if (typeof req.body?.image === 'string') data.image = req.body.image.trim();
@@ -2817,9 +3041,12 @@ router.patch('/events/:id', async (req: AuthRequest, res: Response, next: NextFu
       if (hostAvatar !== undefined) data.hostAvatar = hostAvatar;
     }
 
-    if (req.body?.baseAttendees !== undefined) data.baseAttendees = req.body.baseAttendees;
-    if (req.body?.maxAttendees !== undefined) data.maxAttendees = req.body.maxAttendees;
-    if (req.body?.price !== undefined) data.price = req.body.price;
+    const baseAttendees = eventWholeNumber(req.body?.baseAttendees, 'baseAttendees', EVENT_NUMBER_BOUNDS.baseAttendees);
+    const maxAttendees = eventWholeNumber(req.body?.maxAttendees, 'maxAttendees', EVENT_NUMBER_BOUNDS.maxAttendees);
+    const price = eventWholeNumber(req.body?.price, 'price', EVENT_NUMBER_BOUNDS.price);
+    if (baseAttendees !== undefined) data.baseAttendees = baseAttendees;
+    if (maxAttendees !== undefined) data.maxAttendees = maxAttendees;
+    if (price !== undefined) data.price = price;
     if (req.body?.tags !== undefined) {
       data.tags = Array.isArray(req.body.tags) ? req.body.tags.filter((t: any) => typeof t === 'string') : [];
     }

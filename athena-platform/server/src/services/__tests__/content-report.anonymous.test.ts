@@ -13,7 +13,12 @@ jest.mock('../../utils/prisma', () => ({
       count: jest.fn(async () => 0),
       update: jest.fn(),
     },
-    user: { findMany: jest.fn(async () => []), findUnique: jest.fn(async () => null), update: jest.fn() },
+    user: {
+      findMany: jest.fn(async () => []),
+      findUnique: jest.fn(async () => null),
+      update: jest.fn(async () => ({ email: 'reported@example.org' })),
+    },
+    bannedIdentity: { upsert: jest.fn(async () => ({ id: 'ban-1' })) },
     post: { update: jest.fn() },
     moderationLog: { create: jest.fn() },
     notification: { create: jest.fn() },
@@ -27,6 +32,8 @@ jest.mock('../../utils/email', () => ({
 jest.mock('../../utils/logger', () => ({
   logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
+
+process.env.BANNED_IDENTITY_HASH_KEY = 'test-ban-key';
 
 import { prisma as prismaTyped } from '../../utils/prisma';
 import { sendEmail as sendEmailTyped } from '../../utils/email';
@@ -169,6 +176,20 @@ describe('Anonymous reports reach a moderator', () => {
     const html = String((sendEmail.mock.calls[0][0] as { html: string }).html);
     expect(html).toContain('banned the account');
     expect(html).not.toMatch(/permanent/i);
+  });
+
+  it('bans the account behind an anonymous report and bars its address, naming the incident in the reason', async () => {
+    prisma.safetyIncident.findFirst.mockResolvedValue(incident({ metadata: { anonymous: true } }));
+
+    const outcome = await resolveAnonymousReport('inc-1', 'ban', MODERATOR, 'Threats after being blocked');
+
+    const lock = prisma.user.update.mock.calls[0][0];
+    expect(lock.where).toEqual({ id: REPORTED });
+    expect(lock.data.bannedAt).toBeInstanceOf(Date);
+    expect(lock.data.banReason).toBe('Threats after being blocked (anonymous report inc-1)');
+    // BannedIdentity.reportId names a ContentReport, which an incident is not.
+    expect(prisma.bannedIdentity.upsert.mock.calls[0][0].create).toMatchObject({ userId: REPORTED, reportId: null, createdById: MODERATOR });
+    expect(outcome.banIdentityRecorded).toBe(true);
   });
 
   it('a bounced outcome email does not undo or fail the decision', async () => {

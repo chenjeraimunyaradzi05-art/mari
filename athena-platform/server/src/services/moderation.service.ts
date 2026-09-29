@@ -3,6 +3,7 @@
  * Uses OpenAI Moderation API for UGC safety
  */
 
+import { createHash } from 'node:crypto';
 import OpenAI from 'openai';
 import { RekognitionClient, DetectModerationLabelsCommand } from "@aws-sdk/client-rekognition";
 import { ApiError } from '../middleware/errorHandler';
@@ -70,6 +71,14 @@ export interface ModerationResult {
   scores: Record<string, number>;
   action: 'allow' | 'review' | 'block';
   reason?: string;
+  /**
+   * True when the provider was configured but did not answer. The verdict is
+   * then 'review' with no categories, which is a statement about the provider
+   * and not about the text, and each surface decides what an unanswered check
+   * means for it: a post goes out and the outage is counted, while a message
+   * aimed at another member is held back until it can be checked.
+   */
+  unavailable?: boolean;
 }
 
 export interface SafetyScoreResult {
@@ -92,8 +101,9 @@ export async function moderateText(content: string): Promise<ModerationResult> {
   }
 
   try {
-    // Check cache first (hash of content)
-    const cacheKey = `moderation:${hashContent(content)}`;
+    // Check cache first. The key is a SHA-256 of the text under a versioned
+    // prefix; see contentCacheKey for why the old key could not be trusted.
+    const cacheKey = contentCacheKey(content);
     const cached = await cacheGet<ModerationResult>(cacheKey);
     if (cached) {
       return cached;
@@ -154,14 +164,21 @@ export async function moderateText(content: string): Promise<ModerationResult> {
 
     return moderationResult;
   } catch (error) {
+    // The provider did not answer. This used to be a bare log line and a
+    // 'review' verdict indistinguishable from a real one, so an outage was
+    // recorded nowhere a dashboard could count it and every caller had to guess
+    // from an empty category list whether the text had been judged at all. It
+    // is counted here, once, at the one place the outage is known, and the
+    // verdict says plainly that nothing was checked.
     logger.error('Moderation API error', { error });
-    // On error, allow but flag for manual review
+    recordFailure('moderation.provider_unavailable', error);
     return {
       flagged: false,
       categories: [],
       scores: {},
       action: 'review',
       reason: 'Moderation API unavailable',
+      unavailable: true,
     };
   }
 }
@@ -224,6 +241,8 @@ export async function moderatePost(content: string): Promise<{
   /** What the provider actually flagged; empty when it flagged nothing or never answered. */
   categories: string[];
   scores: Record<string, number>;
+  /** The provider was configured and did not answer, so nothing was judged. */
+  unavailable: boolean;
 }> {
   const result = await moderateText(content);
 
@@ -234,17 +253,36 @@ export async function moderatePost(content: string): Promise<{
     reason: result.reason,
     categories: result.categories,
     scores: result.scores,
+    unavailable: result.unavailable === true,
   };
 }
 
+/** What a member is told when her message could not be checked. */
+export const MESSAGE_CHECK_UNAVAILABLE =
+  'Messages cannot be checked right now. Please try again in a few minutes.';
+
 /**
  * Moderate message content
+ *
+ * A message reaches the person it is aimed at before anybody can report it, so
+ * when the provider does not answer the message is held rather than sent. It
+ * used to go out: a provider outage delivered every direct message and live
+ * chat line unscreened, which is exactly the window someone set on reaching a
+ * woman who has blocked him elsewhere would wait for. The sender is told to try
+ * again shortly, which costs her a few minutes; the other way round cost the
+ * recipient the only screening she had.
  */
 export async function moderateMessage(content: string): Promise<{
   allowed: boolean;
   reason?: string;
+  /** Held because nothing could check it, not because of what it says. */
+  unavailable?: boolean;
 }> {
   const result = await moderateText(content);
+
+  if (result.unavailable) {
+    return { allowed: false, reason: MESSAGE_CHECK_UNAVAILABLE, unavailable: true };
+  }
 
   // Messages are more strictly moderated
   if (result.flagged) {
@@ -272,6 +310,10 @@ export type ModeratedSurface =
   | 'caption'
   | 'status'
   | 'profile'
+  // An organisation's name and description, which employers and community
+  // groups publish. These were screened under 'profile', so a flag on a
+  // company page read in the log as though a member's own bio had tripped it.
+  | 'organization'
   | 'message'
   | 'group_message'
   | 'channel_message'
@@ -300,6 +342,70 @@ export function isTextModerationConfigured(): boolean {
   return openai !== null;
 }
 
+/** Whether an image moderation provider is configured; the operations screen reads it. */
+export function isImageModerationConfigured(): boolean {
+  return rekognition !== null;
+}
+
+/**
+ * What happens to member content when nothing is configured to screen it.
+ *
+ * - 'off': it publishes, and every unscreened write is counted.
+ * - 'public': posts, comments, captions, statuses, profiles, organisation pages
+ *   and images are refused with a 503 until a provider is configured, while
+ *   conversations stay open and are counted.
+ * - 'all': conversations are refused too.
+ */
+export type ModerationRequirement = 'off' | 'public' | 'all';
+
+/**
+ * The deployment's answer, from MODERATION_REQUIRED.
+ *
+ * With no provider configured, everything used to publish unscreened in every
+ * environment. That was announced at error level, counted on each write and
+ * shown on the readiness check, but it was never a choice anyone had made: a
+ * production deployment whose key had lapsed published every post a women's
+ * safety platform received, unread by anything. It is now a switch, and in
+ * production the default is 'public': the posts, profiles and images the whole
+ * community sees are refused until they can be checked, which a member is told
+ * in so many words, while conversations stay open. Refusing a message would
+ * cut off a woman writing to a support line because an operator forgot a key,
+ * and a message is aimed at one person who can block and report its sender.
+ * A deployment that decides otherwise says so explicitly: MODERATION_REQUIRED
+ * set to 'off' (or 'false') publishes unscreened, 'all' refuses conversations
+ * too. Outside production the default stays 'off', so a developer without a
+ * key can still post to her own machine.
+ *
+ * A provider that is configured and does not answer is an outage, not this,
+ * and is handled where the call fails: see moderateMessage.
+ */
+export function moderationRequirement(): ModerationRequirement {
+  const raw = process.env.MODERATION_REQUIRED?.trim().toLowerCase();
+  if (raw === 'all') return 'all';
+  if (raw === 'public' || raw === 'true') return 'public';
+  if (raw === 'off' || raw === 'false') return 'off';
+  if (raw) announceUnreadableRequirement(raw);
+  return process.env.NODE_ENV === 'production' ? 'public' : 'off';
+}
+
+let unreadableRequirementAnnounced = false;
+
+function announceUnreadableRequirement(raw: string): void {
+  if (unreadableRequirementAnnounced) return;
+  unreadableRequirementAnnounced = true;
+  logger.error("MODERATION_REQUIRED is not one of 'off', 'public' or 'all'; the environment's default applies", {
+    value: raw,
+  });
+}
+
+/** What a member is told when her post cannot be published because nothing can check it. */
+export const PUBLISHING_PAUSED =
+  'Posting is paused because new content cannot be checked right now. Please try again later.';
+
+/** What a member is told when her image cannot be uploaded because nothing can check it. */
+export const IMAGE_CHECK_UNAVAILABLE =
+  'Images cannot be checked right now, so they cannot be uploaded. Please try again later.';
+
 // A warning line per message is not a decision and nobody reads it, so the
 // absence of a provider is said once, at error level, where alerting will see
 // it. isTextModerationConfigured carries it from there.
@@ -308,9 +414,14 @@ let missingProviderAnnounced = false;
 function announceMissingProvider(kind: ModeratedSurface): void {
   if (missingProviderAnnounced) return;
   missingProviderAnnounced = true;
+  const requirement = moderationRequirement();
   logger.error(
-    'No text moderation provider is configured: member text is being published unscreened. Set AI_OPENAI_API_KEY.',
-    { kind }
+    requirement === 'off'
+      ? 'No text moderation provider is configured: member text is being published unscreened. Set AI_OPENAI_API_KEY.'
+      : requirement === 'public'
+        ? 'No text moderation provider is configured: posts, profiles and comments are being refused and conversations are publishing unscreened. Set AI_OPENAI_API_KEY.'
+        : 'No text moderation provider is configured: all member text is being refused. Set AI_OPENAI_API_KEY.',
+    { kind, requirement }
   );
 }
 
@@ -320,18 +431,23 @@ function announceMissingImageProvider(): void {
   if (missingImageProviderAnnounced) return;
   missingImageProviderAnnounced = true;
   logger.error(
-    'No image moderation provider is configured: member images are being published unscreened. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.'
+    moderationRequirement() === 'off'
+      ? 'No image moderation provider is configured: member images are being published unscreened. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.'
+      : 'No image moderation provider is configured: member images are being refused. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.'
   );
 }
 
 /**
  * Gate for user generated text on the write paths.
  *
- * Moderation is optional infrastructure: with no provider configured, or with
- * the provider down, the write goes through and leaves a warning behind rather
- * than rejecting everything the deployment tries to publish. When a provider IS
- * configured and blocks the content, the caller gets a 400 and the write never
- * happens.
+ * With no provider configured, what happens is the deployment's
+ * MODERATION_REQUIRED decision — see moderationRequirement: refused with a 503
+ * where it says so, and otherwise published with the gap counted. With a
+ * provider configured but not answering, public surfaces still publish and the
+ * outage is counted, while conversational surfaces are refused with a 503 until
+ * the check can run — see moderateMessage for why a message is held rather
+ * than sent. When a provider blocks the content, the caller gets a 400 and the
+ * write never happens.
  */
 export async function assertContentAllowed(
   content: string,
@@ -339,6 +455,16 @@ export async function assertContentAllowed(
 ): Promise<void> {
   if (!openai) {
     announceMissingProvider(context.kind);
+    const conversational = CONVERSATIONAL_SURFACES.has(context.kind);
+    const requirement = moderationRequirement();
+
+    if (requirement === 'all' || (requirement === 'public' && !conversational)) {
+      // Counted like the unscreened publishes are, so the dashboard shows how
+      // much the missing key is costing members as well as that it is missing.
+      recordFailure('moderation.unscreened_refused', new Error(`no provider for ${context.kind}`));
+      throw new ApiError(503, conversational ? MESSAGE_CHECK_UNAVAILABLE : PUBLISHING_PAUSED);
+    }
+
     // Counted on every occurrence, not just the first: the log line announces
     // itself once per process, which is right for a log and useless for
     // answering "how much went out unscreened". /health/detailed reads this,
@@ -353,6 +479,11 @@ export async function assertContentAllowed(
       // Anything the provider flags in a conversation is refused outright, so
       // there is no "review" outcome to queue here.
       const message = await moderateMessage(content);
+      if (message.unavailable) {
+        // Our outage, not her words: a 503 tells the client to offer a retry
+        // rather than telling her she broke the guidelines.
+        throw new ApiError(503, message.reason || MESSAGE_CHECK_UNAVAILABLE);
+      }
       if (!message.allowed) {
         throw new ApiError(400, message.reason || 'This content violates our community guidelines');
       }
@@ -365,15 +496,11 @@ export async function assertContentAllowed(
       throw new ApiError(400, verdict.reason || 'This content violates our community guidelines');
     }
 
-    if (verdict.needsReview) {
-      if (verdict.categories.length > 0) {
-        await queueForReview(content, context, verdict);
-      } else {
-        // moderateText answers "review" with no categories when the provider
-        // itself could not be reached. That is an outage, not a judgement about
-        // this post, so it is counted as one rather than filed against a member.
-        recordFailure('moderation.provider_unavailable', new Error(verdict.reason || 'provider did not answer'));
-      }
+    // An unanswered check is an outage, not a judgement about this post. It has
+    // already been counted where it happened, in moderateText, and nothing is
+    // filed against a member for it.
+    if (verdict.needsReview && !verdict.unavailable && verdict.categories.length > 0) {
+      await queueForReview(content, context, verdict);
     }
   } catch (error) {
     if (error instanceof ApiError) {
@@ -381,6 +508,14 @@ export async function assertContentAllowed(
     }
 
     recordFailure('moderation.provider_unavailable', error);
+
+    if (CONVERSATIONAL_SURFACES.has(context.kind)) {
+      // The same line as an unanswered provider: a message that could not be
+      // checked is held, whatever the reason it could not be.
+      logger.warn('Text moderation unavailable, holding message', { kind: context.kind, error });
+      throw new ApiError(503, MESSAGE_CHECK_UNAVAILABLE);
+    }
+
     logger.warn('Text moderation unavailable, allowing content', { kind: context.kind, error });
   }
 }
@@ -461,16 +596,17 @@ async function queueForReview(
 }
 
 /**
- * Simple hash function for caching
+ * The cache key a verdict is stored under.
+ *
+ * This was a 31-bit string hash, under which 'Aa' and 'BB' — and any number of
+ * crafted pairs — shared a key. A cached 'allow' for a harmless sentence could
+ * therefore be served for a threat engineered to collide with it, and the
+ * threat would go out as screened. SHA-256 cannot be steered that way. The v2
+ * prefix means no verdict written under the old keys is ever read again; they
+ * age out of the cache on their own one-hour expiry.
  */
-function hashContent(content: string): string {
-  let hash = 0;
-  for (let i = 0; i < content.length; i++) {
-    const char = content.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
-  }
-  return Math.abs(hash).toString(36);
+function contentCacheKey(content: string): string {
+  return `moderation:v2:${createHash('sha256').update(content).digest('hex')}`;
 }
 
 /**
@@ -644,6 +780,10 @@ export async function evaluateSafetyScore(content: string): Promise<SafetyScoreR
 
 /**
  * Moderate image content using AWS Rekognition
+ *
+ * Throws a 503 when no provider is configured and the deployment requires
+ * screening (see moderationRequirement): every image a member uploads is
+ * public, an avatar as much as a post, so images follow the 'public' line.
  */
 export async function moderateImage(imageBuffer: Buffer): Promise<ModerationResult> {
   // No provider, no screening — said once at error level and counted every
@@ -651,6 +791,10 @@ export async function moderateImage(imageBuffer: Buffer): Promise<ModerationResu
   // went up unscreened" is a question a warn line cannot answer.
   if (!rekognition) {
     announceMissingImageProvider();
+    if (moderationRequirement() !== 'off') {
+      recordFailure('moderation.unscreened_image_refused', new Error('no image moderation provider'));
+      throw new ApiError(503, IMAGE_CHECK_UNAVAILABLE);
+    }
     recordFailure('moderation.unscreened_image', new Error('no image moderation provider'));
     return { flagged: false, categories: [], scores: {}, action: 'allow' };
   }
@@ -708,8 +852,19 @@ export async function moderateImage(imageBuffer: Buffer): Promise<ModerationResu
       reason,
     };
   } catch (error) {
+    // The image goes up, as a post does when the text provider is down, but the
+    // outage is now counted. It was a log line and nothing else, so a
+    // Rekognition outage that let every image through unscreened looked, on
+    // every dashboard, exactly like a quiet day.
     logger.error('AWS Rekognition moderation failed', { error });
-    // Fail safe: allow if service is down, but log error
-    return { flagged: false, categories: [], scores: {}, action: 'allow' };
+    recordFailure('moderation.image_provider_unavailable', error);
+    return {
+      flagged: false,
+      categories: [],
+      scores: {},
+      action: 'allow',
+      reason: 'Image moderation unavailable',
+      unavailable: true,
+    };
   }
 }

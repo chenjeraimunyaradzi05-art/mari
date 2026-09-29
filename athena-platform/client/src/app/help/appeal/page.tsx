@@ -9,15 +9,24 @@
 
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { Scale, Send, CheckCircle, ArrowLeft, AlertCircle, FileText } from 'lucide-react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/lib/hooks';
 import OnlineSafetyNotice from '@/components/compliance/OnlineSafetyNotice';
 
+type AppealFormType =
+  | 'content_removal'
+  | 'account_suspension'
+  | 'account_ban'
+  | 'verification_decision'
+  | 'warning'
+  | 'other';
+
 interface AppealFormData {
-  appealType: 'content_removal' | 'account_suspension' | 'account_ban' | 'warning' | 'other';
+  appealType: AppealFormType;
   referenceId: string;
   reason: string;
   additionalInfo: string;
@@ -25,29 +34,64 @@ interface AppealFormData {
   agreeToTerms: boolean;
 }
 
-const APPEAL_TYPES = [
+const APPEAL_TYPES: Array<{ value: AppealFormType; label: string; description: string }> = [
   { value: 'content_removal', label: 'Content Removal', description: 'Your post, comment, or other content was removed' },
-  { value: 'account_suspension', label: 'Account Suspension', description: 'Your account has been temporarily suspended' },
-  { value: 'account_ban', label: 'Account Ban', description: 'Your account has been permanently banned' },
+  { value: 'account_suspension', label: 'Account Suspension', description: 'Your account has been suspended' },
+  { value: 'account_ban', label: 'Account Ban', description: 'Your account has been banned' },
+  {
+    value: 'verification_decision',
+    label: 'Verification decision',
+    description: 'Your women-only verification was not approved',
+  },
   { value: 'warning', label: 'Warning', description: 'You received a warning about a policy violation' },
   { value: 'other', label: 'Other', description: 'Other enforcement action' },
 ];
 
 // The appeals API records a coarser category than the form offers, so the exact
 // action being appealed is kept alongside it in metadata.
-const APPEAL_API_TYPES: Record<AppealFormData['appealType'], 'CONTENT_MODERATION' | 'ACCOUNT_SUSPENSION' | 'OTHER'> = {
+const APPEAL_API_TYPES: Record<
+  AppealFormType,
+  'CONTENT_MODERATION' | 'ACCOUNT_SUSPENSION' | 'VERIFICATION_DECISION' | 'OTHER'
+> = {
   content_removal: 'CONTENT_MODERATION',
   account_suspension: 'ACCOUNT_SUSPENSION',
   account_ban: 'ACCOUNT_SUSPENSION',
+  // Settings and the rejection notice both send a refused member here. Filed
+  // as OTHER, an upheld appeal could not reopen her verification; filed as
+  // VERIFICATION_DECISION, upholding it puts her request back in front of the
+  // women-only reviewer.
+  verification_decision: 'VERIFICATION_DECISION',
   warning: 'CONTENT_MODERATION',
   other: 'OTHER',
 };
 
+// Appeals about the account itself, which a locked account cannot file from
+// here: it cannot sign in, and this form is behind sign-in.
+const ACCOUNT_LOCK_TYPES: ReadonlySet<AppealFormType> = new Set(['account_suspension', 'account_ban']);
+
+function isAppealFormType(value: string | null): value is AppealFormType {
+  return APPEAL_TYPES.some((type) => type.value === value);
+}
+
 const REASON_MAX_LENGTH = 5000;
 
 export default function AppealPage() {
+  return (
+    <Suspense fallback={null}>
+      <AppealForm />
+    </Suspense>
+  );
+}
+
+function AppealForm() {
+  // Settings links here with ?type=verification_decision, and the other
+  // notices with the type they are about, so she lands on the right choice
+  // rather than having to find it.
+  const searchParams = useSearchParams();
+  const requestedType = searchParams.get('type');
+
   const [formData, setFormData] = useState<AppealFormData>({
-    appealType: 'content_removal',
+    appealType: isAppealFormType(requestedType) ? requestedType : 'content_removal',
     referenceId: '',
     reason: '',
     additionalInfo: '',
@@ -61,6 +105,11 @@ export default function AppealPage() {
   const [ticketId, setTicketId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [needsSignIn, setNeedsSignIn] = useState(false);
+  // A suspended or banned account is refused by every signed-in route, this
+  // one included. The sign-in page is where such an account is offered an
+  // appeal of its own, so that is where she is sent.
+  const [lockedOut, setLockedOut] = useState(false);
+  const aboutAccountLock = ACCOUNT_LOCK_TYPES.has(formData.appealType);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,6 +122,7 @@ export default function AppealPage() {
     setSubmitting(true);
     setError(null);
     setNeedsSignIn(false);
+    setLockedOut(false);
 
     try {
       // People appealing an enforcement action are often locked out, and the
@@ -94,8 +144,23 @@ export default function AppealPage() {
       );
 
       if (response.status === 401) {
+        if (aboutAccountLock) {
+          setLockedOut(true);
+          throw new Error(
+            'If your account has been suspended or banned, sign in with your email and password as usual. The sign-in page will offer you the appeal form for your account.'
+          );
+        }
         setNeedsSignIn(true);
         throw new Error('An appeal is attached to your account, so you need to be signed in to submit one.');
+      }
+
+      if (response.status === 403 && aboutAccountLock) {
+        // The account this session belongs to is locked, which is exactly the
+        // case the sign-in page's own appeal exists for.
+        setLockedOut(true);
+        throw new Error(
+          'Your account is suspended, so it cannot send an appeal from here. Sign in with your email and password and the sign-in page will offer you the appeal form.'
+        );
       }
 
       if (response.status >= 400) {
@@ -200,18 +265,29 @@ export default function AppealPage() {
               <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
               <div>
                 <h3 className="font-semibold text-amber-900 dark:text-amber-100">Sign in to appeal</h3>
-                <p className="text-sm text-amber-800 dark:text-amber-200 mt-1">
-                  An appeal is attached to the account the decision was made against, so you need to be signed in
-                  to submit one.{' '}
-                  <Link href="/login?redirect=%2Fhelp%2Fappeal" className="underline font-medium">
-                    Sign in and return here
-                  </Link>
-                  . If you cannot get into your account at all, use the{' '}
-                  <Link href="/report?type=other" className="underline font-medium">
-                    report form
-                  </Link>{' '}
-                  to reach Trust &amp; Safety with your email address.
-                </p>
+                {aboutAccountLock ? (
+                  <p className="text-sm text-amber-800 dark:text-amber-200 mt-1">
+                    If your account has been suspended or banned, you can still appeal.{' '}
+                    <Link href="/login" className="underline font-medium">
+                      Sign in with your email and password
+                    </Link>{' '}
+                    as usual: the sign-in page will tell you the account is suspended and offer you the appeal form
+                    for it there.
+                  </p>
+                ) : (
+                  <p className="text-sm text-amber-800 dark:text-amber-200 mt-1">
+                    An appeal is attached to the account the decision was made against, so you need to be signed in
+                    to submit one.{' '}
+                    <Link href="/login?redirect=%2Fhelp%2Fappeal" className="underline font-medium">
+                      Sign in and return here
+                    </Link>
+                    . If you cannot get into your account at all, use the{' '}
+                    <Link href="/report?type=other" className="underline font-medium">
+                      report form
+                    </Link>{' '}
+                    to reach Trust &amp; Safety with your email address.
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -342,6 +418,14 @@ export default function AppealPage() {
                   className="mt-2 inline-block text-sm font-medium text-red-800 dark:text-red-200 underline"
                 >
                   Sign in and return to this form
+                </Link>
+              )}
+              {lockedOut && (
+                <Link
+                  href="/login"
+                  className="mt-2 inline-block text-sm font-medium text-red-800 dark:text-red-200 underline"
+                >
+                  Go to sign-in to appeal the suspension
                 </Link>
               )}
             </div>

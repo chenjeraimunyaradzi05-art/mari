@@ -123,6 +123,24 @@ describe('GET /api/admin/ops/config', () => {
     expect(serialised).not.toContain(process.env.JWT_SECRET || 'dev-only-secret-not-for-production');
   });
 
+  it('says whether member content is screened and what happens when it cannot be', async () => {
+    const previous = process.env.MODERATION_REQUIRED;
+    process.env.MODERATION_REQUIRED = 'all';
+    try {
+      const res = await request(app).get('/api/admin/ops/config');
+
+      expect(res.status).toBe(200);
+      expect(typeof res.body.moderation.text).toBe('boolean');
+      expect(typeof res.body.moderation.images).toBe('boolean');
+      expect(res.body.moderation.whenUnscreened).toBe('all');
+      expect(typeof res.body.integrations.trustSafetyAlerts).toBe('boolean');
+      expect(typeof res.body.integrations.authorityReferralAlerts).toBe('boolean');
+    } finally {
+      if (previous === undefined) delete process.env.MODERATION_REQUIRED;
+      else process.env.MODERATION_REQUIRED = previous;
+    }
+  });
+
   it('treats a placeholder from .env.example as not configured', async () => {
     process.env.STRIPE_SECRET_KEY = 'sk_test_not_configured';
     process.env.SENDGRID_API_KEY = '   ';

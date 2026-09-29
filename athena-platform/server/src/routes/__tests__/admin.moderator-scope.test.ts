@@ -4,8 +4,14 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 jest.mock('../../utils/prisma', () => ({
   prisma: {
     contentReport: { findMany: jest.fn(async () => []), count: jest.fn(async () => 0) },
-    user: { findMany: jest.fn(async () => []), count: jest.fn(async () => 0), findUnique: jest.fn(), update: jest.fn() },
-    appeal: { findMany: jest.fn(async () => []) },
+    user: {
+      findMany: jest.fn(async () => []),
+      count: jest.fn(async () => 0),
+      findUnique: jest.fn(),
+      findUniqueOrThrow: jest.fn(async () => ({ id: 'u2', role: 'MODERATOR' })),
+      update: jest.fn(),
+    },
+    appeal: { findMany: jest.fn(async () => []), count: jest.fn(async () => 0) },
     auditLog: { create: jest.fn() },
   },
 }));

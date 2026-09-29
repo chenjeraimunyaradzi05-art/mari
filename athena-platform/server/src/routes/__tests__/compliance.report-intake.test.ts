@@ -215,6 +215,38 @@ describe('POST /api/compliance/report-content', () => {
     expect(intakeConsequences).toHaveBeenCalledWith(expect.objectContaining({ reviewHours: 24 }));
   });
 
+  it('writes the deadline and priority into the columns the queue sorts on, not into the evidence', async () => {
+    currentUser = { id: 'member-1', role: 'USER', email: 'member-1@example.com' };
+    const before = Date.now();
+
+    const res = await request(app).post('/api/compliance/report-content').send(body({ reason: 'csam' }));
+
+    expect(res.status).toBe(201);
+    const data = prisma.contentReport.create.mock.calls[0][0].data;
+    expect(data.priority).toBe('URGENT');
+    expect(data.reviewDeadline).toBeInstanceOf(Date);
+    expect(Math.round((data.reviewDeadline.getTime() - before) / 3_600_000)).toBe(24);
+    expect(data.evidence.reviewDeadline).toBeUndefined();
+    expect(data.evidence.priority).toBeUndefined();
+    // The reference she is emailed stays where the status lookup finds it.
+    expect(data.evidence.ticketId).toMatch(/^RPT-/);
+  });
+
+  it('answers the status lookup with the deadline from the column', async () => {
+    prisma.contentReport.findFirst.mockResolvedValue({
+      id: 'report-2',
+      status: 'PENDING',
+      action: null,
+      updatedAt: new Date('2026-09-20T00:00:00.000Z'),
+      reviewDeadline: new Date('2026-09-22T00:00:00.000Z'),
+      evidence: { ticketId: 'RPT-COL-1' },
+    });
+
+    const res = await request(app).get('/api/compliance/report-status/RPT-COL-1');
+
+    expect(res.body.data.reviewDeadline).toBe('2026-09-22T00:00:00.000Z');
+  });
+
   it('refuses a reason that is not one either report door offers', async () => {
     currentUser = { id: 'member-1', role: 'USER', email: 'member-1@example.com' };
 
