@@ -257,10 +257,10 @@ This document outlines a granular, step-by-step plan to bridge the gaps identifi
 ### PHASE 5: MOBILE PARITY & PRODUCTION (Steps 81-100)
 81. ✅ Mobile Navigation Architect — [athena-platform/mobile/App.tsx](athena-platform/mobile/App.tsx)
 82. ✅ Shared UI Library — types, utils, and hooks extracted. Evidence: [athena-platform/shared/src/index.ts](athena-platform/shared/src/index.ts), [athena-platform/shared/src/hooks/index.ts](athena-platform/shared/src/hooks/index.ts)
-83. ✅ Mobile Auth Integration — [athena-platform/mobile/src/services/socialAuth.ts](athena-platform/mobile/src/services/socialAuth.ts)
+83. ❌ Mobile Auth Integration — the social-auth helper at athena-platform/mobile/src/services/socialAuth.ts was never imported by any screen and sent a body the server's Google route does not read; removed 2026-09-30. The app signs in with email and password through AuthContext; social sign-in on mobile is not built.
 84. ✅ Mobile Video Feed — [athena-platform/mobile/src/screens/VideoFeedScreen.tsx](athena-platform/mobile/src/screens/VideoFeedScreen.tsx)
 85. ✅ Mobile Chat — [athena-platform/mobile/src/screens/MessagesScreen.tsx](athena-platform/mobile/src/screens/MessagesScreen.tsx)
-86. ✅ Camera Integration — [athena-platform/mobile/src/services/camera.ts](athena-platform/mobile/src/services/camera.ts)
+86. ❌ Camera Integration — athena-platform/mobile/src/services/camera.ts was never imported and posted to an upload route that has no mount; removed 2026-09-30. Not built.
 87. ✅ Push Notification Client — [athena-platform/mobile/src/services/pushNotifications.ts](athena-platform/mobile/src/services/pushNotifications.ts)
 88. ✅ Mobile Profile Edit — [athena-platform/mobile/src/screens/ProfileEditScreen.tsx](athena-platform/mobile/src/screens/ProfileEditScreen.tsx)
 89. ✅ Offline Sync — [athena-platform/mobile/src/services/offlineSync.ts](athena-platform/mobile/src/services/offlineSync.ts)
@@ -271,7 +271,7 @@ This document outlines a granular, step-by-step plan to bridge the gaps identifi
 94. ✅ Security Audit — [athena-platform/.github/workflows/security-audit.yml](athena-platform/.github/workflows/security-audit.yml)
 95. ✅ E2E Testing Suite — [athena-platform/client/playwright.config.ts](athena-platform/client/playwright.config.ts)
 96. ✅ GDPR/Compliance Check — compliance checklist documented. Evidence: [athena-platform/docs/compliance/GDPR_COMPLIANCE_CHECKLIST.md](athena-platform/docs/compliance/GDPR_COMPLIANCE_CHECKLIST.md)
-97. ✅ Analytics Integration — full KPI tracking implementation. Evidence: [athena-platform/mobile/src/services/analytics.ts](athena-platform/mobile/src/services/analytics.ts)
+97. ❌ Analytics Integration — athena-platform/mobile/src/services/analytics.ts built every event and dropped it, because no provider SDK was ever installed; removed 2026-09-30. Not built.
 98. ✅ Production DB Migration Dry-Run — migration script with reporting. Evidence: [athena-platform/server/scripts/migration-dry-run.js](athena-platform/server/scripts/migration-dry-run.js)
 99. ✅ DNS & SSL — configuration guide documented. Evidence: [athena-platform/docs/launch/DNS_SSL_CONFIGURATION.md](athena-platform/docs/launch/DNS_SSL_CONFIGURATION.md)
 100. ✅ LAUNCH — launch checklist prepared. Evidence: [athena-platform/docs/launch/LAUNCH_CHECKLIST.md](athena-platform/docs/launch/LAUNCH_CHECKLIST.md)

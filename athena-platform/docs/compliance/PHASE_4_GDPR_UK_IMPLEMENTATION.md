@@ -19,11 +19,11 @@ This document summarizes the GDPR and UK Online Safety Act compliance features i
 - `useDSAR()` - Data Subject Access Request handling
 - `useRegion()` - Region detection for compliance rules
 
-### GDPR Context (`client/src/lib/contexts/GDPRContext.tsx`)
-- Global GDPR state provider
-- Cookie preferences management
-- Region detection (UK, EU, ANZ, US)
-- Privacy mode toggle
+### GDPR Context (client/src/lib/contexts/GDPRContext.tsx — removed 2026-09-30)
+- Kept a second copy of the cookie consent, wrote it through a second path to
+  /api/gdpr/cookies, and showed its banner only to visitors it guessed were in
+  the UK or the EU; nothing read it. CookieConsentBanner is the one consent
+  record.
 
 ### Cookie Consent Banner (`client/src/components/CookieConsentBanner.tsx`)
 - GDPR-compliant cookie consent UI
@@ -210,7 +210,7 @@ model UserSafetySettings {
 
 ### Created
 - client/src/lib/hooks/useGDPR.ts (removed 2026-09-13, never imported)
-- `client/src/lib/contexts/GDPRContext.tsx`
+- client/src/lib/contexts/GDPRContext.tsx (removed 2026-09-30, a second copy of the consent state that nothing read)
 - `client/src/lib/services/compliance.service.ts`
 - client/src/lib/services/gdpr.service.ts (removed 2026-09-13, never imported)
 - `client/src/app/report/page.tsx`

@@ -237,10 +237,17 @@ function ignoredByGit(targets) {
   // check down over a sentence in the ML README naming a URL route. So the
   // leading slash is dropped for the question and mapped back for the answer;
   // the trailing slash, which is what the paragraph above is about, is kept.
+  //
+  // A citation that climbs out of the repository root (`../../client/x.tsx`
+  // written from a doc two levels deep, once the file it named is deleted) is
+  // the same kind of question git refuses as "outside repository". No ignore
+  // rule can match it, so it is not asked and stays reported as broken, which
+  // is what it is.
   const asked = new Map();
   for (const target of targets.filter(Boolean)) {
     const forGit = target.replace(/^\/+/, '');
     if (forGit === '') continue;
+    if (path.posix.normalize(forGit).startsWith('..')) continue;
     if (!asked.has(forGit)) asked.set(forGit, []);
     asked.get(forGit).push(target);
   }

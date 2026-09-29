@@ -189,11 +189,10 @@ This document serves as the legal review checklist for ATHENA's GDPR/Privacy com
 
 ### Evidence Files
 1. [Privacy Center UI](../../client/src/app/privacy-center/page.tsx)
-2. [Cookie Consent Banner](../../client/src/components/CookieConsentBanner.tsx)
-3. [GDPR Context Provider](../../client/src/lib/contexts/GDPRContext.tsx)
-4. [User Data Export Route](../../server/src/routes/user.routes.ts)
-5. [Data Retention Policy](../../../docs/security/retention-and-deletion.md)
-6. [Privacy Policy draft](../legal/PRIVACY_POLICY_DRAFT.md)
+2. [Cookie Consent Banner](../../client/src/components/CookieConsentBanner.tsx) — the one consent record; the former GDPRContext provider, a second copy of the consent state that nothing read, was removed on 2026-09-30
+3. [User Data Export Route](../../server/src/routes/user.routes.ts)
+4. [Data Retention Policy](../../../docs/security/retention-and-deletion.md)
+5. [Privacy Policy draft](../legal/PRIVACY_POLICY_DRAFT.md)
 
 ---
 
