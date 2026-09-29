@@ -13,12 +13,14 @@
 
 import { use, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { Award, CalendarDays, Check, CreditCard, ExternalLink, Loader2, Rocket, Video } from 'lucide-react';
 import { businessApi } from '@/lib/api';
 import { apiMessage } from '@/lib/strategy-api';
 import { PaymentIntentForm } from '@/components/payments/PaymentIntentForm';
 import { cn, formatCurrency, formatDate } from '@/lib/utils';
+import { WithdrawPlace } from '../WithdrawPlace';
 
 type Week = {
   weekNumber: number; sessionId: string; title: string; scheduledAt: string; durationMins: number;
@@ -37,6 +39,7 @@ const when = (iso: string) => new Date(iso).toLocaleString('en-AU', { weekday: '
 
 export default function CohortProgressPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const router = useRouter();
   const [progress, setProgress] = useState<Progress | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -113,6 +116,8 @@ export default function CohortProgressPage({ params }: { params: Promise<{ id: s
   const ended = progress.status === 'DROPPED';
   const unpaid = !ended && progress.paymentStatus !== 'PAID';
   const graduated = progress.status === 'COMPLETED' && progress.completedAt;
+  // A place she can still give up: not ended, and not finished.
+  const canLeave = !ended && progress.status !== 'COMPLETED' && progress.status !== 'GRADUATED';
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-6">
@@ -252,6 +257,17 @@ export default function CohortProgressPage({ params }: { params: Promise<{ id: s
       <p className="text-xs text-slate-500 dark:text-slate-400">
         The certificate is issued once every week is marked done and the cohort has ended, so an early tick-through cannot manufacture a graduation.
       </p>
+
+      {canLeave && (
+        <WithdrawPlace
+          enrollmentId={progress.enrollmentId}
+          cohortName={progress.cohort.name}
+          paid={progress.paymentStatus === 'PAID'}
+          // An unpaid place is deleted, so there is no page left to show her;
+          // a paid one ends and this page then says what happens to her fee.
+          onDone={(removed) => (removed ? router.push('/dashboard/accelerator') : void load())}
+        />
+      )}
     </div>
   );
 }

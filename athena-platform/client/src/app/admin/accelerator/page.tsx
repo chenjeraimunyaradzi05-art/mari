@@ -6,20 +6,28 @@
  * empty. Staff create a cohort here, start from the blueprint's twelve weeks
  * or from nothing, then put the dates and meeting links on each session.
  * Founders see a cohort the moment it is saved.
+ *
+ * Each cohort also has its roster: who holds a place, whether she has paid,
+ * how far she has got. The three things staff can do about a place — free an
+ * unpaid seat, take back a completion certificate, record that a fee was
+ * returned — had routes and tests and no screen, so a cohort filled with
+ * unpaid clicks stayed closed and a refund could not be written down anywhere.
  */
 
 import { useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { ArrowLeft, Loader2, Plus, Rocket, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Loader2, Plus, Rocket, Trash2, Users, X } from 'lucide-react';
 import {
   adminApiMessage,
   adminCatalogueApi,
   fromDateTimeLocal,
   listFromText,
   toDateTimeLocal,
+  type CohortEnrollment,
   type CohortStatus,
+  type EnrollmentAction,
 } from '@/lib/admin-catalogue-api';
 import { cn } from '@/lib/utils';
 
@@ -344,6 +352,8 @@ export default function AdminAcceleratorPage() {
                 onChanged={refresh}
               />
             )}
+
+            {current && <RosterPanel cohortId={current.id} onChanged={refresh} />}
           </aside>
         )}
       </div>
@@ -485,6 +495,207 @@ function SessionsPanel({ cohortId, sessions, loading, onSeed, seeding, onChanged
             )}
           </div>
         </form>
+      )}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ roster
+
+const ACTION_COPY: Record<EnrollmentAction, { button: string; heading: string; done: string; help: string }> = {
+  release: {
+    button: 'Release',
+    heading: 'Release this unpaid place',
+    done: 'Place released. She has been told she was not charged.',
+    help: 'The seat goes back to the cohort so someone else can take it. She is told, with your reason.',
+  },
+  revoke: {
+    button: 'Revoke certificate',
+    heading: 'Withdraw her certificate of completion',
+    done: 'Certificate withdrawn. She has been told why.',
+    help: 'Her place is marked dropped and the public certificate stops checking out. She is told, with your reason.',
+  },
+  record_refund: {
+    button: 'Record refund',
+    heading: 'Record that her fee was returned',
+    done: 'Refund recorded. She has been told, with the reference.',
+    help: 'This does not move money: it records a refund already made. Give the Stripe refund id or the bank transfer reference.',
+  },
+};
+
+const PAYMENT_TONE: Record<CohortEnrollment['paymentStatus'], string> = {
+  PENDING: 'bg-amber-100 text-amber-800',
+  PAID: 'bg-emerald-100 text-emerald-800',
+  FAILED: 'bg-red-100 text-red-700',
+  REFUNDED: 'bg-slate-100 text-slate-700',
+};
+
+/**
+ * Which of the three actions the server will accept for this place, by the
+ * same rules it applies, so a button is never offered only to be refused.
+ */
+function actionsFor(e: CohortEnrollment): EnrollmentAction[] {
+  const completed = e.status === 'COMPLETED' || e.status === 'GRADUATED';
+  const actions: EnrollmentAction[] = [];
+  if (e.paymentStatus !== 'PAID' && !completed) actions.push('release');
+  if (completed) actions.push('revoke');
+  if (e.paymentStatus === 'PAID') actions.push('record_refund');
+  return actions;
+}
+
+function RosterPanel({ cohortId, onChanged }: { cohortId: string; onChanged: () => void }) {
+  const queryClient = useQueryClient();
+  const [acting, setActing] = useState<{ id: string; action: EnrollmentAction } | null>(null);
+  const [reason, setReason] = useState('');
+  const [reference, setReference] = useState('');
+
+  const roster = useQuery({
+    queryKey: ['admin-cohort-enrollments', cohortId],
+    queryFn: () => adminCatalogueApi.cohorts.enrollments(cohortId),
+    select: (r) => (Array.isArray(r.data?.data?.enrollments) ? (r.data.data.enrollments as CohortEnrollment[]) : []),
+  });
+
+  const act = useMutation({
+    mutationFn: (chosen: { id: string; action: EnrollmentAction }) =>
+      adminCatalogueApi.cohorts.enrollmentAction(chosen.id, {
+        action: chosen.action,
+        reason: reason.trim(),
+        ...(chosen.action === 'record_refund' ? { reference: reference.trim() } : {}),
+      }),
+    onSuccess: (_response, chosen) => {
+      toast.success(ACTION_COPY[chosen.action].done);
+      setActing(null);
+      setReason('');
+      setReference('');
+      queryClient.invalidateQueries({ queryKey: ['admin-cohort-enrollments', cohortId] });
+      onChanged();
+    },
+    // The server's 400 and 409 say exactly what is wrong (a paid place cannot
+    // be released, a refund needs a reference), so they are shown as sent.
+    onError: (e) => toast.error(adminApiMessage(e) || 'That was not saved. The place is as it was.'),
+  });
+
+  const start = (id: string, action: EnrollmentAction) => {
+    setActing({ id, action });
+    setReason('');
+    setReference('');
+  };
+
+  const ready = reason.trim().length >= 3 && (acting?.action !== 'record_refund' || reference.trim().length > 0);
+
+  return (
+    <div className="space-y-3 border-t border-slate-200 pt-4 dark:border-slate-700">
+      <h3 className="flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wide text-slate-500">
+        <Users className="h-4 w-4" /> Who is enrolled
+      </h3>
+
+      {roster.isLoading ? (
+        <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+      ) : roster.isError ? (
+        // A failed load is not an empty cohort.
+        <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300" role="alert">
+          The roster did not load. Nobody has been removed from it.{' '}
+          <button type="button" onClick={() => roster.refetch()} className="font-medium underline">
+            Try again
+          </button>
+        </p>
+      ) : (roster.data?.length ?? 0) === 0 ? (
+        <p className="text-sm text-slate-500">Nobody has enrolled in this cohort yet.</p>
+      ) : (
+        <ul className="max-h-96 space-y-2 overflow-y-auto text-sm">
+          {roster.data!.map((e) => {
+            const name = [e.user.firstName, e.user.lastName].filter(Boolean).join(' ') || 'No name given';
+            const open = acting?.id === e.id ? acting : null;
+            const offered = actionsFor(e);
+            return (
+              <li key={e.id} className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-medium text-slate-900 dark:text-white">{name}</p>
+                    <p className="truncate text-xs text-slate-500">{e.user.email}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                      {e.status.toLowerCase()}
+                    </span>
+                    <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', PAYMENT_TONE[e.paymentStatus])}>
+                      {e.paymentStatus.toLowerCase()}
+                    </span>
+                  </div>
+                </div>
+                <p className="mt-1 text-xs text-slate-500">
+                  Enrolled {day(e.enrolledAt)} · {e.completedWeeks} of 12 weeks done
+                  {e.completedAt ? ` · completed ${day(e.completedAt)}` : ''}
+                </p>
+                {!open && offered.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {offered.map((action) => (
+                      <button
+                        key={action}
+                        type="button"
+                        onClick={() => start(e.id, action)}
+                        className={cn('btn-secondary py-1 text-xs', action !== 'release' && 'text-red-700')}
+                      >
+                        {ACTION_COPY[action].button}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {open && (
+                  <form
+                    className="mt-3 space-y-2 rounded-lg bg-slate-50 p-3 dark:bg-slate-800"
+                    onSubmit={(ev) => {
+                      ev.preventDefault();
+                      if (ready) act.mutate(open);
+                    }}
+                  >
+                    <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">{ACTION_COPY[open.action].heading}</p>
+                    <p className="text-xs text-slate-500">{ACTION_COPY[open.action].help}</p>
+                    <div>
+                      <label htmlFor={`reason-${e.id}`} className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                        Reason (she reads this)
+                      </label>
+                      <textarea
+                        id={`reason-${e.id}`}
+                        value={reason}
+                        onChange={(ev) => setReason(ev.target.value)}
+                        rows={2}
+                        minLength={3}
+                        maxLength={500}
+                        required
+                        className="input mt-1 w-full text-sm"
+                      />
+                    </div>
+                    {open.action === 'record_refund' && (
+                      <div>
+                        <label htmlFor={`reference-${e.id}`} className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                          Refund reference
+                        </label>
+                        <input
+                          id={`reference-${e.id}`}
+                          value={reference}
+                          onChange={(ev) => setReference(ev.target.value)}
+                          maxLength={200}
+                          required
+                          placeholder="re_... or the bank transfer reference"
+                          className="input mt-1 w-full text-sm"
+                        />
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <button type="submit" disabled={act.isPending || !ready} className="btn-primary flex-1 py-1.5 text-sm">
+                        {act.isPending ? 'Saving…' : ACTION_COPY[open.action].button}
+                      </button>
+                      <button type="button" onClick={() => setActing(null)} disabled={act.isPending} className="btn-secondary py-1.5 text-sm">
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </li>
+            );
+          })}
+        </ul>
       )}
     </div>
   );

@@ -27,7 +27,7 @@ import { ApiError } from '../middleware/errorHandler';
 import { sendEmail } from '../utils/email';
 import { logger } from '../utils/logger';
 import { bestEffort } from '../utils/best-effort';
-import { recordAdminAction } from '../services/admin-audit.service';
+import { recordAdminAction, type AdminAuditAction } from '../services/admin-audit.service';
 import { notifyAdmins } from '../services/admin-notify.service';
 
 const router = Router();
@@ -71,8 +71,6 @@ function sentFields<T extends Record<string, unknown>>(data: T): Partial<T> {
   }
   return out;
 }
-
-const aud = (n: number) => new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 }).format(n);
 
 /** In-app notification plus an email, the way the grant and insurance reviews tell a member. */
 async function tellMember(userId: string, subject: string, line: string, link: string) {
@@ -443,6 +441,12 @@ router.get('/accelerator/cohorts/:id/enrollments', ...adminOnly, async (req: Aut
 });
 
 const ENROLLMENT_ACTIONS = ['release', 'revoke', 'record_refund'] as const;
+
+const ENROLLMENT_AUDIT_VERB: Record<(typeof ENROLLMENT_ACTIONS)[number], AdminAuditAction> = {
+  release: 'ACCELERATOR_ENROLLMENT_RELEASED',
+  revoke: 'ACCELERATOR_ENROLLMENT_REVOKED',
+  record_refund: 'ACCELERATOR_ENROLLMENT_REFUND_RECORDED',
+};
 const enrollmentActionSchema = z.object({
   action: z.enum(ENROLLMENT_ACTIONS),
   // Said to the founder, and kept in the audit record, so it has to be real.
@@ -522,15 +526,16 @@ router.patch('/accelerator/enrollments/:id', ...adminOnly, async (req: AuthReque
       by: req.user!.id,
     });
 
-    // There is no enrolment action in the audit vocabulary yet, so this is
-    // recorded as the change to the cohort's roster it is, with the enrolment
-    // and the member named.
-    await recordAdminAction(req, 'ACCELERATOR_COHORT_UPDATED', {
+    // Filed under the enrolment verb for what was done to her place. These
+    // used to be written as ACCELERATOR_COHORT_UPDATED with the action in a
+    // `change` field, the nearest name the vocabulary had, so a search for
+    // what happened to one woman's place turned up a cohort edit instead.
+    const verb = ENROLLMENT_AUDIT_VERB[data.action];
+    await recordAdminAction(req, verb, {
       resourceType: 'AcceleratorEnrollment',
       resourceId: enrollment.id,
       targetUserId: enrollment.userId,
       cohortId: enrollment.cohortId,
-      change: `ENROLLMENT_${data.action.toUpperCase()}`,
       previousStatus: enrollment.status,
       previousPaymentStatus: enrollment.paymentStatus,
       ...(data.reference ? { reference: data.reference } : {}),

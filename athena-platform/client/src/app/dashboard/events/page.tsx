@@ -22,6 +22,7 @@ import { format, addDays, startOfWeek, isSameDay } from 'date-fns';
 import toast from 'react-hot-toast';
 import { useEvents, useRegisterEvent, useSaveEvent, useUnsaveEvent } from '@/lib/hooks';
 import { HostEventDialog } from '@/components/events/HostEventDialog';
+import { AddToCalendar } from '@/components/events/AddToCalendar';
 import { ReportEventDialog } from './ReportEventDialog';
 import { HostingPanel } from './HostingPanel';
 
@@ -78,6 +79,15 @@ interface Event {
   isHost?: boolean;
   /** Your listing is written but not published until a moderator reads it. */
   pendingReview?: boolean;
+  /**
+   * Called off by its host or by ATHENA. It stays on the page, marked, until
+   * its day has passed, so a woman who registered can see what happened to it
+   * rather than find it gone. The reason is only sent to the people who had a
+   * place, the host and staff.
+   */
+  isCancelled?: boolean;
+  cancelledAt?: string | null;
+  cancelledReason?: string | null;
   tags: string[];
 }
 
@@ -137,8 +147,10 @@ export default function EventsPage() {
     ? Array.from({ length: 7 }, (_, i) => addDays(effectiveWeekStart, i))
     : [];
 
+  // The dot under a day means something is on. A called-off event is still in
+  // the list below, marked, but it is not a reason to keep the day free.
   const getEventCountForDay = (date: Date) => {
-    return events.filter((event) => isSameDay(event.date, date)).length;
+    return events.filter((event) => !event.isCancelled && isSameDay(event.date, date)).length;
   };
 
   return (
@@ -318,7 +330,7 @@ export default function EventsPage() {
       ) : (
         <div className="grid md:grid-cols-2 gap-6">
           {filteredEvents.map((event) => (
-            <div key={event.id} className="card-hover overflow-hidden">
+            <div key={event.id} className={cn('card-hover overflow-hidden', event.isCancelled && 'opacity-80')}>
               {/* Image */}
               <div className="relative h-48 -mx-6 -mt-6 mb-4">
                 <img
@@ -345,9 +357,14 @@ export default function EventsPage() {
                   )}
                 </div>
                 <div className="absolute top-4 right-4 flex items-center space-x-2">
+                  {event.isCancelled && (
+                    <Badge variant="default" className="bg-rose-600">
+                      Cancelled
+                    </Badge>
+                  )}
                   {/* Your own held listing. Nobody else can see it at all, so
                       saying so here is the only way you would know. */}
-                  {event.pendingReview && (
+                  {event.pendingReview && !event.isCancelled && (
                     <Badge variant="default" className="bg-amber-500">
                       Waiting on review
                     </Badge>
@@ -461,17 +478,34 @@ export default function EventsPage() {
                       </button>
                     )}
                   </div>
-                  {event.isRegistered ? (
-                    <button
-                      className="btn-outline flex items-center space-x-2"
-                      onClick={() => {
-                        if (event.link) window.open(event.link, '_blank', 'noopener,noreferrer');
-                      }}
-                      disabled={!event.link}
-                    >
-                      <ExternalLink className="w-4 h-4" />
-                      <span>Join Event</span>
-                    </button>
+                  {event.isCancelled ? (
+                    // Nothing to join and nothing to register for. Where she had
+                    // a place, she is told why; the notice in her inbox says the
+                    // same, and this is where she comes back to check.
+                    <div className="flex max-w-[18rem] flex-col items-end text-right" role="status">
+                      <span className="text-sm font-medium text-rose-700 dark:text-rose-300">
+                        {event.isRegistered ? 'Cancelled. It will not go ahead.' : 'Cancelled'}
+                      </span>
+                      {event.cancelledReason && (
+                        <span className="mt-1 text-xs text-slate-500 dark:text-slate-400">{event.cancelledReason}</span>
+                      )}
+                    </div>
+                  ) : event.isRegistered ? (
+                    <div className="flex flex-col items-end gap-2">
+                      <button
+                        className="btn-outline flex items-center space-x-2"
+                        onClick={() => {
+                          if (event.link) window.open(event.link, '_blank', 'noopener,noreferrer');
+                        }}
+                        disabled={!event.link}
+                      >
+                        <ExternalLink className="w-4 h-4" />
+                        <span>Join Event</span>
+                      </button>
+                      {/* Registering used to be the last she heard of it. This
+                          puts it in her own calendar, in full or discreetly. */}
+                      <AddToCalendar eventId={event.id} />
+                    </div>
                   ) : (
                     <div className="flex flex-col items-end">
                       {/* The button used to read "Register - $29" and then take

@@ -43,6 +43,7 @@ jest.mock('../../utils/prisma', () => ({
       findMany: jest.fn(async () => []),
       findUnique: jest.fn(),
       update: jest.fn(async () => ({})),
+      updateMany: jest.fn(async () => ({ count: 1 })),
       delete: jest.fn(async () => ({})),
     },
     eventRegistration: { findMany: jest.fn(async () => []), upsert: jest.fn(async () => ({})), delete: jest.fn() },
@@ -51,6 +52,7 @@ jest.mock('../../utils/prisma', () => ({
     userSafetySettings: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
     user: { findMany: jest.fn(async () => [{ id: 'admin-1' }]) },
     notification: { createMany: jest.fn(async () => ({ count: 1 })) },
+    auditLog: { create: jest.fn(async () => ({})) },
   },
 }));
 
@@ -196,27 +198,129 @@ describe('An event’s host: who is coming, changing it, calling it off', () => 
   });
 
   describe('calling it off', () => {
-    it('tells everyone registered, keeps the listing for any report, then removes it', async () => {
+    it('marks it cancelled rather than deleting it, tells everyone registered why, and keeps the listing for any report', async () => {
       prisma.eventRegistration.findMany.mockResolvedValue([{ userId: 'u1' }, { userId: 'u2' }]);
       prisma.contentReport.findMany.mockResolvedValue([{ id: 'rep1', evidence: { note: 'kept' } }]);
 
-      const res = await request(app).delete('/api/events/ev1').set(as('host-1')).expect(200);
+      const res = await request(app)
+        .post('/api/events/ev1/cancel')
+        .set(as('host-1'))
+        .send({ reason: 'VENUE_UNAVAILABLE' })
+        .expect(200);
 
       expect(res.body.data.registrantsTold).toBe(2);
+      // The row and its registrations stay: nothing is deleted.
+      expect(prisma.event.delete).not.toHaveBeenCalled();
+      const data = prisma.event.updateMany.mock.calls[0][0].data;
+      expect(data.cancelledAt).toBeInstanceOf(Date);
+      expect(data.cancelledReason).toBe('The venue is no longer available.');
       expect(notificationService.notify.mock.calls.map((c: any) => c[0].title)).toEqual([
         'An event you registered for is cancelled',
         'An event you registered for is cancelled',
       ]);
+      expect(notificationService.notify.mock.calls[0][0].message).toMatch(/cancelled by its host.*The venue is no longer available\./);
+      // In the app only.
+      for (const call of notificationService.notify.mock.calls) expect(call[0].channels).toBeUndefined();
       expect(prisma.contentReport.update.mock.calls[0][0].data.evidence).toMatchObject({
         note: 'kept',
         eventSnapshots: [expect.objectContaining({ because: 'CANCELLED', title: 'Coffee and code' })],
       });
-      expect(prisma.event.delete).toHaveBeenCalledWith({ where: { id: 'ev1' } });
     });
 
-    it('is the host’s alone', async () => {
-      await request(app).delete('/api/events/ev1').set(as('someone-else')).expect(404);
+    it('takes a host’s reason only from the list, so it cannot carry a new address past review', async () => {
+      await request(app)
+        .post('/api/events/ev1/cancel')
+        .set(as('host-1'))
+        .send({ reason: 'Cancelled — come to 14 Private Street instead' })
+        .expect(400);
+      await request(app).post('/api/events/ev1/cancel').set(as('host-1')).send({}).expect(400);
+      expect(prisma.event.updateMany).not.toHaveBeenCalled();
+      expect(notificationService.notify).not.toHaveBeenCalled();
+    });
+
+    it('lets staff give their own reason, tells the host, and records who did it', async () => {
+      prisma.eventRegistration.findMany.mockResolvedValue([{ userId: 'u1' }]);
+
+      await request(app)
+        .post('/api/events/ev1/cancel')
+        .set(as('staff', 'ADMIN'))
+        .send({ reason: 'The venue has told us it cannot host this group.' })
+        .expect(200);
+
+      expect(prisma.event.updateMany.mock.calls[0][0].data.cancelledReason).toBe('The venue has told us it cannot host this group.');
+      const told = notificationService.notify.mock.calls.map((c: any) => c[0]);
+      expect(told.map((n: any) => n.userId)).toEqual(['u1', 'host-1']);
+      expect(told[0].message).toMatch(/cancelled by ATHENA/);
+      expect(told[1].title).toBe('Your event has been cancelled');
+      expect(prisma.auditLog.create.mock.calls[0][0].data).toMatchObject({
+        action: 'ADMIN_EVENT_UPDATE',
+        actorUserId: 'staff',
+        metadata: expect.objectContaining({ eventId: 'ev1', change: 'CANCELLED' }),
+      });
+    });
+
+    it('is the host’s and staff’s alone, and happens once', async () => {
+      await request(app).post('/api/events/ev1/cancel').set(as('someone-else')).send({ reason: 'OTHER' }).expect(404);
+      expect(prisma.event.updateMany).not.toHaveBeenCalled();
+
+      prisma.event.findUnique.mockResolvedValue({ ...hostedEvent, cancelledAt: new Date(), cancelledReason: 'x' });
+      await request(app).post('/api/events/ev1/cancel').set(as('host-1')).send({ reason: 'OTHER' }).expect(409);
+      expect(prisma.event.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('tells registrants once when two cancellations arrive together', async () => {
+      prisma.eventRegistration.findMany.mockResolvedValue([{ userId: 'u1' }]);
+      // Both read the row before either wrote it; the second write finds it
+      // already marked.
+      prisma.event.updateMany.mockResolvedValueOnce({ count: 0 });
+      await request(app).post('/api/events/ev1/cancel').set(as('host-1')).send({ reason: 'OTHER' }).expect(409);
+      expect(notificationService.notify).not.toHaveBeenCalled();
+      expect(prisma.event.updateMany.mock.calls[0][0].where).toEqual({ id: 'ev1', cancelledAt: null });
+    });
+
+    it('is no longer a delete', async () => {
+      await request(app).delete('/api/events/ev1').set(as('host-1')).expect(404);
       expect(prisma.event.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a cancelled event', () => {
+    const cancelled = {
+      ...hostedEvent,
+      format: 'VIRTUAL',
+      link: 'https://meet.example.org/room',
+      cancelledAt: new Date('2026-09-25T00:00:00.000Z'),
+      cancelledReason: 'The host is no longer able to run it.',
+    };
+
+    it('stays on the page, marked, with the reason for the women who had a place and not for strangers', async () => {
+      prisma.event.findUnique.mockResolvedValue({ ...cancelled, registrations: [{ id: 'r' }], saves: [] });
+      const mine = await request(app).get('/api/events/ev1').set(as('u1')).expect(200);
+      expect(mine.body.data).toMatchObject({
+        isCancelled: true,
+        cancelledReason: 'The host is no longer able to run it.',
+        // Nothing to join.
+        link: null,
+        linkRequiresRegistration: false,
+      });
+
+      prisma.event.findUnique.mockResolvedValue({ ...cancelled, registrations: [], saves: [] });
+      const stranger = await request(app).get('/api/events/ev1').set(as('u9')).expect(200);
+      expect(stranger.body.data).toMatchObject({ isCancelled: true, cancelledReason: null, link: null });
+    });
+
+    it('takes no new registrations and no further changes', async () => {
+      prisma.event.findUnique.mockResolvedValue({ ...cancelled, registrations: [], saves: [] });
+      await request(app).post('/api/events/ev1/register').set(as('u9')).expect(409);
+      expect(prisma.eventRegistration.upsert).not.toHaveBeenCalled();
+
+      await request(app).patch('/api/events/ev1').set(as('host-1')).send({ startTime: '10:30' }).expect(409);
+      expect(prisma.event.update).not.toHaveBeenCalled();
+    });
+
+    it('sorts after everything still going ahead in the public list', async () => {
+      await request(app).get('/api/events').expect(200);
+      expect(prisma.event.findMany.mock.calls[0][0].orderBy[0]).toEqual({ cancelledAt: { sort: 'desc', nulls: 'first' } });
     });
   });
 

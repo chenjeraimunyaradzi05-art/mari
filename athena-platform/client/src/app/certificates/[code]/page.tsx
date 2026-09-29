@@ -3,6 +3,11 @@
 /**
  * A course certificate, checkable by anyone with its code: an employer given
  * the code can see it is real, who earned it, for which course, and when.
+ *
+ * The course title and the issuer are the ones on the certificate itself —
+ * written when it was issued — not whatever the course is called today. The
+ * page used to read both live, so renaming a course changed what every
+ * certificate issued for it said it was for.
  */
 
 import { use } from 'react';
@@ -15,8 +20,21 @@ type Certificate = {
   code: string;
   issuedAt: string;
   learner: string;
-  course: { id: string; title: string; slug: string; provider: string };
+  course: {
+    id: string;
+    title: string;
+    slug: string;
+    provider: string;
+    /** Whether the course is still in the catalogue. A retired course keeps its certificates. */
+    listed?: boolean;
+    /** What the course is called now, when that differs from the certificate. */
+    listedAs?: string | null;
+  };
 };
+
+function statusOf(error: unknown): number | undefined {
+  return (error as { response?: { status?: number } })?.response?.status;
+}
 
 export default function CertificatePage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = use(params);
@@ -27,16 +45,31 @@ export default function CertificatePage({ params }: { params: Promise<{ code: st
     retry: false,
   });
 
+  // Only a 404 means there is no such certificate. Anything else — the API
+  // down, a timeout, a server error — used to render as "No certificate with
+  // that code", which told an employer a genuine credential was fake.
+  const notFound = certificate.isError && statusOf(certificate.error) === 404;
+
   return (
     <div className="mx-auto max-w-2xl px-4 py-16">
       {certificate.isLoading ? (
         <div className="flex justify-center">
           <Loader2 className="h-8 w-8 animate-spin text-primary-500" />
         </div>
-      ) : certificate.isError || !certificate.data ? (
+      ) : notFound ? (
         <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center dark:border-slate-700 dark:bg-slate-900">
           <p className="text-lg font-semibold text-slate-900 dark:text-white">No certificate with that code</p>
           <p className="mt-1 text-sm text-slate-500">Check the code and try again. Codes are ten characters.</p>
+        </div>
+      ) : certificate.isError || !certificate.data ? (
+        <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center dark:border-slate-700 dark:bg-slate-900" role="alert">
+          <p className="text-lg font-semibold text-slate-900 dark:text-white">This certificate could not be checked just now</p>
+          <p className="mt-1 text-sm text-slate-500">
+            That is a problem on our side, not a sign the certificate is not real. Try again in a moment.
+          </p>
+          <button type="button" onClick={() => certificate.refetch()} className="btn-outline mt-4 px-4 py-2 text-sm">
+            Try again
+          </button>
         </div>
       ) : (
         <div className="rounded-2xl border-2 border-primary-200 bg-white p-10 text-center shadow-sm dark:border-primary-900/50 dark:bg-slate-900">
@@ -55,13 +88,22 @@ export default function CertificatePage({ params }: { params: Promise<{ code: st
               to contact the candidate — it says so a line above — and the only
               link on it used to point at /dashboard/learn/<id>, which bounced
               the anonymous reader it was built for straight into the sign-in
-              wall. /courses/<slug> is the same course, readable by anyone, and
-              the response already carries the slug. */}
+              wall. /courses/<slug> is the same course, readable by anyone.
+              A course the provider has since retired has no public page to
+              open, so there is no link to one — and the certificate stands. */}
           <p className="mt-6 text-xs text-slate-400">
-            Anyone can confirm this certificate at this address. Course details:{' '}
-            <Link href={`/courses/${certificate.data.course.slug}`} className="text-primary-600 hover:underline">
-              {certificate.data.course.title}
-            </Link>
+            Anyone can confirm this certificate at this address.{' '}
+            {certificate.data.course.listed === false ? (
+              <>The provider no longer lists this course. The certificate still stands.</>
+            ) : (
+              <>
+                Course details:{' '}
+                <Link href={`/courses/${certificate.data.course.slug}`} className="text-primary-600 hover:underline">
+                  {certificate.data.course.listedAs ?? certificate.data.course.title}
+                </Link>
+                {certificate.data.course.listedAs && <> (the course&rsquo;s name today)</>}
+              </>
+            )}
           </p>
         </div>
       )}

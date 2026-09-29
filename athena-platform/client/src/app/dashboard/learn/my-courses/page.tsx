@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui';
 import { useMyCourses } from '@/lib/hooks';
 import { CardSkeleton } from '@/components/ui/loading';
+import { waitsForProvider, type CourseAccess } from '@/app/courses/CoursePlacePanel';
 
 interface EnrolledCourse {
   id: string;
@@ -32,6 +33,8 @@ interface EnrolledCourse {
   category: string;
   employmentRate?: number | null;
   avgStartingSalary?: number | null;
+  /** On a course with a provider and a fee, whether the provider has confirmed her place yet. */
+  access?: CourseAccess | null;
 }
 
 type FilterType = 'all' | 'in-progress' | 'completed';
@@ -121,6 +124,7 @@ export default function MyCoursesPage() {
       category: course.type ? formatLabel(course.type) : 'Course',
       employmentRate: course.employmentRate,
       avgStartingSalary: course.avgStartingSalary,
+      access: course.access ?? null,
     };
   });
 
@@ -273,6 +277,15 @@ export default function MyCoursesPage() {
           {filteredCourses.map((course) => {
             const duration = formatDuration(course.durationMonths);
             const modes = toStringList(course.studyMode);
+            // "Continue" on a course whose lessons are still waiting for the
+            // provider sent her to a classroom that could only turn her away.
+            const waiting = waitsForProvider(course.access);
+            const waitingLabel =
+              course.access?.reason === 'AWAITING_PROVIDER'
+                ? `Waiting for ${providerNameFor(course)} to confirm your place`
+                : course.access?.reason === 'NOT_OFFERED'
+                  ? `${providerNameFor(course)} has not offered you a place`
+                  : `Ask ${providerNameFor(course)} for a place to open the lessons`;
 
             return (
               <div
@@ -288,7 +301,7 @@ export default function MyCoursesPage() {
                     <div className="absolute inset-0 bg-green-500/80 flex items-center justify-center">
                       <CheckCircle className="w-12 h-12 text-white" />
                     </div>
-                  ) : (
+                  ) : waiting ? null : (
                     <div className="absolute bottom-2 left-2 right-2">
                       <div className="bg-black/60 rounded-full px-3 py-1.5 text-white text-xs flex items-center space-x-2">
                         <Play className="w-3 h-3" />
@@ -315,6 +328,12 @@ export default function MyCoursesPage() {
                       {course.category}
                     </Badge>
                   </div>
+
+                  {waiting && (
+                    <p className="mt-2 text-sm text-amber-700 dark:text-amber-300" role="status">
+                      {waitingLabel}
+                    </p>
+                  )}
 
                   <div className="mt-3">
                     <div className="flex items-center justify-between text-sm mb-1">
@@ -360,7 +379,7 @@ export default function MyCoursesPage() {
                     href={`/dashboard/learn/${course.id}`}
                     className="btn-primary text-sm w-full md:w-auto"
                   >
-                    {course.progress === 100 ? 'Review' : 'Continue'}
+                    {waiting ? 'See the course' : course.progress === 100 ? 'Review' : 'Continue'}
                   </Link>
                   <Link
                     href={`/dashboard/learn/${course.id}`}

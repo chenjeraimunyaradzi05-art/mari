@@ -32,6 +32,10 @@ export type HostedEvent = {
   price: number | null;
   attendees: number;
   pendingReview?: boolean;
+  /** Called off. The listing stays, marked, and can no longer be changed. */
+  isCancelled?: boolean;
+  cancelledAt?: string | null;
+  cancelledReason?: string | null;
 };
 
 type Form = {
@@ -65,7 +69,20 @@ function apiMessage(error: unknown, fallback: string): string {
   return payload?.message || payload?.error || fallback;
 }
 
-export function EditHostedEventDialog({ event, onClose }: { event: HostedEvent | null; onClose: () => void }) {
+export function EditHostedEventDialog({
+  event,
+  onClose,
+  asStaff = false,
+}: {
+  event: HostedEvent | null;
+  onClose: () => void;
+  /**
+   * Staff editing from the admin console. The server does not send a staff
+   * edit back for review — staff are the review — so the note that says it
+   * will would be false there.
+   */
+  asStaff?: boolean;
+}) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<Form | null>(event ? formFrom(event) : null);
 
@@ -79,6 +96,7 @@ export function EditHostedEventDialog({ event, onClose }: { event: HostedEvent |
       const updated = response.data?.data as { pendingReview?: boolean } | undefined;
       queryClient.invalidateQueries({ queryKey: ['my-events'] });
       queryClient.invalidateQueries({ queryKey: ['events'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-events'] });
       toast.success(
         updated?.pendingReview && !event?.pendingReview
           ? 'Saved. The listing is held until a moderator has read the change.'
@@ -109,12 +127,12 @@ export function EditHostedEventDialog({ event, onClose }: { event: HostedEvent |
   };
 
   return (
-    <Modal isOpen onClose={() => !save.isPending && onClose()} title="Change your event" size="lg">
+    <Modal isOpen onClose={() => !save.isPending && onClose()} title={asStaff ? 'Change this event' : 'Change your event'} size="lg">
       <form onSubmit={submit} className="space-y-4 p-6">
         <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-          Changing the title, description, place, link or price of a published listing sends it back to a moderator
-          before it reappears. Changing the date, times or number of places does not. Everyone registered is told in
-          the app when the date, time or place changes.
+          {asStaff
+            ? 'A change made here goes live straight away and is recorded against your account. Everyone registered is told in the app when the date, time or place changes, and anything reported about this listing keeps a copy of it as it stood.'
+            : 'Changing the title, description, place, link or price of a published listing sends it back to a moderator before it reappears. Changing the date, times or number of places does not. Everyone registered is told in the app when the date, time or place changes.'}
         </p>
 
         <label className="block">
@@ -151,7 +169,11 @@ export function EditHostedEventDialog({ event, onClose }: { event: HostedEvent |
           <label className="block">
             <span className="text-sm font-medium text-slate-900 dark:text-white">Link to join</span>
             <input type="url" value={form.link} onChange={set('link')} placeholder="https://" className="input mt-1 w-full" />
-            <span className="mt-1 block text-xs text-slate-500">Only people who have registered see this.</span>
+            <span className="mt-1 block text-xs text-slate-500">
+              {asStaff
+                ? 'On a member’s listing only people who have registered see this. On a listing ATHENA curated, it is the public booking page.'
+                : 'Only people who have registered see this.'}
+            </span>
           </label>
         )}
 
@@ -175,7 +197,7 @@ export function EditHostedEventDialog({ event, onClose }: { event: HostedEvent |
             <span className="text-sm font-medium text-slate-900 dark:text-white">Price in AUD (0 is free)</span>
             <input type="number" min={0} value={form.price} onChange={set('price')} className="input mt-1 w-full" />
             <span className="mt-1 block text-xs text-slate-500">
-              ATHENA does not take payment for events. If you charge, people pay you directly.
+              ATHENA does not take payment for events. If you charge, people pay you directly, so say in the description how and when, for example at the door.
             </span>
           </label>
         </div>

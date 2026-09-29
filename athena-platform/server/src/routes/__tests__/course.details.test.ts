@@ -65,7 +65,7 @@ describe('Course catalogue search and the publish gate', () => {
     jest.clearAllMocks();
     prisma.course.findUnique.mockResolvedValue({ id: 'c1', organizationId: 'org1', title: 'Founding a business' });
     prisma.organizationMember.findUnique.mockImplementation(async ({ where }: any) =>
-      where.organizationId_userId.userId === 'teacher' ? { id: 'm1' } : null
+      where.organizationId_userId.userId === 'teacher' ? { id: 'm1', acceptedAt: new Date('2026-01-01') } : null
     );
     prisma.course.update.mockImplementation(async ({ data }: any) => ({ id: 'c1', ...data }));
   });
@@ -132,7 +132,7 @@ describe('Course catalogue search and the publish gate', () => {
 
     jest.clearAllMocks();
     prisma.course.findUnique.mockResolvedValue({ id: 'c1', organizationId: 'org1', title: 'Founding a business' });
-    prisma.organizationMember.findUnique.mockResolvedValue({ id: 'm1' });
+    prisma.organizationMember.findUnique.mockResolvedValue({ id: 'm1', acceptedAt: new Date('2026-01-01') });
     prisma.course.update.mockImplementation(async ({ data }: any) => ({ id: 'c1', ...data }));
 
     // Taking a course down is always allowed: an empty course in the catalogue

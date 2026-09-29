@@ -1,8 +1,12 @@
 /**
- * Admin catalogue helpers: the accelerator cohorts and sessions, the investor
- * directory and its introductions, and the insurance products. Every call
- * here has a route in server/src/routes/admin-catalogue.routes.ts; keeping
- * the paths literal is what lets the API-contract check see them.
+ * Admin catalogue helpers: the accelerator cohorts, their sessions and their
+ * rosters, the investor directory and its introductions, the insurance
+ * products, and the course catalogue. Every call here has a route in
+ * server/src/routes/admin-catalogue.routes.ts, except taking a course down,
+ * which is the provider's own PATCH /api/courses/:id in course.routes.ts —
+ * staff may already make it on any course, and one route for it means the
+ * publish rules live in one place. Keeping the paths literal is what lets the
+ * API-contract check see them.
  */
 
 import type { AxiosResponse } from 'axios';
@@ -65,6 +69,41 @@ export type InvestorInput = {
   isVerified?: boolean;
 };
 
+export type EnrollmentStatus = 'PENDING' | 'ACTIVE' | 'COMPLETED' | 'GRADUATED' | 'DROPPED';
+export type EnrollmentPaymentStatus = 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED';
+export type EnrollmentAction = 'release' | 'revoke' | 'record_refund';
+
+/** One founder's place in a cohort, as GET /admin/accelerator/cohorts/:id/enrollments returns it. */
+export type CohortEnrollment = {
+  id: string;
+  status: EnrollmentStatus;
+  paymentStatus: EnrollmentPaymentStatus;
+  paymentId: string | null;
+  completedWeeks: number;
+  enrolledAt: string;
+  completedAt: string | null;
+  user: { id: string; firstName: string | null; lastName: string | null; email: string };
+};
+
+export type CourseListStatus = 'live' | 'draft' | 'all';
+
+/** A course as the admin catalogue lists it. */
+export type AdminCourse = {
+  id: string;
+  title: string;
+  slug: string;
+  type: string | null;
+  isActive: boolean;
+  cost: number | null;
+  employmentRate: number | null;
+  avgStartingSalary: number | null;
+  providerName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  organization: { id: string; name: string; isVerified: boolean } | null;
+  _count: { enrollments: number; certificates: number; modules: number };
+};
+
 export type InsuranceProductInput = {
   provider: string;
   name: string;
@@ -93,6 +132,18 @@ export const adminCatalogueApi = {
     updateSession: (id: string, sessionId: string, data: Partial<SessionInput>): AdminWrite =>
       api.patch(`/admin/accelerator/cohorts/${id}/sessions/${sessionId}`, data),
     removeSession: (id: string, sessionId: string) => api.delete(`/admin/accelerator/cohorts/${id}/sessions/${sessionId}`),
+    // Who holds a place, and the three things staff can do about one: free an
+    // unpaid seat, take back a completion, or record that a fee went back.
+    enrollments: (id: string) => api.get(`/admin/accelerator/cohorts/${id}/enrollments`),
+    enrollmentAction: (enrollmentId: string, data: { action: EnrollmentAction; reason: string; reference?: string | null }): AdminWrite =>
+      api.patch(`/admin/accelerator/enrollments/${enrollmentId}`, data),
+  },
+  courses: {
+    list: (params?: { status?: CourseListStatus; search?: string; organizationId?: string; page?: number; limit?: number }) =>
+      api.get('/admin/courses', { params }),
+    // Taking a listing down. Never a delete: a course that has issued
+    // certificates cannot be deleted, because the certificates point at it.
+    unpublish: (courseId: string): AdminWrite => api.patch(`/courses/${courseId}`, { isActive: false }),
   },
   investors: {
     list: (params?: { type?: InvestorType; active?: 'true' | 'false'; search?: string }) => api.get('/admin/investors', { params }),

@@ -13,7 +13,7 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
  */
 
 const applications: Record<string, { id: string; userId: string; organizationId: string; status: string }> = {};
-const memberships: Record<string, { role: string; canPostJobs: boolean; canViewAnalytics: boolean }> = {};
+const memberships: Record<string, { role: string; canPostJobs: boolean; canViewAnalytics: boolean; acceptedAt: Date | null }> = {};
 
 jest.mock('../../utils/prisma', () => ({
   prisma: {
@@ -101,7 +101,7 @@ describe('Education applications: who may decide one', () => {
   });
 
   it('refuses a provider decision from a VIEWER who can only read analytics', async () => {
-    memberships['org-1:viewer-1'] = { role: 'VIEWER', canPostJobs: false, canViewAnalytics: true };
+    memberships['org-1:viewer-1'] = { role: 'VIEWER', canPostJobs: false, canViewAnalytics: true, acceptedAt: new Date('2026-01-01') };
 
     await request(app)
       .patch('/api/education/providers/org-1/applications/app-1')
@@ -113,7 +113,7 @@ describe('Education applications: who may decide one', () => {
   });
 
   it('lets an admissions-capable member move SUBMITTED to ACCEPTED', async () => {
-    memberships['org-1:staff-1'] = { role: 'RECRUITER', canPostJobs: true, canViewAnalytics: true };
+    memberships['org-1:staff-1'] = { role: 'RECRUITER', canPostJobs: true, canViewAnalytics: true, acceptedAt: new Date('2026-01-01') };
 
     const res = await request(app)
       .patch('/api/education/providers/org-1/applications/app-1')
@@ -125,8 +125,28 @@ describe('Education applications: who may decide one', () => {
     expect(prisma.educationApplication.update.mock.calls[0][0].data).toEqual({ status: 'ACCEPTED' });
   });
 
+  it('treats an invitation nobody has accepted as no membership at all', async () => {
+    memberships['org-1:invitee-1'] = { role: 'OWNER', canPostJobs: true, canViewAnalytics: true, acceptedAt: null };
+
+    await request(app)
+      .patch('/api/education/providers/org-1/applications/app-1')
+      .set('x-test-user', 'invitee-1')
+      .send({ status: 'ACCEPTED' })
+      .expect(403);
+    await request(app).get('/api/education/providers/org-1/applications').set('x-test-user', 'invitee-1').expect(403);
+    await request(app).get('/api/education/providers/org-1/outcomes').set('x-test-user', 'invitee-1').expect(403);
+
+    expect(prisma.educationApplication.update).not.toHaveBeenCalled();
+  });
+
+  it('keeps the list of applicants from a VIEWER who can read the outcomes chart', async () => {
+    memberships['org-1:viewer-1'] = { role: 'VIEWER', canPostJobs: false, canViewAnalytics: true, acceptedAt: new Date('2026-01-01') };
+
+    await request(app).get('/api/education/providers/org-1/applications').set('x-test-user', 'viewer-1').expect(403);
+  });
+
   it('will not let one provider decide another provider’s application', async () => {
-    memberships['org-2:staff-2'] = { role: 'OWNER', canPostJobs: false, canViewAnalytics: true };
+    memberships['org-2:staff-2'] = { role: 'OWNER', canPostJobs: false, canViewAnalytics: true, acceptedAt: new Date('2026-01-01') };
 
     await request(app)
       .patch('/api/education/providers/org-2/applications/app-1')

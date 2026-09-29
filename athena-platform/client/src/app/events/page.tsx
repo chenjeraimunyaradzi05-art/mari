@@ -57,6 +57,12 @@ type PublicEvent = {
   maxAttendees?: number | null;
   price?: number | null;
   tags?: string[];
+  /**
+   * Called off. The listing stays in the catalogue, marked, until its day has
+   * passed, so anyone who registered and comes back to check finds it saying
+   * so rather than find it gone.
+   */
+  isCancelled?: boolean;
 };
 
 /* ---------------------------------------------------------------- formatting */
@@ -120,13 +126,17 @@ function Badge({ children }: { children: ReactNode }) {
 }
 
 function EventCard({ event }: { event: PublicEvent }) {
-  const href = externalLink(event.link);
+  const cancelled = event.isCancelled === true;
+  // No booking link on a cancelled listing: it would send someone to buy a
+  // place at something that is not going ahead. The server already withholds
+  // it; this makes sure a stale cached copy cannot bring it back.
+  const href = cancelled ? null : externalLink(event.link);
   const date = formatEventDate(event.date);
   const time = [event.startTime, event.endTime].filter(Boolean).join(' – ');
   const place = event.location || sentenceCase(event.format);
   const tags = (event.tags ?? []).slice(0, 3);
   const going = event.attendees ?? 0;
-  const tile = 'tile-soft focusable flex h-full flex-col p-4';
+  const tile = `tile-soft focusable flex h-full flex-col p-4${cancelled ? ' opacity-75' : ''}`;
 
   const body = (
     <>
@@ -165,6 +175,11 @@ function EventCard({ event }: { event: PublicEvent }) {
       )}
 
       <span className="mt-3 flex flex-wrap gap-1.5">
+        {cancelled && (
+          <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white dark:bg-white dark:text-slate-900">
+            Cancelled
+          </span>
+        )}
         <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">
           {sentenceCase(event.type)}
         </span>
@@ -177,7 +192,7 @@ function EventCard({ event }: { event: PublicEvent }) {
               ? 'Free'
               : `$${event.price}`}
         </Badge>
-        {going > 0 && (
+        {going > 0 && !cancelled && (
           <Badge>
             <Users className="h-2.5 w-2.5" aria-hidden="true" />
             {going} going{event.maxAttendees ? ` of ${event.maxAttendees}` : ''}
@@ -188,6 +203,17 @@ function EventCard({ event }: { event: PublicEvent }) {
         ))}
       </span>
 
+      {/* "$29" on its own, next to a card that registers you, reads as a
+          ticket ATHENA sells. ATHENA sells none: the price is what the
+          organiser charges, paid to them, on their booking page or however
+          their listing says. The calendar says the same beside its Register
+          button; this card said nothing. */}
+      {!cancelled && typeof event.price === 'number' && event.price > 0 && (
+        <span className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+          Paid to the organiser, not through ATHENA.
+        </span>
+      )}
+
       <span className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-3">
         {event.host?.name ? (
           <span className="truncate text-xs text-slate-500 dark:text-slate-400">
@@ -197,7 +223,13 @@ function EventCard({ event }: { event: PublicEvent }) {
           <span />
         )}
         <span className="inline-flex items-center gap-1 text-xs font-semibold text-rose-600 dark:text-rose-400">
-          {href ? (
+          {cancelled ? (
+            <>
+              {/* Where she registered, the reason is waiting in her calendar. */}
+              Not going ahead · see your calendar
+              <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+            </>
+          ) : href ? (
             <>
               Book on {hostname(href)}
               <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />

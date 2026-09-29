@@ -42,6 +42,11 @@ const orgAvatar = (name: string) =>
 // ===========================================
 // EVENTS — each verified on its own listing page
 // ===========================================
+//
+// Times are 24-hour HH:MM, the one shape a member's own listing is allowed to
+// take. These rows used to say "9:00 AM", so they were the only events on the
+// platform an edit would have refused as written, and the only ones that
+// sorted and compared differently from everything beside them.
 
 const EVENTS = [
   {
@@ -52,8 +57,8 @@ const EVENTS = [
     type: 'CONFERENCE' as const,
     format: 'IN_PERSON' as const,
     date: new Date('2026-09-17T12:00:00Z'),
-    startTime: '9:00 AM',
-    endTime: '12:00 PM',
+    startTime: '09:00',
+    endTime: '12:00',
     location: 'KPMG, Level 16/153 Macquarie Street, Parramatta NSW 2150',
     link: 'https://events.humanitix.com/wsw-ai',
     image: 'https://images.unsplash.com/photo-1573164713988-8665fc963095?w=1200&q=80',
@@ -70,8 +75,8 @@ const EVENTS = [
     type: 'NETWORKING' as const,
     format: 'IN_PERSON' as const,
     date: new Date('2026-11-06T12:00:00Z'),
-    startTime: '5:30 PM',
-    endTime: '11:00 PM',
+    startTime: '17:30',
+    endTime: '23:00',
     location: 'QCEC, Brisbane QLD',
     link: 'https://womenindigital.org/women-in-digital-awards/attend/',
     image: 'https://images.unsplash.com/photo-1511795409834-ef04bbd61622?w=1200&q=80',
@@ -88,8 +93,8 @@ const EVENTS = [
     type: 'CONFERENCE' as const,
     format: 'IN_PERSON' as const,
     date: new Date('2027-02-23T12:00:00Z'),
-    startTime: '9:00 AM',
-    endTime: '5:00 PM',
+    startTime: '09:00',
+    endTime: '17:00',
     location: 'Sydney Masonic Centre, 111 Goulburn Street, Sydney NSW',
     link: 'https://www.womenintechfest.com.au/',
     image: 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=1200&q=80',
@@ -106,8 +111,8 @@ const EVENTS = [
     type: 'WORKSHOP' as const,
     format: 'IN_PERSON' as const,
     date: new Date('2027-03-15T12:00:00Z'),
-    startTime: '9:00 AM',
-    endTime: '5:00 PM',
+    startTime: '09:00',
+    endTime: '17:00',
     // Venue is still "to be announced" on the listing, so it is not invented here.
     location: 'Sydney NSW — venue to be announced',
     link: 'https://www.sans.org/mlp/women-in-cyber-sydney-march-2027',

@@ -91,12 +91,31 @@ export default function ClassroomPage({ params }: { params: Promise<{ id: string
     );
   }
   if (classroom.isError || !classroom.data) {
+    // Three different answers used to read as one. A refusal carries the
+    // server's reason — not enrolled, or a provider who has not yet confirmed
+    // her place on a course with a fee — and says it. A failed load is not a
+    // refusal, and telling a woman part-way through a course to "enrol" when
+    // her connection dropped read as though her place had gone.
+    const status = (classroom.error as { response?: { status?: number } } | null)?.response?.status;
+    const refused = status === 403;
+    const heading = refused
+      ? errorMessage(classroom.error) || 'Enrol in this course to open the classroom.'
+      : status === 404
+        ? 'This course could not be found.'
+        : 'The classroom did not load. Nothing has changed on your progress.';
     return (
-      <div className="mx-auto max-w-2xl p-6 text-center">
-        <p className="text-lg font-medium text-slate-900 dark:text-white">Enrol in this course to open the classroom.</p>
-        <Link href={`/dashboard/learn/${id}`} className="mt-3 inline-block text-primary-600 hover:underline">
-          Back to the course
-        </Link>
+      <div className="mx-auto max-w-2xl p-6 text-center" role={refused ? 'status' : 'alert'}>
+        <p className="text-lg font-medium text-slate-900 dark:text-white">{heading}</p>
+        <div className="mt-3 flex justify-center gap-4">
+          {!refused && status !== 404 && (
+            <button type="button" onClick={() => classroom.refetch()} className="text-primary-600 hover:underline">
+              Try again
+            </button>
+          )}
+          <Link href={`/dashboard/learn/${id}`} className="text-primary-600 hover:underline">
+            Back to the course
+          </Link>
+        </div>
       </div>
     );
   }

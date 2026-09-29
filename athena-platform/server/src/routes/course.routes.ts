@@ -1,5 +1,5 @@
 import { Router, Response, NextFunction } from 'express';
-import { Prisma } from '@prisma/client';
+import { EducationApplicationStatus, Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
@@ -7,6 +7,10 @@ import { parsePagination } from '../utils/pagination';
 import { body, validationResult } from 'express-validator';
 import { randomBytes } from 'crypto';
 import { normalizeSafeUrl } from '../utils/contentSafety';
+import { bestEffort } from '../utils/best-effort';
+import { recordAdminAction } from '../services/admin-audit.service';
+import { notificationService } from '../services/notification.service';
+import { HIRING_MEMBER_WHERE, POSTING_MEMBER_WHERE } from '../services/hiring-access.service';
 
 const router = Router();
 
@@ -196,6 +200,11 @@ router.get('/me', authenticate, async (req: AuthRequest, res, next) => {
       orderBy: { updatedAt: 'desc' },
     });
 
+    // Where she stands on each: open, or waiting for the provider to confirm
+    // her place. Read in one query for every course that waits, not one each.
+    const gatedIds = enrollments.filter((e) => requiresAdmission(e.course)).map((e) => e.courseId);
+    const places = await placesFor(req.user!.id, gatedIds);
+
     // Client expects an array from response.data.data
     res.json({
       success: true,
@@ -207,6 +216,12 @@ router.get('/me', authenticate, async (req: AuthRequest, res, next) => {
           createdAt: e.createdAt,
           updatedAt: e.updatedAt,
         },
+        access: accessFrom({
+          course: e.course,
+          enrollment: e,
+          applications: places.get(e.courseId) ?? [],
+          canEdit: false,
+        }),
       })),
     });
   } catch (error) {
@@ -227,9 +242,36 @@ router.get('/me', authenticate, async (req: AuthRequest, res, next) => {
  * organisation and no providerName, so the same certificate told an employer
  * it came from the provider and told the woman who earned it that ATHENA had
  * issued it. One function, used by both, so they cannot drift apart again.
+ *
+ * The provider's own name for itself comes first, then the organisation. That
+ * is the order the public course page names a provider in, and the order the
+ * migration that gave each certificate its own copy of the issuer used when it
+ * filled in the certificates already issued — so a certificate earned today
+ * and one earned last month for the same course name the same issuer.
  */
 function certificateIssuer(course: { providerName: string | null; organization: { name: string } | null }): string {
-  return course.organization?.name ?? course.providerName ?? 'ATHENA';
+  return course.providerName?.trim() || course.organization?.name || 'ATHENA';
+}
+
+/**
+ * What a certificate says it was awarded for, and by whom.
+ *
+ * Each certificate now carries the course title and the issuer as they stood
+ * the moment it was issued. Both used to be read live from the course, so
+ * renaming a course rewrote every certificate already issued for it, and an
+ * employer checking a woman's code could read a qualification she was never
+ * awarded, on a page that says ATHENA vouches for it. The live course is only
+ * a fallback, for a row that somehow has no copy of its own.
+ */
+function certificateNames(certificate: {
+  courseTitle: string | null;
+  issuerName: string | null;
+  course: { title: string; providerName: string | null; organization: { name: string } | null };
+}): { title: string; issuer: string } {
+  return {
+    title: certificate.courseTitle ?? certificate.course.title,
+    issuer: certificate.issuerName ?? certificateIssuer(certificate.course),
+  };
 }
 
 /**
@@ -250,6 +292,7 @@ router.get('/me/certificates', authenticate, async (req: AuthRequest, res, next)
             providerName: true,
             type: true,
             durationMonths: true,
+            isActive: true,
             organization: { select: { name: true } },
           },
         },
@@ -258,13 +301,28 @@ router.get('/me/certificates', authenticate, async (req: AuthRequest, res, next)
     });
     res.json({
       success: true,
-      data: certificates.map((c) => ({
-        id: c.id,
-        code: c.code,
-        issuedAt: c.issuedAt,
-        course: c.course,
-        provider: certificateIssuer(c.course),
-      })),
+      data: certificates.map((c) => {
+        const names = certificateNames(c);
+        return {
+          id: c.id,
+          code: c.code,
+          issuedAt: c.issuedAt,
+          // Her wallet shows what the employer's check shows: the course as it
+          // was called when she earned it. `listedAs` is the course's name now,
+          // when it has since changed, so she is not surprised to find the
+          // catalogue calling it something else.
+          course: {
+            id: c.course.id,
+            slug: c.course.slug,
+            title: names.title,
+            type: c.course.type,
+            durationMonths: c.course.durationMonths,
+            listed: c.course.isActive,
+            listedAs: c.course.title !== names.title ? c.course.title : null,
+          },
+          provider: names.issuer,
+        };
+      }),
     });
   } catch (error) {
     next(error);
@@ -553,15 +611,224 @@ router.get('/recommendations/for-me', optionalAuth, async (req: AuthRequest, res
 });
 
 // ===========================================
+// WHO THE LESSONS ARE OPEN TO
+// ===========================================
+//
+// A provider can list a course with a fee and build its lessons here. Until
+// now enrolling opened every one of those lessons, and finishing them issued a
+// certificate in the provider's name, to anyone who clicked "Enrol" — so a
+// provider who put a paid course on ATHENA was giving it away, and the page
+// said beside the button that the fee "is arranged with the provider" when
+// nothing arranged anything.
+//
+// ATHENA does not take course fees. Collecting a provider's fee would make
+// ATHENA a party to the sale of someone else's course, with its own refund,
+// tax and payout obligations, and whether to be that is a decision for the
+// owner rather than for a route. What ATHENA can do without it is let the
+// provider decide who is in. On a course that has a
+// provider and a fee, enrolling keeps it in her dashboard, the previews stay
+// open to everyone, and the rest of the lessons open once the provider has
+// confirmed her place — by accepting her application, which is the same
+// decision the provider's console already makes for a course place. The fee
+// is then arranged between them, as the page has always said. A free course,
+// or one ATHENA runs itself, opens on enrolment as it always has.
+
+/**
+ * Enrolments made before this rule came in keep what they were given. A woman
+ * who enrolled and started a course when enrolling opened it is not locked
+ * out of it half-way through; her provider can still confirm her place, and
+ * anyone enrolling from here on asks for one.
+ */
+export const ADMISSION_REQUIRED_FROM = new Date('2026-09-27T00:00:00+10:00');
+
+/** A course whose lessons wait for the provider: it has a provider, and a fee. */
+export function requiresAdmission(course: { organizationId: string | null; cost: number | null }): boolean {
+  return Boolean(course.organizationId) && typeof course.cost === 'number' && course.cost > 0;
+}
+
+export type CourseAccessReason =
+  | 'EDITOR'
+  | 'OPEN_COURSE'
+  | 'NOT_ENROLLED'
+  | 'ADMITTED'
+  | 'ENROLLED_BEFORE_RULE'
+  | 'AWAITING_PROVIDER'
+  | 'NOT_OFFERED'
+  | 'NOT_REQUESTED';
+
+export type CourseAccess = {
+  /** Whether this course's lessons wait for the provider to confirm a place. */
+  requiresAdmission: boolean;
+  /** Whether every lesson is open to this viewer now. */
+  lessonsOpen: boolean;
+  /** Whether the provider has confirmed her place (or never needed to). */
+  admitted: boolean;
+  /** Her most telling application for a place on this course, if any. */
+  place: { applicationId: string; status: EducationApplicationStatus } | null;
+  reason: CourseAccessReason;
+};
+
+type PlaceRow = { id: string; status: EducationApplicationStatus; submittedAt: Date };
+
+/**
+ * The application that decides her place: an accepted one wins, then one
+ * still being considered, then the latest of the rest. A woman turned down
+ * once and accepted on a second application is in.
+ */
+function decidingPlace(rows: PlaceRow[]): PlaceRow | null {
+  const rank = (s: EducationApplicationStatus) =>
+    s === 'ACCEPTED' ? 0 : s === 'IN_REVIEW' || s === 'SUBMITTED' ? 1 : 2;
+  return (
+    [...rows].sort((a, b) => rank(a.status) - rank(b.status) || b.submittedAt.getTime() - a.submittedAt.getTime())[0] ?? null
+  );
+}
+
+/** Works out access from what has already been read; no database calls. */
+export function accessFrom(input: {
+  course: { organizationId: string | null; cost: number | null };
+  enrollment: { createdAt: Date } | null;
+  applications: PlaceRow[];
+  canEdit: boolean;
+}): CourseAccess {
+  const gated = requiresAdmission(input.course);
+  const enrolled = Boolean(input.enrollment);
+  if (input.canEdit) {
+    return { requiresAdmission: gated, lessonsOpen: true, admitted: true, place: null, reason: 'EDITOR' };
+  }
+  if (!gated) {
+    return {
+      requiresAdmission: false,
+      lessonsOpen: enrolled,
+      admitted: true,
+      place: null,
+      reason: enrolled ? 'OPEN_COURSE' : 'NOT_ENROLLED',
+    };
+  }
+
+  const deciding = decidingPlace(input.applications);
+  const place = deciding ? { applicationId: deciding.id, status: deciding.status } : null;
+  const accepted = deciding?.status === 'ACCEPTED';
+  const grandfathered = Boolean(input.enrollment && input.enrollment.createdAt < ADMISSION_REQUIRED_FROM);
+  const admitted = accepted || grandfathered;
+
+  let reason: CourseAccessReason;
+  if (accepted) reason = 'ADMITTED';
+  else if (grandfathered) reason = 'ENROLLED_BEFORE_RULE';
+  else if (deciding && (deciding.status === 'SUBMITTED' || deciding.status === 'IN_REVIEW')) reason = 'AWAITING_PROVIDER';
+  else if (deciding?.status === 'REJECTED') reason = 'NOT_OFFERED';
+  else reason = enrolled ? 'NOT_REQUESTED' : 'NOT_ENROLLED';
+
+  return { requiresAdmission: true, lessonsOpen: admitted && enrolled, admitted, place, reason };
+}
+
+async function placesFor(userId: string, courseIds: string[]): Promise<Map<string, PlaceRow[]>> {
+  const byCourse = new Map<string, PlaceRow[]>();
+  if (courseIds.length === 0) return byCourse;
+  const rows = await prisma.educationApplication.findMany({
+    where: { userId, courseId: { in: courseIds } },
+    select: { id: true, status: true, submittedAt: true, courseId: true },
+  });
+  for (const row of rows) {
+    if (!row.courseId) continue;
+    const list = byCourse.get(row.courseId) ?? [];
+    list.push({ id: row.id, status: row.status, submittedAt: row.submittedAt });
+    byCourse.set(row.courseId, list);
+  }
+  return byCourse;
+}
+
+/** Access for one viewer on one course, reading only what the rule needs. */
+async function courseAccessFor(
+  course: { id: string; organizationId: string | null; cost: number | null },
+  userId: string | null,
+  enrollment: { createdAt: Date } | null,
+  canEdit: boolean
+): Promise<CourseAccess> {
+  const applications =
+    userId && !canEdit && requiresAdmission(course) ? (await placesFor(userId, [course.id])).get(course.id) ?? [] : [];
+  return accessFrom({ course, enrollment, applications, canEdit });
+}
+
+/** The provider's name as the course page gives it. */
+function providerLabel(course: { providerName: string | null; organization: { name: string } | null }): string {
+  return course.providerName?.trim() || course.organization?.name || 'The provider';
+}
+
+/** What to tell a learner the lessons are closed to, and why. */
+function closedMessage(access: CourseAccess, provider: string): string {
+  switch (access.reason) {
+    case 'AWAITING_PROVIDER':
+      return `${provider} has not confirmed your place yet. The lessons open here when they do.`;
+    case 'NOT_OFFERED':
+      return `${provider} has not offered you a place on this course, so its lessons stay closed. The previews are still open.`;
+    case 'NOT_REQUESTED':
+      return `This course's lessons open once ${provider} confirms your place. Ask for one on the course page.`;
+    default:
+      return 'Enrol in this course to open the classroom';
+  }
+}
+
+/**
+ * Ask the provider for a place: an application for this course, and a notice
+ * to the people who can decide it. One open application at a time, the rule
+ * the application form has, so asking twice is a no-op rather than a second
+ * row in the provider's list.
+ */
+async function requestPlace(
+  course: { id: string; title: string; organizationId: string | null },
+  userId: string
+): Promise<PlaceRow | null> {
+  const organizationId = course.organizationId;
+  if (!organizationId) return null;
+  const open = await prisma.educationApplication.findFirst({
+    where: { userId, courseId: course.id, status: { in: ['SUBMITTED', 'IN_REVIEW', 'ACCEPTED'] } },
+    select: { id: true, status: true, submittedAt: true },
+  });
+  if (open) return open;
+
+  const created = await prisma.educationApplication.create({
+    data: { userId, organizationId, courseId: course.id, programName: null, notes: null },
+    select: { id: true, status: true, submittedAt: true },
+  });
+
+  await bestEffort(`course ${course.id} place request notice to provider ${organizationId}`, async () => {
+    const deciders = await prisma.organizationMember.findMany({
+      where: { organizationId, ...HIRING_MEMBER_WHERE },
+      select: { userId: true },
+      take: 50,
+    });
+    for (const member of deciders) {
+      await notificationService.notify({
+        userId: member.userId,
+        type: 'APPLICATION_UPDATE',
+        title: 'Someone has asked for a place',
+        message: `Someone has asked for a place on "${course.title}". Accepting it opens the course's lessons to her on ATHENA; the fee is for you to arrange with her.`,
+        link: `/employer/organizations/${organizationId}/education/applications`,
+        channels: ['in-app'],
+        data: { kind: 'COURSE_PLACE_REQUESTED', applicationId: created.id, courseId: course.id },
+      });
+    }
+  });
+
+  return created;
+}
+
+// ===========================================
 // ENROLL IN COURSE
 // ===========================================
+//
+// On a course that waits for its provider, `requestPlace: true` also asks the
+// provider for a place, which shows them her name and email: the page says so
+// on the button that sends it, and nothing is shared without it. Enrolling
+// without it only keeps the course in her dashboard.
 router.post('/:courseId/enroll', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { courseId } = req.params;
+    const userId = req.user!.id;
 
     const course = await prisma.course.findUnique({
       where: { id: courseId },
-      select: { id: true, isActive: true },
+      select: { id: true, isActive: true, title: true, organizationId: true, cost: true },
     });
 
     if (!course || !course.isActive) {
@@ -571,12 +838,12 @@ router.post('/:courseId/enroll', authenticate, async (req: AuthRequest, res, nex
     const enrollment = await prisma.courseEnrollment.upsert({
       where: {
         userId_courseId: {
-          userId: req.user!.id,
+          userId,
           courseId,
         },
       },
       create: {
-        userId: req.user!.id,
+        userId,
         courseId,
       },
       update: {
@@ -585,10 +852,20 @@ router.post('/:courseId/enroll', authenticate, async (req: AuthRequest, res, nex
       },
     });
 
+    const askedForPlace = (req.body as { requestPlace?: unknown } | undefined)?.requestPlace === true;
+    if (askedForPlace && requiresAdmission(course)) {
+      await requestPlace(course, userId);
+    }
+    const access = await courseAccessFor(course, userId, enrollment, false);
+
     res.status(201).json({
       success: true,
-      message: 'Enrolled successfully',
-      data: enrollment,
+      message: access.lessonsOpen
+        ? 'Enrolled successfully'
+        : access.reason === 'AWAITING_PROVIDER'
+          ? 'Enrolled. The provider has been asked to confirm your place.'
+          : 'Enrolled. The lessons open once the provider confirms your place.',
+      data: { ...enrollment, access },
     });
   } catch (error) {
     next(error);
@@ -646,13 +923,23 @@ async function uniqueSlug(title: string): Promise<string> {
   return slug;
 }
 
+/**
+ * Whether this person is on the provider's team.
+ *
+ * An OrganizationMember row exists from the moment an owner types someone's
+ * email address into the invite box. Until she accepts, it grants nothing —
+ * that is the rule services/hiring-access.service.ts applies to the employer
+ * console — but this check used to accept the row as it stood, so an unanswered
+ * invitation opened the builder, every draft and every locked lesson to
+ * whoever held the invited address.
+ */
 async function isOrganizationMember(organizationId: string, user: { id: string; role: string }): Promise<boolean> {
   if (user.role === 'ADMIN') return true;
   const membership = await prisma.organizationMember.findUnique({
     where: { organizationId_userId: { organizationId, userId: user.id } },
-    select: { id: true },
+    select: { id: true, acceptedAt: true },
   });
-  return Boolean(membership);
+  return Boolean(membership?.acceptedAt);
 }
 
 async function assertOrganizationMember(organizationId: string, user: { id: string; role: string }) {
@@ -760,13 +1047,16 @@ router.get('/certificates/:code', async (req, res, next) => {
     const certificate = await prisma.courseCertificate.findUnique({
       where: { code: String(req.params.code).toUpperCase() },
       include: {
-        course: { select: { id: true, title: true, slug: true, providerName: true, organization: { select: { name: true } } } },
+        course: {
+          select: { id: true, title: true, slug: true, isActive: true, providerName: true, organization: { select: { name: true } } },
+        },
         user: { select: { firstName: true, lastName: true, displayName: true } },
       },
     });
     if (!certificate) {
       throw new ApiError(404, 'No certificate with that code');
     }
+    const names = certificateNames(certificate);
     res.json({
       success: true,
       data: {
@@ -774,9 +1064,16 @@ router.get('/certificates/:code', async (req, res, next) => {
         issuedAt: certificate.issuedAt,
         course: {
           id: certificate.course.id,
-          title: certificate.course.title,
+          // What she was awarded, as it was called then. See certificateNames.
+          title: names.title,
           slug: certificate.course.slug,
-          provider: certificateIssuer(certificate.course),
+          provider: names.issuer,
+          // A course with issued certificates is retired rather than deleted,
+          // so it can stop being listed while its certificates stand. The page
+          // only links to the listing while there is one to open, and says so
+          // when the course has since been renamed.
+          listed: certificate.course.isActive,
+          listedAs: certificate.course.title !== names.title ? certificate.course.title : null,
         },
         learner:
           certificate.user.displayName?.trim() ||
@@ -919,7 +1216,7 @@ router.patch(
       if (!errors.isEmpty()) {
         throw new ApiError(400, errors.array()[0].msg);
       }
-      await assertCourseEditor(req.params.courseId, req.user!);
+      const before = await assertCourseEditor(req.params.courseId, req.user!);
       const b = req.body as Record<string, unknown>;
       const data: Record<string, unknown> = {};
       if (typeof b.title === 'string' && b.title.trim()) data.title = b.title.trim();
@@ -941,31 +1238,6 @@ router.patch(
         data.intakeDates = b.intakeDates.map((d) => new Date(String(d)).toISOString());
       }
 
-      // A certificate does not carry its own copy of the course it was issued
-      // for: the public check at /certificates/:code reads the course's title
-      // and provider name live. So renaming a course after certificates had
-      // been issued rewrote every one of them — a woman who earned "Bookkeeping
-      // Foundations" could have an employer check her code and read "Advanced
-      // Financial Management", on a page that says ATHENA vouches for it.
-      // Until each certificate stores what it was issued for, the name on it
-      // is the name the course had when it was earned, and it stays that way.
-      if (data.title !== undefined || data.providerName !== undefined) {
-        const current = await prisma.course.findUnique({
-          where: { id: req.params.courseId },
-          select: { title: true, providerName: true, _count: { select: { certificates: true } } },
-        });
-        const renaming =
-          (data.title !== undefined && data.title !== current?.title) ||
-          (data.providerName !== undefined && data.providerName !== (current?.providerName ?? null));
-        const issued = current?._count?.certificates ?? 0;
-        if (renaming && issued > 0) {
-          throw new ApiError(
-            409,
-            `${issued} ${issued === 1 ? 'certificate has' : 'certificates have'} been issued under this course's current title and provider name, and ${issued === 1 ? 'it shows' : 'they show'} whatever the course is called. They cannot be changed now without changing what those certificates say.`
-          );
-        }
-      }
-
       if (typeof b.isActive === 'boolean') {
         if (b.isActive) {
           const lessons = await prisma.courseLesson.count({ where: { module: { courseId: req.params.courseId } } });
@@ -976,7 +1248,79 @@ router.patch(
         data.isActive = b.isActive;
       }
 
-      const updated = await prisma.course.update({ where: { id: req.params.courseId }, data: data as any });
+      // Renaming a course used to rewrite every certificate already issued for
+      // it, because the public check read the title and provider live — a
+      // woman who earned "Bookkeeping Foundations" could have an employer
+      // check her code and read "Advanced Financial Management". The last
+      // pass stopped that by refusing the rename outright once anything had
+      // been issued, which left a provider unable to correct a typo in her
+      // own course for as long as it existed. Each certificate now keeps its
+      // own copy of what it was issued for, so the course is free to change.
+      //
+      // The one case left is a certificate with no copy of its own (the
+      // migration filled in every row it could see; this covers anything it
+      // could not). Before a rename lands, any such certificate is given the
+      // name it was earned under, in the same transaction as the rename, so
+      // there is no moment at which it reads the new one.
+      const courseId = req.params.courseId;
+      const changes = data as Prisma.CourseUpdateInput;
+      const renaming = data.title !== undefined || data.providerName !== undefined;
+      const updated = renaming
+        ? await prisma.$transaction(async (tx) => {
+            const current = await tx.course.findUnique({
+              where: { id: courseId },
+              select: { title: true, providerName: true, organization: { select: { name: true } } },
+            });
+            if (current) {
+              await tx.courseCertificate.updateMany({
+                where: { courseId, courseTitle: null },
+                data: { courseTitle: current.title },
+              });
+              await tx.courseCertificate.updateMany({
+                where: { courseId, issuerName: null },
+                data: { issuerName: certificateIssuer(current) },
+              });
+            }
+            return tx.course.update({ where: { id: courseId }, data: changes });
+          })
+        : await prisma.course.update({ where: { id: courseId }, data: changes });
+
+      // Staff taking a provider's listing out of the catalogue is a staff
+      // decision about someone else's work: it is recorded against the person
+      // who made it, and the provider's team is told rather than left to find
+      // their course quietly back in draft. Taking a course down is the only
+      // way to remove one — a course that has issued certificates cannot be
+      // deleted, because the certificates point at it — so this is also the
+      // record of every course staff have retired.
+      if (req.user!.role === 'ADMIN' && before.isActive && data.isActive === false) {
+        await recordAdminAction(req, 'COURSE_UNPUBLISHED', {
+          resourceType: 'Course',
+          resourceId: courseId,
+          organizationId: before.organizationId,
+        });
+        const organizationId = before.organizationId;
+        if (organizationId) {
+          await bestEffort(`course ${courseId} unpublished notice to provider ${organizationId}`, async () => {
+            const team = await prisma.organizationMember.findMany({
+              where: { organizationId, ...POSTING_MEMBER_WHERE, userId: { not: req.user!.id } },
+              select: { userId: true },
+              take: 25,
+            });
+            for (const member of team) {
+              await notificationService.notify({
+                userId: member.userId,
+                type: 'SYSTEM',
+                title: 'A course has been taken out of the catalogue',
+                message: `ATHENA has unpublished "${before.title}". Learners already enrolled keep their access and every certificate issued for it still checks out. Contact ATHENA to talk about putting it back.`,
+                link: `/employer/organizations/${organizationId}/education/courses/${courseId}`,
+                channels: ['in-app'],
+                data: { kind: 'COURSE_UNPUBLISHED_BY_STAFF', courseId },
+              });
+            }
+          });
+        }
+      }
+
       res.json({ success: true, data: updated });
     } catch (error) {
       next(error);
@@ -996,7 +1340,13 @@ router.get('/:courseId/builder', authenticate, async (req: AuthRequest, res, nex
         _count: { select: { enrollments: true, certificates: true } },
       },
     });
-    res.json({ success: true, data: course });
+    // So the builder can tell its editors, in the rule's own terms, that with
+    // a fee set the lessons other than previews open only to the learners
+    // whose place they confirm.
+    res.json({
+      success: true,
+      data: course ? { ...course, lessonsWaitForProvider: requiresAdmission(course) } : course,
+    });
   } catch (error) {
     next(error);
   }
@@ -1133,11 +1483,12 @@ router.get('/:courseId/classroom', authenticate, async (req: AuthRequest, res, n
       throw new ApiError(404, 'Course not found');
     }
     const enrollment = await prisma.courseEnrollment.findUnique({ where: { userId_courseId: { userId, courseId } } });
-    if (!enrollment) {
-      const editor = course.organizationId ? await isOrganizationMember(course.organizationId, req.user!) : req.user!.role === 'ADMIN';
-      if (!editor) {
-        throw new ApiError(403, 'Enrol in this course to open the classroom');
-      }
+    const editor = course.organizationId ? await isOrganizationMember(course.organizationId, req.user!) : req.user!.role === 'ADMIN';
+    // Enrolled is not always enough: on a course with a provider and a fee
+    // the lessons wait for the provider to confirm her place.
+    const access = await courseAccessFor(course, userId, enrollment, editor);
+    if (!access.lessonsOpen) {
+      throw new ApiError(403, closedMessage(access, providerLabel(course)));
     }
     const progress = await progressFor(courseId, userId);
     res.json({
@@ -1147,6 +1498,7 @@ router.get('/:courseId/classroom', authenticate, async (req: AuthRequest, res, n
         modules: course.modules,
         enrollment,
         progress,
+        access,
       },
     });
   } catch (error) {
@@ -1159,9 +1511,28 @@ router.post('/:courseId/lessons/:lessonId/complete', authenticate, async (req: A
   try {
     const { courseId, lessonId } = req.params;
     const userId = req.user!.id;
-    const enrollment = await prisma.courseEnrollment.findUnique({ where: { userId_courseId: { userId, courseId } }, select: { id: true } });
+    const enrollment = await prisma.courseEnrollment.findUnique({
+      where: { userId_courseId: { userId, courseId } },
+      select: { id: true, createdAt: true },
+    });
     if (!enrollment) {
       throw new ApiError(403, 'Enrol in this course first');
+    }
+    // The classroom is not the only way in: this route used to tick off, and
+    // certify, anything an enrolled learner posted, so a course whose lessons
+    // wait for the provider could still be "completed" and certified by a
+    // learner the provider had never admitted.
+    const gate = await prisma.course.findUnique({
+      where: { id: courseId },
+      select: { id: true, organizationId: true, cost: true, providerName: true, organization: { select: { name: true } } },
+    });
+    if (!gate) {
+      throw new ApiError(404, 'Course not found');
+    }
+    const editor = gate.organizationId ? await isOrganizationMember(gate.organizationId, req.user!) : req.user!.role === 'ADMIN';
+    const access = await courseAccessFor(gate, userId, enrollment, editor);
+    if (!access.lessonsOpen) {
+      throw new ApiError(403, closedMessage(access, providerLabel(gate)));
     }
     await loadLessonOf(courseId, lessonId);
 
@@ -1175,9 +1546,24 @@ router.post('/:courseId/lessons/:lessonId/complete', authenticate, async (req: A
 
     let certificate = progress.certificate;
     if (progress.total > 0 && progress.percent === 100 && !certificate) {
-      // Every lesson done: issued once, with a code anyone can check.
+      // Every lesson done: issued once, with a code anyone can check, and with
+      // its own copy of what it was awarded for and by whom. The course can be
+      // renamed or retired afterwards; what she earned stays what she earned.
+      const course = await prisma.course.findUnique({
+        where: { id: courseId },
+        select: { title: true, providerName: true, organization: { select: { name: true } } },
+      });
+      if (!course) {
+        throw new ApiError(404, 'Course not found');
+      }
       certificate = await prisma.courseCertificate.create({
-        data: { courseId, userId, code: randomBytes(5).toString('hex').toUpperCase() },
+        data: {
+          courseId,
+          userId,
+          code: randomBytes(5).toString('hex').toUpperCase(),
+          courseTitle: course.title,
+          issuerName: certificateIssuer(course),
+        },
         select: { code: true, issuedAt: true },
       });
     }
@@ -1212,11 +1598,14 @@ router.get('/:slug', optionalAuth, async (req: AuthRequest, res, next) => {
     // Enrolment and progress ride along for a signed-in viewer; the lessons'
     // content only for someone enrolled (or the provider's own team).
     const viewer = req.user;
-    let enrollment: { id: string; progress: number } | null = null;
+    let enrollment: { id: string; progress: number; createdAt: Date } | null = null;
     let progress: Awaited<ReturnType<typeof progressFor>> | null = null;
     let canEdit = false;
     if (viewer) {
-      const row = await prisma.courseEnrollment.findUnique({ where: { userId_courseId: { userId: viewer.id, courseId: course.id } }, select: { id: true, progress: true } });
+      const row = await prisma.courseEnrollment.findUnique({
+        where: { userId_courseId: { userId: viewer.id, courseId: course.id } },
+        select: { id: true, progress: true, createdAt: true },
+      });
       enrollment = row ?? null;
       canEdit = course.organizationId ? await isOrganizationMember(course.organizationId, viewer) : viewer.role === 'ADMIN';
     }
@@ -1236,11 +1625,15 @@ router.get('/:slug', optionalAuth, async (req: AuthRequest, res, next) => {
     }
 
     if (viewer && enrollment) progress = await progressFor(course.id, viewer.id);
-    const modules = withLockedContent(course.modules ?? [], Boolean(enrollment) || canEdit);
+    // Open to the provider's team, and to a learner once enrolling has opened
+    // it for her — which, on a course with a provider and a fee, means once the
+    // provider has confirmed her place. See "Who the lessons are open to".
+    const access = await courseAccessFor(course, viewer?.id ?? null, enrollment, canEdit);
+    const modules = withLockedContent(course.modules ?? [], access.lessonsOpen);
 
     res.json({
       success: true,
-      data: { ...course, modules, enrollment, progress, canEdit },
+      data: { ...course, modules, enrollment, progress, canEdit, access },
     });
   } catch (error) {
     next(error);

@@ -25,10 +25,19 @@ type Certificate = {
   id: string;
   code: string;
   issuedAt: string;
-  course: { id: string; title: string; slug: string; providerName: string | null; type: string | null; durationMonths: number | null };
-  // Who issued it, resolved by the server the same way the public check at
-  // /certificates/:code resolves it: the provider organisation first, then the
-  // provider's own name for itself, then ATHENA.
+  // The title is the one on the certificate, written when she earned it, not
+  // the course's name today; `listedAs` is today's name when it differs.
+  course: {
+    id: string;
+    title: string;
+    slug: string;
+    type: string | null;
+    durationMonths: number | null;
+    listed?: boolean;
+    listedAs?: string | null;
+  };
+  // Who issued it, as written on the certificate when it was issued — the
+  // same answer the public check at /certificates/:code gives an employer.
   provider: string;
 };
 
@@ -104,12 +113,13 @@ export default function CertificationsPage() {
           ) : mine.isError ? (
             // A failed load is not "no certificates". Telling a woman who has
             // earned one that she has none is the one thing this list must not do.
-            <EmptyState
-              icon={Award}
-              reason="empty"
-              title="Your certificates did not load"
-              description="Nothing has happened to them. Try again in a moment."
-            />
+            <div className="surface p-5 text-sm" role="alert">
+              <p className="font-semibold text-slate-900 dark:text-white">Your certificates did not load</p>
+              <p className="mt-1 text-slate-600 dark:text-slate-300">Nothing has happened to them. Try again in a moment.</p>
+              <button type="button" onClick={() => mine.refetch()} className="btn-outline mt-3 px-3 py-1.5 text-sm">
+                Try again
+              </button>
+            </div>
           ) : (mine.data?.length ?? 0) === 0 ? (
             <EmptyState
               icon={Award}
@@ -132,6 +142,14 @@ export default function CertificationsPage() {
                       <p className="text-sm text-slate-500">
                         {c.provider} · issued {issued(c.issuedAt)}
                       </p>
+                      {/* So she is not surprised when the catalogue calls it
+                          something else, or no longer lists it: what her
+                          certificate says does not change either way. */}
+                      {c.course.listed === false ? (
+                        <p className="mt-1 text-xs text-slate-500">The provider no longer lists this course. Your certificate still stands.</p>
+                      ) : c.course.listedAs ? (
+                        <p className="mt-1 text-xs text-slate-500">Now listed as &ldquo;{c.course.listedAs}&rdquo;. Your certificate keeps the name you earned it under.</p>
+                      ) : null}
                       <p className="mt-2 font-mono text-sm tracking-widest text-slate-700 dark:text-slate-300">{c.code}</p>
                       <Link href={`/certificates/${c.code}`} className="mt-2 inline-block text-sm text-primary-600 hover:underline">
                         Open the checkable certificate
@@ -169,7 +187,8 @@ export default function CertificationsPage() {
               <li key={course.id}>
                 <Link href={`/courses/${course.slug}`} className="surface block h-full p-5 transition hover:shadow-md">
                   <h3 className="font-semibold text-slate-900 dark:text-white">{course.title}</h3>
-                  <p className="text-sm text-slate-500">{course.organization?.name || course.providerName || 'Provider not stated'}</p>
+                  {/* Named the way the certificate it issues will name it. */}
+                  <p className="text-sm text-slate-500">{course.providerName || course.organization?.name || 'Provider not stated'}</p>
                   <p className="mt-2 line-clamp-3 text-sm text-slate-600 dark:text-slate-300">{course.description}</p>
                   <p className="mt-3 flex flex-wrap gap-3 text-xs text-slate-500">
                     {duration(course.durationMonths) && (

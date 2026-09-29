@@ -19,6 +19,7 @@ import { useCourse, useEnrollCourse } from '@/lib/hooks';
 import { useAuthStore } from '@/lib/store';
 import { EmptyState, PageShell, Section } from '@/components/layout/PageShell';
 import { safeHref } from '@/lib/safe-href';
+import { CoursePlacePanel, waitsForProvider, type CourseAccess } from '../CoursePlacePanel';
 
 type Lesson = { id: string; title: string; type: string; durationMinutes?: number | null; isPreview: boolean; locked?: boolean };
 type Course = {
@@ -39,6 +40,8 @@ type Course = {
   isActive?: boolean;
   enrollment?: { id?: string; progress?: number | null } | null;
   progress?: { total: number; completed: number; percent: number; certificate?: { code: string } | null } | null;
+  /** Who the lessons are open to: on a course with a provider and a fee, the provider decides. */
+  access?: CourseAccess | null;
   modules?: Array<{ id: string; title: string; description?: string | null; lessons: Lesson[] }>;
 };
 
@@ -106,6 +109,9 @@ export default function PublicCoursePage({ params }: { params: Promise<{ slug: s
   const modules = course.modules ?? [];
   const lessonCount = modules.reduce((n, m) => n + m.lessons.length, 0);
   const enrolled = Boolean(course.enrollment);
+  const access = course.access ?? null;
+  const gated = Boolean(access?.requiresAdmission);
+  const waiting = waitsForProvider(access);
   const facts: Array<[typeof Clock, string, string]> = [];
   if (duration(course.durationMonths)) facts.push([Clock, 'Duration', duration(course.durationMonths)!]);
   if (studyModes.length) facts.push([GraduationCap, 'Study mode', studyModes.map(label).join(', ')]);
@@ -160,7 +166,7 @@ export default function PublicCoursePage({ params }: { params: Promise<{ slug: s
           )}
 
           {modules.length > 0 && (
-            <Section icon={BookOpen} title="What is in it" description={`${modules.length} ${modules.length === 1 ? 'module' : 'modules'}, ${lessonCount} ${lessonCount === 1 ? 'lesson' : 'lessons'}. Previews are open to everyone; the rest opens on enrolment.`}>
+            <Section icon={BookOpen} title="What is in it" description={`${modules.length} ${modules.length === 1 ? 'module' : 'modules'}, ${lessonCount} ${lessonCount === 1 ? 'lesson' : 'lessons'}. Previews are open to everyone; ${gated ? `the rest opens once ${provider} confirms your place` : 'the rest opens on enrolment'}.`}>
               <ol className="space-y-3">
                 {modules.map((m, i) => (
                   <li key={m.id} className="surface p-4">
@@ -186,7 +192,9 @@ export default function PublicCoursePage({ params }: { params: Promise<{ slug: s
         </div>
 
         <aside className="surface h-fit space-y-3 p-5 lg:sticky lg:top-6">
-          {enrolled ? (
+          {isAuthenticated && waiting && course.isActive !== false ? (
+            <CoursePlacePanel courseId={course.id} provider={provider} cost={course.cost} access={access} />
+          ) : enrolled ? (
             <>
               <p className="text-sm text-slate-600 dark:text-slate-300">
                 You are enrolled
@@ -230,9 +238,13 @@ export default function PublicCoursePage({ params }: { params: Promise<{ slug: s
             </>
           ) : (
             <>
-              <p className="text-sm text-slate-600 dark:text-slate-300">Sign in to enrol. Previews on this page are open without an account.</p>
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                {gated
+                  ? `Sign in to ask ${provider} for a place. The lessons open once they confirm it; the fee is arranged with them, not through ATHENA. Previews on this page are open without an account.`
+                  : 'Sign in to enrol. Previews on this page are open without an account.'}
+              </p>
               <Link href={`/login?redirect=${encodeURIComponent(`/courses/${course.slug}`)}`} className="btn-primary flex items-center justify-center gap-2">
-                Sign in to enrol <ArrowRight className="h-4 w-4" />
+                {gated ? 'Sign in to ask for a place' : 'Sign in to enrol'} <ArrowRight className="h-4 w-4" />
               </Link>
               <Link href="/register" className="block text-center text-sm text-primary-600 hover:underline">
                 New here? Create an account

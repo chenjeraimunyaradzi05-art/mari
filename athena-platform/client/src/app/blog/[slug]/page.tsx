@@ -34,6 +34,16 @@ export default function ArticlePage({ params }: { params: Promise<{ slug: string
         <div className="flex justify-center py-16">
           <Loader2 className="h-8 w-8 animate-spin text-primary-500" />
         </div>
+      ) : article.isError && (article.error as { response?: { status?: number } } | null)?.response?.status !== 404 ? (
+        // A dropped connection is not a missing article. Saying "no article at
+        // this address" sent readers of a release note away believing it had
+        // been taken down.
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300" role="alert">
+          The article did not load. Try again in a moment.{' '}
+          <button type="button" onClick={() => article.refetch()} className="font-medium underline">
+            Try again
+          </button>
+        </div>
       ) : article.isError || !article.data ? (
         <EmptyState icon={Newspaper} reason="empty" title="No article at this address" description="It may have been unpublished, or the link is wrong." primaryAction={{ label: 'All articles', href: '/blog' }} />
       ) : (

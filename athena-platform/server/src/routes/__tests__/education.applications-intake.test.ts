@@ -21,7 +21,7 @@ jest.mock('../../utils/prisma', () => ({
     },
     courseEnrollment: { aggregate: jest.fn(), count: jest.fn(async () => 0) },
     organizationMember: {
-      findUnique: jest.fn(async () => ({ role: 'OWNER', canPostJobs: true, canViewAnalytics: true })),
+      findUnique: jest.fn(async () => ({ role: 'OWNER', canPostJobs: true, canViewAnalytics: true, acceptedAt: new Date('2026-01-01') })),
       findMany: jest.fn(async () => [{ userId: 'provider-staff-1' }, { userId: 'provider-staff-2' }]),
     },
   },
@@ -84,8 +84,12 @@ describe('Education applications: what comes in, and who hears about it', () => 
     expect(data.intakeDate.toISOString().slice(0, 10)).toBe('2027-02-15');
     expect(res.body.data.id).toBe('app-new');
 
-    // Only members with the recruiting flag or an owner/admin role are asked for.
-    expect(prisma.organizationMember.findMany.mock.calls[0][0].where).toMatchObject({ organizationId: 'org-1' });
+    // Only the hiring team is asked for — accepted invitations, and the roles
+    // or posting rights that let someone open the application at all.
+    expect(prisma.organizationMember.findMany.mock.calls[0][0].where).toMatchObject({
+      organizationId: 'org-1',
+      acceptedAt: { not: null },
+    });
     expect(notificationService.notify.mock.calls.map((c: any) => c[0].userId)).toEqual(['provider-staff-1', 'provider-staff-2']);
     // The provider's notice does not name the applicant.
     expect(notificationService.notify.mock.calls[0][0].message).not.toMatch(/applicant-1|member@example.com/);

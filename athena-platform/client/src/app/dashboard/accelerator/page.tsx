@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Calendar, Rocket, Users, BadgeCheck, Loader2 } from 'lucide-react';
 import { businessApi } from '@/lib/api';
 import { formatCurrency, formatDate, pluralize } from '@/lib/utils';
+import { WithdrawPlace } from './WithdrawPlace';
 
 const statusOptions = [
   { value: '', label: 'All statuses' },
@@ -252,6 +253,17 @@ export default function AcceleratorPage() {
                     <Link href={`/dashboard/accelerator/${enrollment.id}`} className="mt-1 mr-3 inline-block text-xs font-medium text-primary-600 hover:underline">Week by week</Link>
                     {enrollment.status === 'COMPLETED' && (
                       <Link href={`/certificates/accelerator/${enrollment.id}`} className="mt-1 inline-block text-xs font-medium text-primary-600 hover:underline">Certificate of completion</Link>
+                    )}
+                    {/* A place she can still give up: not ended, not finished. */}
+                    {!['COMPLETED', 'GRADUATED', 'DROPPED'].includes(enrollment.status) && (
+                      <div className="mt-1">
+                        <WithdrawPlace
+                          enrollmentId={enrollment.id}
+                          cohortName={enrollment.cohort.name}
+                          paid={enrollment.paymentStatus === 'PAID'}
+                          onDone={() => void loadData()}
+                        />
+                      </div>
                     )}
                   </div>
                   <span className={`text-xs font-semibold px-2 py-1 rounded-full ${toneClass[placeLabel(enrollment).tone]}`}>

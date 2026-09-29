@@ -7,6 +7,8 @@ import { parsePagination } from '../utils/pagination';
 import { body, validationResult } from 'express-validator';
 import { bestEffort } from '../utils/best-effort';
 import { notificationService } from '../services/notification.service';
+import { HIRING_MEMBER_WHERE, canViewApplicants } from '../services/hiring-access.service';
+import { requiresAdmission } from './course.routes';
 
 const router = Router();
 
@@ -19,13 +21,24 @@ function parseEducationApplicationStatus(value: unknown): EducationApplicationSt
 }
 
 /**
- * Deciding an application is not reading a chart. `canViewAnalytics` defaults
- * to true for every member of an organisation, including a VIEWER, so it can
- * gate the outcomes dashboard and must not gate an admissions decision. This
- * mirrors the permission test the employer job routes already use: the
- * recruiting flag, or a role that owns the organisation outright.
+ * Seeing who applied, and deciding what happens to her.
+ *
+ * An application carries the applicant's name, her email address, her photo
+ * and headline, and the notes she wrote. She was told those go to the
+ * provider's admissions people, and "who that is" is one rule for the whole
+ * platform: services/hiring-access.service.ts — an accepted owner, admin or
+ * recruiter, or an accepted member given posting rights.
+ *
+ * This file used to ask two looser questions of its own. The list of
+ * applicants was gated on `canViewAnalytics`, which defaults to true for every
+ * member including a VIEWER, so anyone added to the organisation to read a
+ * chart could read every applicant's contact details. And neither check looked
+ * at whether the invitation had been accepted: the membership row exists from
+ * the moment an owner types an email address, so a pending invitee — someone
+ * who had said nothing, and might not be who the owner thought — was treated
+ * as staff.
  */
-const requireOrgApplicationDecisions: RequestHandler<{ organizationId: string }> = async (
+const requireOrgApplicantAccess: RequestHandler<{ organizationId: string }> = async (
   req,
   _res: Response,
   next: NextFunction
@@ -48,14 +61,15 @@ const requireOrgApplicationDecisions: RequestHandler<{ organizationId: string }>
       select: {
         role: true,
         canPostJobs: true,
+        acceptedAt: true,
       },
     });
 
-    if (!membership) {
+    if (!membership?.acceptedAt) {
       throw new ApiError(403, 'Not authorized');
     }
-    if (!membership.canPostJobs && membership.role !== 'OWNER' && membership.role !== 'ADMIN') {
-      throw new ApiError(403, 'You do not have permission to decide applications');
+    if (!canViewApplicants(membership)) {
+      throw new ApiError(403, 'You do not have permission to see or decide applications for this provider');
     }
 
     next();
@@ -64,6 +78,11 @@ const requireOrgApplicationDecisions: RequestHandler<{ organizationId: string }>
   }
 };
 
+/**
+ * The outcomes dashboard: counts and averages, no applicant named. Readable by
+ * any member the organisation has let see its analytics — once she has
+ * accepted the invitation, and not before.
+ */
 const requireOrgAnalyticsAccess: RequestHandler<{ organizationId: string }> = async (
   req,
   _res: Response,
@@ -87,10 +106,11 @@ const requireOrgAnalyticsAccess: RequestHandler<{ organizationId: string }> = as
       select: {
         role: true,
         canViewAnalytics: true,
+        acceptedAt: true,
       },
     });
 
-    if (!membership || !membership.canViewAnalytics) {
+    if (!membership?.acceptedAt || !membership.canViewAnalytics) {
       throw new ApiError(403, 'Not authorized');
     }
 
@@ -365,13 +385,15 @@ router.post('/applications', authenticate, applicationValidators, async (req: Au
     });
 
     // Tell the people who can decide it. These are the same people the
-    // decision route lets through: the recruiting flag, or an owner or admin
-    // of the organisation. It never fails her application — it is already in,
-    // and the provider's list shows it whether or not anyone was pinged.
+    // decision route lets through — the platform's one hiring rule, accepted
+    // invitations only — so nobody is pinged about an application she cannot
+    // open, and nobody who has not yet said yes to an invitation hears that a
+    // woman applied. It never fails her application — it is already in, and
+    // the provider's list shows it whether or not anyone was pinged.
     const what = courseTitle ?? programName ?? 'a place';
     await bestEffort(`education application ${created.id} notice to provider ${organizationId}`, async () => {
       const deciders = await prisma.organizationMember.findMany({
-        where: { organizationId, OR: [{ canPostJobs: true }, { role: { in: ['OWNER', 'ADMIN'] } }] },
+        where: { organizationId, ...HIRING_MEMBER_WHERE },
         select: { userId: true },
         take: 50,
       });
@@ -469,7 +491,7 @@ router.patch('/applications/:id', authenticate, async (req: AuthRequest, res, ne
 router.patch(
   '/providers/:organizationId/applications/:applicationId',
   authenticate,
-  requireOrgApplicationDecisions,
+  requireOrgApplicantAccess,
   async (req: AuthRequest, res, next) => {
     try {
       const { organizationId, applicationId } = req.params;
@@ -511,6 +533,26 @@ router.patch(
         data: { status: parsedStatus },
       });
 
+      // On a course whose lessons wait for the provider, accepting her is what
+      // opens them. She may have applied from the provider's page without
+      // enrolling, so the enrolment the classroom needs is made here: the
+      // provider has just said yes, and "your place is confirmed" should not be
+      // followed by "enrol first".
+      const course = updated.courseId
+        ? await prisma.course.findUnique({
+            where: { id: updated.courseId },
+            select: { id: true, organizationId: true, cost: true },
+          })
+        : null;
+      const opensLessons = Boolean(course && requiresAdmission(course));
+      if (parsedStatus === EducationApplicationStatus.ACCEPTED && course && opensLessons) {
+        await prisma.courseEnrollment.upsert({
+          where: { userId_courseId: { userId: updated.userId, courseId: course.id } },
+          create: { userId: updated.userId, courseId: course.id },
+          update: {},
+        });
+      }
+
       // She hears the decision from us, not by happening to reopen the page.
       // Only a real change is news; re-saving the same status tells her nothing.
       // All of it is best-effort: the decision is already saved, and a notice
@@ -528,10 +570,15 @@ router.patch(
               title: 'Your application is being reviewed',
               message: `${provider} has started reviewing your application for ${what}.`,
             },
-            ACCEPTED: {
-              title: 'Your application was accepted',
-              message: `${provider} has accepted your application for ${what}. They will be in touch about next steps.`,
-            },
+            ACCEPTED: opensLessons
+              ? {
+                  title: 'Your place is confirmed',
+                  message: `${provider} has confirmed your place on ${what}. The lessons are open in your classroom on ATHENA, and ${provider} will be in touch about the fee.`,
+                }
+              : {
+                  title: 'Your application was accepted',
+                  message: `${provider} has accepted your application for ${what}. They will be in touch about next steps.`,
+                },
             REJECTED: {
               title: 'An update on your application',
               message: `${provider} has decided not to offer you a place for ${what} this time.`,
@@ -544,7 +591,10 @@ router.patch(
             type: 'APPLICATION_UPDATE',
             title: chosen.title,
             message: chosen.message,
-            link: '/dashboard/learn/applications',
+            link:
+              parsedStatus === EducationApplicationStatus.ACCEPTED && opensLessons && course
+                ? `/dashboard/learn/${course.id}`
+                : '/dashboard/learn/applications',
             // In-app only. The email fallback in notification.service puts the
             // provider's own course title into HTML unescaped, and an applicant's
             // inbox is not always hers alone to read.
@@ -570,7 +620,7 @@ router.patch(
 router.get(
   '/providers/:organizationId/applications',
   authenticate,
-  requireOrgAnalyticsAccess,
+  requireOrgApplicantAccess,
   async (req: AuthRequest, res, next) => {
     try {
       const { organizationId } = req.params;
@@ -601,6 +651,8 @@ router.get(
               title: true,
               slug: true,
               type: true,
+              organizationId: true,
+              cost: true,
             },
           },
         },
@@ -609,7 +661,13 @@ router.get(
 
       res.json({
         success: true,
-        data: applications,
+        // Whether accepting this one opens a course's lessons to her on
+        // ATHENA, so the console can say so beside the button: on a course
+        // with a fee, the provider's yes is the key to the classroom.
+        data: applications.map((application) => ({
+          ...application,
+          acceptingOpensLessons: Boolean(application.course && requiresAdmission(application.course)),
+        })),
       });
     } catch (error) {
       next(error);

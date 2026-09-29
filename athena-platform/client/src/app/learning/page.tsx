@@ -35,6 +35,7 @@ import {
 type Course = {
   id: string;
   title: string;
+  slug: string;
   providerName?: string | null;
   organization?: { name?: string | null } | null;
   type?: string | null;
@@ -109,9 +110,12 @@ function CourseTile({ course }: { course: Course }) {
 
   return (
     <li>
-      {/* The course detail view lives under the learning dashboard. */}
+      {/* The public course page, not the dashboard one. /learning is open to
+          anyone and /dashboard sits behind the sign-in wall, so this link used
+          to bounce every signed-out visitor who clicked a course to a login
+          form instead of showing her the course she chose. */}
       <Link
-        href={`/dashboard/learn/${course.id}`}
+        href={`/courses/${course.slug}`}
         className="tile-soft focusable flex h-full flex-col p-4"
       >
         <span className="line-clamp-2 text-sm font-semibold text-slate-900 dark:text-white">

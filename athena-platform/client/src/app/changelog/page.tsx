@@ -1,13 +1,17 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
+import { ReleaseNotes } from './ReleaseNotes';
 
 export const metadata: Metadata = {
   title: 'Changelog | ATHENA',
   description: 'Notable platform updates, in the open.',
 };
 
-// Keep entries factual and verifiable — this page is part of our commitment
-// to only publishing claims we can evidence.
+// The releases from before notes were published through the blog. They stay
+// as they were written, and nothing is added here any more: a new release
+// note is an article tagged "changelog" at /admin/blog, and ReleaseNotes lists
+// it above these. Keep entries factual and verifiable — this page is part of
+// our commitment to only publishing claims we can evidence.
 const entries = [
   {
     date: 'September 2026',
@@ -56,10 +60,12 @@ export default function ChangelogPage() {
     <div className="container mx-auto max-w-3xl px-4 py-12">
       <h1 className="text-3xl font-bold">Changelog</h1>
       <p className="mt-4 text-muted-foreground">
-        Notable updates to the platform. For what is coming next, see the{' '}
+        Notable updates to the platform, published by the team as each release goes out. For what is coming next, see the{' '}
         <Link href="/help/transparency-report" className="text-primary hover:underline">transparency report</Link>.
       </p>
-      <div className="mt-8 space-y-6">
+      <ReleaseNotes />
+      <h2 className="mt-12 text-sm font-medium uppercase tracking-wide text-muted-foreground">Earlier releases</h2>
+      <div className="mt-4 space-y-6">
         {entries.map((e) => (
           <div key={e.date} className="rounded-2xl border border-border bg-card p-6 shadow-sm">
             <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">{e.date}</p>

@@ -100,7 +100,13 @@ export function HostEventDialog({ open, onClose }: HostEventDialogProps) {
         tags: tags.split(/[\s,]+/).filter(Boolean),
       });
       queryClient.invalidateQueries({ queryKey: ['events'] });
-      toast.success('Your event is listed');
+      queryClient.invalidateQueries({ queryKey: ['my-events'] });
+      // Not "your event is listed": the server holds a member's listing until a
+      // moderator has read it, and saying otherwise sent hosts off to share a
+      // link that showed nobody anything.
+      toast.success(
+        'Sent for review. Your event appears once a moderator has read it. You can see who registers under Events you are hosting.'
+      );
       onClose();
     } catch (err) {
       setError(errorMessage(err, 'Could not create the event'));
@@ -179,6 +185,15 @@ export function HostEventDialog({ open, onClose }: HostEventDialogProps) {
             <label className="text-xs text-slate-500">
               Price in AUD (0 is free)
               <input type="number" min={0} step={1} value={price} onChange={(e) => setPrice(e.target.value)} className="input mt-1 w-full" />
+              {/* Said before she sets a price, not after: ATHENA has no event
+                  ticketing, and a host who assumed it did would have people
+                  turn up believing they had paid. The second sentence is the
+                  half that was missing: her registrants are told to pay her,
+                  and the listing is the only place they can learn how, since
+                  the list she sees of them carries no contact details. */}
+              <span className="mt-1 block">
+                ATHENA does not take payment for events. If you charge, people pay you directly, so say in the description how and when, for example at the door.
+              </span>
             </label>
           </div>
           <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="Tags, e.g. leadership, brisbane" className="input w-full" />

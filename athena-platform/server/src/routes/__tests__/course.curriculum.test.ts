@@ -50,7 +50,7 @@ describe('Course curriculum: builder, classroom, certificates', () => {
     prisma.course.findUnique.mockResolvedValue(course);
     // Only "teacher" is on the provider's team.
     prisma.organizationMember.findUnique.mockImplementation(async ({ where }: any) =>
-      where.organizationId_userId.userId === 'teacher' ? { id: 'm1' } : null
+      where.organizationId_userId.userId === 'teacher' ? { id: 'm1', acceptedAt: new Date('2026-01-01') } : null
     );
     prisma.courseCertificate.findUnique.mockResolvedValue(null);
   });
@@ -149,7 +149,14 @@ describe('Course curriculum: builder, classroom, certificates', () => {
     const done = await request(app).post('/api/courses/c1/lessons/l2/complete').set(as('learner')).expect(200);
     expect(done.body.data.percent).toBe(100);
     expect(done.body.data.certificate.code).toMatch(/^[0-9A-F]{10}$/);
-    expect(prisma.courseCertificate.create.mock.calls[0][0].data).toMatchObject({ courseId: 'c1', userId: 'learner' });
+    // The certificate keeps its own copy of what it was awarded for and by
+    // whom, so a later rename of the course cannot change what it says.
+    expect(prisma.courseCertificate.create.mock.calls[0][0].data).toMatchObject({
+      courseId: 'c1',
+      userId: 'learner',
+      courseTitle: 'Founding a business',
+      issuerName: 'ATHENA',
+    });
 
     // Not enrolled: nothing to tick.
     prisma.courseEnrollment.findUnique.mockResolvedValue(null);
@@ -169,5 +176,32 @@ describe('Course curriculum: builder, classroom, certificates', () => {
 
     prisma.courseCertificate.findUnique.mockResolvedValue(null);
     await request(app).get('/api/courses/certificates/nope').expect(404);
+  });
+
+  it('the public check reads what the certificate says, not what the course is called now', async () => {
+    prisma.courseCertificate.findUnique.mockResolvedValue({
+      code: 'ABC123DEF4',
+      issuedAt: new Date('2026-09-01T00:00:00Z'),
+      courseTitle: 'Bookkeeping Foundations',
+      issuerName: 'Northside TAFE',
+      course: {
+        id: 'c1',
+        title: 'Advanced Financial Management',
+        slug: 'bookkeeping',
+        isActive: false,
+        providerName: 'Someone else',
+        organization: { name: 'Renamed Pty Ltd' },
+      },
+      user: { firstName: 'Ana', lastName: 'Ruiz', displayName: null },
+    });
+    const res = await request(app).get('/api/courses/certificates/abc123def4').expect(200);
+    expect(res.body.data.course).toMatchObject({
+      title: 'Bookkeeping Foundations',
+      provider: 'Northside TAFE',
+      // Retired, not deleted: the certificate stands and the page knows there
+      // is no listing to link to.
+      listed: false,
+      listedAs: 'Advanced Financial Management',
+    });
   });
 });

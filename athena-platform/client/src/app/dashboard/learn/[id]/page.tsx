@@ -19,6 +19,7 @@ import toast from 'react-hot-toast';
 import { useCourse, useEnrollCourse } from '@/lib/hooks';
 import { cn, formatCurrency } from '@/lib/utils';
 import { downloadText, shareOrCopy } from '@/lib/download';
+import { CoursePlacePanel, waitsForProvider, type CourseAccess } from '@/app/courses/CoursePlacePanel';
 
 interface CourseDetails {
   id: string;
@@ -55,6 +56,8 @@ interface CourseDetails {
   }>;
   progress?: { total: number; completed: number; percent: number; certificate?: { code: string; issuedAt: string } | null } | null;
   canEdit?: boolean;
+  /** Who the lessons are open to: on a course with a provider and a fee, the provider decides. */
+  access?: CourseAccess | null;
 }
 
 function toStringList(value: unknown): string[] {
@@ -160,6 +163,8 @@ export default function CourseDetailPage() {
   const lessonCount = modules.reduce((n, m) => n + m.lessons.length, 0);
   const hasClassroom = lessonCount > 0;
   const certificate = displayCourse.progress?.certificate ?? null;
+  const access = displayCourse.access ?? null;
+  const waiting = waitsForProvider(access);
 
   // Courses here are provider-run programs, not lessons hosted on ATHENA, so an
   // enrolled learner continues on the provider's own page.
@@ -342,7 +347,11 @@ export default function CourseDetailPage() {
                   </ul>
                 </div>
               ))}
-              {!isEnrolled && <p className="text-sm text-slate-500">Enrol to open every lesson in the classroom. Preview lessons are open to everyone.</p>}
+              {waiting ? (
+                <p className="text-sm text-slate-500">Preview lessons are open to everyone. The rest open once {providerName} confirms your place.</p>
+              ) : (
+                !isEnrolled && <p className="text-sm text-slate-500">Enrol to open every lesson in the classroom. Preview lessons are open to everyone.</p>
+              )}
             </div>
           )}
 
@@ -402,9 +411,18 @@ export default function CourseDetailPage() {
               <p className="text-3xl font-bold text-slate-900 dark:text-white">
                 {typeof displayCourse.cost === 'number' ? formatCurrency(displayCourse.cost) : 'Contact provider'}
               </p>
+              {/* A price above an "Enroll Now" button reads as a purchase.
+                  ATHENA takes no course payment: the fee is the provider's. */}
+              {typeof displayCourse.cost === 'number' && displayCourse.cost > 0 && (
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Arranged with {providerName} directly. ATHENA does not take payment for courses.
+                </p>
+              )}
             </div>
 
-            {isEnrolled ? (
+            {waiting && displayCourse.isActive !== false ? (
+              <CoursePlacePanel courseId={displayCourse.id} provider={providerName} cost={displayCourse.cost} access={access} />
+            ) : isEnrolled ? (
               <div className="space-y-3">
                 <div className="h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
                   <div className="h-full bg-primary-500" style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} />

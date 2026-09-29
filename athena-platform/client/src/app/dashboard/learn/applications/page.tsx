@@ -14,7 +14,7 @@ type Application = {
   programName: string | null;
   submittedAt: string | null;
   organization: { name: string; slug: string } | null;
-  course: { title: string } | null;
+  course: { id: string; title: string } | null;
 };
 
 const STATUS_LABEL: Record<Application['status'], string> = {
@@ -113,6 +113,13 @@ export default function MyEducationApplicationsPage() {
                     <span className="px-2 py-1 text-xs rounded-full bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
                       {STATUS_LABEL[a.status] ?? a.status}
                     </span>
+                    {/* An accepted place on a course with a fee is what opens its
+                        lessons, so the way to them starts here too. */}
+                    {a.course?.id && a.status === 'ACCEPTED' ? (
+                      <Link href={`/dashboard/learn/${a.course.id}`} className="btn-primary px-4 py-2">
+                        Go to the course
+                      </Link>
+                    ) : null}
                     {a.organization?.slug ? (
                       <Link
                         href={`/dashboard/learn/providers/${a.organization.slug}`}

@@ -116,7 +116,7 @@ describe('The figures and dates a provider publishes on a course', () => {
     jest.clearAllMocks();
     prisma.course.findUnique.mockResolvedValue({ id: 'c1', organizationId: 'org1', title: 'Founding a business' });
     prisma.organizationMember.findUnique.mockImplementation(async ({ where }: any) =>
-      where.organizationId_userId.userId === 'teacher' ? { id: 'm1' } : null
+      where.organizationId_userId.userId === 'teacher' ? { id: 'm1', acceptedAt: new Date('2026-01-01') } : null
     );
     prisma.course.update.mockImplementation(async ({ data }: any) => ({ id: 'c1', ...data }));
   });
@@ -170,7 +170,7 @@ describe('The figures and dates a provider publishes on a course', () => {
 
     jest.clearAllMocks();
     prisma.course.findUnique.mockResolvedValue({ id: 'c1', organizationId: 'org1', title: 'Founding a business' });
-    prisma.organizationMember.findUnique.mockResolvedValue({ id: 'm1' });
+    prisma.organizationMember.findUnique.mockResolvedValue({ id: 'm1', acceptedAt: new Date('2026-01-01') });
 
     await request(app).patch('/api/courses/c1').set(asTeacher).send({ intakeDates: ['next autumn'] }).expect(400);
     expect(prisma.course.update).not.toHaveBeenCalled();
@@ -182,7 +182,7 @@ describe('Creating a course', () => {
     jest.clearAllMocks();
     // uniqueSlug walks this until it finds a slug nobody holds.
     prisma.course.findUnique.mockResolvedValue(null);
-    prisma.organizationMember.findUnique.mockResolvedValue({ id: 'm1' });
+    prisma.organizationMember.findUnique.mockResolvedValue({ id: 'm1', acceptedAt: new Date('2026-01-01') });
     prisma.course.create.mockImplementation(async ({ data }: any) => ({ id: 'new', ...data }));
   });
 

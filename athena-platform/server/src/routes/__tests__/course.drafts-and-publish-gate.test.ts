@@ -9,9 +9,11 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
  * - The "publish needs a lesson" rule lived on the PATCH alone, so deleting
  *   the last lesson (or its module) left an empty course live.
  * - Renaming a course rewrote every certificate already issued for it, because
- *   the public check reads the title live.
+ *   the public check read the title live. Each certificate now keeps its own
+ *   copy, so a rename is allowed and changes nothing a certificate says.
  * - The learner's own wallet named ATHENA as the issuer of a certificate the
  *   public check said a provider had issued.
+ * - An invitation nobody had accepted opened the builder and every draft.
  */
 
 jest.mock('../../utils/prisma', () => ({
@@ -23,7 +25,7 @@ jest.mock('../../utils/prisma', () => ({
       count: jest.fn(async () => 0),
       groupBy: jest.fn(async () => []),
     },
-    organizationMember: { findUnique: jest.fn() },
+    organizationMember: { findUnique: jest.fn(), findMany: jest.fn(async () => []) },
     courseModule: { findUnique: jest.fn(), delete: jest.fn(async () => ({})) },
     courseLesson: {
       count: jest.fn(async () => 0),
@@ -34,8 +36,17 @@ jest.mock('../../utils/prisma', () => ({
       findMany: jest.fn(async () => []),
     },
     courseEnrollment: { findUnique: jest.fn(async () => null) },
+    // Read when a learner opens a course with a provider and a fee: the lessons
+    // wait for the provider to confirm her place (see course.admission.test.ts).
+    educationApplication: { findMany: jest.fn(async () => []) },
     lessonProgress: { findMany: jest.fn(async () => []) },
-    courseCertificate: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
+    courseCertificate: {
+      findUnique: jest.fn(async () => null),
+      findMany: jest.fn(async () => []),
+      updateMany: jest.fn(async () => ({ count: 0 })),
+    },
+    auditLog: { create: jest.fn(async () => ({})) },
+    $transaction: jest.fn(),
   },
 }));
 
@@ -85,9 +96,24 @@ describe('Courses: drafts, the publish gate, certificates', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     prisma.organizationMember.findUnique.mockImplementation(async ({ where }: any) =>
-      where.organizationId_userId.userId === 'teacher' ? { id: 'm1' } : null
+      where.organizationId_userId.userId === 'teacher' ? { id: 'm1', acceptedAt: new Date('2026-01-01') } : null
     );
     prisma.courseEnrollment.findUnique.mockResolvedValue(null);
+    // The rename runs in a transaction; the mock hands the callback the same
+    // client, so the calls it makes are the ones the test reads.
+    prisma.$transaction.mockImplementation(async (fn: any) => fn(prisma));
+  });
+
+  describe('a pending invitation is not a membership', () => {
+    it('treats someone who has not accepted as a stranger to the draft and the builder', async () => {
+      prisma.organizationMember.findUnique.mockResolvedValue({ id: 'm2', acceptedAt: null });
+      prisma.course.findFirst.mockResolvedValue(draft);
+      prisma.course.findUnique.mockResolvedValue({ id: 'c1', organizationId: 'org1', title: 'Founding a business', isActive: false });
+      await request(app).get('/api/courses/founding-a-business').set(as('invitee')).expect(404);
+      await request(app).get('/api/courses/c1/builder').set(as('invitee')).expect(403);
+      await request(app).patch('/api/courses/c1').set(as('invitee')).send({ description: 'Mine now' }).expect(403);
+      expect(prisma.course.update).not.toHaveBeenCalled();
+    });
   });
 
   describe('a draft is not public', () => {
@@ -167,52 +193,103 @@ describe('Courses: drafts, the publish gate, certificates', () => {
   });
 
   describe('an issued certificate keeps the name it was earned under', () => {
-    it('refuses to rename a course that has issued certificates', async () => {
+    it('lets a course with issued certificates be renamed, after giving any certificate without its own copy the old name', async () => {
       prisma.course.findUnique.mockImplementation(async ({ select }: any) =>
-        select?._count
-          ? { title: 'Bookkeeping Foundations', providerName: null, _count: { certificates: 4 } }
+        select?.organization
+          ? { title: 'Bookkeeping Foundations', providerName: null, organization: { name: 'Northside TAFE' } }
           : { id: 'c1', organizationId: 'org1', title: 'Bookkeeping Foundations', isActive: true }
       );
-      const res = await request(app).patch('/api/courses/c1').set(as('teacher')).send({ title: 'Advanced Financial Management' }).expect(409);
-      expect(res.body.message ?? res.body.error).toMatch(/4 certificates/);
-      await request(app).patch('/api/courses/c1').set(as('teacher')).send({ providerName: 'Someone else' }).expect(409);
-      expect(prisma.course.update).not.toHaveBeenCalled();
 
-      // Re-sending the same title is not a rename, and other fields still save.
-      await request(app)
-        .patch('/api/courses/c1')
-        .set(as('teacher'))
-        .send({ title: 'Bookkeeping Foundations', description: 'Updated outline' })
-        .expect(200);
+      await request(app).patch('/api/courses/c1').set(as('teacher')).send({ title: 'Advanced Financial Management' }).expect(200);
+
+      // Only rows with nothing of their own are touched, and they get the name
+      // they were earned under — before the rename, in the same transaction.
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.courseCertificate.updateMany).toHaveBeenCalledWith({
+        where: { courseId: 'c1', courseTitle: null },
+        data: { courseTitle: 'Bookkeeping Foundations' },
+      });
+      expect(prisma.courseCertificate.updateMany).toHaveBeenCalledWith({
+        where: { courseId: 'c1', issuerName: null },
+        data: { issuerName: 'Northside TAFE' },
+      });
+      const renameOrder = prisma.course.update.mock.invocationCallOrder[0];
+      for (const order of prisma.courseCertificate.updateMany.mock.invocationCallOrder) {
+        expect(order).toBeLessThan(renameOrder);
+      }
+      expect(prisma.course.update.mock.calls[0][0].data.title).toBe('Advanced Financial Management');
     });
 
-    it('renames freely while no certificate exists', async () => {
-      prisma.course.findUnique.mockImplementation(async ({ select }: any) =>
-        select?._count
-          ? { title: 'Old', providerName: null, _count: { certificates: 0 } }
-          : { id: 'c1', organizationId: 'org1', title: 'Old', isActive: false }
-      );
-      await request(app).patch('/api/courses/c1').set(as('teacher')).send({ title: 'New' }).expect(200);
-      expect(prisma.course.update.mock.calls[0][0].data.title).toBe('New');
+    it('leaves the certificates alone when nothing that names the course changes', async () => {
+      prisma.course.findUnique.mockResolvedValue({ id: 'c1', organizationId: 'org1', title: 'Old', isActive: false });
+      await request(app).patch('/api/courses/c1').set(as('teacher')).send({ description: 'Updated outline' }).expect(200);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.courseCertificate.updateMany).not.toHaveBeenCalled();
     });
 
-    it('names the provider organisation in the learner’s own wallet, as the public check does', async () => {
+    it('shows the learner what her certificate says, not what the course is called today', async () => {
       prisma.courseCertificate.findMany.mockResolvedValue([
         {
           id: 'cert1',
           code: 'ABCDE12345',
           issuedAt: new Date('2026-09-01'),
-          course: { id: 'c1', title: 'Founding', slug: 'founding', providerName: null, type: 'short_course', durationMonths: 1, organization: { name: 'Northside TAFE' } },
+          courseTitle: 'Bookkeeping Foundations',
+          issuerName: 'Northside TAFE',
+          course: {
+            id: 'c1',
+            title: 'Advanced Financial Management',
+            slug: 'founding',
+            providerName: 'Somebody Else',
+            type: 'short_course',
+            durationMonths: 1,
+            isActive: false,
+            organization: { name: 'Renamed Org' },
+          },
         },
         {
           id: 'cert2',
           code: 'FFFFF00000',
           issuedAt: new Date('2026-08-01'),
-          course: { id: 'c2', title: 'Staff course', slug: 'staff', providerName: null, type: null, durationMonths: null, organization: null },
+          courseTitle: null,
+          issuerName: null,
+          course: { id: 'c2', title: 'Founding', slug: 'f', providerName: null, type: null, durationMonths: null, isActive: true, organization: { name: 'Northside TAFE' } },
+        },
+        {
+          id: 'cert3',
+          code: 'EEEEE00000',
+          issuedAt: new Date('2026-07-01'),
+          courseTitle: null,
+          issuerName: null,
+          course: { id: 'c3', title: 'Staff course', slug: 'staff', providerName: null, type: null, durationMonths: null, isActive: true, organization: null },
         },
       ]);
       const res = await request(app).get('/api/courses/me/certificates').set(as('learner')).expect(200);
-      expect(res.body.data.map((c: any) => c.provider)).toEqual(['Northside TAFE', 'ATHENA']);
+      expect(res.body.data[0]).toMatchObject({
+        provider: 'Northside TAFE',
+        course: { title: 'Bookkeeping Foundations', listed: false, listedAs: 'Advanced Financial Management' },
+      });
+      // A row with no copy of its own falls back to the course, named the way
+      // the public check names it.
+      expect(res.body.data.map((c: any) => c.provider)).toEqual(['Northside TAFE', 'Northside TAFE', 'ATHENA']);
+      expect(res.body.data[1].course.listedAs).toBeNull();
+    });
+  });
+
+  describe('taking a course down', () => {
+    it('records the staff member who unpublished a provider’s course, and tells the provider’s team', async () => {
+      prisma.course.findUnique.mockResolvedValue({ id: 'c1', organizationId: 'org1', title: 'Founding a business', isActive: true });
+      prisma.organizationMember.findMany.mockResolvedValue([{ userId: 'teacher' }]);
+
+      await request(app).patch('/api/courses/c1').set(as('staff', 'ADMIN')).send({ isActive: false }).expect(200);
+
+      expect(prisma.course.update.mock.calls[0][0].data).toEqual({ isActive: false });
+      const audit = prisma.auditLog.create.mock.calls[0][0].data;
+      expect(audit.metadata).toMatchObject({ adminAction: 'COURSE_UNPUBLISHED', resourceId: 'c1' });
+      // Only accepted members who can manage listings are told.
+      expect(prisma.organizationMember.findMany.mock.calls[0][0].where).toMatchObject({
+        organizationId: 'org1',
+        acceptedAt: { not: null },
+      });
     });
   });
 
