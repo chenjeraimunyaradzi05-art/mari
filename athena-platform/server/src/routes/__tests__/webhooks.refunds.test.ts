@@ -94,6 +94,43 @@ describe('Refunds, disputes and failed renewals', () => {
     expect(sendEmail).toHaveBeenCalledTimes(1);
   });
 
+  it('never sends a dispute to a mailbox ATHENA does not own when none is configured', async () => {
+    // The fallback used to be trust-safety@athena.com, a domain the venture
+    // does not own, so dispute ids and amounts went to a stranger.
+    const saved = { ...process.env };
+    delete process.env.TRUST_SAFETY_EMAIL;
+    delete process.env.CONTACT_DOMAIN;
+    delete process.env.NEXT_PUBLIC_CONTACT_DOMAIN;
+    try {
+      await deliver({
+        id: 'evt_d3',
+        type: 'charge.dispute.created',
+        data: { object: { id: 'dp_2', payment_intent: 'pi_9', amount: 12000, currency: 'aud', reason: 'fraudulent', status: 'needs_response' } },
+      }).expect(200);
+      expect(sendEmail).not.toHaveBeenCalled();
+    } finally {
+      process.env = saved;
+    }
+  });
+
+  it('falls back to ATHENA\'s own support mailbox, and scales a zero-decimal amount correctly', async () => {
+    const saved = { ...process.env };
+    delete process.env.TRUST_SAFETY_EMAIL;
+    process.env.CONTACT_DOMAIN = 'athena.example';
+    try {
+      await deliver({
+        id: 'evt_d4',
+        type: 'charge.dispute.created',
+        data: { object: { id: 'dp_3', payment_intent: 'pi_9', amount: 15000, currency: 'jpy', reason: 'fraudulent', status: 'needs_response' } },
+      }).expect(200);
+      const mail = (sendEmail as any).mock.calls[0][0];
+      expect(mail.to).toBe('support@athena.example');
+      expect(mail.text).toContain('15000 JPY');
+    } finally {
+      process.env = saved;
+    }
+  });
+
   it('a failed renewal marks the subscription past due and tells the member how to fix it', async () => {
     prisma.subscription.findFirst.mockResolvedValue({ id: 'sub-1', stripeCustomerId: 'cus_1', user: { email: 'sarah@example.com', firstName: 'Sarah' } });
     prisma.subscription.update.mockResolvedValue({});

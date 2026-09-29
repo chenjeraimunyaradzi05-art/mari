@@ -33,6 +33,9 @@ import {
   listFormationQueue,
   refundFormationFee,
 } from '../services/formation.service';
+import { recordAdminAction } from '../services/admin-audit.service';
+import { prisma } from '../utils/prisma';
+import { bestEffort } from '../utils/best-effort';
 
 const router = Router();
 
@@ -121,6 +124,33 @@ router.post('/formation/:id/decision', ...adminOnly, async (req: AuthRequest, re
       certificateUrl: input.certificateUrl,
     });
 
+    // A formation decision approves or refuses a paid registration, and a
+    // rejection hands money back, yet neither wrote an audit row: the state
+    // history said what happened to the registration, and nothing said which
+    // member of staff did it. Written after the decision has committed, so the
+    // row only ever claims what happened. The note is left out on purpose; it
+    // is free text about her and is kept on the registration itself.
+    const applicantId = result.registration?.userId ?? null;
+    await recordAdminAction(req, 'COMPANY_FORMATION_DECIDED', {
+      resourceType: 'BusinessRegistration',
+      resourceId: req.params.id,
+      targetUserId: applicantId,
+      decision: input.decision,
+      from: result.previousState,
+      to: result.currentState,
+      refund: result.refund?.status ?? null,
+    });
+    if (result.refund?.status === 'refunded') {
+      await recordAdminAction(req, 'COMPANY_FORMATION_FEE_REFUNDED', {
+        resourceType: 'BusinessRegistration',
+        resourceId: req.params.id,
+        targetUserId: applicantId,
+        amountCents: result.refund.amountCents,
+        refundId: result.refund.refundId,
+        via: 'REJECT',
+      });
+    }
+
     res.json({
       success: true,
       data: {
@@ -151,6 +181,31 @@ router.post('/formation/:id/refund', ...adminOnly, async (req: AuthRequest, res:
     const refund = await refundFormationFee(req.params.id, note);
     if (refund.status === 'unavailable') {
       throw new ApiError(502, `The fee could not be refunded: ${refund.reason}`);
+    }
+
+    // Only a refund that moved money this time is recorded as one; an
+    // already-refunded or never-paid registration answers without a new row,
+    // so the log does not show the same fee going back twice.
+    if (refund.status === 'refunded') {
+      // Read after the refund, because refundFormationFee does not hand the
+      // registration back. A failed read costs the row its target, not the row.
+      const applicant = await bestEffort(
+        'admin-formation.refund-applicant',
+        () =>
+          prisma.businessRegistration.findUnique({
+            where: { id: req.params.id },
+            select: { userId: true },
+          }),
+        null
+      );
+      await recordAdminAction(req, 'COMPANY_FORMATION_FEE_REFUNDED', {
+        resourceType: 'BusinessRegistration',
+        resourceId: req.params.id,
+        targetUserId: applicant?.userId ?? null,
+        amountCents: refund.amountCents,
+        refundId: refund.refundId,
+        via: 'REFUND_ONLY',
+      });
     }
 
     res.json({ success: true, data: refund });

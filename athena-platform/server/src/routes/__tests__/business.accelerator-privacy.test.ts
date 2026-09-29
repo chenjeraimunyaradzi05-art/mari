@@ -69,7 +69,10 @@ describe('Accelerator cohort detail keeps the roster private', () => {
 
     const include = prisma.acceleratorCohort.findUnique.mock.calls[0][0].include;
     expect(include.enrollments).toBeUndefined();
-    expect(include._count).toEqual({ select: { enrollments: true } });
+    // A filtered count — only the places that hold a seat — and still a count:
+    // no row, and so no name, comes back.
+    expect(Object.keys(include._count.select)).toEqual(['enrollments']);
+    expect(Object.keys(include._count.select.enrollments)).toEqual(['where']);
 
     expect(res.body.data.enrollments).toBeUndefined();
     // The count is the only thing the response ever derived from them.

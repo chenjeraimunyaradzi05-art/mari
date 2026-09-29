@@ -219,16 +219,122 @@ describe('Accelerator enrol and progress (business routes)', () => {
     expect(prisma.acceleratorEnrollment.update.mock.calls[0][0].data.status).toBeUndefined();
   });
 
-  it('never makes a place that has ended COMPLETED, however many weeks are ticked', async () => {
+  it('records no more weeks against a place that has ended', async () => {
     const twoDone = { weeks: [1, 2].map((n) => ({ weekNumber: n, completedAt: new Date().toISOString() })) };
     prisma.acceleratorEnrollment.findUnique.mockResolvedValue(enrolmentRow({ status: 'DROPPED', deliverables: twoDone, cohort: endedCohort }));
-    await request(app).post('/api/business/accelerators/enrollments/e1/progress').set(member).send({ weekNumber: 3 }).expect(200);
-    expect(prisma.acceleratorEnrollment.update.mock.calls[0][0].data.status).toBeUndefined();
+    const res = await request(app).post('/api/business/accelerators/enrollments/e1/progress').set(member).send({ weekNumber: 3 }).expect(400);
+    expect(res.body.message).toMatch(/place has ended/);
+    expect(prisma.acceleratorEnrollment.update).not.toHaveBeenCalled();
+  });
+
+  it('records no weeks at all in a cohort that was cancelled', async () => {
+    prisma.acceleratorEnrollment.findUnique.mockResolvedValue(
+      enrolmentRow({ cohort: { ...endedCohort, status: 'CANCELLED' } })
+    );
+    await request(app).post('/api/business/accelerators/enrollments/e1/progress').set(member).send({ weekNumber: 1 }).expect(400);
+    expect(prisma.acceleratorEnrollment.update).not.toHaveBeenCalled();
   });
 
   it('keeps one founder out of another founder’s place', async () => {
     prisma.acceleratorEnrollment.findUnique.mockResolvedValue(enrolmentRow({ userId: 'someone-else', cohort: endedCohort }));
     await request(app).post('/api/business/accelerators/enrollments/e1/progress').set(member).send({ weekNumber: 1 }).expect(403);
     await request(app).get('/api/business/accelerators/enrollments/e1/progress').set(member).expect(403);
+  });
+});
+
+// Every row used to count against the cap, so unpaid clicks held seats for
+// ever, and a founder had no way to leave a cohort she had joined.
+describe('Accelerator seats and withdrawals (business routes)', () => {
+  type SeatRow = { status: string; paymentStatus: string; enrolledAt: Date };
+
+  /**
+   * A cohort whose seat count is worked out from `rows` with the filter the
+   * route actually sends, so the test fails if the filter stops excluding what
+   * it should.
+   */
+  function cohortWithPlaces(rows: SeatRow[], over: Record<string, unknown> = {}) {
+    prisma.acceleratorCohort.findUnique.mockImplementation(async (args: any) => {
+      const where = args?.include?._count?.select?.enrollments?.where;
+      const recent = where?.OR?.find((branch: any) => branch.enrolledAt)?.enrolledAt?.gte as Date | undefined;
+      const holding = rows.filter(
+        (r) =>
+          r.status !== 'DROPPED' &&
+          (r.paymentStatus === 'PAID' ||
+            (r.paymentStatus !== 'REFUNDED' && recent !== undefined && r.enrolledAt >= recent))
+      );
+      return { id: 'c1', name: 'Summer 2026', status: 'ENROLLING', maxParticipants: 30, _count: { enrollments: holding.length }, ...over };
+    });
+  }
+
+  const stale = (n: number): SeatRow[] =>
+    Array.from({ length: n }, () => ({ status: 'PENDING', paymentStatus: 'PENDING', enrolledAt: new Date(Date.now() - 8 * DAY) }));
+  const fresh = (n: number): SeatRow[] =>
+    Array.from({ length: n }, () => ({ status: 'PENDING', paymentStatus: 'PENDING', enrolledAt: new Date(Date.now() - DAY) }));
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.acceleratorEnrollment.findUnique.mockResolvedValue(null);
+  });
+
+  it('does not let thirty unpaid places older than a week fill a thirty-seat cohort', async () => {
+    cohortWithPlaces(stale(30));
+    await request(app).post('/api/business/accelerators/c1/enroll').set(member).expect(201);
+    expect(prisma.acceleratorEnrollment.create).toHaveBeenCalled();
+  });
+
+  it('still counts unpaid places inside their first week, and every paid one', async () => {
+    cohortWithPlaces([...fresh(20), ...Array.from({ length: 10 }, () => ({ status: 'ACTIVE', paymentStatus: 'PAID', enrolledAt: new Date(Date.now() - 60 * DAY) }))]);
+    const res = await request(app).post('/api/business/accelerators/c1/enroll').set(member).expect(400);
+    expect(res.body.message).toMatch(/full/);
+  });
+
+  it('reports the seats that are really left', async () => {
+    cohortWithPlaces([...stale(25), ...fresh(4)]);
+    const res = await request(app).get('/api/business/accelerators/c1').set(member).expect(200);
+    expect(res.body.data.spotsRemaining).toBe(26);
+  });
+
+  it('lets a founder rejoin a cohort she left without paying', async () => {
+    cohortWithPlaces([]);
+    prisma.acceleratorEnrollment.findUnique.mockResolvedValue({ id: 'e-old', status: 'DROPPED', paymentStatus: 'PENDING' });
+    await request(app).post('/api/business/accelerators/c1/enroll').set(member).expect(201);
+    expect(prisma.acceleratorEnrollment.delete).toHaveBeenCalledWith({ where: { id: 'e-old' } });
+    expect(prisma.acceleratorEnrollment.create).toHaveBeenCalled();
+  });
+
+  it('does not clear a paid place that is waiting on its refund', async () => {
+    cohortWithPlaces([]);
+    prisma.acceleratorEnrollment.findUnique.mockResolvedValue({ id: 'e-old', status: 'DROPPED', paymentStatus: 'PAID' });
+    await request(app).post('/api/business/accelerators/c1/enroll').set(member).expect(409);
+    expect(prisma.acceleratorEnrollment.delete).not.toHaveBeenCalled();
+  });
+
+  it('frees the seat at once when a founder leaves a place she has not paid for', async () => {
+    prisma.acceleratorEnrollment.findUnique.mockResolvedValue(
+      enrolmentRow({ status: 'PENDING', paymentStatus: 'PENDING', paymentId: null })
+    );
+    const res = await request(app).post('/api/business/accelerators/enrollments/e1/withdraw').set(member).expect(200);
+    expect(prisma.acceleratorEnrollment.delete).toHaveBeenCalledWith({ where: { id: 'e1' } });
+    expect(res.body.message).toMatch(/not been charged/);
+  });
+
+  it('ends a paid place and tells the team her fee needs a decision, without promising a refund', async () => {
+    prisma.acceleratorEnrollment.findUnique.mockResolvedValue(enrolmentRow({ status: 'ACTIVE', paymentStatus: 'PAID' }));
+    const res = await request(app).post('/api/business/accelerators/enrollments/e1/withdraw').set(member).expect(200);
+    expect(prisma.acceleratorEnrollment.update.mock.calls[0][0]).toEqual({ where: { id: 'e1' }, data: { status: 'DROPPED' } });
+    expect(prisma.acceleratorEnrollment.delete).not.toHaveBeenCalled();
+    const notice = prisma.notification.createMany.mock.calls[0][0].data[0];
+    expect(notice.data).toMatchObject({ kind: 'ACCELERATOR_WITHDRAWAL_REFUND_DUE', enrollmentId: 'e1' });
+    expect(res.body.message).not.toMatch(/will be refunded/);
+  });
+
+  it('keeps a founder out of another founder’s place, and out of a completed one', async () => {
+    prisma.acceleratorEnrollment.findUnique.mockResolvedValue(enrolmentRow({ userId: 'someone-else' }));
+    await request(app).post('/api/business/accelerators/enrollments/e1/withdraw').set(member).expect(403);
+
+    prisma.acceleratorEnrollment.findUnique.mockResolvedValue(enrolmentRow({ status: 'COMPLETED' }));
+    await request(app).post('/api/business/accelerators/enrollments/e1/withdraw').set(member).expect(400);
+    expect(prisma.acceleratorEnrollment.delete).not.toHaveBeenCalled();
+    expect(prisma.acceleratorEnrollment.update).not.toHaveBeenCalled();
   });
 });

@@ -21,7 +21,7 @@ jest.mock('../../utils/prisma', () => ({
     mentorSession: { update: jest.fn(), findFirst: jest.fn(async () => null) },
     businessRegistration: { findUnique: jest.fn(async () => null), findFirst: jest.fn(async () => null), update: jest.fn() },
     acceleratorEnrollment: { findUnique: jest.fn(async () => null), update: jest.fn() },
-    creatorPayout: { findFirst: jest.fn(), update: jest.fn() },
+    creatorPayout: { findFirst: jest.fn(), update: jest.fn(), updateMany: jest.fn(async () => ({ count: 0 })) },
     creatorProfile: { update: jest.fn() },
     user: { findMany: jest.fn(async () => []) },
     notification: { createMany: jest.fn() },
@@ -259,5 +259,38 @@ describe('A creator payout transfer reaches its end state', () => {
     await deliver(transferEvent('transfer.created')).expect(500);
 
     expect(prisma.stripeWebhookEvent.delete).toHaveBeenCalledWith({ where: { id: 'evt_transfer.created_1' } });
+  });
+
+  it('links a payout row that never learned its transfer id, from the transfer metadata, and settles it', async () => {
+    // The row write after transfers.create failed, so no row carries tr_1.
+    // Without the fallback this event failed on every delivery for good.
+    prisma.creatorPayout.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: 'payout-7', status: 'PENDING', amount: 90, creatorProfileId: 'profile-1' });
+    prisma.creatorPayout.updateMany.mockResolvedValueOnce({ count: 1 });
+
+    await deliver(
+      transferEvent('transfer.created', { metadata: { type: 'creator_payout', userId: 'creator-1', payoutId: 'payout-7' } })
+    ).expect(200);
+
+    expect(prisma.creatorPayout.updateMany).toHaveBeenCalledWith({
+      where: { id: 'payout-7', stripeTransferId: null },
+      data: { stripeTransferId: 'tr_1' },
+    });
+    expect(prisma.creatorPayout.update).toHaveBeenCalledWith({
+      where: { id: 'payout-7' },
+      data: { status: 'COMPLETED', completedAt: new Date(1_760_000_500 * 1000) },
+    });
+  });
+
+  it('never re-points a payout that is already linked to a different transfer', async () => {
+    prisma.creatorPayout.findFirst.mockResolvedValue(null);
+    prisma.creatorPayout.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    await deliver(
+      transferEvent('transfer.created', { metadata: { type: 'creator_payout', userId: 'creator-1', payoutId: 'payout-8' } })
+    ).expect(500);
+
+    expect(prisma.creatorPayout.update).not.toHaveBeenCalled();
   });
 });

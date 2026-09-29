@@ -36,6 +36,10 @@ jest.mock('../src/utils/prisma', () => ({
       create: jest.fn(),
     },
     user: { findUnique: jest.fn() },
+    // The generic capture and cancel routes now refuse a hold that belongs to a
+    // flow of its own — a mentor session, a car purchase — so they look for the
+    // session behind the intent first. None here: these are generic holds.
+    mentorSession: { findUnique: jest.fn(async () => null) },
   },
 }));
 

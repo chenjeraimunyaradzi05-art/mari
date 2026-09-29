@@ -51,6 +51,7 @@ import {
   cancelEscrowPayment,
   getEarningsDashboard,
   resolveLapsedEscrowHold,
+  adoptUnledgeredMentorSessionHold,
   PLATFORM_ESCROW_ACTOR,
 } from '../stripe-connect.service';
 
@@ -246,13 +247,52 @@ describe('Giving a hold back', () => {
     stripe.refunds.create.mockResolvedValue({ id: 're_1' });
     prisma.escrowPayment.update.mockResolvedValue({});
 
-    const result = await cancelEscrowPayment('pi_1', BUYER, 'not delivered');
+    const result = await cancelEscrowPayment('pi_1', PLATFORM_ESCROW_ACTOR, 'not delivered');
 
     expect(result).toEqual({ status: 'refunded' });
     expect(stripe.refunds.create).toHaveBeenCalledWith(
       expect.objectContaining({ payment_intent: 'pi_1' }),
       // Two presses of the same button inside Stripe's idempotency window are
       // one refund, not two.
+      { idempotencyKey: 'escrow-refund-escrow-1' }
+    );
+  });
+
+  it('will not let a member refund a payment that has already been released to the seller', async () => {
+    // Either party could cancel a CAPTURED hold, and the refund came out of
+    // ATHENA's balance while the seller kept the transfer: a buyer could
+    // release and then cancel, a seller could be paid and then cancel, and the
+    // platform paid both times.
+    prisma.escrowPayment.findUnique.mockResolvedValue(escrowRow({ status: 'CAPTURED' }));
+    stripe.paymentIntents.retrieve.mockResolvedValue({
+      id: 'pi_1',
+      status: 'succeeded',
+      latest_charge: { id: 'ch_1', refunded: false },
+    });
+
+    for (const member of [BUYER, SELLER]) {
+      await expect(cancelEscrowPayment('pi_1', member)).rejects.toMatchObject({ statusCode: 409 });
+    }
+    expect(stripe.refunds.create).not.toHaveBeenCalled();
+    expect(prisma.escrowPayment.update).not.toHaveBeenCalled();
+  });
+
+  it('takes a refund of a released payment back from the seller and the fee, not from ATHENA alone', async () => {
+    prisma.escrowPayment.findUnique.mockResolvedValue(escrowRow({ status: 'CAPTURED' }));
+    stripe.paymentIntents.retrieve.mockResolvedValue({
+      id: 'pi_1',
+      status: 'succeeded',
+      transfer_data: { destination: 'acct_seller' },
+      application_fee_amount: 3750,
+      latest_charge: { id: 'ch_1', refunded: false },
+    });
+    stripe.refunds.create.mockResolvedValue({ id: 're_1' });
+    prisma.escrowPayment.update.mockResolvedValue({});
+
+    await cancelEscrowPayment('pi_1', PLATFORM_ESCROW_ACTOR, 'dispute upheld');
+
+    expect(stripe.refunds.create).toHaveBeenCalledWith(
+      expect.objectContaining({ payment_intent: 'pi_1', reverse_transfer: true, refund_application_fee: true }),
       { idempotencyKey: 'escrow-refund-escrow-1' }
     );
   });
@@ -300,7 +340,7 @@ describe('Giving a hold back', () => {
     stripe.refunds.create.mockResolvedValue({ id: 're_1' });
     prisma.escrowPayment.update.mockRejectedValue(new Error('database is down'));
 
-    const result = await cancelEscrowPayment('pi_1', BUYER);
+    const result = await cancelEscrowPayment('pi_1', PLATFORM_ESCROW_ACTOR);
 
     expect(result).toEqual({ status: 'refunded' });
   });
@@ -474,5 +514,101 @@ describe('Settling a hold that has outlived its authorisation', () => {
     expect(await resolveLapsedEscrowHold('pi_1')).toEqual({ state: 'unpaid' });
 
     expect(prisma.escrowPayment.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+// Mentor sessions booked before mentoring wrote escrow rows could be warned
+// about and nothing more: capturing one early would have moved money with no
+// ledger row, and a cancelled one could not be released through escrow at all.
+describe('Giving a legacy mentor session the escrow row it never had', () => {
+  const legacySession = {
+    id: 'session-legacy',
+    menteeId: 'mentee-1',
+    mentorUserId: 'mentor-user-1',
+    mentorProfileId: 'mentor-profile-1',
+    stripePaymentIntentId: 'pi_legacy',
+    paymentCapturedAt: null,
+    paymentCanceledAt: null,
+  };
+
+  it('writes the row from what Stripe says, including when the authorisation clock started', async () => {
+    stripe.paymentIntents.retrieve.mockResolvedValue({
+      id: 'pi_legacy',
+      status: 'requires_capture',
+      amount: 18000,
+      application_fee_amount: 2700,
+      currency: 'aud',
+      created: 1789000000,
+      metadata: { type: 'mentor_session', sessionId: 'session-legacy' },
+    });
+    prisma.escrowPayment.create.mockResolvedValue({ id: 'escrow-new' });
+
+    const wrote = await adoptUnledgeredMentorSessionHold(legacySession);
+
+    expect(wrote).toBe(true);
+    const [{ data }] = prisma.escrowPayment.create.mock.calls[0];
+    expect(data).toMatchObject({
+      paymentIntentId: 'pi_legacy',
+      buyerId: 'mentee-1',
+      sellerId: 'mentor-user-1',
+      amount: 18000,
+      platformFee: 2700,
+      currency: 'aud',
+      status: 'AUTHORIZED',
+      sessionType: 'mentor_session',
+      createdAt: new Date(1789000000 * 1000),
+    });
+  });
+
+  it('records a lapsed legacy hold as cancelled rather than held', async () => {
+    stripe.paymentIntents.retrieve.mockResolvedValue({
+      id: 'pi_legacy',
+      status: 'canceled',
+      cancellation_reason: 'automatic',
+      canceled_at: 1789600000,
+      amount: 18000,
+      application_fee_amount: 2700,
+      currency: 'aud',
+      created: 1789000000,
+      metadata: { sessionId: 'session-legacy' },
+    });
+    prisma.escrowPayment.create.mockResolvedValue({ id: 'escrow-new' });
+
+    await adoptUnledgeredMentorSessionHold(legacySession);
+
+    const [{ data }] = prisma.escrowPayment.create.mock.calls[0];
+    expect(data).toMatchObject({
+      status: 'CANCELED',
+      canceledAt: new Date(1789600000 * 1000),
+      cancelReason: 'The card authorisation lapsed before the payment was released',
+    });
+  });
+
+  it('refuses an intent that belongs to a different session', async () => {
+    stripe.paymentIntents.retrieve.mockResolvedValue({
+      id: 'pi_legacy',
+      status: 'requires_capture',
+      amount: 18000,
+      currency: 'aud',
+      created: 1789000000,
+      metadata: { sessionId: 'somebody-elses-session' },
+    });
+
+    await expect(adoptUnledgeredMentorSessionHold(legacySession)).rejects.toThrow(/not adopting it/);
+    expect(prisma.escrowPayment.create).not.toHaveBeenCalled();
+  });
+
+  it('treats a row another run wrote first as nothing to do', async () => {
+    stripe.paymentIntents.retrieve.mockResolvedValue({
+      id: 'pi_legacy',
+      status: 'requires_capture',
+      amount: 18000,
+      currency: 'aud',
+      created: 1789000000,
+      metadata: {},
+    });
+    prisma.escrowPayment.create.mockRejectedValue(Object.assign(new Error('unique'), { code: 'P2002' }));
+
+    expect(await adoptUnledgeredMentorSessionHold(legacySession)).toBe(false);
   });
 });

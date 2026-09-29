@@ -1,12 +1,16 @@
 import { Router, Response, NextFunction } from 'express';
-import { body, param, query, validationResult } from 'express-validator';
+import { body, validationResult } from 'express-validator';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
 import { parsePagination, buildPaginationMeta } from '../utils/pagination';
+import { InsuranceType, Prisma } from '@prisma/client';
 
 const router = Router();
+
+const isInsuranceType = (value: string): value is InsuranceType =>
+  (Object.values(InsuranceType) as string[]).includes(value);
 
 // ===========================================
 // SAVINGS GOALS
@@ -265,16 +269,26 @@ router.patch(
 // ===========================================
 
 // GET /api/finance/insurance - List insurance products
+//
+// The type filter is checked against the enum before it reaches Prisma. The
+// insurance page offered "Disability" and "Renters", which are not insurance
+// types this schema has, and passing either straight into the query failed it
+// with a 500 — so choosing a filter emptied the page into "failed to load".
 router.get('/insurance', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { type } = req.query;
     const { page, limit, skip } = parsePagination(req.query as { page?: string; limit?: string });
 
-    const where: any = {
+    const where: Prisma.InsuranceProductWhereInput = {
       isActive: true,
     };
 
-    if (type) where.type = type;
+    if (type !== undefined && type !== '') {
+      if (typeof type !== 'string' || !isInsuranceType(type)) {
+        throw new ApiError(400, `type must be one of ${Object.values(InsuranceType).join(', ')}`);
+      }
+      where.type = type;
+    }
 
     const [products, total] = await Promise.all([
       prisma.insuranceProduct.findMany({
@@ -348,8 +362,10 @@ router.post(
         where: { productId_userId: { productId: id, userId } },
       });
 
+      // Worded as a saved draft, because that is all this route creates: the
+      // row is written DRAFT and nothing sends it to the insurer.
       if (existing) {
-        throw new ApiError(409, 'You have already applied for this product');
+        throw new ApiError(409, 'You already have a saved application for this product');
       }
 
       const application = await prisma.insuranceApplication.create({

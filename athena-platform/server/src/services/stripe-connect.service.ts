@@ -532,11 +532,14 @@ export async function createEscrowPayment(input: EscrowPaymentInput): Promise<{
       transfer_data: {
         destination: sellerAccountId,
       },
+      // The caller's metadata first and the parties last, so that nothing a
+      // caller passes can rename who is paying whom. The webhook and the
+      // reconciliation both read these three keys as the truth about the hold.
       metadata: {
+        ...input.metadata,
         buyerId: input.buyerId,
         sellerId: input.sellerId,
         sessionType: input.sessionType || 'mentor_session',
-        ...input.metadata,
       },
       description: input.description,
     });
@@ -819,7 +822,11 @@ export async function captureEscrowPayment(
  */
 async function readReturnStateAtStripe(
   paymentIntentId: string
-): Promise<{ state: 'already_returned'; as: 'refunded' | 'canceled' } | { state: 'refundable' } | { state: 'cancelable' }> {
+): Promise<
+  | { state: 'already_returned'; as: 'refunded' | 'canceled' }
+  | { state: 'refundable'; reverseTransfer: boolean; refundApplicationFee: boolean }
+  | { state: 'cancelable' }
+> {
   const intent = await getStripe().paymentIntents.retrieve(paymentIntentId, {
     expand: ['latest_charge'],
   });
@@ -837,7 +844,23 @@ async function readReturnStateAtStripe(
     const refunded =
       charge !== null && typeof charge === 'object' ? charge.refunded : false;
 
-    return refunded ? { state: 'already_returned', as: 'refunded' } : { state: 'refundable' };
+    if (refunded) return { state: 'already_returned', as: 'refunded' };
+
+    // What the refund has to undo besides the charge itself. Every hold made
+    // by createEscrowPayment is a destination charge, so once it is captured
+    // the seller's share has already been transferred to her connected
+    // account and ATHENA's fee sits in the platform balance. Stripe's default
+    // refund takes the whole amount out of the platform balance and leaves the
+    // transfer where it is, so each refund of a released payment used to be
+    // paid by ATHENA while the seller kept the money. Asked for only when the
+    // intent actually carries a transfer and a fee, because an intent made
+    // some other way has nothing to reverse.
+    return {
+      state: 'refundable',
+      reverseTransfer: Boolean(intent.transfer_data?.destination),
+      refundApplicationFee:
+        typeof intent.application_fee_amount === 'number' && intent.application_fee_amount > 0,
+    };
   }
 
   return { state: 'cancelable' };
@@ -891,12 +914,31 @@ export async function cancelEscrowPayment(
     return { status: at.as };
   }
 
+  // A hold that has been captured is no longer a hold: the seller has been paid
+  // out of it. "Either party backing out is safe" is true of money that is
+  // still only authorised, and it was being applied to money that had already
+  // moved — so a buyer could release a payment, then cancel it from the same
+  // route and be refunded, and a seller could do the same after being paid,
+  // with the refund coming out of ATHENA's balance both times. Undoing a
+  // completed sale is a decision for ATHENA's team, who can see both sides of
+  // it; the platform flows that are authorised elsewhere act as ADMIN too.
+  // Asked after Stripe rather than from the row, so a member whose money has
+  // already gone back still gets her row repaired above rather than a refusal.
+  if (at.state === 'refundable' && actor.role !== 'ADMIN') {
+    throw new ApiError(
+      409,
+      'This payment has already been released to the seller, so it cannot be cancelled here. If something went wrong, contact ATHENA support and the team will look at a refund with you.'
+    );
+  }
+
   try {
     if (at.state === 'refundable') {
       await getStripe().refunds.create(
         {
           payment_intent: paymentIntentId,
           reason: 'requested_by_customer',
+          ...(at.reverseTransfer ? { reverse_transfer: true } : {}),
+          ...(at.refundApplicationFee ? { refund_application_fee: true } : {}),
         },
         {
           // Derived from the escrow row rather than generated, so that two
@@ -1033,6 +1075,123 @@ export async function resolveLapsedEscrowHold(paymentIntentId: string): Promise<
   }
 
   return { state: 'unpaid' };
+}
+
+/** A mentor session booked before mentoring wrote escrow rows, and whose hold therefore has none. */
+export interface UnledgeredMentorSession {
+  id: string;
+  menteeId: string;
+  mentorUserId: string;
+  stripePaymentIntentId: string;
+  mentorProfileId: string;
+  paymentCapturedAt: Date | null;
+  paymentCanceledAt: Date | null;
+}
+
+/** What an escrow row should say for a payment intent in each of Stripe's states. */
+function escrowStatusForIntent(status: Stripe.PaymentIntent.Status): 'PENDING' | 'AUTHORIZED' | 'CAPTURED' | 'CANCELED' {
+  switch (status) {
+    case 'requires_capture':
+      return 'AUTHORIZED';
+    case 'succeeded':
+      return 'CAPTURED';
+    case 'canceled':
+      return 'CANCELED';
+    default:
+      // requires_payment_method, requires_confirmation, requires_action and
+      // processing: nothing is held on her card yet.
+      return 'PENDING';
+  }
+}
+
+/**
+ * Writes the escrow row a legacy mentor session never had, from what Stripe
+ * says about its payment intent.
+ *
+ * Mentoring used to take its holds through a PaymentIntent of its own and write
+ * no EscrowPayment row. The expiry sweep could see those sessions but could do
+ * nothing for them except warn: capturing early would have moved money with no
+ * ledger row to say so, and the earnings screen, the statement and the admins
+ * would all have gone on saying it had not moved. Once the row exists the
+ * session goes through the same path as every hold booked since — the early
+ * capture and its checks, the settlement of a lapsed hold, the earnings figures.
+ *
+ * Every figure is Stripe's rather than the session's: the amount and fee the
+ * intent actually carries, and the moment it was created, which is when the
+ * authorisation clock the sweep measures began. An intent whose metadata names
+ * a different session is refused rather than adopted, because attaching money
+ * to the wrong session is worse than leaving it unattached.
+ *
+ * Returns false when there was nothing to do because another run wrote the
+ * row first.
+ */
+export async function adoptUnledgeredMentorSessionHold(session: UnledgeredMentorSession): Promise<boolean> {
+  if (!isStripeConfigured()) {
+    throw new ApiError(503, 'Adopting a legacy mentor session hold requires STRIPE_SECRET_KEY');
+  }
+
+  const intent = await getStripe().paymentIntents.retrieve(session.stripePaymentIntentId);
+
+  const namedSession = typeof intent.metadata?.sessionId === 'string' ? intent.metadata.sessionId : null;
+  if (namedSession && namedSession !== session.id) {
+    throw new Error(
+      `Payment intent ${intent.id} names session ${namedSession}, not ${session.id}; not adopting it`
+    );
+  }
+
+  const status = escrowStatusForIntent(intent.status);
+
+  try {
+    await prisma.escrowPayment.create({
+      data: {
+        paymentIntentId: intent.id,
+        buyerId: session.menteeId,
+        sellerId: session.mentorUserId,
+        amount: intent.amount,
+        platformFee: intent.application_fee_amount ?? 0,
+        currency: intent.currency,
+        status,
+        description: `Mentor session ${session.id}`,
+        sessionType: 'mentor_session',
+        metadata: {
+          type: 'mentor_session',
+          sessionId: session.id,
+          menteeId: session.menteeId,
+          mentorProfileId: session.mentorProfileId,
+          adoptedFromLegacySession: 'true',
+        },
+        createdAt: new Date(intent.created * 1000),
+        capturedAt: status === 'CAPTURED' ? session.paymentCapturedAt ?? new Date() : null,
+        canceledAt:
+          status === 'CANCELED'
+            ? intent.canceled_at
+              ? new Date(intent.canceled_at * 1000)
+              : session.paymentCanceledAt ?? new Date()
+            : null,
+        cancelReason:
+          status === 'CANCELED'
+            ? intent.cancellation_reason === 'automatic'
+              ? 'The card authorisation lapsed before the payment was released'
+              : `Cancelled at Stripe (${intent.cancellation_reason ?? 'no reason given'})`
+            : null,
+      },
+    });
+  } catch (error) {
+    // Another sweep, or a second instance, got there first. The row it wrote
+    // came from the same intent, so there is nothing to add.
+    if ((error as { code?: string })?.code === 'P2002') return false;
+    throw error;
+  }
+
+  logger.info('Wrote the escrow row a legacy mentor session never had', {
+    sessionId: session.id,
+    paymentIntentId: intent.id,
+    status,
+    amount: intent.amount,
+    currency: intent.currency,
+  });
+
+  return true;
 }
 
 /** Holds where the money has moved to the seller. */

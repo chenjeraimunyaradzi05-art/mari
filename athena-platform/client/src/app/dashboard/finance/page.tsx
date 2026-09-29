@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Calculator, Receipt, Package, Banknote, ArrowRight, PiggyBank, Shield, TrendingUp, HeartPulse, Landmark, Home, LifeBuoy, CreditCard, Car } from 'lucide-react';
+import { Calculator, Receipt, Package, Banknote, ArrowRight, PiggyBank, Shield, TrendingUp, HeartPulse, Landmark, Home, LifeBuoy, CreditCard, Car, Wallet } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { RoadmapStrip } from '@/components/strategy/RoadmapStrip';
 
@@ -39,6 +39,12 @@ const tiles = [
     description: 'What ATHENA has charged you, each one a tax invoice as a PDF.',
     href: '/dashboard/finance/invoices',
     icon: Receipt,
+  },
+  {
+    title: 'Payments on hold',
+    description: 'Money held on your card until you confirm you received what you paid for.',
+    href: '/dashboard/finance/holds',
+    icon: Wallet,
   },
   {
     title: 'Savings Goals',

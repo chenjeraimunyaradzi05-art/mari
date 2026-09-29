@@ -50,10 +50,20 @@ jest.mock('../../utils/logger', () => ({
   logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
 
+jest.mock('../../services/admin-audit.service', () => ({
+  ...(jest.requireActual('../../services/admin-audit.service') as object),
+  recordAdminAction: jest.fn(async () => undefined),
+}));
+
 import adminFormationRoutes from '../admin-formation.routes';
 import { prisma as prismaTyped } from '../../utils/prisma';
+import { recordAdminAction } from '../../services/admin-audit.service';
 
 const prisma: any = prismaTyped;
+const auditMock = recordAdminAction as unknown as jest.Mock;
+
+/** The audit verbs written, with their detail, in order. */
+const auditRows = () => auditMock.mock.calls.map((call: any[]) => ({ action: call[1], detail: call[2] }));
 
 function createTestApp() {
   const app = express();
@@ -218,6 +228,97 @@ describe('POST /api/admin/formation/:id/decision', () => {
       .expect(403);
 
     expect(prisma.businessRegistration.update).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  // Formation decisions and fee refunds are staff actions over a member's
+  // money, and neither used to write an audit row.
+  describe('audit trail', () => {
+    it('records who approved a registration, against the applicant', async () => {
+      stubRegistration({ ...submittedCompany(), status: 'UNDER_REVIEW' });
+
+      await request(createTestApp())
+        .post('/api/admin/formation/reg-1/decision')
+        .send({ decision: 'APPROVE', registrationNumber: '0123456789', acn: '004085616' })
+        .expect(200);
+
+      expect(auditRows()).toEqual([
+        {
+          action: 'COMPANY_FORMATION_DECIDED',
+          detail: expect.objectContaining({
+            resourceType: 'BusinessRegistration',
+            resourceId: 'reg-1',
+            targetUserId: 'user-1',
+            decision: 'APPROVE',
+            to: 'APPROVED',
+            refund: null,
+          }),
+        },
+      ]);
+    });
+
+    it('records a rejection and the refund it paid out as two rows, without the note', async () => {
+      stubRegistration({ ...submittedCompany(), status: 'UNDER_REVIEW' });
+
+      await request(createTestApp())
+        .post('/api/admin/formation/reg-1/decision')
+        .send({ decision: 'REJECT', note: 'The company name is already registered to someone else.' })
+        .expect(200);
+
+      const rows = auditRows();
+      expect(rows.map((r) => r.action)).toEqual(['COMPANY_FORMATION_DECIDED', 'COMPANY_FORMATION_FEE_REFUNDED']);
+      expect(rows[0].detail).toMatchObject({ decision: 'REJECT', refund: 'refunded', targetUserId: 'user-1' });
+      expect(rows[1].detail).toMatchObject({ refundId: 're_1', targetUserId: 'user-1' });
+      expect(JSON.stringify(rows)).not.toMatch(/already registered/);
+    });
+
+    it('writes nothing when the decision did not happen', async () => {
+      stubRegistration({ ...submittedCompany(), status: 'UNDER_REVIEW' });
+      refunds.create.mockRejectedValueOnce(new Error('charge already refunded'));
+
+      await request(createTestApp())
+        .post('/api/admin/formation/reg-1/decision')
+        .send({ decision: 'REJECT', note: 'Not eligible' })
+        .expect(502);
+
+      expect(auditMock).not.toHaveBeenCalled();
+    });
+
+    it('records a refund given on its own', async () => {
+      stubRegistration({ ...submittedCompany(), status: 'UNDER_REVIEW' });
+
+      await request(createTestApp())
+        .post('/api/admin/formation/reg-1/refund')
+        .send({ note: 'We cannot register this structure' })
+        .expect(200);
+
+      expect(auditRows()).toEqual([
+        {
+          action: 'COMPANY_FORMATION_FEE_REFUNDED',
+          detail: expect.objectContaining({
+            resourceId: 'reg-1',
+            targetUserId: 'user-1',
+            refundId: 're_1',
+            via: 'REFUND_ONLY',
+          }),
+        },
+      ]);
+    });
+
+    it('does not record a second refund for a fee already given back', async () => {
+      stubRegistration({
+        ...submittedCompany(),
+        status: 'UNDER_REVIEW',
+        data: { paymentId: 'pi_formation', refund: { refundId: 're_1', status: 'refunded' } },
+      });
+
+      await request(createTestApp())
+        .post('/api/admin/formation/reg-1/refund')
+        .send({ note: 'Asked again' })
+        .expect(200);
+
+      expect(auditMock).not.toHaveBeenCalled();
+    });
   });
 });
 

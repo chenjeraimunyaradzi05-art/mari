@@ -818,6 +818,177 @@ export async function recordAcceleratorPaymentFailure(
   });
 }
 
+/**
+ * Makes sure an unpaid place's payment cannot complete after the place is gone.
+ *
+ * A founder withdrawing from a place she has not paid for has the place
+ * deleted, which frees the seat. Her payment intent, though, lives at Stripe
+ * and can still be confirmed from a checkout tab she left open — and a
+ * confirmation for a place that no longer exists lands in the webhook as an
+ * unknown enrollment: her card charged, no place, and nothing on the platform
+ * that would tell anyone. So the intent is cancelled first, and a payment that
+ * is already going through stops the withdrawal instead.
+ *
+ * - `clear`: there is no live intent any more, and the place can go.
+ * - `in_flight`: Stripe has taken, or is taking, the money. The place must stay
+ *   until the webhook settles it.
+ */
+export async function cancelUnpaidAcceleratorIntent(
+  paymentId: string | null
+): Promise<'clear' | 'in_flight'> {
+  // Only a real intent id has anything behind it at Stripe. A free cohort's
+  // place carries none, and a deployment with no Stripe key never created one.
+  if (!paymentId || !paymentId.startsWith('pi_') || !isStripeConfigured()) {
+    return 'clear';
+  }
+
+  const intent = await getStripe().paymentIntents.retrieve(paymentId);
+
+  if (intent.status === 'canceled') return 'clear';
+  if (intent.status === 'succeeded' || intent.status === 'processing' || intent.status === 'requires_capture') {
+    return 'in_flight';
+  }
+
+  try {
+    await getStripe().paymentIntents.cancel(paymentId, { cancellation_reason: 'abandoned' });
+    return 'clear';
+  } catch (error) {
+    // Cancelling races with a confirmation that landed between the read and
+    // the cancel. Read again and let Stripe's answer decide, rather than
+    // deleting a place whose fee may now have been taken.
+    const again = await getStripe().paymentIntents.retrieve(paymentId);
+    if (again.status === 'canceled') return 'clear';
+    logger.warn('Could not cancel an accelerator payment intent on withdrawal', {
+      paymentId,
+      status: again.status,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return 'in_flight';
+  }
+}
+
+export type AcceleratorRefund =
+  | { status: 'refunded'; refundId: string; amountCents: number }
+  | { status: 'already_refunded'; refundId: string | null }
+  | { status: 'nothing_to_refund'; reason: string }
+  | { status: 'unavailable'; reason: string };
+
+/** Whether Stripe refused because the charge has already been given back. */
+function isAlreadyRefunded(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'charge_already_refunded'
+  );
+}
+
+/**
+ * Give an accelerator fee back, through Stripe, and record it.
+ *
+ * Staff used to refund a place by hand in the Stripe dashboard and then type a
+ * reference into the admin screen, so the refund was only as real as what was
+ * typed: nothing checked that money had gone back, and the Payment row the
+ * webhook wrote for the fee still said COMPLETED until a charge.refunded event
+ * happened to arrive. This issues the refund, then moves the place and the
+ * Payment row together.
+ *
+ * Idempotent: the idempotency key means two presses inside Stripe's window are
+ * one refund, and Stripe's own refusal of a charge that is already refunded is
+ * read as the refund having happened, so a retry after a failed row write
+ * repairs the rows instead of failing for ever. A completed place keeps its
+ * completion — a goodwill refund does not undo work — and any other place is
+ * ended, the same rule the admin screen applies.
+ */
+export async function refundAcceleratorEnrollmentPayment(
+  enrollmentId: string,
+  reason: string
+): Promise<AcceleratorRefund> {
+  const enrollment = await prisma.acceleratorEnrollment.findUnique({
+    where: { id: enrollmentId },
+    select: { id: true, status: true, paymentStatus: true, paymentId: true, userId: true },
+  });
+
+  if (!enrollment) {
+    throw new ApiError(404, 'Enrolment not found');
+  }
+
+  if (enrollment.paymentStatus === 'REFUNDED') {
+    return { status: 'already_refunded', refundId: null };
+  }
+
+  if (enrollment.paymentStatus !== 'PAID') {
+    return { status: 'nothing_to_refund', reason: 'This place was never paid for' };
+  }
+
+  const paymentIntentId = enrollment.paymentId;
+  if (!paymentIntentId || !paymentIntentId.startsWith('pi_')) {
+    // Paid with no intent is the free-cohort path, which took no money.
+    return { status: 'nothing_to_refund', reason: 'No card payment was taken for this place' };
+  }
+
+  if (!isStripeConfigured()) {
+    logger.error('An accelerator fee needs refunding and Stripe is not configured', { enrollmentId });
+    return { status: 'unavailable', reason: 'Card payments are not configured on this deployment' };
+  }
+
+  let refundId: string | null = null;
+  let amountCents = 0;
+
+  try {
+    const refund = await getStripe().refunds.create(
+      {
+        payment_intent: paymentIntentId,
+        reason: 'requested_by_customer',
+        metadata: { enrollmentId, athenaReason: reason.slice(0, 400) },
+      },
+      { idempotencyKey: `accelerator-refund-${enrollmentId}` }
+    );
+    refundId = refund.id;
+    amountCents = refund.amount;
+  } catch (error) {
+    if (!isAlreadyRefunded(error)) {
+      logger.error('Stripe refused an accelerator refund', {
+        enrollmentId,
+        paymentIntentId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return {
+        status: 'unavailable',
+        reason: error instanceof Error ? error.message : 'Stripe refused the refund',
+      };
+    }
+    logger.warn('Accelerator fee was already refunded at Stripe; bringing the rows into line', {
+      enrollmentId,
+      paymentIntentId,
+    });
+  }
+
+  const completed = enrollment.status === 'COMPLETED' || enrollment.status === 'GRADUATED';
+
+  await prisma.$transaction([
+    prisma.acceleratorEnrollment.update({
+      where: { id: enrollmentId },
+      data: {
+        paymentStatus: 'REFUNDED',
+        ...(completed ? {} : { status: 'DROPPED' as const }),
+      },
+    }),
+    // The money row follows the money, the same move charge.refunded makes;
+    // whichever of the two lands first, the other finds it already done.
+    prisma.payment.updateMany({
+      where: { stripePaymentIntentId: paymentIntentId },
+      data: { status: 'REFUNDED' },
+    }),
+  ]);
+
+  logger.info('Accelerator fee refunded', { enrollmentId, paymentIntentId, refundId, amountCents });
+
+  return refundId
+    ? { status: 'refunded', refundId, amountCents }
+    : { status: 'already_refunded', refundId: null };
+}
+
 // Helper functions
 
 /**

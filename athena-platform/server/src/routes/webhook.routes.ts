@@ -25,6 +25,7 @@ import {
   paidChargeFromStripeInvoice,
   type PaymentKind,
 } from '../services/invoice.service';
+import { trustAndSafetyMailbox } from '../services/content-report.service';
 import { prisma } from '../utils/prisma';
 import { sendEmail } from '../utils/email';
 import { recordFailure, recordIgnored, recordSuccess } from '../utils/ops-metrics';
@@ -246,6 +247,16 @@ router.post(
         throw new ApiError(500, 'Stripe webhook secret not configured');
       }
 
+      // Stripe delivers events about connected accounts — a mentor's account
+      // being verified, her bank payout arriving or bouncing — only to a Connect
+      // endpoint, which Stripe signs with a secret of its own. With one secret
+      // this route could only ever hear the platform's events, so the
+      // account.updated handler below never fired for anybody and a withdrawal
+      // that bounced was never mentioned to the woman whose money it was. Both
+      // endpoints can point at this same URL; each event is verified against
+      // whichever secret signed it.
+      const connectWebhookSecret = process.env.STRIPE_CONNECT_WEBHOOK_SECRET || null;
+
       const signature = req.headers['stripe-signature'];
       if (typeof signature !== 'string' || signature.length === 0) {
         throw new ApiError(400, 'Missing Stripe signature');
@@ -262,7 +273,12 @@ router.post(
       let event: Stripe.Event;
       try {
         // req.body is a Buffer because of express.raw.
-        event = stripeWebhooks.constructEvent(req.body as any, signature, webhookSecret);
+        try {
+          event = stripeWebhooks.constructEvent(req.body as any, signature, webhookSecret);
+        } catch (platformError) {
+          if (!connectWebhookSecret) throw platformError;
+          event = stripeWebhooks.constructEvent(req.body as any, signature, connectWebhookSecret);
+        }
       } catch (err: any) {
         // Counted as ignored, not as a failure. A post whose signature does not
         // verify is a stranger being turned away before any identity check, on a
@@ -327,8 +343,14 @@ router.post(
 
             // Escrow holds (marketplace orders) move to AUTHORIZED, and the
             // provider hears that a paid order is waiting for them.
+            //
+            // FAILED as well as PENDING: a declined card marks the row FAILED
+            // on payment_intent.payment_failed, and the buyer can try another
+            // card on the same intent. When that one authorises, the row used
+            // to stay FAILED — so the money was held on her card while every
+            // screen said the payment had failed and nothing would release it.
             const held = await prisma.escrowPayment.updateMany({
-              where: { paymentIntentId: paymentIntent.id, status: 'PENDING' },
+              where: { paymentIntentId: paymentIntent.id, status: { in: ['PENDING', 'FAILED'] } },
               data: { status: 'AUTHORIZED' },
             });
             if (held.count > 0 && (paymentIntent.metadata as any)?.sessionType === 'service_order') {
@@ -377,6 +399,22 @@ router.post(
 
             if (type === ACCELERATOR_PAYMENT_TYPE) {
               await confirmAcceleratorEnrollmentPayment(paymentIntent);
+            }
+
+            // A manual-capture intent succeeding is an escrow hold being
+            // captured. captureEscrowPayment writes the row itself when it is
+            // the one capturing, but a hold captured any other way — from the
+            // Stripe dashboard by an admin rescuing it before it lapsed, or by a
+            // capture whose row write failed — left the row saying the money
+            // was still held: the seller's earnings screen showed it pending,
+            // the statement left it out, and the expiry sweep went on warning
+            // about money that had already moved. Only rows still held are
+            // moved, so a row a flow has already settled is left as it is.
+            if (paymentIntent.capture_method === 'manual') {
+              await prisma.escrowPayment.updateMany({
+                where: { paymentIntentId: paymentIntent.id, status: { in: ['PENDING', 'AUTHORIZED', 'FAILED'] } },
+                data: { status: 'CAPTURED', capturedAt: new Date(event.created * 1000) },
+              });
             }
 
             // The money itself, on the Payment table, after each flow has
@@ -678,10 +716,47 @@ router.post(
             const transfer = event.data.object as Stripe.Transfer;
             const ours = metadataString((transfer.metadata as any)?.type) === CREATOR_PAYOUT_TRANSFER_TYPE;
 
-            const payout = await prisma.creatorPayout.findFirst({
+            const payoutSelect = {
+              id: true,
+              status: true,
+              amount: true,
+              creatorProfileId: true,
+              reversedAmount: true,
+            } as const;
+
+            let payout = await prisma.creatorPayout.findFirst({
               where: { stripeTransferId: transfer.id },
-              select: { id: true, status: true, amount: true, creatorProfileId: true, reversedAmount: true },
+              select: payoutSelect,
             });
+
+            // creator.service stores the transfer id on the row only after
+            // Stripe has created the transfer. When that write failed, or the
+            // process died between the two, the row never learned its id: this
+            // event was thrown back to Stripe on every delivery until Stripe
+            // gave up, and the payout stayed PENDING for good although the
+            // money had gone. The transfer carries the row's id in its signed
+            // metadata, so the row is found by that and linked. Only a row with
+            // no transfer yet is claimed, so a row already linked to another
+            // transfer is never re-pointed at this one.
+            if (!payout && ours) {
+              const payoutId = metadataString((transfer.metadata as any)?.payoutId);
+              if (payoutId) {
+                const linked = await prisma.creatorPayout.updateMany({
+                  where: { id: payoutId, stripeTransferId: null },
+                  data: { stripeTransferId: transfer.id },
+                });
+                if (linked.count > 0) {
+                  logger.warn('Linked a creator payout to its transfer from the transfer metadata', {
+                    payoutId,
+                    transferId: transfer.id,
+                  });
+                  payout = await prisma.creatorPayout.findFirst({
+                    where: { stripeTransferId: transfer.id },
+                    select: payoutSelect,
+                  });
+                }
+              }
+            }
 
             if (!payout) {
               if (!ours) {
@@ -776,6 +851,84 @@ router.post(
           // mentor or creator who had completed Stripe's checks still could not
           // be paid, and nothing anywhere would have said why. Three comments
           // elsewhere in the codebase claimed this handler already existed.
+          // A member's own bank payout, out of her connected account's Stripe
+          // balance: the withdrawal she asked for on the earnings screen, or
+          // Stripe's scheduled one. These arrive only through the Connect
+          // endpoint (see STRIPE_CONNECT_WEBHOOK_SECRET above), with
+          // `event.account` naming whose balance it was.
+          //
+          // Nothing listened for either. A withdrawal to a closed or mistyped
+          // account failed at the bank days after the earnings screen had told
+          // her it was "on its way", Stripe put the money back in her balance,
+          // and she was never told — she would find out by its not arriving.
+          case 'payout.failed':
+          case 'payout.paid': {
+            const payout = event.data.object as Stripe.Payout;
+            const accountId = event.account ?? null;
+
+            // A payout of ATHENA's own balance to ATHENA's bank carries no
+            // account. Not ours to tell anybody about.
+            if (!accountId) {
+              outcome = 'ignored';
+              break;
+            }
+
+            const member = await prisma.user.findFirst({
+              where: { stripeConnectAccountId: accountId },
+              select: { id: true },
+            });
+            if (!member) {
+              logger.warn('Payout event for a connected account no member owns', { accountId, payoutId: payout.id });
+              outcome = 'ignored';
+              break;
+            }
+
+            const scale = minorUnitScale(payout.currency);
+            const amount = `${(payout.amount / scale).toFixed(scale === 1 ? 0 : 2)} ${payout.currency.toUpperCase()}`;
+
+            if (event.type === 'payout.failed') {
+              logger.warn('A member’s bank payout failed', {
+                userId: member.id,
+                payoutId: payout.id,
+                failureCode: payout.failure_code,
+              });
+              await prisma.notification.create({
+                data: {
+                  userId: member.id,
+                  type: 'SYSTEM',
+                  title: 'Your withdrawal did not reach your bank',
+                  message:
+                    `Your bank returned the payout of ${amount}` +
+                    (payout.failure_message ? `: ${payout.failure_message}` : '.') +
+                    ' Stripe has put the money back in your balance, so nothing is lost. Check the bank account on your earnings page before you withdraw again.',
+                  link: '/dashboard/earnings',
+                  data: { kind: 'PAYOUT_FAILED', payoutId: payout.id } as Prisma.InputJsonValue,
+                },
+              });
+              break;
+            }
+
+            // Stripe's own schedule pays out without her asking, and Stripe
+            // tells her about those itself; the one worth a notification here
+            // is the withdrawal she asked for on ATHENA.
+            if (payout.automatic) {
+              outcome = 'ignored';
+              break;
+            }
+
+            await prisma.notification.create({
+              data: {
+                userId: member.id,
+                type: 'SYSTEM',
+                title: 'Your withdrawal has been paid',
+                message: `Stripe has paid ${amount} to your bank. It should now be in your account; some banks take until the next business day to show it.`,
+                link: '/dashboard/earnings',
+                data: { kind: 'PAYOUT_PAID', payoutId: payout.id } as Prisma.InputJsonValue,
+              },
+            });
+            break;
+          }
+
           case 'account.updated': {
             const account = event.data.object as Stripe.Account;
             const matched = await syncConnectedAccountFromStripe(account);
@@ -801,13 +954,34 @@ router.post(
               status: dispute.status,
             });
             if (event.type === 'charge.dispute.created') {
-              const to = process.env.TRUST_SAFETY_EMAIL || 'trust-safety@athena.com';
+              // The fallback used to be the literal 'trust-safety@athena.com'.
+              // athena.com is not a domain this venture owns, so any deployment
+              // without TRUST_SAFETY_EMAIL posted dispute ids, amounts and
+              // payment-intent ids to a stranger's mail server. The mailbox now
+              // comes from the same resolver the safety alerts use: ATHENA's own
+              // support address, or nothing. With nothing, the alert is not
+              // sent and the missing mailbox is recorded where the operations
+              // screen shows it; the dispute itself is still in Stripe and in
+              // the log line above.
+              const to = trustAndSafetyMailbox();
+              if (!to) {
+                recordFailure(
+                  'stripe.dispute-alert',
+                  new Error('no Trust & Safety mailbox configured')
+                );
+                break;
+              }
               const respondBy = dispute.evidence_details?.due_by ? new Date(dispute.evidence_details.due_by * 1000).toISOString() : 'see Stripe';
+              // Scaled by the currency's own unit, so a yen dispute is not
+              // reported at a hundredth of its size.
+              const disputedAmount = `${(dispute.amount / minorUnitScale(dispute.currency)).toFixed(
+                minorUnitScale(dispute.currency) === 1 ? 0 : 2
+              )} ${dispute.currency.toUpperCase()}`;
               await sendEmail({
                 to,
                 subject: `Stripe dispute opened: ${dispute.id}`,
-                text: `A cardholder has disputed a charge.\n\nDispute: ${dispute.id}\nAmount: ${(dispute.amount / 100).toFixed(2)} ${dispute.currency.toUpperCase()}\nReason: ${dispute.reason}\nPayment intent: ${paymentIntentId ?? 'unknown'}\nEvidence due: ${respondBy}\n\nRespond in the Stripe dashboard.`,
-                html: `<p>A cardholder has disputed a charge.</p><ul><li>Dispute: ${dispute.id}</li><li>Amount: ${(dispute.amount / 100).toFixed(2)} ${dispute.currency.toUpperCase()}</li><li>Reason: ${dispute.reason}</li><li>Payment intent: ${paymentIntentId ?? 'unknown'}</li><li>Evidence due: ${respondBy}</li></ul><p>Respond in the Stripe dashboard.</p>`,
+                text: `A cardholder has disputed a charge.\n\nDispute: ${dispute.id}\nAmount: ${disputedAmount}\nReason: ${dispute.reason}\nPayment intent: ${paymentIntentId ?? 'unknown'}\nEvidence due: ${respondBy}\n\nRespond in the Stripe dashboard.`,
+                html: `<p>A cardholder has disputed a charge.</p><ul><li>Dispute: ${dispute.id}</li><li>Amount: ${disputedAmount}</li><li>Reason: ${dispute.reason}</li><li>Payment intent: ${paymentIntentId ?? 'unknown'}</li><li>Evidence due: ${respondBy}</li></ul><p>Respond in the Stripe dashboard.</p>`,
               });
             }
             break;

@@ -1,5 +1,5 @@
 import { Router, Response, NextFunction } from 'express';
-import { body, param, query, validationResult } from 'express-validator';
+import { body, validationResult } from 'express-validator';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
@@ -7,7 +7,10 @@ import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
 import { parsePagination, buildPaginationMeta } from '../utils/pagination';
 import { bestEffort } from '../utils/best-effort';
-import { createAcceleratorEnrollmentPayment } from '../services/payments-orchestration.service';
+import {
+  cancelUnpaidAcceleratorIntent,
+  createAcceleratorEnrollmentPayment,
+} from '../services/payments-orchestration.service';
 import { notifyAdmins } from '../services/admin-notify.service';
 
 const router = Router();
@@ -415,6 +418,33 @@ async function matchScoreForApplication(
 // ACCELERATOR COHORTS
 // ===========================================
 
+/** How long a place nobody has paid for keeps its seat. */
+const UNPAID_PLACE_HOLD_DAYS = 7;
+
+/**
+ * The places that take up a seat: every paid one, and an unpaid one only for
+ * its first week.
+ *
+ * Every row used to count, so a click on Enrol held a seat for ever. Thirty
+ * founders who looked at a thirty-seat cohort and never paid filled it, and
+ * the thirty-first — who would have paid — was told it was full. A dropped
+ * place holds nothing, and neither does a refunded one. The same filter is
+ * used for the enrol check and for the spots the list and detail routes
+ * report, so the number a founder is shown is the number she is held to.
+ */
+function seatHoldingPlaces(now: Date = new Date()): Prisma.AcceleratorEnrollmentWhereInput {
+  return {
+    status: { not: 'DROPPED' },
+    OR: [
+      { paymentStatus: 'PAID' },
+      {
+        paymentStatus: { not: 'REFUNDED' },
+        enrolledAt: { gte: new Date(now.getTime() - UNPAID_PLACE_HOLD_DAYS * 24 * 60 * 60 * 1000) },
+      },
+    ],
+  };
+}
+
 // GET /api/business/accelerators - List all accelerator cohorts
 router.get('/accelerators', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
@@ -435,7 +465,7 @@ router.get('/accelerators', async (req: AuthRequest, res: Response, next: NextFu
         orderBy: { startDate: 'asc' },
         include: {
           _count: {
-            select: { enrollments: true, sessions: true },
+            select: { enrollments: { where: seatHoldingPlaces() }, sessions: true },
           },
         },
         skip,
@@ -450,7 +480,7 @@ router.get('/accelerators', async (req: AuthRequest, res: Response, next: NextFu
         ...c,
         enrollmentCount: c._count.enrollments,
         sessionCount: c._count.sessions,
-        spotsRemaining: c.maxParticipants - c._count.enrollments,
+        spotsRemaining: Math.max(0, c.maxParticipants - c._count.enrollments),
       })),
       pagination: buildPaginationMeta(total, page, limit),
     });
@@ -484,7 +514,7 @@ router.get(
             orderBy: { weekNumber: 'asc' },
           },
           _count: {
-            select: { enrollments: true },
+            select: { enrollments: { where: seatHoldingPlaces() } },
           },
         },
       });
@@ -498,7 +528,7 @@ router.get(
         data: {
           ...cohort,
           enrollmentCount: cohort._count.enrollments,
-          spotsRemaining: cohort.maxParticipants - cohort._count.enrollments,
+          spotsRemaining: Math.max(0, cohort.maxParticipants - cohort._count.enrollments),
         },
       });
     } catch (error) {
@@ -518,7 +548,7 @@ router.post(
 
       const cohort = await prisma.acceleratorCohort.findUnique({
         where: { id },
-        include: { _count: { select: { enrollments: true } } },
+        include: { _count: { select: { enrollments: { where: seatHoldingPlaces() } } } },
       });
 
       if (!cohort) {
@@ -539,7 +569,21 @@ router.post(
       });
 
       if (existing) {
-        throw new ApiError(409, 'You are already enrolled in this cohort');
+        // A place she left without paying for is not a place she holds. The
+        // unique key on (cohort, member) meant a founder who withdrew, or
+        // whose unpaid place staff dropped, could never join that cohort
+        // again; the old row is cleared so she can. A dropped place that was
+        // paid is still waiting on its refund, and is left for staff.
+        if (existing.status === 'DROPPED' && existing.paymentStatus !== 'PAID') {
+          await prisma.acceleratorEnrollment.delete({ where: { id: existing.id } });
+        } else if (existing.status === 'DROPPED') {
+          throw new ApiError(
+            409,
+            'Your earlier place in this cohort is waiting on its refund. ATHENA\'s team will be in touch before you can join again.'
+          );
+        } else {
+          throw new ApiError(409, 'You are already enrolled in this cohort');
+        }
       }
 
       const enrollment = await prisma.acceleratorEnrollment.create({
@@ -559,7 +603,119 @@ router.post(
       res.status(201).json({
         success: true,
         data: enrollment,
-        message: 'Enrollment created. Please complete payment to confirm your spot.',
+        message: `Enrollment created. Please complete payment within ${UNPAID_PLACE_HOLD_DAYS} days to keep your spot.`,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// POST /api/business/accelerators/enrollments/:id/withdraw - Leave a place
+//
+// There was no way for a founder to leave a cohort at all. An unpaid place sat
+// on a seat until staff released it by hand, and a paid place could only be
+// ended by writing to the team. An unpaid place is now deleted, which frees the
+// seat at once; a paid one is ended and the team is told her fee needs a
+// decision, because whether and how much is refunded is theirs to make, not
+// this route's. Nothing here promises her a refund.
+router.post(
+  '/accelerators/enrollments/:id/withdraw',
+  authenticate,
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const { id } = req.params;
+      const userId = req.user!.id;
+
+      const enrollment = await prisma.acceleratorEnrollment.findUnique({
+        where: { id },
+        include: { cohort: { select: { id: true, name: true } } },
+      });
+
+      if (!enrollment) {
+        throw new ApiError(404, 'Enrollment not found');
+      }
+
+      if (enrollment.userId !== userId) {
+        throw new ApiError(403, 'Not authorized to withdraw from this enrollment');
+      }
+
+      if (enrollment.status === 'COMPLETED' || enrollment.status === 'GRADUATED') {
+        throw new ApiError(400, 'You have completed this cohort, so there is no place to withdraw from');
+      }
+
+      if (enrollment.status === 'DROPPED') {
+        throw new ApiError(409, 'You have already left this cohort');
+      }
+
+      if (enrollment.paymentStatus === 'PAID') {
+        const updated = await prisma.acceleratorEnrollment.update({
+          where: { id },
+          data: { status: 'DROPPED' },
+        });
+
+        await notifyAdmins({
+          title: 'A founder left a paid accelerator place',
+          message: `A founder has withdrawn from her paid place in ${enrollment.cohort.name}. Her fee needs a decision on a refund.`,
+          link: '/admin/accelerator',
+          data: {
+            kind: 'ACCELERATOR_WITHDRAWAL_REFUND_DUE',
+            enrollmentId: id,
+            cohortId: enrollment.cohortId,
+          },
+        });
+
+        logger.info('Founder withdrew from a paid accelerator place', { enrollmentId: id, cohortId: enrollment.cohortId });
+
+        res.json({
+          success: true,
+          data: updated,
+          message: 'You have left this cohort. ATHENA\'s team has been told and will contact you about your fee.',
+        });
+        return;
+      }
+
+      if (enrollment.paymentStatus === 'REFUNDED') {
+        // Already given back, so there is nothing for anyone to decide; the
+        // place simply ends.
+        const updated = await prisma.acceleratorEnrollment.update({
+          where: { id },
+          data: { status: 'DROPPED' },
+        });
+        res.json({ success: true, data: updated, message: 'You have left this cohort.' });
+        return;
+      }
+
+      // Unpaid. The payment she started must not be able to finish after the
+      // place is gone, or her card is charged for a place that no longer
+      // exists; a payment already going through keeps the place until it
+      // settles.
+      let intent: 'clear' | 'in_flight';
+      try {
+        intent = await cancelUnpaidAcceleratorIntent(enrollment.paymentId);
+      } catch (error) {
+        logger.error('Could not check an accelerator payment before a withdrawal', {
+          enrollmentId: id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw new ApiError(502, 'We could not check your payment with Stripe just now, so your place has not been changed. Please try again.');
+      }
+
+      if (intent === 'in_flight') {
+        throw new ApiError(
+          409,
+          'Your payment for this place is going through. Once it has finished you can withdraw, and the team will contact you about the fee.'
+        );
+      }
+
+      await prisma.acceleratorEnrollment.delete({ where: { id } });
+
+      logger.info('Founder withdrew from an unpaid accelerator place', { enrollmentId: id, cohortId: enrollment.cohortId });
+
+      res.json({
+        success: true,
+        data: { id, withdrawn: true },
+        message: 'You have left this cohort. You have not been charged.',
       });
     } catch (error) {
       next(error);
@@ -746,6 +902,15 @@ router.post(
 
       if (enrollment.userId !== userId) {
         throw new ApiError(403, 'Not authorized to update this enrollment');
+      }
+
+      // A place she has left, or one in a cohort that was called off, is over.
+      // Weeks used to go on being recorded against both, which is how a
+      // cancelled cohort came to show a founder a full record of work for
+      // sessions that never ran. The certificate route refuses such places
+      // already; this stops the record at its source.
+      if (enrollment.status === 'DROPPED' || enrollment.cohort.status === 'CANCELLED') {
+        throw new ApiError(400, 'This place has ended');
       }
 
       if (enrollment.paymentStatus !== 'PAID') {
