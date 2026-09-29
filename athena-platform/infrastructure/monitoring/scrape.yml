@@ -1,0 +1,28 @@
+# The scrape job the alert rules in alerts.yml expect, as a Prometheus
+# scrape_configs entry. Use it as it is in a self-hosted Prometheus or Grafana
+# Agent / Alloy; in a hosted service's form (Grafana Cloud's "Metrics Endpoint"
+# integration, for one) enter the same four things: the job name, the URL, the
+# bearer token and the interval.
+#
+# job_name must stay athena-api: every rule selects job="athena-api", and
+# AthenaApiMetricsAbsent exists to say so if it does not.
+#
+# The token is the API's METRICS_TOKEN (render.yaml generates it; read it in
+# Render under the athena-api service's Environment, or set it with
+# `fly secrets set` on Fly.io). /metrics answers 404 in production without one
+# and 401 to a wrong one, and a failed scrape is what AthenaApiDown reports.
+
+scrape_configs:
+  - job_name: athena-api
+    scheme: https
+    metrics_path: /metrics
+    scrape_interval: 60s
+    scrape_timeout: 10s
+    authorization:
+      type: Bearer
+      # A file holding METRICS_TOKEN and nothing else, readable only by the
+      # scraper. Never paste the token into this file: the repository is public.
+      credentials_file: /etc/prometheus/secrets/athena-metrics-token
+    static_configs:
+      # The API's public host, as in API_URL, without https:// or a path.
+      - targets: ['api.your-domain.com']

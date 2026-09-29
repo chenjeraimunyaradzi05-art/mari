@@ -35,9 +35,19 @@ const isProduction = process.env.NODE_ENV === 'production';
  * an inline script injected into the page has no nonce and does not run.
  * The 'unsafe-inline' and https: at the end are ignored by any browser that
  * understands nonces and only keep very old ones working.
+ *
+ * Cloudflare Turnstile, the human check on the sign-up form, is named in both
+ * script-src and frame-src. Its script is added by HumanCheck.tsx, which
+ * 'strict-dynamic' already trusts, so the script-src entry is for browsers
+ * that predate it; the frame-src entry is the one that matters. The widget is
+ * an iframe from challenges.cloudflare.com, and without it the frame is
+ * blocked, no token is ever issued, and once TURNSTILE_SECRET_KEY is set on
+ * the API every password sign-up is refused with "complete the check".
  */
+const TURNSTILE_ORIGIN = 'https://challenges.cloudflare.com';
+
 function buildContentSecurityPolicy(nonce: string): string {
-  const scriptSrc = [`'self'`, `'nonce-${nonce}'`, `'strict-dynamic'`, isProduction ? '' : `'unsafe-eval'`, `'unsafe-inline'`, 'https:']
+  const scriptSrc = [`'self'`, `'nonce-${nonce}'`, `'strict-dynamic'`, isProduction ? '' : `'unsafe-eval'`, `'unsafe-inline'`, TURNSTILE_ORIGIN, 'https:']
     .filter(Boolean)
     .join(' ');
   const connectSrc = ['\'self\'', 'https:', 'wss:', isProduction ? '' : 'http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:*']
@@ -65,7 +75,7 @@ function buildContentSecurityPolicy(nonce: string): string {
     "media-src 'self' blob: https:",
     "worker-src 'self' blob:",
     "manifest-src 'self'",
-    "frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://accounts.google.com https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com",
+    `frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://accounts.google.com https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com ${TURNSTILE_ORIGIN}`,
     isProduction ? 'upgrade-insecure-requests' : '',
   ]
     .filter(Boolean)

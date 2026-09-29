@@ -1,0 +1,113 @@
+# Alert rules for the ATHENA API, in the Prometheus rule format.
+#
+# Nothing evaluates these yet. The API has exposed Prometheus metrics at
+# /metrics for months and nothing has ever read them: there is no scraper, no
+# alert rule and no pager in this repository, and a hosted one needs an account
+# only the owner can open. These are the rules to load once it exists; README.md
+# beside this file says how, and CI checks and unit-tests them with promtool so
+# they cannot rot in the meantime.
+#
+# Every expression reads a metric the API actually produces:
+#   http_requests_total, http_request_duration_seconds   src/utils/metrics.ts,
+#                                                        recorded in middleware/responseTime.ts
+#   process_*, nodejs_*                                  prom-client's default metrics
+#   up                                                   written by the scraper itself
+# and every rule selects job="athena-api", the job name in scrape.yml.
+#
+# severity: page    someone should be woken: members cannot use the platform.
+# severity: ticket  someone should look today: it is degrading, not down.
+
+groups:
+  - name: athena-api
+    rules:
+      # The scrape itself failing: the process is down, the host is unreachable,
+      # or METRICS_TOKEN no longer matches what the scraper sends (a 401 is a
+      # failed scrape too, and the annotation says to check that first).
+      - alert: AthenaApiDown
+        expr: up{job="athena-api"} == 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: The ATHENA API has not answered its metrics scrape for two minutes.
+          runbook: 'athena-platform/docs/runbooks/ONCALL.md: "/readyz is 503" and "Rollback Procedures". If /livez answers, check that METRICS_TOKEN on the API matches the scraper''s bearer token.'
+
+      # No series at all is a different failure from a failing one: the scrape
+      # job was removed or renamed, and every rule below has gone quiet with it.
+      - alert: AthenaApiMetricsAbsent
+        expr: absent(up{job="athena-api"})
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: No scrape of the ATHENA API has been recorded for ten minutes, so none of its alerts can fire.
+          runbook: athena-platform/infrastructure/monitoring/README.md, step 2. The scrape job must be named athena-api.
+
+      # More than one request in twenty failing with a 5xx, sustained. The
+      # volume guard keeps a quiet night's single error from reading as a 100%
+      # failure rate. Maintenance mode answers 503 to everything, so it fires
+      # this on purpose: members cannot use the site either way.
+      - alert: AthenaApiHighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{job="athena-api", status=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total{job="athena-api"}[5m]))
+          ) > 0.05
+          and
+          sum(rate(http_requests_total{job="athena-api"}[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: More than 5% of API requests have failed with a server error for five minutes.
+          runbook: 'athena-platform/docs/runbooks/ONCALL.md: "Common Failure Modes". Sentry carries the failing requests with their request ids.'
+
+      # The slowest one request in twenty taking more than two seconds. Media
+      # uploads and downloads are left out: a large file is slow because it is
+      # large, not because the API is struggling.
+      - alert: AthenaApiSlow
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(http_request_duration_seconds_bucket{job="athena-api", path!~"/api/media.*|/uploads/.*"}[5m]))
+          ) > 2
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: The slowest 5% of API requests have taken more than two seconds for ten minutes.
+          runbook: Check Neon's monitoring for slow queries and connection count, and the event-loop lag alert below.
+
+      # The process is busy doing something synchronous: every request, the
+      # health checks included, waits behind it. Sustained lag this long is how
+      # a host decides the instance is dead and restarts it mid-request.
+      - alert: AthenaApiEventLoopBlocked
+        expr: max_over_time(nodejs_eventloop_lag_seconds{job="athena-api"}[5m]) > 1
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: The API's event loop has been blocked for more than a second at a time for five minutes.
+          runbook: Look for a synchronous file write, a large JSON body or an unbounded loop in the requests logged just before it began.
+
+      # Three or more starts in half an hour is a crash loop, not a deploy.
+      - alert: AthenaApiRestarting
+        expr: changes(process_start_time_seconds{job="athena-api"}[30m]) > 2
+        labels:
+          severity: page
+        annotations:
+          summary: The API process has restarted more than twice in thirty minutes.
+          runbook: 'The host''s logs show the crash; start.ts prints boot and migration errors. athena-platform/docs/runbooks/ONCALL.md: "Deploy / shutdown issues".'
+
+      # Both hosts run the API with 2 GB (render.yaml: plan standard;
+      # server/fly.toml: memory 2gb). At 1.6 GB it is at four fifths of that,
+      # and the next large upload or report can take it over.
+      - alert: AthenaApiMemoryHigh
+        expr: process_resident_memory_bytes{job="athena-api"} > 1.6e9
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: The API has used more than 1.6 GB of its 2 GB for ten minutes.
+          runbook: A steady climb across hours is a leak; take a heap snapshot before restarting. A sudden step is usually one large request.

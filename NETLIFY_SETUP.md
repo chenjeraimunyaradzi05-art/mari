@@ -20,7 +20,7 @@ This guide explains how to deploy the ATHENA web frontend to Netlify.
 ### Step 2: Configure Build Settings
 When configuring the site:
 - **Base directory**: `athena-platform/client`
-- **Build command**: `npm ci --legacy-peer-deps && npm run build`
+- **Build command**: `npm ci && node scripts/check-web-env.js && npm run build`
 - **Publish directory**: `.next` (set in `netlify.toml`; it must not equal the base directory)
 - **Functions directory**: Leave empty (Next.js plugin handles this)
 
@@ -32,7 +32,6 @@ NEXT_PUBLIC_API_URL=https://api.your-domain.com
 NEXT_PUBLIC_APP_URL=https://your-site.netlify.app
 NEXT_PUBLIC_SOCKET_URL=https://api.your-domain.com
 NODE_VERSION=20
-NPM_FLAGS=--legacy-peer-deps
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_xxx (if using Stripe)
 ```
 
@@ -72,7 +71,7 @@ This usually happens when:
 2. **Common issues**:
    - Missing environment variables
    - Node version mismatch (ensure `NODE_VERSION=20`)
-   - Dependency installation failures (`--legacy-peer-deps`)
+   - Dependency installation failures
 
 ### Site Shows 404 or Blank Page
 
@@ -87,14 +86,14 @@ Used when deploying from repository root:
 ```toml
 [build]
   base = "athena-platform/client"
-  command = "npm ci --legacy-peer-deps && npm run build"
+  command = "npm ci && node scripts/check-web-env.js && npm run build"
 ```
 
 ### Client netlify.toml (athena-platform/client/netlify.toml)
 Used when base directory is set in Netlify:
 ```toml
 [build]
-  command = "npm ci --legacy-peer-deps && npm run build"
+  command = "npm ci && node scripts/check-web-env.js && npm run build"
 ```
 
 ### Current Routing Model
@@ -139,7 +138,6 @@ netlify deploy --prod
 | `NEXT_PUBLIC_APP_URL` | Yes | Your Netlify site URL |
 | `NEXT_PUBLIC_SOCKET_URL` | Recommended | The API host's realtime origin; defaults to `NEXT_PUBLIC_API_URL` |
 | `NODE_VERSION` | Yes | Set to `20` |
-| `NPM_FLAGS` | Recommended | Set to `--legacy-peer-deps` |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | No | Stripe publishable key |
 | `NEXT_PUBLIC_POSTHOG_KEY` | No | PostHog analytics key |
 | `NEXT_PUBLIC_SENTRY_DSN` | No | Sentry error tracking |

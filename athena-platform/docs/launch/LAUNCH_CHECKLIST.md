@@ -41,12 +41,14 @@ by someone who assumed they were already true:
   the web tier. `/readyz` is the one that proves Neon is reachable, and nothing
   watches it — that gap is tracked in [ONCALL](../runbooks/ONCALL.md).
 - **"OpenSearch indices populated."** `OPENSEARCH_ENABLED` is `"false"` in
-  `render.yaml`, deliberately. Search runs on Prisma. Turning OpenSearch on at
-  launch would make search *worse*, not better: only posts, jobs and users are
-  ever written to an index, so `athena_courses`, `athena_videos` and
-  `athena_mentors` are created empty and a member searching "all" would stop
-  finding any course, reel or mentor — with no error and no log line, because an
-  empty index is a successful search. Leave it off.
+  `render.yaml`, deliberately, and no OpenSearch cluster is deployed. Search runs
+  on Prisma and covers every kind of result. With OpenSearch on, only members,
+  posts and jobs would be asked of the engine (courses, reels and mentors are
+  answered from the database either way), but those three indexes are written
+  only when a row is created or edited and nothing backfills the rows that
+  already exist — so every member, post and job from before the switch would
+  drop out of search. Leave it off until a backfill has been written and run.
+  `OPENSEARCH_NODE` alone also turns it on, so leave that unset as well.
 
 ### Application
 
@@ -135,8 +137,14 @@ STAGING_DATABASE_URL="postgresql://...neon.tech/athena?sslmode=require" \
   node scripts/migration-dry-run.js
 
 # 3. Take an off-platform backup. Neon keeps point-in-time history whose window
-#    depends on the plan; this file does not, which is the point of taking it.
-pg_dump "$DIRECT_DATABASE_URL" > backup_pre_launch.sql
+#    depends on the plan; an off-platform copy does not, which is the point of
+#    taking it. Run the "Database backup" workflow by hand (Actions → Database
+#    backup → Run workflow) and read its summary: it seals the copy to the
+#    key holders' age keys and restore-tests it before it counts. It needs the
+#    production-backups environment set up first — docs/runbooks/ONCALL.md,
+#    "Backups and restore". If Actions is unavailable, the fallback is a dump
+#    encrypted as it is written, never a plaintext file on a laptop:
+#      pg_dump --format=custom "$DIRECT_DATABASE_URL" | gpg --symmetric --cipher-algo AES256 -o backup_pre_launch.dump.gpg
 
 # 4. Confirm the deployment has everything it needs
 curl -H "X-Health-Token: $HEALTH_DIAGNOSTICS_TOKEN" "$API_URL/health/launch-readiness"
@@ -246,12 +254,13 @@ curl -X POST "$API_URL/api/admin/maintenance" \
 # Migrations are additive, so an older build runs against the newer schema.
 
 # 3. Data, only if the schema or the data is the problem.
-#    Prefer Neon's point-in-time restore over the dump: it is a branch, so the
-#    current state is still there if the restore turns out to be the wrong call.
-#    Neon console → the branch → Restore → pick a timestamp.
-#    The dump is the fallback, and it replaces everything written since it was
-#    taken — including anything a member wrote in the meantime:
-#      psql "$DIRECT_DATABASE_URL" < backup_pre_launch.sql
+#    Restore beside production, not over it: create a Neon branch from
+#    production at a timestamp before the problem, and copy the damaged rows
+#    back from it. Restoring production in place, or loading the pre-launch
+#    copy over it, undoes everything written since — including blocks a member
+#    placed, safety settings she changed and erasures she asked for. Before any
+#    row goes back, work the checks in docs/runbooks/ONCALL.md, "Backups and
+#    restore", which also says how to restore from an off-platform copy.
 
 # 4. Tell people. This exits non-zero and notifies nobody unless
 #    INCIDENT_WEBHOOK_URL or INCIDENT_NOTIFY_EMAILS is set on whatever runs it.
@@ -323,7 +332,8 @@ know that it is blank.
 ### Medium-term (Month 1)
 
 - [ ] Feature iteration based on feedback
-- [ ] Decide the backup retention target and rehearse a restore against a Neon branch
+- [ ] Decide the backup retention period and the key holders, set up the production-backups environment, and confirm the nightly "Database backup" run is green (ONCALL.md, "Backups and restore")
+- [ ] Each key holder decrypts the newest off-platform copy; rehearse a restore against a Neon branch
 - [ ] Expand marketing efforts
 - [ ] Plan next release cycle
 

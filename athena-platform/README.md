@@ -57,7 +57,7 @@ athena-platform/
 ├── mobile/          # React Native mobile app
 ├── ml/              # Python ML services (FastAPI)
 ├── shared/          # Shared TypeScript utilities
-├── infrastructure/  # Terraform IaC
+├── infrastructure/  # Where the platform runs (README only; no IaC)
 └── docs/            # Documentation
 ```
 

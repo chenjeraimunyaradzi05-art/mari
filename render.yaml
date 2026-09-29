@@ -97,6 +97,29 @@ services:
       - key: CORS_ALLOW_PREVIEW_ORIGINS
         value: "false"
 
+      # This service's own public address, e.g. https://athena-api.onrender.com
+      # or the custom domain in front of it. Render cannot supply it here:
+      # `fromService` gives the private hostname, not the public one. The
+      # process refuses to start without it (src/utils/env.ts), because links
+      # and any locally served file URL are built from it and saved.
+      - key: API_URL
+        sync: false
+
+      # The secret the web tier sends with each visitor's address. Set the same
+      # value on Netlify (Builds and Functions scopes); `openssl rand -hex 32`.
+      # Not generated here, because Netlify has to be given the identical
+      # value. Without it the API refuses to start, and without the match every
+      # member shares one login budget and one lockout.
+      - key: PROXY_SHARED_SECRET
+        sync: false
+
+      # The human check on password sign-up (Cloudflare Turnstile). Optional,
+      # and set together with NEXT_PUBLIC_TURNSTILE_SITE_KEY on Netlify or not
+      # at all: this half alone refuses every password sign-up.
+      # /health/launch-readiness reports whether it is set.
+      - key: TURNSTILE_SECRET_KEY
+        sync: false
+
       # Neon. DATABASE_URL is the pooled endpoint for runtime queries;
       # DIRECT_DATABASE_URL is the unpooled one, and start.ts runs the
       # migrations through it because PgBouncer in transaction mode cannot hold
@@ -165,12 +188,15 @@ services:
       - key: ALLOW_STRIPE_SIMULATION
         value: "false"
 
-      # Media. With these set, uploads and processed video go to S3; without
-      # them they are written into the container's own uploads directory, which
-      # Render replaces on every deploy. There is no disk mounted below for
-      # exactly that reason: local media storage is not a configuration this
-      # platform should run in, so it should fail the readiness check rather
-      # than quietly lose a member's photographs.
+      # Media. Uploads and processed video go to S3. There is no disk mounted
+      # below on purpose: the container's own directory is replaced on every
+      # deploy, so local media storage is not a configuration this platform
+      # runs in. The process refuses to start without these three, or with
+      # values that are not the shape AWS issues (src/utils/env.ts), and at
+      # start it asks S3 whether the bucket answers; /health/launch-readiness
+      # fails while it does not. The key needs s3:PutObject, GetObject and
+      # DeleteObject on the bucket's objects, s3:ListBucket on the bucket, and
+      # rekognition:DetectModerationLabels, which screens uploaded images.
       - key: AWS_ACCESS_KEY_ID
         sync: false
       - key: AWS_SECRET_ACCESS_KEY
@@ -180,14 +206,28 @@ services:
       - key: S3_BUCKET
         sync: false
 
+      # Where the off-platform database copies are held, as AWS region codes
+      # (comma-separated). The API takes no part in backups — they are
+      # .github/workflows/backup.yml — and reads this only to publish it:
+      # GET /api/compliance/data-transfers lists these regions as backup
+      # locations. Leave it empty until the backup bucket exists, and the
+      # disclosure names no backup location, which is then the truth.
+      - key: BACKUP_AWS_REGIONS
+        sync: false
+
       # Text moderation and the AI features read AI_OPENAI_API_KEY first.
       - key: AI_OPENAI_API_KEY
         sync: false
       - key: AI_ALLOW_SIMULATION
         value: "false"
 
-      # The Python recommendation service in athena-platform/ml.
+      # The Python recommendation service in athena-platform/ml. Optional. If it
+      # is deployed, ML_SERVICE_KEY is the shared key the API sends as X-ML-Key,
+      # set to the same value on the ML service, which in production refuses to
+      # start without one.
       - key: ML_SERVICE_URL
+        sync: false
+      - key: ML_SERVICE_KEY
         sync: false
 
       # Background jobs. With ENABLE_WORKERS=true and both flags below false,
@@ -218,19 +258,20 @@ services:
       - key: SCHEDULER_TIMEZONE
         value: Australia/Brisbane
 
-      # Off, and not merely "not set up yet" — turning it on today makes search
-      # worse than the Prisma path it replaces. utils/opensearch.ts declares six
-      # indexes and init-opensearch.ts creates mappings for all six, but
-      # indexDocument is only ever called for posts, jobs and users.
-      # athena_courses, athena_videos and athena_mentors are created and never
-      # written. search.service.ts prefers OpenSearch whenever a client exists
-      # and falls back to Prisma only when a query *throws*, and an empty index
-      # does not throw — it answers, successfully, with nothing. So a member
-      # searching "all" would silently stop finding any course, reel or mentor,
-      # with no error and no log line to explain it.
+      # Off, and not merely "not set up yet": no OpenSearch cluster is part of
+      # this deployment, and search on Prisma covers every kind of result.
       #
-      # Flip this to "true" only once those three are being indexed on write and
-      # a backfill has run.
+      # This note used to warn that switching it on would silently drop
+      # courses, reels and mentors, whose indexes nothing writes. That is no
+      # longer so — search.service.ts sends only members, posts and jobs to the
+      # engine and answers the other three from the database. What still makes
+      # it worse today is the missing backfill: those three indexes are written
+      # only when a row is created or edited, and no script loads the rows that
+      # already exist, so every member, post and job from before the switch
+      # would drop out of search. Write and run that backfill first.
+      #
+      # OPENSEARCH_NODE on its own also switches it on (utils/opensearch.ts),
+      # so leave that unset too until then.
       - key: OPENSEARCH_ENABLED
         value: "false"
       - key: RATE_LIMIT_ENABLED

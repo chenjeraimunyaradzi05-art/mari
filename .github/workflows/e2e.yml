@@ -1,0 +1,164 @@
+name: E2E (full stack)
+
+# The browser journey that needs the whole platform: a member registers, finds
+# a mentor, requests a session and searches the job board
+# (athena-platform/client/tests/critical-paths.spec.ts).
+#
+# That spec used to run in CI's client job, which has no API and no database,
+# and it passed there because every step returned early when the page it
+# wanted was not there. It now fails unless each step really happens, so it
+# runs here instead, against a Postgres built by the same migrations
+# production runs, the API built from this commit, and the fixtures in
+# athena-platform/server/scripts/seed-e2e.js (one free mentor, one published
+# job — named as fixtures, on a disposable database).
+#
+# A separate workflow rather than a job in ci.yml, deliberately, for now. The
+# release pipeline ("Build and Deploy") starts only when the workflow named CI
+# succeeds, and this journey has not yet had a green run on main: GitHub
+# Actions has been unable to start jobs for this repository (a billing lock on
+# the account), so it could not be run before it was written. Putting it
+# inside CI first would let a fault in the harness itself, rather than in the
+# product, stop every release, safety fixes included. Its failures are not
+# hidden by this: it is its own red workflow, on every push to main. Once it
+# has passed on main, move the job into ci.yml (or add "E2E (full stack)" as a
+# required check) so that it gates releases too.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  journey:
+    name: Critical path against a live API
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      NEXT_PUBLIC_API_URL: http://localhost:5000
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      # schema.prisma's datasource also names DIRECT_DATABASE_URL, and Prisma
+      # refuses the schema (P1012) when it is unset, so `migrate deploy` would
+      # stop here without it. No pooler in the service container: same database.
+      DIRECT_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      # Tells the spec the API and its fixtures are up, so the journey runs
+      # rather than being skipped with a reason.
+      E2E_FULL_STACK: 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: |
+            athena-platform/server/package-lock.json
+            athena-platform/client/package-lock.json
+
+      # Made per run and masked. PROXY_SHARED_SECRET has to be the same value
+      # on both servers: the web tier sends it with the visitor's address and
+      # the API believes the address only when it matches. JWT_SECRET signs the
+      # member's session, and registration needs it to check the ban list.
+      - name: Generate per-run secrets
+        run: |
+          proxy_secret="$(openssl rand -hex 32)"
+          jwt_secret="$(openssl rand -hex 32)"
+          echo "::add-mask::$proxy_secret"
+          echo "::add-mask::$jwt_secret"
+          {
+            echo "PROXY_SHARED_SECRET=$proxy_secret"
+            echo "JWT_SECRET=$jwt_secret"
+          } >> "$GITHUB_ENV"
+
+      - name: Install API dependencies
+        working-directory: athena-platform/server
+        run: npm ci
+
+      # The same `migrate deploy` production runs, then the fixtures. The seed
+      # refuses any database that is not local, so this step cannot write to
+      # anything but the service container above.
+      - name: Prepare the database
+        working-directory: athena-platform/server
+        run: |
+          npx prisma generate
+          npx prisma migrate deploy
+          node scripts/seed-e2e.js
+
+      - name: Build the API
+        working-directory: athena-platform/server
+        run: npm run build
+
+      # Development mode, as `npm run dev:e2e` runs it locally: production mode
+      # would demand S3, Redis, SendGrid and Stripe, none of which this journey
+      # touches. Rate limits are off because one runner is every visitor.
+      - name: Start the API and wait until it is ready
+        working-directory: athena-platform/server
+        env:
+          NODE_ENV: development
+          PORT: '5000'
+          API_URL: http://localhost:5000
+          CLIENT_URL: http://localhost:3000
+          FRONTEND_URL: http://localhost:3000
+          ALLOWED_ORIGINS: http://localhost:3000
+          RATE_LIMIT_ENABLED: 'false'
+          ENABLE_WORKERS: 'false'
+          OPENSEARCH_ENABLED: 'false'
+        run: |
+          nohup node dist/index.js > "$RUNNER_TEMP/api.log" 2>&1 &
+          for attempt in $(seq 1 60); do
+            if curl --silent --fail http://localhost:5000/readyz > /dev/null; then
+              echo "API ready after $attempt attempt(s)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::The API did not answer /readyz within two minutes"
+          tail -n 100 "$RUNNER_TEMP/api.log"
+          exit 1
+
+      - name: Install web dependencies
+        working-directory: athena-platform/client
+        run: npm ci
+
+      - name: Build the web app
+        working-directory: athena-platform/client
+        run: npm run build
+
+      - name: Install Playwright browser
+        working-directory: athena-platform/client
+        run: npx playwright install --with-deps chromium
+
+      # Playwright's webServer starts `next start` on port 3000 against the
+      # build above (playwright.config.ts), which proxies to the API on 5000.
+      - name: Run the critical-path journey
+        working-directory: athena-platform/client
+        run: npx playwright test tests/critical-paths.spec.ts --project=chromium
+
+      - name: Show the API log
+        if: failure()
+        run: tail -n 200 "$RUNNER_TEMP/api.log" || true
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-full-stack
+          path: athena-platform/client/playwright-report
+          retention-days: 7

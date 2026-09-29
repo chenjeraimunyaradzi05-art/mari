@@ -1,6 +1,20 @@
 [build]
   base = "athena-platform/client"
-  command = "npm ci --legacy-peer-deps && npm run build"
+  # scripts/check-web-env.js stops a build that has no PROXY_SHARED_SECRET.
+  # The web host refuses to serve in production without it
+  # (instrumentation.ts), and a refusal at the first request would come after
+  # the broken deploy had already replaced the working one. Failing the build
+  # keeps the working one live.
+  #
+  # No --legacy-peer-deps. It used to be here, and in NPM_FLAGS, to push past a
+  # peer-dependency conflict that no longer exists: next@16 accepts react
+  # ^18.2.0, and the client's lockfile resolves cleanly without the flag (checked
+  # with `npm install --package-lock-only`, which left the lockfile unchanged).
+  # Keeping it would only have hidden the next real conflict until it broke
+  # something at runtime. CI (.github/workflows/ci.yml) and
+  # athena-platform/client/netlify.toml install the same way, so all three
+  # agree.
+  command = "npm ci && node scripts/check-web-env.js && npm run build"
   # Must be set here, and must not equal `base`.
   #
   # Leaving it to "the plugin" did not do that: with no publish directory in
@@ -16,10 +30,14 @@
 
 [build.environment]
   NODE_VERSION = "20"
-  NPM_FLAGS = "--legacy-peer-deps"
   NEXT_TELEMETRY_DISABLED = "1"
-  # Set NEXT_PUBLIC_API_URL in Netlify Dashboard Environment Variables
-  # Example: NEXT_PUBLIC_API_URL = "https://api.your-domain.com"
+  # Set these in Netlify Dashboard Environment Variables, not here (a value
+  # here would be committed):
+  #   NEXT_PUBLIC_API_URL = "https://api.your-domain.com"   (baked in at build)
+  #   PROXY_SHARED_SECRET = the API's value, 32+ characters (Builds and Functions scopes)
+  #   NEXT_PUBLIC_TURNSTILE_SITE_KEY = the site key paired with the API's
+  #     TURNSTILE_SECRET_KEY; set both or neither. athena-platform/client/
+  #     netlify.toml says what each half does alone.
 
 # Enable Next.js runtime - REQUIRED for Next.js 14 on Netlify
 [[plugins]]

@@ -78,8 +78,19 @@ sudo certbot --nginx -d athena.com -d www.athena.com -d api.athena.com
 #### AWS
 1. Go to AWS IAM Console
 2. Create new user with programmatic access
-3. Attach policies: `AmazonS3FullAccess`, `AmazonSESFullAccess`
-4. Save Access Key ID and Secret Access Key
+3. Attach a policy scoped to the one media bucket (`S3_BUCKET`): `s3:PutObject`,
+   `s3:GetObject` and `s3:DeleteObject` on `arn:aws:s3:::<bucket>/*`, and
+   `s3:ListBucket` on `arn:aws:s3:::<bucket>`, which the startup probe's
+   HeadBucket needs. Add `rekognition:DetectModerationLabels` (resource `*`):
+   the same key screens uploaded images (`moderation.service.ts`), and without
+   that permission every image screening call fails. Add
+   `secretsmanager:GetSecretValue` on the one secret only if `USE_AWS_SECRETS`
+   is on. Not `AmazonS3FullAccess`, which this step used to name: it hands the
+   API's key every bucket in the account. No SES policy either; email goes
+   through SendGrid.
+4. Save Access Key ID and Secret Access Key. In production the API checks both
+   at boot and asks S3 whether the bucket answers; `/health/launch-readiness`
+   fails while it does not.
 
 #### Sentry (Error Tracking)
 1. Go to https://sentry.io and create account
@@ -93,35 +104,54 @@ sudo certbot --nginx -d athena.com -d www.athena.com -d api.athena.com
 
 ### Step 5: Deploy
 
-**Option A: Docker**
-```bash
-# Build and run
-docker-compose -f docker-compose.yml up -d
+**Netlify + Neon + API host (what production runs)**
+- Client: Deploy to Netlify (connect GitHub repo, base dir `athena-platform/client`). Set `PROXY_SHARED_SECRET` there with the Builds and Functions scopes, the same value as the API's: the build stops without it, and the web host refuses to serve without it.
+- Server: Deploy to an always-on Node host (root dir `athena-platform/server`, Dockerfile or `npm ci && npm run build`, start `node dist/start.js`). `render.yaml` at the repository root and `athena-platform/server/fly.toml` are ready-made configurations; see `DEPLOYMENT_GUIDE.md` at the repository root.
+- Database: Neon PostgreSQL — pooled `DATABASE_URL` at runtime, direct `DIRECT_DATABASE_URL` for migrations (see [NEON_SETUP.md](../../../NEON_SETUP.md))
+- Migrations run automatically on deploy via `start.ts` → `prisma migrate deploy`, and from the "Build and Deploy" workflow
 
-# Check logs
-docker-compose logs -f
-```
+**Not for production: `athena-platform/docker-compose.yml`**
 
-**Option B: Manual Deployment**
+This guide used to offer `docker-compose -f docker-compose.yml up -d` as a
+production option. That file is the development stack. It runs the ML service
+from its development image with `DEBUG=true` and no shared key, so every
+endpoint answers anything that can reach its port, and it publishes Postgres,
+Redis, OpenSearch and the ML service on the host's ports for a developer's
+convenience. Do not deploy it.
+
+**The ML service, if you deploy it**
+
+It is optional: without `ML_SERVICE_URL` the feed ranks by engagement alone
+(`docs/runbooks/ML-SERVICE.md` has what turning it on would take). A production
+deployment of `athena-platform/ml` must set:
+
+- `ML_SERVICE_KEY`, a long random value (`openssl rand -hex 32`), set to the
+  same value on the API, which sends it as `X-ML-Key`. The service refuses to
+  start in production without it.
+- `ENVIRONMENT=production` (or `ATHENA_ENV`, `APP_ENV` or `NODE_ENV`, read in
+  that order). Without a production environment name the missing-key refusal
+  does not apply and `DEBUG` is honoured, which returns exception text to
+  callers.
+- No published port. Put it on the API host's private network and point
+  `ML_SERVICE_URL` at that address.
+
+**Manual deployment (a single machine you run yourself)**
 ```bash
-# Server
+# Server: the build needs the dev dependencies (TypeScript), so install them,
+# build, then drop them.
 cd server
-npm ci --production
+npm ci
 npm run build
+npm prune --omit=dev
 pm2 start dist/start.js --name athena-api
 
-# Client
+# Client: PROXY_SHARED_SECRET must be in this process's environment, or it
+# refuses to serve.
 cd client
 npm ci
 npm run build
 pm2 start npm --name athena-web -- start
 ```
-
-**Option C: Netlify + Neon + API host (Current)**
-- Client: Deploy to Netlify (connect GitHub repo, base dir `athena-platform/client`)
-- Server: Deploy to an always-on Node host (root dir `athena-platform/server`, Dockerfile or `npm ci && npm run build`, start `node dist/start.js`)
-- Database: Neon PostgreSQL — pooled `DATABASE_URL` at runtime, direct `DIRECT_DATABASE_URL` for migrations (see [NEON_SETUP.md](../../../NEON_SETUP.md))
-- Migrations run automatically on deploy via `start.ts` → `prisma migrate deploy`, and from the "Build and Deploy" workflow
 
 ### Step 6: Verify Deployment
 

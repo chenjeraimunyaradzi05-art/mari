@@ -11,17 +11,31 @@
   # This previously ran `node ../../scripts/netlify-build.mjs`, which does not
   # exist in this repository — not here and not on main. Any deploy that
   # resolved this file rather than the root one would have failed outright.
-  command = "npm ci --legacy-peer-deps && npm run build"
+  #
+  # scripts/check-web-env.js fails the build when PROXY_SHARED_SECRET is
+  # missing, rather than letting instrumentation.ts refuse every request after
+  # the deploy has gone live. See the root netlify.toml.
+  # No --legacy-peer-deps; see the root netlify.toml for why it was dropped.
+  command = "npm ci && node scripts/check-web-env.js && npm run build"
   publish = ".next"
 
 [build.environment]
   NODE_VERSION = "20"
-  NPM_FLAGS = "--legacy-peer-deps"
   NEXT_TELEMETRY_DISABLED = "1"
   # -------------------------------------------------------
   # REQUIRED — set in Netlify Dashboard → Site Settings → Environment Variables:
   #   NEXT_PUBLIC_API_URL = "https://api.your-domain.com"
   #   NEXT_PUBLIC_APP_URL = "https://YOUR-APP.netlify.app"
+  #   PROXY_SHARED_SECRET = the same value as on the API, 32+ characters.
+  #     Server-only (no NEXT_PUBLIC_ prefix). The web host refuses to serve
+  #     without it in production (instrumentation.ts): without it every member
+  #     shares one login budget, the lockout keys on this host, and new-device
+  #     alerts never fire.
+  # SET TOGETHER WITH THE API'S TURNSTILE_SECRET_KEY:
+  #   NEXT_PUBLIC_TURNSTILE_SITE_KEY = the site key of the same Turnstile
+  #     widget. Shows the human check on the sign-up form. The secret on the API
+  #     without this refuses every password sign-up; this without the secret
+  #     shows a check nobody verifies.
   # No database variables here. The web tier never opens a database
   # connection: every /api request is proxied to the API host, which is the
   # only thing that holds the Neon DATABASE_URL / DIRECT_DATABASE_URL.
@@ -43,15 +57,23 @@
 #
 # A redirect in this file cannot read an environment variable, so sending
 # these to the backend from here would mean hardcoding the API host.
-# Both paths are proxied in-app instead, reading NEXT_PUBLIC_API_URL at
-# request time:
+# Both paths are proxied in-app instead, to the NEXT_PUBLIC_API_URL the site
+# was *built* with:
 #
 #   /api/auth/*   app/api/auth/*        (forwards Set-Cookie itself)
 #   /api/*        app/api/[...path]     (all verbs, generic pass-through)
 #   /uploads/*    app/uploads/[...path] (user media)
 #
+# This note used to say the handlers read NEXT_PUBLIC_API_URL "at request
+# time". They do not. Next.js replaces every NEXT_PUBLIC_* reference with its
+# build-time value, in the server route handlers as well as in the browser
+# bundle, so changing the variable in the Netlify dashboard does nothing until
+# a new deploy builds the site again. Set it, then start a new build (Deploys,
+# "Trigger deploy"). The root netlify.toml and
+# athena-platform/docs/runbooks/ONCALL.md say the same.
+#
 # Realtime connects directly to the backend via NEXT_PUBLIC_SOCKET_URL,
-# falling back to NEXT_PUBLIC_API_URL.
+# falling back to NEXT_PUBLIC_API_URL; both are baked in at build time too.
 
 # ===========================================
 # SECURITY HEADERS
@@ -68,13 +90,22 @@
 # block in next.config.js — now say 'none'/DENY, so the browser enforces what
 # the files claim. Nothing frames an ATHENA page; the iframes in the client
 # embed third parties, which `frame-src` governs.
+#
+# frame-src and font-src are spelled out here to match src/proxy.ts. A browser
+# that receives two policies enforces both, and this one used to leave
+# frame-src to default-src 'self': wherever it was served beside the proxy's,
+# the Stripe card form, Google sign-in, the classroom's YouTube and Vimeo
+# players and the Turnstile check on the sign-up form were all blocked, and
+# with TURNSTILE_SECRET_KEY set on the API a blocked Turnstile frame means
+# every password sign-up is refused. The same gap in public/_headers is
+# handed to its owner.
 [[headers]]
   for = "/*"
   [headers.values]
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
-    Content-Security-Policy = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; media-src 'self' blob: https:; worker-src 'self' blob:; manifest-src 'self'"
+    Content-Security-Policy = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https: wss:; media-src 'self' blob: https:; worker-src 'self' blob:; manifest-src 'self'; frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://accounts.google.com https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://challenges.cloudflare.com"
     Cross-Origin-Opener-Policy = "same-origin-allow-popups"
     X-XSS-Protection = "1; mode=block"
     Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=(), display-capture=()"

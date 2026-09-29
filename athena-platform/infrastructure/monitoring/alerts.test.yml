@@ -1,0 +1,169 @@
+# Unit tests for alerts.yml, run in CI with `promtool test rules alerts.test.yml`.
+#
+# Each case feeds the rules a few minutes of made-up series and says which
+# alerts must be firing at a given moment, and which must not. The expected
+# annotations are the rules' own text: promtool compares them exactly, so an
+# edit to a rule's wording has to be made here as well.
+
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  # The scrape fails from minute 2. Two minutes later it is a page, not before.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="athena-api", instance="api:5000"}'
+        values: '1 1 0 0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: AthenaApiDown
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: AthenaApiDown
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              job: athena-api
+              instance: "api:5000"
+            exp_annotations:
+              summary: "The ATHENA API has not answered its metrics scrape for two minutes."
+              runbook: "athena-platform/docs/runbooks/ONCALL.md: \"/readyz is 503\" and \"Rollback Procedures\". If /livez answers, check that METRICS_TOKEN on the API matches the scraper's bearer token."
+      - eval_time: 6m
+        alertname: AthenaApiMetricsAbsent
+        exp_alerts: []
+
+  # A scrape job under some other name: every athena-api rule would be silent.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="something-else", instance="x"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: AthenaApiMetricsAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              job: athena-api
+            exp_annotations:
+              summary: "No scrape of the ATHENA API has been recorded for ten minutes, so none of its alerts can fire."
+              runbook: "athena-platform/infrastructure/monitoring/README.md, step 2. The scrape job must be named athena-api."
+
+  # One request in eleven failing, at about one a second: a page.
+  - interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="athena-api", instance="api:5000", method="GET", path="/api/posts/feed", status="200"}'
+        values: '0+60x20'
+      - series: 'http_requests_total{job="athena-api", instance="api:5000", method="GET", path="/api/posts/feed", status="500"}'
+        values: '0+6x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: AthenaApiHighErrorRate
+        exp_alerts:
+          - exp_labels:
+              severity: page
+            exp_annotations:
+              summary: "More than 5% of API requests have failed with a server error for five minutes."
+              runbook: "athena-platform/docs/runbooks/ONCALL.md: \"Common Failure Modes\". Sentry carries the failing requests with their request ids."
+
+  # Half of a trickle failing — one request a minute — is below the volume
+  # guard, so a quiet night's single error does not page anyone.
+  - interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="athena-api", instance="api:5000", method="GET", path="/api/posts/feed", status="200"}'
+        values: '0+1x20'
+      - series: 'http_requests_total{job="athena-api", instance="api:5000", method="GET", path="/api/posts/feed", status="500"}'
+        values: '0+1x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: AthenaApiHighErrorRate
+        exp_alerts: []
+
+  # Every request taking between two and five seconds.
+  - interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_bucket{job="athena-api", instance="api:5000", method="GET", path="/api/jobs", status="200", le="1"}'
+        values: '0x25'
+      - series: 'http_request_duration_seconds_bucket{job="athena-api", instance="api:5000", method="GET", path="/api/jobs", status="200", le="2"}'
+        values: '0x25'
+      - series: 'http_request_duration_seconds_bucket{job="athena-api", instance="api:5000", method="GET", path="/api/jobs", status="200", le="5"}'
+        values: '0+10x25'
+      - series: 'http_request_duration_seconds_bucket{job="athena-api", instance="api:5000", method="GET", path="/api/jobs", status="200", le="+Inf"}'
+        values: '0+10x25'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: AthenaApiSlow
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+            exp_annotations:
+              summary: "The slowest 5% of API requests have taken more than two seconds for ten minutes."
+              runbook: "Check Neon's monitoring for slow queries and connection count, and the event-loop lag alert below."
+
+  # The same slowness on media uploads alone is a large file, not a slow API.
+  - interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_bucket{job="athena-api", instance="api:5000", method="POST", path="/api/media/upload", status="200", le="2"}'
+        values: '0x25'
+      - series: 'http_request_duration_seconds_bucket{job="athena-api", instance="api:5000", method="POST", path="/api/media/upload", status="200", le="+Inf"}'
+        values: '0+10x25'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: AthenaApiSlow
+        exp_alerts: []
+
+  # Two seconds of event-loop lag, held.
+  - interval: 1m
+    input_series:
+      - series: 'nodejs_eventloop_lag_seconds{job="athena-api", instance="api:5000"}'
+        values: '2x20'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: AthenaApiEventLoopBlocked
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              job: athena-api
+              instance: "api:5000"
+            exp_annotations:
+              summary: "The API's event loop has been blocked for more than a second at a time for five minutes."
+              runbook: "Look for a synchronous file write, a large JSON body or an unbounded loop in the requests logged just before it began."
+
+  # Three starts in ten minutes is a crash loop; one start is a deploy.
+  - interval: 1m
+    input_series:
+      - series: 'process_start_time_seconds{job="athena-api", instance="api:5000"}'
+        values: '1000 1000 1060 1060 1180 1180 1300 1300 1300 1300 1300'
+      - series: 'process_start_time_seconds{job="athena-api", instance="api:5001"}'
+        values: '1000 1000 1060 1060 1060 1060 1060 1060 1060 1060 1060'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: AthenaApiRestarting
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              job: athena-api
+              instance: "api:5000"
+            exp_annotations:
+              summary: "The API process has restarted more than twice in thirty minutes."
+              runbook: "The host's logs show the crash; start.ts prints boot and migration errors. athena-platform/docs/runbooks/ONCALL.md: \"Deploy / shutdown issues\"."
+
+  # 1.7 GB held for a quarter of an hour; 1.2 GB never alerts.
+  - interval: 1m
+    input_series:
+      - series: 'process_resident_memory_bytes{job="athena-api", instance="api:5000"}'
+        values: '1700000000x20'
+      - series: 'process_resident_memory_bytes{job="athena-api", instance="api:5001"}'
+        values: '1200000000x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: AthenaApiMemoryHigh
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              job: athena-api
+              instance: "api:5000"
+            exp_annotations:
+              summary: "The API has used more than 1.6 GB of its 2 GB for ten minutes."
+              runbook: "A steady climb across hours is a leak; take a heap snapshot before restarting. A sudden step is usually one large request."

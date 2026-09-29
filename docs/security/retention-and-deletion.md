@@ -17,17 +17,19 @@ _Version 1.0 — 2026-08-18. Enforcement code: `athena-platform/server/src/scrip
 | Stripe data | per Stripe retention; deletion via Stripe API on account deletion | account deletion | policy |
 | AI prompts/responses | 30 days for abuse review, then delete; never used for third-party training | rolling | **policy — define with provider DPA** |
 | Server logs / runtime logs | 30 days | rolling | policy (runtime logs quarantined by cleanup script) |
-| Backups | 35 days rolling (Neon PITR window) | provider | **[FOUNDER: confirm Neon plan window]** |
+| Backups (Neon point-in-time history) | the Neon plan's history window — not yet read from the console, so no figure is stated here | provider | **[FOUNDER: read the window in the Neon console and record it]** |
+| Backups (nightly off-platform copies) | `BACKUP_RETENTION_DAYS`, the owner's decision; the backup run refuses to take a copy unless the bucket's lifecycle rule deletes it within that many days | the bucket's lifecycle rule | **enforced once set up** (`.github/workflows/backup.yml`); nothing is copied until the owner decides the period — see `athena-platform/docs/runbooks/ONCALL.md`, "Backups and restore" |
 
 ## Deletion standards
 
 1. **Deletion means deletion** — not `deleted=true` forever. Anonymisation is acceptable only where content integrity requires it (threads) or law requires retention (financial).
 2. Deletion must propagate to: DB, object storage, search indexes (OpenSearch when enabled), caches, Stripe (via API), analytics.
 3. Every user-requested deletion gets a completion confirmation; the GDPR worker records completion.
-4. Backups: deleted data may persist in backups until the window lapses — state this in the privacy policy.
+4. Backups: deleted data may persist in backups until the window lapses — state this in the privacy policy, with the Neon window and `BACKUP_RETENTION_DAYS` as the two figures. A restore must never bring an erased account back: the checks before any restored row returns to production are in `athena-platform/docs/runbooks/ONCALL.md`, "Backups and restore".
 
 ## Actions
 
 - [ ] Wire dormant-account and orphaned-upload sweeps into the scheduler (`data-retention.ts` is the natural home)
 - [ ] Implement verification-document 90-day purge
 - [ ] **[FOUNDER]** Confirm statutory retention list with counsel (tax 7y, employment records, NDB documentation)
+- [ ] **[FOUNDER]** Decide how long off-platform backup copies are kept (`BACKUP_RETENTION_DAYS`), who holds the decryption keys (two people at least), and which region the bucket is in, then set up the `production-backups` environment (`athena-platform/docs/runbooks/ONCALL.md`, "Backups and restore")

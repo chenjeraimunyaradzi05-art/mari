@@ -48,6 +48,26 @@ const path = require('path');
 const SERVER_ROOT = path.resolve(__dirname, '..');
 const SRC = path.join(SERVER_ROOT, 'src');
 const HEALTH_ROUTES = path.join(SRC, 'routes', 'health.routes.ts');
+const ENV_RULES = path.join(SRC, 'utils', 'env.ts');
+
+/**
+ * The names src/utils/env.ts refuses to boot without, read from that file.
+ *
+ * The list below mirrors the readiness endpoint, which reports; env.ts is what
+ * stops the process, and the two had drifted. PROXY_SHARED_SECRET and API_URL
+ * became boot requirements there and were never added to render.yaml, so a
+ * service created from the blueprint would have exited at start with nothing
+ * in CI to say it would. Reading the rules from env.ts itself, rather than
+ * keeping a third copy here, is what stops that recurring: a name that becomes
+ * required at boot is required of the blueprint in the same commit.
+ */
+function namesRequiredAtBoot() {
+  const text = fs.readFileSync(ENV_RULES, 'utf8');
+  const names = [];
+  for (const m of text.matchAll(/name:\s*'([A-Z][A-Z0-9_]*)',\s*required:\s*true\b/g)) names.push(m[1]);
+  if (names.length === 0) fail(`found no required variables in ${ENV_RULES}; its rule format changed (update this script)`);
+  return names;
+}
 
 // What production needs, mirroring the launch-readiness checks. Each name is
 // verified below to still appear in health.routes.ts, so this list cannot
@@ -215,6 +235,15 @@ function namesReadByCode() {
     for (const m of text.matchAll(/anyEnvCheck\([^)]*?\[([^\]]+)\]/g)) {
       for (const n of m[1].matchAll(/['"]([A-Z][A-Z0-9_]*)['"]/g)) names.add(n[1]);
     }
+    // Helpers that take the variable's name and read process.env[name]
+    // themselves: quotaFromEnv('AI_CHAT_FREE_WINDOW_SECONDS',
+    // 'AI_CHAT_FREE_MAX_REQUESTS', ...) in ai.routes.ts, positiveIntFromEnv in
+    // ai-budget.service.ts. Without this every name they read was reported
+    // OBSOLETE, which is the one finding that tempts someone to delete a
+    // setting that works.
+    for (const m of text.matchAll(/\b[A-Za-z_]\w*FromEnv\(([^)]*)\)/g)) {
+      for (const n of m[1].matchAll(/['"]([A-Z][A-Z0-9_]*)['"]/g)) names.add(n[1]);
+    }
   }
   return names;
 }
@@ -254,6 +283,11 @@ function main() {
       continue;
     }
     if (set.every((name) => PLACEHOLDER_VALUES.has(String(env[name]).trim().toLowerCase()))) placeholders.push(group.join(' or '));
+  }
+  const alreadyRequired = new Set(REQUIRED_IN_PRODUCTION.flat());
+  for (const name of namesRequiredAtBoot()) {
+    if (alreadyRequired.has(name)) continue;
+    if (env[name] === undefined || env[name] === '') missing.push(`${name} (the process refuses to start without it: src/utils/env.ts)`);
   }
   for (const rule of CONDITIONAL) {
     if (!rule.when(env)) continue;

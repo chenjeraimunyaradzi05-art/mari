@@ -1,0 +1,170 @@
+name: Database backup
+
+# The nightly off-platform copy of the production database, and a restore of
+# every copy it takes. The work is in athena-platform/server/scripts/db-backup.sh,
+# whose header explains each choice; the runbook, including what the owner has
+# to set up and how to restore, is "Backups and restore" in
+# athena-platform/docs/runbooks/ONCALL.md.
+#
+# Before this existed Neon's point-in-time history was the only backup, nothing
+# was held anywhere else, and no restore had ever been rehearsed.
+#
+# What a run does: checks every setting and that the bucket deletes copies
+# within the retention period the owner chose; dumps the public schema inside
+# a held snapshot, counting every table in that snapshot; restores the dump
+# into a throwaway Postgres on this runner and requires every count to match;
+# encrypts it with age to the owner's offline keys; uploads it. A copy that does
+# not pass the drill is still uploaded, named UNVERIFIED, and the run fails.
+#
+# Until the production-backups environment is set up, every run fails and says
+# which settings are missing. That is deliberate: a skipped run would look like
+# a working backup. A failed run opens one issue titled "Database backup
+# failed", which the next successful run closes.
+#
+# This repository is public, and so are these logs. The script never prints a
+# row, a row count or a table's size. Do not add `set -x`, an artifact upload,
+# or a debug step that prints the environment.
+
+on:
+  schedule:
+    # 16:40 UTC is 02:40 in Brisbane (no daylight saving), the quietest hour.
+    - cron: '40 16 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: database-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: Dump, restore-drill, seal and upload
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # The secrets live in this environment, not at repository level, so that a
+    # workflow edited on another branch cannot read them. Restrict it to main
+    # (Settings → Environments → production-backups → Deployment branches).
+    environment: production-backups
+    env:
+      BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+      BACKUP_AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_AWS_ACCESS_KEY_ID }}
+      BACKUP_AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_AWS_SECRET_ACCESS_KEY }}
+      BACKUP_AWS_REGION: ${{ vars.BACKUP_AWS_REGION }}
+      BACKUP_S3_BUCKET: ${{ vars.BACKUP_S3_BUCKET }}
+      BACKUP_AGE_RECIPIENTS: ${{ vars.BACKUP_AGE_RECIPIENTS }}
+      BACKUP_RETENTION_DAYS: ${{ vars.BACKUP_RETENTION_DAYS }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: athena-platform/server/scripts
+          persist-credentials: false
+
+      - name: Check the settings and the bucket's retention
+        id: check
+        run: bash athena-platform/server/scripts/db-backup.sh check
+
+      - name: Install the Postgres client for the server's version, and age
+        id: tools
+        run: bash athena-platform/server/scripts/db-backup.sh tools
+
+      - name: Dump inside a snapshot, counting every table
+        id: dump
+        run: bash athena-platform/server/scripts/db-backup.sh dump
+
+      - name: Restore the dump into a throwaway Postgres and compare
+        id: drill
+        run: bash athena-platform/server/scripts/db-backup.sh drill
+
+      # Runs when the drill failed too: a copy that might not restore is kept,
+      # named UNVERIFIED, rather than thrown away.
+      - name: Seal with age and upload
+        id: seal
+        if: ${{ always() && steps.dump.outcome == 'success' }}
+        env:
+          DRILL_OUTCOME: ${{ steps.drill.outcome }}
+        run: bash athena-platform/server/scripts/db-backup.sh seal
+
+      - name: Remove the plaintext and the drill database
+        if: ${{ always() }}
+        run: bash athena-platform/server/scripts/db-backup.sh clean
+
+      - name: Open the backup issue
+        if: ${{ failure() }}
+        uses: actions/github-script@v7
+        env:
+          CHECK: ${{ steps.check.outcome }}
+          TOOLS: ${{ steps.tools.outcome }}
+          DUMP: ${{ steps.dump.outcome }}
+          DRILL: ${{ steps.drill.outcome }}
+          SEAL: ${{ steps.seal.outcome }}
+        with:
+          script: |
+            const title = 'Database backup failed';
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              creator: 'github-actions[bot]',
+              per_page: 100,
+            });
+            if (open.some((issue) => issue.title === title && !issue.pull_request)) {
+              core.info('A backup issue is already open; not notifying again.');
+              return;
+            }
+            const steps = [
+              ['Settings and retention', process.env.CHECK],
+              ['Postgres client', process.env.TOOLS],
+              ['Dump', process.env.DUMP],
+              ['Restore drill', process.env.DRILL],
+              ['Seal and upload', process.env.SEAL],
+            ];
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              labels: ['backup'],
+              body: [
+                'Last night\'s off-platform copy of the production database did not complete. Until one does, the newest good copy is older than it should be.',
+                '',
+                ...steps.map(([name, outcome]) => `- ${name}: ${outcome || 'not reached'}`),
+                '',
+                'The failing step\'s log says why. Work it with "Backups and restore" in `athena-platform/docs/runbooks/ONCALL.md`.',
+                'This issue closes itself on the next run that uploads a verified copy.',
+                '',
+                `Run: ${run}`,
+              ].join('\n'),
+            });
+
+      - name: Close the backup issue
+        if: ${{ success() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = 'Database backup failed';
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              creator: 'github-actions[bot]',
+              per_page: 100,
+            });
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            for (const issue of open.filter((i) => i.title === title && !i.pull_request)) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `A verified copy was uploaded.\n\nRun: ${run}`,
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed',
+              });
+            }

@@ -30,6 +30,16 @@ jobs:
           --health-cmd "pg_isready -U postgres" --health-interval 10s --health-timeout 5s --health-retries 5
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      # schema.prisma's datasource names `directUrl = env("DIRECT_DATABASE_URL")`
+      # (the Neon direct host migrations need), and Prisma refuses the whole
+      # schema when a variable it names is unset: "Environment variable not
+      # found: DIRECT_DATABASE_URL" (P1012), checked 27 September 2026 with the
+      # Prisma CLI this package pins. So `migrate deploy` below could not have
+      # passed since the datasource gained it on 19 August, and no run showed
+      # it: every CI run since then has ended within seconds, before a job
+      # started, because of the account's billing lock. The service container
+      # has no pooler, so both names point at the same database.
+      DIRECT_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
       NODE_ENV: test
 
     steps:
@@ -99,6 +109,15 @@ jobs:
       # the client. Fails on a control a user can reach that does nothing.
       - name: Check for dead interactions in reachable UI
         run: node ../client/scripts/check-dead-interactions.js
+
+      # `req.user!`, `any` as a type, and route files that validate nothing
+      # with zod or express-validator: about eleven hundred, four hundred and
+      # two hundred and thirty of them, and nothing stopped the next one. This
+      # fails when any file has more than debt-ratchet-baseline.json records,
+      # so the numbers only go down. It reads the TypeScript syntax tree, which
+      # `npm ci` above has installed.
+      - name: Check type-safety and validation debt has not grown
+        run: node scripts/check-debt-ratchet.js
 
       # scripts/check-env.js existed, worked, and was called by nothing — so the
       # production drift it was written to catch (STRIPE_PRICE_STARTER for
@@ -171,6 +190,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # `next start`, which Playwright runs below, is a production server, and
+      # instrumentation.ts refuses to serve in production without
+      # PROXY_SHARED_SECRET. There is no API in this job for it to match, so any
+      # value of the right length will do; it is made fresh for each run rather
+      # than written here, so nothing in the repository looks like a secret.
+      - name: Generate a proxy secret for the web server
+        run: |
+          secret="$(openssl rand -hex 32)"
+          echo "::add-mask::$secret"
+          echo "PROXY_SHARED_SECRET=$secret" >> "$GITHUB_ENV"
+
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
@@ -179,7 +209,10 @@ jobs:
           cache-dependency-path: athena-platform/client/package-lock.json
 
       - name: Install dependencies
-        run: npm ci --legacy-peer-deps
+        # No --legacy-peer-deps: next@16 accepts react ^18.2.0, so there is no
+        # peer conflict to suppress, and suppressing it here meant CI could not
+        # report a real one introduced later.
+        run: npm ci
 
       - name: Type check
         run: npx tsc --noEmit
@@ -201,12 +234,19 @@ jobs:
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
 
-      # A pull request runs the smoke spec only. The rest of the suite drives
-      # long authenticated journeys and adds several minutes to every review;
-      # it runs on the merge instead, where nobody is waiting on it.
-      - name: Run E2E smoke spec
+      # A pull request runs the specs that answer the API at the browser: the
+      # smoke spec, the failure states and the search page. They take seconds
+      # and give the same answer with or without an API. The rest of
+      # critical-paths.spec.ts (the timing and keyboard checks, and the member
+      # journey) runs on the merge instead, where nobody is waiting on it.
+      #
+      # There is no API in this job. The journey in tests/critical-paths.spec.ts
+      # needs one, with fixtures, and is skipped here with that reason printed;
+      # it runs for real in .github/workflows/e2e.yml, which starts Postgres and
+      # the API first.
+      - name: Run the web-tier E2E specs
         if: github.event_name == 'pull_request'
-        run: npx playwright test tests/smoke.spec.ts --project=chromium
+        run: npx playwright test tests/smoke.spec.ts tests/failure-states.spec.ts tests/search.spec.ts --project=chromium
 
       - name: Run full E2E suite
         if: github.event_name != 'pull_request'
@@ -219,3 +259,56 @@ jobs:
           name: playwright-report
           path: athena-platform/client/playwright-report
           retention-days: 7
+
+  # The recommendation service (athena-platform/ml) had pytest in its
+  # requirements, no test files, and no workflow that would have run any. Its
+  # suite covers the served API — feed ranking, mentor matching, income
+  # streams, the safety score and the key check in front of all of them — and
+  # runs here on the same Python as the image (python:3.11-slim in
+  # ml/Dockerfile). requirements-test.txt is what src/api imports plus pytest,
+  # not the training stack, so this installs in seconds rather than pulling
+  # torch.
+  ml:
+    name: ML service
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: athena-platform/ml
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: athena-platform/ml/requirements-test.txt
+
+      - name: Install the served API's dependencies and the test tools
+        run: python -m pip install -r requirements-test.txt
+
+      - name: Run the tests
+        run: python -m pytest
+
+  # The alert rules in athena-platform/infrastructure/monitoring are not
+  # evaluated by anything until a hosted metrics service exists (its README says
+  # what the owner has to set up). Checking and unit-testing them here keeps
+  # them from rotting before then: a rule that no longer parses, or over a
+  # metric that no longer exists, would otherwise be found on the day it was
+  # needed. The image is pinned so a promtool release cannot change the result.
+  alert-rules:
+    name: Alert rules
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: athena-platform/infrastructure/monitoring
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the rules
+        run: docker run --rm -v "$PWD:/rules" -w /rules --entrypoint /bin/promtool prom/prometheus:v2.54.1 check rules alerts.yml
+
+      - name: Test the rules
+        run: docker run --rm -v "$PWD:/rules" -w /rules --entrypoint /bin/promtool prom/prometheus:v2.54.1 test rules alerts.test.yml

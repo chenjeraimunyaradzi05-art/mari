@@ -11,6 +11,10 @@
 #   cd athena-platform/server
 #   fly launch --no-deploy --copy-config   # first time only, creates the app
 #   fly secrets set DATABASE_URL=... JWT_SECRET=...   # see DEPLOYMENT_GUIDE.md
+#     # The process refuses to start without every one of these (src/utils/env.ts):
+#     # DATABASE_URL DIRECT_DATABASE_URL JWT_SECRET DV_ENCRYPTION_KEY REDIS_URL
+#     # PROXY_SHARED_SECRET (same value as Netlify's) API_URL (this app's public
+#     # https address) AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY S3_BUCKET
 #   fly deploy --ha=false
 #   fly scale count 1                      # then `fly status` must list one machine
 #
