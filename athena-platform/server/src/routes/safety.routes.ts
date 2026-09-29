@@ -21,6 +21,13 @@ import { prisma } from '../utils/prisma';
 import { blockUser, listBlockedUsers, unblockUser } from '../utils/safety-store';
 import { reviewReportedContent } from '../services/moderation-threshold.service';
 import { reportLimiter } from '../middleware/socialLimits';
+import {
+  isReportableReason,
+  openReportIntake,
+  runReportIntakeConsequences,
+  type ReportPriority,
+} from '../services/content-report.service';
+import { withdrawPresence } from '../services/presence.service';
 
 const router = Router();
 
@@ -34,6 +41,19 @@ const REPORT_STATUS_LABELS: Record<string, string> = {
   REVIEWING: 'UNDER_REVIEW',
   RESOLVED: 'ACTION_TAKEN',
   DISMISSED: 'CLOSED',
+};
+
+/**
+ * The queue's three urgency levels, from intake's four. ContentReport.priority
+ * holds URGENT, HIGH or NORMAL — the values the migration copied out of the
+ * evidence JSON — so a critical report is URGENT, a high one HIGH, and
+ * everything else waits its turn as NORMAL.
+ */
+const QUEUE_PRIORITY: Record<ReportPriority, 'URGENT' | 'HIGH' | 'NORMAL'> = {
+  critical: 'URGENT',
+  high: 'HIGH',
+  medium: 'NORMAL',
+  low: 'NORMAL',
 };
 
 /**
@@ -160,15 +180,32 @@ router.get('/reports', authenticate, async (req: AuthRequest, res: Response, nex
   }
 });
 
+/**
+ * The in-app door into the report queue.
+ *
+ * It used to write the row and nothing else: no reference she could quote
+ * back, no review deadline, no alert to Trust & Safety however serious the
+ * reason, and no referral path for the reasons the law says must be referred.
+ * The public report form had all of those, so the same threat reported from
+ * inside the app was quietly handled worse than one reported from outside it.
+ * Both doors now share content-report.service's intake: the reference, the
+ * priority and the review clock are stamped here before the row is written —
+ * in the columns the queue sorts by and, as before, in the evidence — and the
+ * acknowledgment, the alert and any referral run once it is.
+ *
+ * Only the reasons that intake knows are accepted. A reason it did not know
+ * used to go through as "medium" and alert nobody, which is how "Violence or
+ * threats" from the dialog once raised no alert at all.
+ */
 router.post(
   '/reports',
   authenticate,
   reportLimiter,
   [
     body('targetType').notEmpty().isIn(['post', 'comment', 'video', 'user', 'message', 'channel', 'event', 'other']),
-    body('reason').notEmpty().isString(),
+    body('reason').custom(isReportableReason).withMessage('Choose one of the reasons on the report form'),
     body('targetId').optional().isString(),
-    body('details').optional().isString(),
+    body('details').optional().isString().isLength({ max: 5000 }),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
@@ -177,12 +214,14 @@ router.post(
         throw new ApiError(400, errors.array()[0].msg);
       }
 
-      const { targetType, targetId, reason, details } = req.body as {
+      const { targetType, targetId, details } = req.body as {
         targetType: ReportTargetType;
         targetId?: string;
-        reason: string;
         details?: string;
       };
+      // The feed sends OTHER, the dialogs send lower case; the queue and the
+      // score read one spelling.
+      const reason = String(req.body.reason).trim().toLowerCase();
 
       const reportedUserId = await resolveReportedUserId(targetType, targetId);
 
@@ -212,6 +251,8 @@ router.post(
         });
       }
 
+      const intake = openReportIntake({ reason });
+
       const report = await prisma.contentReport.create({
         data: {
           reporterId: req.user!.id,
@@ -221,26 +262,57 @@ router.post(
           reason,
           description: details,
           status: 'PENDING',
+          reviewDeadline: intake.reviewDeadline,
+          priority: QUEUE_PRIORITY[intake.priority],
+          evidence: {
+            ticketId: intake.ticketId,
+            reviewDeadline: intake.reviewDeadline.toISOString(),
+            reviewHours: intake.reviewHours,
+            priority: intake.priority,
+            source: 'IN_APP_REPORT',
+          },
         },
       });
 
-      await recordSafetyReport(req.user!.id, reportedUserId);
-      await handleUserReport(reportedUserId, req.user!.id, reason, targetId, targetType);
+      // The report is filed from here on, so nothing below may turn it into
+      // an error: she would file it again, and the queue would hold two. Each
+      // consequence is best effort and logged when it fails, as on the public
+      // door.
+      await bestEffort('safety.report.trust-score', recordSafetyReport(req.user!.id, reportedUserId));
+      await bestEffort(
+        'safety.report.safety-score',
+        handleUserReport(reportedUserId, req.user!.id, reason, targetId, targetType)
+      );
       // Enough different reporters take the content down while it is reviewed.
       if ((targetType === 'post' || targetType === 'comment' || targetType === 'video') && targetId) {
-        await reviewReportedContent(targetType, targetId);
+        await bestEffort('safety.report.auto-hide', reviewReportedContent(targetType, targetId));
       }
+      await bestEffort(
+        'safety.report.intake-consequences',
+        runReportIntakeConsequences({
+          ticketId: intake.ticketId,
+          reason,
+          priority: intake.priority,
+          reviewHours: intake.reviewHours,
+          contentType: targetType.toUpperCase(),
+          contentId: targetId ?? '',
+          description: details,
+        })
+      );
 
       res.status(201).json({
         success: true,
         data: {
           id: report.id,
+          reference: intake.ticketId,
           userId: report.reporterId,
           targetType,
           targetId,
           reason,
           details,
           status: REPORT_STATUS_LABELS[report.status] ?? report.status,
+          reviewHours: intake.reviewHours,
+          reviewDeadline: intake.reviewDeadline.toISOString(),
           createdAt: report.createdAt.toISOString(),
           updatedAt: report.updatedAt.toISOString(),
         },
@@ -451,6 +523,15 @@ router.patch(
             ...preferenceUpdates,
           },
         });
+      }
+
+      // Hiding her online status, or going into Safe Mode, stops her being
+      // announced from now on — but the people in her threads were told she
+      // was online a moment ago and would go on reading "Active now" until
+      // they reloaded. This takes that back. They already saw her online, so
+      // the offline notice tells them nothing new, and it never throws.
+      if (req.body.hideOnlineStatus === true || isSafeMode === true) {
+        void withdrawPresence(req.user!.id);
       }
 
       res.json({ success: true });
@@ -749,10 +830,13 @@ router.post(
       await verifyReport(incident.id, upheld, req.user!.id);
       const status = await getSafetyStatus(incident.userId);
 
+      // Recorded under its own verb now that there is one; it used to borrow
+      // DATA_ACCESS, which made a moderator's ruling on a report look like
+      // somebody reading a record.
       await bestEffort(
         'safety incident decision audit row',
         logAudit({
-          action: AuditAction.DATA_ACCESS,
+          action: AuditAction.SAFETY_REPORT_DECIDED,
           actorUserId: req.user!.id,
           targetUserId: incident.userId,
           ipAddress: req.ip ?? null,

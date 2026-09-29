@@ -204,7 +204,8 @@ describe('Public catalogues', () => {
     await request(app).get('/api/impact/disability-friendly-employers?minRating=abc').expect(200);
 
     const query = prisma.disabilityFriendlyEmployer.findMany.mock.calls[0][0];
-    expect(query.where).toEqual({});
+    // Only the listing staff have checked; no rating filter at all.
+    expect(query.where).toEqual({ verifiedAt: { not: null } });
     expect(query.take).toBe(50);
   });
 

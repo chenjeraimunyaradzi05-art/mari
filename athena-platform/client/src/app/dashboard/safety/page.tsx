@@ -255,22 +255,24 @@ export default function SafetyPage() {
   // nothing; no website can remove entries from the history list. It clears
   // what a page really can — ATHENA's own storage in this browser — says so,
   // and says it could not when the browser refused.
+  //
+  // It also used to ask the server first and clear the device only if the
+  // server answered, so a dropped connection left everything on the device in
+  // place. The server keeps nothing about her browsing and has nothing to
+  // clear, and the request itself was one more line in an access log saying
+  // she had used this, so the device is now cleared here and nothing is sent.
   const [tracesCleared, setTracesCleared] = useState<'cleared' | 'blocked' | null>(null);
-  const clearTraces = useMutation({
-    mutationFn: dvSafeApi.clearTraces,
-    onSuccess: () => {
-      try {
-        window.localStorage.clear();
-        window.sessionStorage.clear();
-        setTracesCleared('cleared');
-        toast.success("ATHENA's saved data is cleared from this browser");
-      } catch {
-        setTracesCleared('blocked');
-        toast.error('This browser would not let ATHENA clear its storage');
-      }
-    },
-    onError: (error) => toast.error(errorMessage(error) || 'Could not clear traces'),
-  });
+  const clearTraces = () => {
+    try {
+      window.localStorage.clear();
+      window.sessionStorage.clear();
+      setTracesCleared('cleared');
+      toast.success("ATHENA's saved data is cleared from this browser");
+    } catch {
+      setTracesCleared('blocked');
+      toast.error('This browser would not let ATHENA clear its storage');
+    }
+  };
 
   // ---- checking one particular person
   const [personQuery, setPersonQuery] = useState('');
@@ -781,8 +783,10 @@ export default function SafetyPage() {
                 <Eraser className="h-5 w-5" /> Clear traces on this device
               </h2>
               <p className="text-sm text-slate-500 dark:text-slate-400">
-                Removes what ATHENA has saved in this browser, such as drafts and page settings. No website can remove pages from your
-                browser&apos;s history: to do that, delete it in the browser&apos;s own settings, or use a private window next time.
+                Removes what ATHENA has saved in this browser, such as drafts and page settings. While you stay signed in, ATHENA
+                saves a little again as you use it, so clear this again or sign out before someone else uses the device. No website
+                can remove pages from your browser&apos;s history: to do that, delete it in the browser&apos;s own settings, or use a
+                private window next time.
               </p>
               {tracesCleared === 'blocked' && (
                 <p className="mt-1 text-sm text-red-700 dark:text-red-300" role="status">
@@ -790,7 +794,7 @@ export default function SafetyPage() {
                 </p>
               )}
             </div>
-            <button type="button" onClick={() => clearTraces.mutate()} disabled={clearTraces.isPending} className="btn-outline px-4 py-2 text-sm">
+            <button type="button" onClick={clearTraces} className="btn-outline px-4 py-2 text-sm">
               Clear now
             </button>
           </section>

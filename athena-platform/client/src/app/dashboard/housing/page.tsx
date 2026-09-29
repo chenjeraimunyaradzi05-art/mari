@@ -21,9 +21,11 @@ import { useSearchParams } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { Home, Loader2, MapPin, BedDouble, ShieldCheck, Heart, Search, Plus, Lock } from 'lucide-react';
 import { housingApi } from '@/lib/api';
+import { useAuthStore } from '@/lib/hooks';
 import { EmptyState } from '@/components/layout/PageShell';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { QuickExitButton } from '../safety/QuickExit';
+import { StaffHousingSupply } from './StaffHousingSupply';
 
 const listingTypes = [
   { value: '', label: 'All types' },
@@ -138,6 +140,7 @@ function Thread({ inquiry, me }: { inquiry: HousingInquiry; me: 'ASKER' | 'LISTE
 
 function HousingContent() {
   const searchParams = useSearchParams();
+  const isStaff = useAuthStore().user?.role === 'ADMIN';
 
   const [type, setType] = useState('');
   const [city, setCity] = useState('');
@@ -154,6 +157,10 @@ function HousingContent() {
   const [confidential, setConfidential] = useState<ConfidentialNotice>({ hidden: false, reason: null });
   const [inquiries, setInquiries] = useState<HousingInquiry[]>([]);
   const [myListings, setMyListings] = useState<HousingListing[]>([]);
+  // Her own listings are a separate request. When it failed it used to be
+  // swallowed into an empty list, and the page told a lister with three live
+  // places and waiting inquiries that she had not listed one.
+  const [myListingsFailed, setMyListingsFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -207,12 +214,16 @@ function HousingContent() {
           accessible: accessible || undefined,
         }),
         housingApi.getMyInquiries(),
-        housingApi.getMyListings().catch(() => ({ data: { data: [] } })),
+        housingApi.getMyListings().then(
+          (response) => ({ response, failed: false }),
+          () => ({ response: null, failed: true })
+        ),
       ]);
       setListings(listingsRes.data?.data || []);
       setConfidential(listingsRes.data?.confidential ?? { hidden: false, reason: null });
       setInquiries(inquiriesRes.data?.data || []);
-      setMyListings(mineRes.data?.data || []);
+      setMyListings(mineRes.response?.data?.data || []);
+      setMyListingsFailed(mineRes.failed);
     } catch (err) {
       setError(errorMessage(err) || 'Failed to load housing listings.');
       setListings([]);
@@ -736,7 +747,12 @@ function HousingContent() {
           </div>
         )}
 
-        {myListings.length === 0 ? (
+        {myListingsFailed ? (
+          <p role="alert" className="text-sm text-red-600">
+            Your listings could not be loaded just now, so they are not shown here. They have not been changed.{' '}
+            <button type="button" onClick={() => loadData()} className="font-medium underline">Try again</button>
+          </p>
+        ) : myListings.length === 0 ? (
           !showListForm && <p className="text-sm text-slate-500">You have not listed a place yet.</p>
         ) : (
           <div className="space-y-4">
@@ -855,6 +871,14 @@ function HousingContent() {
           </div>
         )}
       </div>
+
+      {/*
+        Staff only. Until this panel the only way a place reached this search
+        was a member typing one in, and a survivor sent here from the safety
+        page found nothing. The server refuses these routes to anyone else;
+        this only keeps the form off members' screens.
+      */}
+      {isStaff && <StaffHousingSupply onListed={() => loadData()} />}
     </div>
   );
 }

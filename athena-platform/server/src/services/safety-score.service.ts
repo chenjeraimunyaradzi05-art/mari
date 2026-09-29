@@ -171,10 +171,23 @@ export async function calculateSafetyScore(userId: string): Promise<SafetyScoreB
     
     // A report a moderator has looked at and dismissed says nothing about
     // her, so it stops counting. Before reports could be decided at all, an
-    // unfounded one weighed on a score for ever.
-    const dismissed = incident.type === 'REPORT' && Boolean(incident.resolvedAt) && !incident.verified;
+    // unfounded one weighed on a score for ever. The same holds for a report
+    // filed without an account (USER_REPORT), which resolveAnonymousReport
+    // decides the same way.
+    const isReport = incident.type === 'REPORT' || incident.type === 'USER_REPORT';
+    const dismissed = isReport && Boolean(incident.resolvedAt) && !incident.verified;
     if (dismissed) {
-      factors.push({ category: 'incident', impact: 0, details: `REPORT - ${incident.reason} (dismissed by a moderator)` });
+      factors.push({ category: 'incident', impact: 0, details: `${incident.type} - ${incident.reason} (dismissed by a moderator)` });
+      continue;
+    }
+
+    // An anonymous report has no reporter to weigh, and one person signed out
+    // could file as many as she liked, so an undecided one counts for nothing.
+    // It used to count for nothing even after a moderator upheld it, which
+    // left a founded report with no effect at all; once upheld it now weighs
+    // what any other verified report does.
+    if (incident.type === 'USER_REPORT' && !incident.verified) {
+      factors.push({ category: 'incident', impact: 0, details: `USER_REPORT - ${incident.reason} (anonymous, not yet decided)` });
       continue;
     }
 
@@ -183,6 +196,9 @@ export async function calculateSafetyScore(userId: string): Promise<SafetyScoreB
         impact = incident.verified
           ? WEIGHTS.REPORT_VERIFIED * decay
           : WEIGHTS.REPORT_RECEIVED * decay;
+        break;
+      case 'USER_REPORT':
+        impact = incident.verified ? WEIGHTS.REPORT_VERIFIED * decay : 0;
         break;
       case 'BLOCK':
         impact = WEIGHTS.BLOCK_RECEIVED * decay;

@@ -10,6 +10,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { z, ZodError, type ZodTypeAny } from 'zod';
 import { httpUrl } from '../utils/http-url';
 import dvSafeService from '../services/dv-safe.service';
+import { withdrawPresence } from '../services/presence.service';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
 import { createRateLimiter } from '../middleware/rateLimiter';
@@ -87,10 +88,22 @@ const updateSettingsSchema = z.object({
   notificationsSafe: z.boolean().optional(),
 });
 
+/*
+ * Safe Mode hides her presence, but the people in her threads were told she
+ * was online a moment before she switched it on, and would go on reading
+ * "Active now" until they reloaded. Turning it on therefore takes that back
+ * as well. withdrawPresence tells only the counterparts who already saw her
+ * online, so it reveals nothing new, and it never throws: the switch is saved
+ * whether or not the notice reaches anyone.
+ */
 router.put('/settings', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const updates = parse(updateSettingsSchema, req.body);
-    res.json(await dvSafeService.updateSafetySettings(req.user!.id, updates));
+    const settings = await dvSafeService.updateSafetySettings(req.user!.id, updates);
+    if (updates.isSafeMode === true) {
+      void withdrawPresence(req.user!.id);
+    }
+    res.json(settings);
   } catch (error) {
     next(error);
   }
@@ -99,6 +112,7 @@ router.put('/settings', async (req: AuthRequest, res: Response, next: NextFuncti
 router.post('/safe-mode', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const settings = await dvSafeService.enableSafeMode(req.user!.id);
+    void withdrawPresence(req.user!.id);
     res.json({ message: 'Safe mode enabled', settings });
   } catch (error) {
     next(error);
@@ -239,22 +253,30 @@ router.delete('/chats/:chatId', safeChatLimiter, async (req: AuthRequest, res: R
  * athena_user, that exist nowhere in this codebase, and to "replace history",
  * which a page can only do for its own current entry — the browser's history
  * list is out of reach of any website. The page then said traces were cleared.
- * The instructions now name only the two stores a page really can empty, and
- * the page tells her plainly what is left for her to do in the browser itself.
+ *
+ * It also answered "Activity traces cleared" for a deletion that never
+ * happened on this side, and logged her user id against the words "Activity
+ * traces cleared for safety": the one server-side trace of her using the
+ * tool was the record the tool made of itself. The server keeps nothing about
+ * her browsing, so there is nothing here to delete, and it now says exactly
+ * that and records nothing at all.
+ *
+ * The web Safety page no longer calls this — it clears the device itself, and
+ * a request here would only put one more line in an access log. The route
+ * stays so an app build that still calls it gets a true answer rather than a
+ * 404, and the instructions still name only the two stores a page really can
+ * empty.
  */
-router.post('/clear-traces', async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    await dvSafeService.clearActivityTraces(req.user!.id);
-    res.json({
-      message: 'Activity traces cleared',
-      clientInstructions: {
-        clearLocalStorage: true,
-        clearSessionStorage: true,
-      },
-    });
-  } catch (error) {
-    next(error);
-  }
+router.post('/clear-traces', (_req: AuthRequest, res: Response) => {
+  res.json({
+    message:
+      "Nothing about your browsing is kept on ATHENA's servers, so there was nothing to clear here. What this device holds has to be cleared on the device itself.",
+    serverTracesKept: false,
+    clientInstructions: {
+      clearLocalStorage: true,
+      clearSessionStorage: true,
+    },
+  });
 });
 
 const safeNotificationSchema = z.object({ title: z.string().max(200), message: z.string().max(2000) });

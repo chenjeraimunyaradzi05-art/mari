@@ -19,7 +19,6 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import { bestEffort } from '../utils/best-effort';
-import { getRedisClient } from '../utils/cache';
 import { sendEmail } from '../utils/email';
 import { isSmsConfigured, sendSms } from './dv-sms.service';
 import { ApiError } from '../middleware/errorHandler';
@@ -284,117 +283,115 @@ function verifyPin(pin: string | undefined, stored: string | null): boolean {
  * which is the exact situation the PIN exists for, and at the global limit of a
  * hundred requests in fifteen minutes the whole space falls in a day.
  *
- * So five wrong PINs inside fifteen minutes lock the chat for fifteen minutes,
- * and every wrong PIN is counted until she next opens the chat herself. The
- * count is told to her *after* the right PIN — never to whoever is guessing,
- * and never as a notification on a lock screen someone else may be reading.
+ * So five wrong PINs lock the chat for fifteen minutes, and every wrong PIN is
+ * counted until she next opens the chat herself. The count is told to her
+ * *after* the right PIN — never to whoever is guessing, never on the lock
+ * screen, and never as a notification someone else may be reading.
  *
- * The counters live in Redis when it is configured, so every instance of the
- * API shares them, and in this process otherwise, the way the login lockout
- * does. They are not in the database because DvSafeChat has no column for
- * them; a restart without Redis forgets them, which is the trade-off.
+ * The counters are columns on the chat itself. They used to live in Redis
+ * when it was configured and in this process when it was not, because
+ * DvSafeChat had nowhere to keep them; a deployment without Redis forgot every
+ * lock and every wrong PIN on a restart, and a second instance of the API kept
+ * its own separate count, so the lock could be walked around by landing on
+ * the other one. In the row, every instance reads the same lock, and neither a
+ * restart nor a deploy clears it.
+ *
+ *   wrongPinAttempts    the wrong PINs in the current run. A right PIN ends
+ *                       the run, and so does the lock it earns.
+ *   pinLockedUntil      when the lock ends; null or past means open.
+ *   wrongPinsSinceOpen  every wrong PIN since she last opened the chat, for
+ *                       her to be told behind the right one.
+ *
+ * Every change is a single UPDATE whose arithmetic and condition the database
+ * applies as it writes — never a count read here and written back — so two
+ * guesses arriving together cannot both be counted as the fourth.
+ *
+ * The run has no fifteen-minute window of its own any more. The Redis version
+ * forgot a run fifteen minutes after its first wrong PIN, and there is no
+ * column to remember when a run began, so a run now lasts until the right
+ * PIN or the lock ends it. That is stricter on a guesser and costs her very
+ * little: every time she opens the chat herself, the run is over, so her own
+ * slips only add up if she never gets the PIN right in between.
  */
 const PIN_MAX_FAILURES = 5;
-const PIN_FAILURE_WINDOW_SECONDS = 15 * 60;
 const PIN_LOCK_SECONDS = 15 * 60;
-// How long a wrong-PIN count waits for her to come back and read it.
-const PIN_MISSES_KEEP_SECONDS = 30 * 24 * 60 * 60;
 
-type ExpiringCount = { count: number; expiresAt: number };
-const pinFailures = new Map<string, ExpiringCount>();
-const pinMisses = new Map<string, ExpiringCount>();
-const pinLocks = new Map<string, number>();
-
-/** For tests. */
-export function resetPinAttemptMemory(): void {
-  pinFailures.clear();
-  pinMisses.clear();
-  pinLocks.clear();
-}
-
-function pinRedis() {
-  return process.env.REDIS_URL ? getRedisClient() : null;
-}
-
-function bumpMemory(store: Map<string, ExpiringCount>, key: string, ttlSeconds: number, now: number): number {
-  const existing = store.get(key);
-  const next =
-    existing && existing.expiresAt > now
-      ? { count: existing.count + 1, expiresAt: existing.expiresAt }
-      : { count: 1, expiresAt: now + ttlSeconds * 1000 };
-  store.set(key, next);
-  return next.count;
-}
-
-async function pinLockSecondsLeft(chatId: string): Promise<number> {
-  const client = pinRedis();
-  if (client) {
-    try {
-      const ttl = await client.ttl(`dvpin:lock:${chatId}`);
-      return ttl > 0 ? ttl : 0;
-    } catch (error) {
-      logger.warn('Safe-chat PIN lock read fell back to this process', { error: (error as Error).message });
-    }
-  }
-  const until = pinLocks.get(chatId) ?? 0;
-  const left = Math.ceil((until - Date.now()) / 1000);
+function secondsUntil(moment: Date | null | undefined, now: Date): number {
+  if (!moment) return 0;
+  const left = Math.ceil((moment.getTime() - now.getTime()) / 1000);
   return left > 0 ? left : 0;
 }
 
-/** Counts a wrong PIN; returns how long the chat is now locked for, or 0. */
+/** The condition "this chat is not locked at this moment", for the conditional updates below. */
+function notLockedAt(now: Date): Prisma.DvSafeChatWhereInput {
+  return { OR: [{ pinLockedUntil: null }, { pinLockedUntil: { lte: now } }] };
+}
+
+/**
+ * Counts a wrong PIN and returns how long the chat is now locked for, or 0.
+ *
+ * The increment is a single UPDATE ... SET n = n + 1, so a burst of guesses
+ * is counted one by one however it interleaves. The guess that reaches the
+ * limit sets the lock and starts a fresh run in the same conditional update;
+ * a second guess that raced it past the limit finds the run already reset,
+ * changes nothing, and is still told the chat is locked.
+ */
 async function notePinMiss(chatId: string): Promise<number> {
-  const client = pinRedis();
-  if (client) {
-    try {
-      const failures = await client.incr(`dvpin:fails:${chatId}`);
-      if (failures === 1) await client.expire(`dvpin:fails:${chatId}`, PIN_FAILURE_WINDOW_SECONDS);
-      const misses = await client.incr(`dvpin:missed:${chatId}`);
-      if (misses === 1) await client.expire(`dvpin:missed:${chatId}`, PIN_MISSES_KEEP_SECONDS);
-      if (failures >= PIN_MAX_FAILURES) {
-        await client.set(`dvpin:lock:${chatId}`, '1', 'EX', PIN_LOCK_SECONDS);
-        await client.del(`dvpin:fails:${chatId}`);
-        return PIN_LOCK_SECONDS;
-      }
-      return 0;
-    } catch (error) {
-      logger.warn('Safe-chat PIN counter fell back to this process', { error: (error as Error).message });
-    }
-  }
-  const now = Date.now();
-  bumpMemory(pinMisses, chatId, PIN_MISSES_KEEP_SECONDS, now);
-  if (bumpMemory(pinFailures, chatId, PIN_FAILURE_WINDOW_SECONDS, now) >= PIN_MAX_FAILURES) {
-    pinFailures.delete(chatId);
-    pinLocks.set(chatId, now + PIN_LOCK_SECONDS * 1000);
-    return PIN_LOCK_SECONDS;
-  }
-  return 0;
+  const now = new Date();
+  const counted = await prisma.dvSafeChat.update({
+    where: { id: chatId },
+    data: { wrongPinAttempts: { increment: 1 }, wrongPinsSinceOpen: { increment: 1 } },
+    select: { wrongPinAttempts: true, pinLockedUntil: true },
+  });
+
+  const alreadyLocked = secondsUntil(counted.pinLockedUntil, now);
+  if (alreadyLocked > 0) return alreadyLocked;
+  if (counted.wrongPinAttempts < PIN_MAX_FAILURES) return 0;
+
+  await prisma.dvSafeChat.updateMany({
+    where: { id: chatId, wrongPinAttempts: { gte: PIN_MAX_FAILURES } },
+    data: { pinLockedUntil: new Date(now.getTime() + PIN_LOCK_SECONDS * 1000), wrongPinAttempts: 0 },
+  });
+  return PIN_LOCK_SECONDS;
 }
 
-/** A right PIN ends the current run of failures. The count kept for her is not touched here. */
-async function clearPinFailures(chatId: string): Promise<void> {
-  pinFailures.delete(chatId);
-  const client = pinRedis();
-  if (!client) return;
-  await bestEffort('safe-chat PIN failure reset', () => client.del(`dvpin:fails:${chatId}`));
+/**
+ * The right PIN has been given: end the run of wrong ones, but only if the
+ * chat is not locked at this moment. A guess made in parallel may have locked
+ * it while this request was checking the PIN, and the lock has to hold against
+ * the right PIN too — otherwise whoever is guessing only has to send the right
+ * one alongside the wrong ones. Throws the locked answer when it is.
+ */
+async function acceptRightPin(chatId: string): Promise<void> {
+  const now = new Date();
+  const opened = await prisma.dvSafeChat.updateMany({
+    where: { id: chatId, ...notLockedAt(now) },
+    data: { wrongPinAttempts: 0, pinLockedUntil: null },
+  });
+  if (opened.count > 0) return;
+
+  const current = await prisma.dvSafeChat.findUnique({ where: { id: chatId }, select: { pinLockedUntil: true } });
+  if (!current) throw new ApiError(404, 'Chat not found');
+  throw new ApiError(429, lockedMessage(secondsUntil(current.pinLockedUntil, now) || PIN_LOCK_SECONDS));
 }
 
-/** How many wrong PINs there have been since she last opened the chat; reading it starts the count again. */
-async function takePinMisses(chatId: string): Promise<number> {
-  const now = Date.now();
-  const kept = pinMisses.get(chatId);
-  pinMisses.delete(chatId);
-  let count = kept && kept.expiresAt > now ? kept.count : 0;
-  const client = pinRedis();
-  if (client) {
-    const stored = await bestEffort('safe-chat wrong-PIN count', async () => {
-      const value = await client.get(`dvpin:missed:${chatId}`);
-      await client.del(`dvpin:missed:${chatId}`);
-      return value;
-    });
-    const parsed = Number.parseInt(String(stored ?? ''), 10);
-    if (Number.isFinite(parsed)) count = Math.max(count, parsed);
-  }
-  return count;
+/**
+ * How many wrong PINs there have been since she last opened the chat, and
+ * the count started again.
+ *
+ * `seen` is the count on the row this request read. It is taken off rather
+ * than the column being set to zero, and only while the column still holds at
+ * least that many: a wrong PIN that lands between the read and this write
+ * stays counted for next time instead of vanishing, and if she has the chat
+ * open twice at once only one of the two is told, rather than both.
+ */
+async function takeWrongPinsSinceOpen(chatId: string, seen: number): Promise<number> {
+  if (seen <= 0) return 0;
+  const taken = await prisma.dvSafeChat.updateMany({
+    where: { id: chatId, wrongPinsSinceOpen: { gte: seen } },
+    data: { wrongPinsSinceOpen: { decrement: seen } },
+  });
+  return taken.count > 0 ? seen : 0;
 }
 
 function lockedMessage(seconds: number): string {
@@ -420,6 +417,9 @@ type ChatRow = {
   name: string;
   disguisedName: string;
   accessPinHash: string | null;
+  wrongPinAttempts: number;
+  pinLockedUntil: Date | null;
+  wrongPinsSinceOpen: number;
   lastActivity: Date;
   createdAt: Date;
 };
@@ -482,7 +482,7 @@ async function ownChat(userId: string, chatId: string): Promise<ChatRow> {
 async function requirePin(chat: ChatRow, pin: string | undefined, userId: string): Promise<void> {
   if (!chat.accessPinHash) return;
 
-  const lockedFor = await pinLockSecondsLeft(chat.id);
+  const lockedFor = secondsUntil(chat.pinLockedUntil, new Date());
   if (lockedFor > 0) {
     throw new ApiError(429, lockedMessage(lockedFor));
   }
@@ -500,15 +500,18 @@ async function requirePin(chat: ChatRow, pin: string | undefined, userId: string
     throw new ApiError(403, 'That PIN is not right');
   }
 
-  await clearPinFailures(chat.id);
+  await acceptRightPin(chat.id);
 }
 
 /** Opens a chat: verifies the PIN, drops messages past their auto-delete time, decrypts the rest. */
 export async function accessSafeChat(userId: string, chatId: string, pin?: string): Promise<SafeChat> {
   const chat = await ownChat(userId, chatId);
   await requirePin(chat, pin, userId);
-  // Only now, behind the right PIN, is she told anyone tried a wrong one.
-  const wrongPinAttemptsSinceLastOpen = chat.accessPinHash ? await takePinMisses(chat.id) : 0;
+  // Only now, behind the right PIN, is she told anyone tried a wrong one, and
+  // opening it is what starts that count again.
+  const wrongPinAttemptsSinceLastOpen = chat.accessPinHash
+    ? await takeWrongPinsSinceOpen(chat.id, chat.wrongPinsSinceOpen)
+    : 0;
 
   await prisma.dvSafeMessage.deleteMany({ where: { chatId: chat.id, autoDeleteAt: { lte: new Date() } } });
   const rows = await prisma.dvSafeMessage.findMany({ where: { chatId: chat.id }, orderBy: { createdAt: 'asc' }, take: 500 });
@@ -720,18 +723,34 @@ export async function removeEmergencyContact(userId: string, contactId: string):
   return true;
 }
 
-/** A safety block: recorded here and applied platform-wide, so it also ends follows and threads. */
+/**
+ * A safety block: applied platform-wide first, then recorded here.
+ *
+ * The order used to be the other way round, with the platform half logged
+ * and forgotten when it failed. The safety profile then said he was blocked,
+ * and she was told so, while messages, posts, comments, stories and the
+ * socket — which read the platform block list — went on letting him reach
+ * her. Now the platform block goes first and a failure stops everything: she
+ * is told plainly that nothing changed and to try again, which is something
+ * she can act on, where a block that only half exists is not.
+ */
 export async function blockUser(userId: string, blockedUserId: string): Promise<boolean> {
   if (userId === blockedUserId) throw new ApiError(400, 'You cannot block yourself');
   const profile = await profileFor(userId);
-  const already = (profile.blockedUserIds ?? []).includes(blockedUserId);
-  if (!already) {
-    await prisma.dvSafetyProfile.update({ where: { id: profile.id }, data: { blockedUserIds: { push: blockedUserId } } });
-  }
+
   try {
     await platformBlockUser(userId, blockedUserId);
   } catch (error) {
-    logger.warn('Platform block alongside a safety block failed', { userId, error: error instanceof Error ? error.message : String(error) });
+    logger.error('Safety block refused: the platform-wide block could not be written', {
+      userId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw new ApiError(503, 'Your block could not be applied everywhere just now. Nothing was changed — please try again.');
+  }
+
+  const already = (profile.blockedUserIds ?? []).includes(blockedUserId);
+  if (!already) {
+    await prisma.dvSafetyProfile.update({ where: { id: profile.id }, data: { blockedUserIds: { push: blockedUserId } } });
   }
   logger.info('User blocked for safety', { userId, blockedUserId });
   return !already;
@@ -794,12 +813,6 @@ export async function safeNotificationFor(
     return { title: originalTitle, message: originalMessage };
   }
   return { title: 'New Update', message: 'You have a new update. Open app to view.' };
-}
-
-/** The server keeps no browsing traces; the client clears its own storage. Logged so it is auditable. */
-export async function clearActivityTraces(userId: string): Promise<boolean> {
-  logger.info('Activity traces cleared for safety', { userId });
-  return true;
 }
 
 // ---------------------------------------------------------------- resources
@@ -1047,7 +1060,6 @@ export default {
   isUserVisible,
   getSafeNotificationContent,
   safeNotificationFor,
-  clearActivityTraces,
   getDVResources,
   BUILT_IN_DV_SERVICES,
 };

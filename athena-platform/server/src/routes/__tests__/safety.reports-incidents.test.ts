@@ -53,6 +53,15 @@ jest.mock('../../services/moderation-threshold.service', () => ({
   reviewReportedContent: jest.fn(async () => false),
 }));
 
+// The real intake (reference, priority, clock) with the consequences that
+// send mail and write referrals replaced, so the test can see what they were
+// handed.
+const runReportIntakeConsequences = jest.fn(async (_record: unknown) => undefined);
+jest.mock('../../services/content-report.service', () => ({
+  ...(jest.requireActual('../../services/content-report.service') as object),
+  runReportIntakeConsequences: (record: unknown) => runReportIntakeConsequences(record),
+}));
+
 const store = {
   blockUser: jest.fn(async () => ({ created: true })),
   listBlockedUsers: jest.fn(async () => [] as any[]),
@@ -124,6 +133,63 @@ describe('POST /api/safety/reports', () => {
     expect(prisma.contentReport.create.mock.calls[0][0].data).toMatchObject({ reporterId: 'her', reportedUserId: 'him', contentType: 'POST', contentId: 'post-1' });
     expect(scoring.handleUserReport).toHaveBeenCalledWith('him', 'her', 'harassment', 'post-1', 'post');
     expect(res.body.data.status).toBe('SUBMITTED');
+  });
+
+  // The in-app door used to write the row and nothing else: no reference, no
+  // deadline, no alert and no referral path, while the public form had all
+  // four for the same report.
+  it('gives the report a reference, a review deadline and a priority the queue can sort by', async () => {
+    prisma.post.findUnique.mockResolvedValue({ authorId: 'him' });
+    prisma.contentReport.create.mockImplementation(async ({ data }: any) => ({ id: 'rep-2', ...data, createdAt: new Date(), updatedAt: new Date() }));
+
+    const before = Date.now();
+    const res = await request(app)
+      .post('/api/safety/reports')
+      .set(as('her'))
+      .send({ targetType: 'post', targetId: 'post-1', reason: 'violence', details: 'He said he would come to my work' })
+      .expect(201);
+
+    const data = prisma.contentReport.create.mock.calls[0][0].data;
+    expect(data.evidence).toMatchObject({ source: 'IN_APP_REPORT', priority: 'high', reviewHours: 48 });
+    expect(data.evidence.ticketId).toEqual(expect.any(String));
+    expect(data.priority).toBe('HIGH');
+    expect(data.reviewDeadline).toBeInstanceOf(Date);
+    expect(data.reviewDeadline.getTime()).toBeGreaterThanOrEqual(before + 48 * 60 * 60 * 1000 - 1000);
+    expect(res.body.data.reference).toBe(data.evidence.ticketId);
+
+    // A threat is high priority, so Trust & Safety is told, from this door
+    // exactly as from the public one.
+    expect(runReportIntakeConsequences).toHaveBeenCalledWith(
+      expect.objectContaining({ ticketId: data.evidence.ticketId, reason: 'violence', priority: 'high', contentType: 'POST', contentId: 'post-1' })
+    );
+  });
+
+  it('refuses a reason the intake does not know, rather than filing it as medium and alerting nobody', async () => {
+    prisma.post.findUnique.mockResolvedValue({ authorId: 'him' });
+
+    const res = await request(app).post('/api/safety/reports').set(as('her')).send({ targetType: 'post', targetId: 'post-1', reason: 'meh' }).expect(400);
+
+    expect(res.body.message).toMatch(/reasons on the report form/);
+    expect(prisma.contentReport.create).not.toHaveBeenCalled();
+  });
+
+  it('accepts the feed’s OTHER and files it under the one spelling the queue reads', async () => {
+    prisma.post.findUnique.mockResolvedValue({ authorId: 'him' });
+    prisma.contentReport.create.mockImplementation(async ({ data }: any) => ({ id: 'rep-3', ...data, createdAt: new Date(), updatedAt: new Date() }));
+
+    await request(app).post('/api/safety/reports').set(as('her')).send({ targetType: 'post', targetId: 'post-1', reason: 'OTHER' }).expect(201);
+
+    expect(prisma.contentReport.create.mock.calls[0][0].data).toMatchObject({ reason: 'other', priority: 'NORMAL' });
+  });
+
+  it('does not turn a filed report into an error when what follows it fails', async () => {
+    prisma.post.findUnique.mockResolvedValue({ authorId: 'him' });
+    prisma.contentReport.create.mockImplementation(async ({ data }: any) => ({ id: 'rep-4', ...data, createdAt: new Date(), updatedAt: new Date() }));
+    scoring.handleUserReport.mockRejectedValueOnce(new Error('score store down'));
+    runReportIntakeConsequences.mockRejectedValueOnce(new Error('mail down'));
+
+    // An error here would have her file it again, and the queue would hold two.
+    await request(app).post('/api/safety/reports').set(as('her')).send({ targetType: 'post', targetId: 'post-1', reason: 'harassment' }).expect(201);
   });
 });
 
@@ -201,7 +267,7 @@ describe('Deciding a report', () => {
     expect(scoring.verifyReport).toHaveBeenCalledWith('inc-1', false, 'mod');
     expect(res.body.data).toMatchObject({ upheld: false, score: 60 });
     const audit = prisma.auditLog.create.mock.calls[0][0].data;
-    expect(audit).toMatchObject({ actorUserId: 'mod', targetUserId: 'him' });
+    expect(audit).toMatchObject({ action: 'SAFETY_REPORT_DECIDED', actorUserId: 'mod', targetUserId: 'him' });
     expect(audit.metadata).toMatchObject({ adminAction: 'SAFETY_REPORT_DISMISSED', resourceId: 'inc-1' });
   });
 

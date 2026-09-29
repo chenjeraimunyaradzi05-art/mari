@@ -35,6 +35,7 @@ import { achievementForStreak, celebrate, challengeLeaderboard, goalProgress, go
 import { detectCrisisLanguage, excerpt, isModeratorRole, normaliseWarning, presentAuthor } from '../services/wellness/forum.service';
 import { availableSlots, canCancel, nextAvailableDays, normaliseAvailability, slugify, type Availability } from '../services/wellness/practitioners.service';
 import { currentWeek } from '../services/wellness/wellness-reminders.service';
+import { lastVerificationChecks, recheckState, verifiedPractitionerRechecks, RECHECK_AFTER_DAYS, RECHECK_GRACE_DAYS } from '../services/wellness/practitioner-recheck.service';
 import {
   ACTIVITY_TYPES, CIRCLE_TOPICS, CONTENT_WARNINGS, COPING_STRATEGIES, CRISIS_LINES, HABIT_TEMPLATES, K10_OPTIONS, K10_QUESTIONS, LIBRARY, LIBRARY_AS_AT,
   MENTAL_LOAD_CATEGORIES, MODALITIES, PERIOD_SYMPTOMS, PRACTITIONER_KINDS, SHARE_SCOPES, SPECIALTIES, DELEGATION_TEMPLATES,
@@ -1137,6 +1138,21 @@ router.get('/practitioners/pending', authenticate, requireRole('ADMIN'), async (
   } catch (error) { next(error); }
 });
 
+// The yearly re-check list: every verified practitioner, with when she was
+// last checked and by whom, when the next check is due and when the listing
+// lapses without it, most urgent first. Verification used to be permanent;
+// practitioner-recheck.service says how the year is counted. Re-verifying
+// (PATCH /practitioners/:id/verify with isVerified true) is the re-check.
+router.get('/practitioners/rechecks', authenticate, requireRole('ADMIN'), async (_req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const rows = await verifiedPractitionerRechecks();
+    ok(res, {
+      rechecks: rows.map((p) => ({ id: p.id, name: p.name, kind: p.kind, ahpraNumber: p.ahpraNumber, isActive: p.isActive, verification: p.verification })),
+      rules: { recheckAfterDays: RECHECK_AFTER_DAYS, graceDays: RECHECK_GRACE_DAYS },
+    });
+  } catch (error) { next(error); }
+});
+
 router.get('/practitioners/:slug', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const p = await prisma.healthPractitioner.findFirst({ where: { OR: [{ slug: req.params.slug }, { id: req.params.slug }], isActive: true } });
@@ -1283,7 +1299,16 @@ router.get('/practice', authenticate, async (req: AuthRequest, res: Response, ne
   try {
     const p = await prisma.healthPractitioner.findUnique({ where: { ownerUserId: req.user!.id } });
     const counts = p ? await prisma.healthBooking.groupBy({ by: ['status'], where: { practitionerId: p.id }, _count: { _all: true } }) : [];
-    ok(res, { profile: p ? { ...practitionerCard(p), bio: p.bio, ahpraNumber: p.ahpraNumber, availability: p.availability, slotMinutes: p.slotMinutes, isActive: p.isActive } : null, counts: Object.fromEntries(counts.map((c) => [c.status, c._count._all])), kinds: PRACTITIONER_KINDS.filter((k) => k.key !== 'SERVICE'), modalities: MODALITIES, specialties: SPECIALTIES });
+    // A verified practitioner is told when she was checked and when the next
+    // yearly check falls, so a listing coming down is never a surprise. Who
+    // checked her stays with the admins.
+    let verification: { checkedAt: string | null; dueAt: string; lapsesAt: string; status: string } | null = null;
+    if (p?.isVerified) {
+      const checks = await lastVerificationChecks([p.id]);
+      const { checkedAt, dueAt, lapsesAt, status } = recheckState(checks.get(p.id), p.createdAt);
+      verification = { checkedAt, dueAt, lapsesAt, status };
+    }
+    ok(res, { profile: p ? { ...practitionerCard(p), bio: p.bio, ahpraNumber: p.ahpraNumber, availability: p.availability, slotMinutes: p.slotMinutes, isActive: p.isActive, verification } : null, counts: Object.fromEntries(counts.map((c) => [c.status, c._count._all])), kinds: PRACTITIONER_KINDS.filter((k) => k.key !== 'SERVICE'), modalities: MODALITIES, specialties: SPECIALTIES });
   } catch (error) { next(error); }
 });
 

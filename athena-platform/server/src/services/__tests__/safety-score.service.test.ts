@@ -133,6 +133,49 @@ describe('calculateSafetyScore', () => {
     });
   });
 
+  // A report filed without an account used to count for nothing even after a
+  // moderator upheld it. Undecided, it still counts for nothing: there is no
+  // reporter to weigh, and one person signed out could file any number.
+  it('counts an anonymous report only once a moderator has upheld it', async () => {
+    prisma.user.findUnique.mockResolvedValue(member());
+
+    prisma.safetyIncident.findMany.mockResolvedValue([]);
+    const clean = await calculateSafetyScore('member-1');
+
+    prisma.safetyIncident.findMany.mockResolvedValue([
+      { id: 'a1', type: 'USER_REPORT', verified: false, resolvedAt: null, reason: 'harassment', createdAt: new Date() },
+    ]);
+    const undecided = await calculateSafetyScore('member-1');
+
+    prisma.safetyIncident.findMany.mockResolvedValue([
+      { id: 'a1', type: 'USER_REPORT', verified: true, resolvedAt: new Date(), reason: 'harassment', createdAt: new Date() },
+    ]);
+    const upheld = await calculateSafetyScore('member-1');
+
+    prisma.safetyIncident.findMany.mockResolvedValue([
+      { id: 'r1', type: 'REPORT', verified: true, resolvedAt: new Date(), reason: 'harassment', createdAt: new Date() },
+    ]);
+    const namedAndUpheld = await calculateSafetyScore('member-1');
+
+    expect(undecided.score).toBe(clean.score);
+    expect(upheld.score).toBeLessThan(clean.score);
+    expect(upheld.score).toBe(namedAndUpheld.score);
+  });
+
+  it('stops counting an anonymous report a moderator has dismissed', async () => {
+    prisma.user.findUnique.mockResolvedValue(member());
+    prisma.safetyIncident.findMany.mockResolvedValue([
+      { id: 'a1', type: 'USER_REPORT', verified: false, resolvedAt: new Date(), reason: 'spam', createdAt: new Date() },
+    ]);
+
+    const dismissed = await calculateSafetyScore('member-1');
+
+    expect(dismissed.factors.find((factor) => factor.category === 'incident')).toMatchObject({
+      impact: 0,
+      details: expect.stringContaining('dismissed by a moderator'),
+    });
+  });
+
   it('lets an old incident weigh less than the same incident today', async () => {
     prisma.user.findUnique.mockResolvedValue(member({ createdAt: new Date(Date.now() - 400 * DAY) }));
 

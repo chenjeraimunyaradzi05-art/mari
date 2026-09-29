@@ -2,11 +2,22 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { z, ZodError, type ZodTypeAny } from 'zod';
 import { CommunityType, ImpactMetricType, Prisma, Region } from '@prisma/client';
 import { prisma } from '../utils/prisma';
-import { authenticate, AuthRequest } from '../middleware/auth';
+import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
 import { httpUrl } from '../utils/http-url';
 import { buildPaginationMeta } from '../utils/pagination';
 import { BUILT_IN_DV_SERVICES } from '../services/dv-safe.service';
+import {
+  compileImpactReport,
+  parseReportPeriod,
+  presentPublicReport,
+  presentStaffReport,
+  publishRefusal,
+  reportRowData,
+  storedFigures,
+  type CompileScope,
+} from '../services/impact-reports.service';
+import { recordStaffAction } from '../services/staff-record.service';
 
 const router = Router();
 
@@ -149,7 +160,11 @@ router.post('/metrics', authenticate, async (req: AuthRequest, res: Response, ne
   }
 });
 
-// GET /api/impact/reports - Get impact reports (public)
+// GET /api/impact/reports - Published impact reports (public)
+//
+// Each report is shown as impact-reports.service presents it to the public:
+// a count under the publication floor is withheld and named in `suppressed`,
+// and the basis says what the figures were counted from.
 router.get('/reports', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const communityType = enumFilter(req.query.communityType, COMMUNITY_TYPES, 'community type');
@@ -159,7 +174,7 @@ router.get('/reports', async (req: Request, res: Response, next: NextFunction) =
     const where: Prisma.ImpactReportWhereInput = {
       ...(communityType ? { communityType } : {}),
       ...(region ? { region } : {}),
-      ...(period ? { reportPeriod: period } : {}),
+      ...(period ? { reportPeriod: period.toUpperCase() } : {}),
     };
 
     const reports = await prisma.impactReport.findMany({
@@ -168,7 +183,7 @@ router.get('/reports', async (req: Request, res: Response, next: NextFunction) =
       take: 20,
     });
 
-    res.json({ success: true, data: reports });
+    res.json({ success: true, data: reports.map(presentPublicReport) });
   } catch (error) {
     next(error);
   }
@@ -187,7 +202,215 @@ router.get('/reports/:id', async (req: Request, res: Response, next: NextFunctio
       return res.status(404).json({ success: false, error: 'Report not found' });
     }
 
-    res.json({ success: true, data: report });
+    res.json({ success: true, data: presentPublicReport(report) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
+// STAFF: PUBLISHING IMPACT REPORTS
+// ===========================================
+// Nothing could write an ImpactReport, so the reports page was permanently
+// empty. Staff publish one here for a period, a region and optionally one
+// community, and the figures are counted from the platform's records rather
+// than typed in (impact-reports.service says how). Staff choose the period and
+// write the narrative; a correction recounts and says why; a withdrawal takes
+// the report down. Each is in the audit log under whoever did it.
+
+const REPORT_PERIOD_HELP = 'period: use a quarter like Q3-2026, a financial year like FY2026, a year like 2026, or a month like 2026-09';
+
+const COMMUNITY_LABELS: Record<CommunityType, string> = {
+  FIRST_NATIONS: 'First Nations women',
+  REFUGEE_IMMIGRANT: 'refugee and migrant women',
+  DV_SURVIVOR: 'survivors of domestic violence',
+  DISABILITY: 'women with disability',
+  LGBTQIA: 'LGBTQIA+ women',
+  SINGLE_PARENT: 'single mothers',
+  RURAL_REGIONAL: 'rural and regional women',
+  GENERAL: 'the general community',
+};
+
+const scopeLabel = (scope: Pick<CompileScope, 'communityType' | 'region'> & { label: string }) =>
+  `${scope.label} (${scope.communityType ? COMMUNITY_LABELS[scope.communityType] : 'all communities'}, ${scope.region})`;
+
+/** The scope a report is compiled for, from a query string or a body. */
+function reportScope(input: { period?: unknown; communityType?: unknown; region?: unknown }): CompileScope {
+  const period = parseReportPeriod(input.period);
+  if (!period) throw new ApiError(400, REPORT_PERIOD_HELP);
+  return {
+    period,
+    communityType: enumFilter(input.communityType, COMMUNITY_TYPES, 'community type') ?? null,
+    region: enumFilter(input.region, REGIONS, 'region') ?? Region.ANZ,
+  };
+}
+
+/**
+ * The report already filed for this scope, if any. The database's unique
+ * index cannot answer this for "all communities": Postgres treats two NULL
+ * community types as different, so it would let a second all-communities
+ * report for the same period in beside the first.
+ */
+const reportFiledFor = (scope: CompileScope) =>
+  prisma.impactReport.findFirst({
+    where: { reportPeriod: scope.period.label, communityType: scope.communityType, region: scope.region },
+    select: { id: true },
+  });
+
+const staffNarrative = z.string().trim().max(2000).nullable().optional();
+const staffReason = (what: string) =>
+  z.string({ required_error: `says why ${what}` }).trim().min(10, `says in a sentence why ${what}`).max(1000);
+
+// GET /api/impact/admin/reports - Every published report, with exact counts
+router.get('/admin/reports', authenticate, requireRole('ADMIN'), async (_req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const reports = await prisma.impactReport.findMany({ orderBy: { createdAt: 'desc' }, take: 100 });
+    res.json({ success: true, data: reports.map(presentStaffReport) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/impact/admin/reports/preview - Count a period without publishing it
+router.get('/admin/reports/preview', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const scope = reportScope(req.query);
+    const [compiled, existing] = await Promise.all([compileImpactReport(scope), reportFiledFor(scope)]);
+    const refusal = existing
+      ? `A report for ${scopeLabel({ ...scope, label: scope.period.label })} is already published. Correct it rather than publishing a second.`
+      : publishRefusal(compiled, scope.period);
+    res.json({
+      success: true,
+      data: { ...compiled, publishable: refusal === null, refusal, existingReportId: existing?.id ?? null },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/impact/admin/reports - Count a period and publish it
+router.post('/admin/reports', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const scope = reportScope(req.body ?? {});
+    const { narrativeSummary } = parse(z.object({ narrativeSummary: staffNarrative }).passthrough(), req.body);
+    const label = scopeLabel({ ...scope, label: scope.period.label });
+
+    if (await reportFiledFor(scope)) {
+      throw new ApiError(409, `A report for ${label} is already published. Correct it rather than publishing a second.`);
+    }
+    const compiled = await compileImpactReport(scope);
+    const refusal = publishRefusal(compiled, scope.period);
+    if (refusal) throw new ApiError(400, refusal);
+
+    let report;
+    try {
+      report = await prisma.impactReport.create({
+        data: {
+          reportPeriod: scope.period.label,
+          communityType: scope.communityType,
+          region: scope.region,
+          ...reportRowData(compiled, narrativeSummary || null),
+        },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ApiError(409, `A report for ${label} is already published. Correct it rather than publishing a second.`);
+      }
+      throw error;
+    }
+
+    await recordStaffAction(req, 'IMPACT_REPORT_PUBLISHED', {
+      resourceType: 'ImpactReport',
+      resourceId: report.id,
+      reportPeriod: report.reportPeriod,
+      communityType: report.communityType,
+      region: report.region,
+      figures: compiled.figures,
+      outcomesRecorded: compiled.basis.outcomesRecorded,
+      programmeMembers: compiled.basis.programmeMembers,
+    });
+
+    res.status(201).json({ success: true, data: presentStaffReport(report), message: `Published the report for ${label}.` });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PATCH /api/impact/admin/reports/:id - Correct a published report
+//
+// A correction either recounts the period from the records as they now stand
+// (an outcome recorded late, say) or rewrites the narrative, or both, and it
+// always says why. The figures are never set by hand here either.
+router.patch('/admin/reports/:id', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const input = parse(
+      z.object({ reason: staffReason('the report is being corrected'), narrativeSummary: staffNarrative, recount: z.boolean().optional() }),
+      req.body
+    );
+    if (!input.recount && input.narrativeSummary === undefined) {
+      throw new ApiError(400, 'Nothing to correct: recount the figures, change the narrative, or both.');
+    }
+
+    const report = await prisma.impactReport.findUnique({ where: { id: req.params.id } });
+    if (!report) throw new ApiError(404, 'Report not found');
+
+    const data: Prisma.ImpactReportUpdateInput = {};
+    if (input.narrativeSummary !== undefined) data.narrativeSummary = input.narrativeSummary || null;
+    if (input.recount) {
+      const period = parseReportPeriod(report.reportPeriod);
+      if (!period) {
+        throw new ApiError(400, `This report's period, "${report.reportPeriod}", is not one the records can be recounted for.`);
+      }
+      const compiled = await compileImpactReport({ period, region: report.region, communityType: report.communityType });
+      const refusal = publishRefusal(compiled, period);
+      if (refusal) throw new ApiError(400, `Recounted, this report cannot stand: ${refusal} Withdraw it instead.`);
+      Object.assign(data, reportRowData(compiled, input.narrativeSummary === undefined ? report.narrativeSummary : input.narrativeSummary || null));
+    }
+
+    const updated = await prisma.impactReport.update({ where: { id: report.id }, data });
+
+    await recordStaffAction(req, 'IMPACT_REPORT_CORRECTED', {
+      resourceType: 'ImpactReport',
+      resourceId: report.id,
+      reportPeriod: report.reportPeriod,
+      reason: input.reason,
+      before: { figures: storedFigures(report), narrativeChanged: input.narrativeSummary !== undefined },
+      after: { figures: storedFigures(updated) },
+      recounted: Boolean(input.recount),
+    });
+
+    res.json({ success: true, data: presentStaffReport(updated), message: 'Corrected.' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/impact/admin/reports/:id/withdraw - Take a published report down
+//
+// The row goes, because ImpactReport has no column to mark one withdrawn; the
+// audit row keeps every figure it showed and why it came down, so the record
+// of what ATHENA once said survives it.
+router.post('/admin/reports/:id/withdraw', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { reason } = parse(z.object({ reason: staffReason('the report is being withdrawn') }), req.body);
+    const report = await prisma.impactReport.findUnique({ where: { id: req.params.id } });
+    if (!report) throw new ApiError(404, 'Report not found');
+
+    await prisma.impactReport.delete({ where: { id: report.id } });
+
+    await recordStaffAction(req, 'IMPACT_REPORT_WITHDRAWN', {
+      resourceType: 'ImpactReport',
+      resourceId: report.id,
+      reportPeriod: report.reportPeriod,
+      communityType: report.communityType,
+      region: report.region,
+      reason,
+      figures: storedFigures(report),
+      narrativeSummary: report.narrativeSummary,
+      publishedAt: report.createdAt.toISOString(),
+    });
+
+    res.json({ success: true, message: `Withdrew the report for ${report.reportPeriod}.` });
   } catch (error) {
     next(error);
   }
@@ -519,7 +742,11 @@ router.get('/disability-friendly-employers', async (req: Request, res: Response,
     const minRating = Number.isFinite(requestedRating) ? Math.min(Math.max(requestedRating, 1), 5) : undefined;
     const { page, limit, skip } = listPage(req.query);
 
+    // Only employers staff have checked and not since retired. verifiedAt is
+    // the check: a retired employer keeps its row, and the record of having
+    // been listed, with verifiedAt cleared.
     const where: Prisma.DisabilityFriendlyEmployerWhereInput = {
+      verifiedAt: { not: null },
       ...(hasRemote === 'true' ? { hasRemoteOptions: true } : {}),
       ...(hasFlexible === 'true' ? { hasFlexibleWork: true } : {}),
       ...(minRating !== undefined ? { accessibilityRating: { gte: minRating } } : {}),
@@ -541,6 +768,210 @@ router.get('/disability-friendly-employers', async (req: Request, res: Response,
     ]);
 
     res.json({ success: true, data: employers, pagination: buildPaginationMeta(total, page, limit) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
+// STAFF: THE DISABILITY-FRIENDLY EMPLOYER LIST
+// ===========================================
+// The list had a reader and no writer, so it was permanently empty. Staff now
+// list an employer they have checked, with what they checked; edit it, which
+// is a fresh check; and retire it when it no longer holds. Being on the list
+// is ATHENA vouching for a workplace to women with disability, so every one
+// of those is in the audit log with its reason. No badge is awarded here: a
+// badge names someone else's accreditation, and nothing on the platform
+// checks one.
+
+const employerFields = {
+  accessibilityRating: z.coerce.number().int('is a whole number from 1 to 5').min(1, 'is from 1 to 5').max(5, 'is from 1 to 5'),
+  accommodationsOffered: z.array(z.string().trim().min(1).max(200)).max(30),
+  hasWheelchairAccess: z.boolean(),
+  hasFlexibleWork: z.boolean(),
+  hasRemoteOptions: z.boolean(),
+  hasMentalHealthSupport: z.boolean(),
+};
+const checkedBasis = z
+  .string({ required_error: 'says what you checked' })
+  .trim()
+  .min(10, 'says what you checked: who you spoke to, and what you saw')
+  .max(1000);
+
+const employerCreateSchema = z.object({
+  organizationId: z.string().trim().min(1).max(64),
+  accessibilityRating: employerFields.accessibilityRating,
+  accommodationsOffered: employerFields.accommodationsOffered.default([]),
+  hasWheelchairAccess: employerFields.hasWheelchairAccess.default(false),
+  hasFlexibleWork: employerFields.hasFlexibleWork.default(false),
+  hasRemoteOptions: employerFields.hasRemoteOptions.default(false),
+  hasMentalHealthSupport: employerFields.hasMentalHealthSupport.default(false),
+  basis: checkedBasis,
+});
+
+const employerUpdateSchema = z.object({
+  accessibilityRating: employerFields.accessibilityRating.optional(),
+  accommodationsOffered: employerFields.accommodationsOffered.optional(),
+  hasWheelchairAccess: employerFields.hasWheelchairAccess.optional(),
+  hasFlexibleWork: employerFields.hasFlexibleWork.optional(),
+  hasRemoteOptions: employerFields.hasRemoteOptions.optional(),
+  hasMentalHealthSupport: employerFields.hasMentalHealthSupport.optional(),
+  basis: checkedBasis,
+});
+
+const EMPLOYER_ORG_SELECT = { select: { id: true, name: true, logo: true, industry: true } } as const;
+
+type EmployerRow = {
+  accessibilityRating: number | null;
+  accommodationsOffered: string[];
+  hasWheelchairAccess: boolean;
+  hasFlexibleWork: boolean;
+  hasRemoteOptions: boolean;
+  hasMentalHealthSupport: boolean;
+  verifiedAt: Date | null;
+};
+
+/** What the audit row keeps of a listing: the assessment, never the organisation's own copy. */
+const employerAssessment = (row: EmployerRow) => ({
+  accessibilityRating: row.accessibilityRating,
+  accommodationsOffered: row.accommodationsOffered,
+  hasWheelchairAccess: row.hasWheelchairAccess,
+  hasFlexibleWork: row.hasFlexibleWork,
+  hasRemoteOptions: row.hasRemoteOptions,
+  hasMentalHealthSupport: row.hasMentalHealthSupport,
+  listed: row.verifiedAt !== null,
+});
+
+// GET /api/impact/admin/disability-employers - Every listing, retired ones included
+router.get('/admin/disability-employers', authenticate, requireRole('ADMIN'), async (_req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const employers = await prisma.disabilityFriendlyEmployer.findMany({
+      include: { organization: EMPLOYER_ORG_SELECT },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }],
+      take: 200,
+    });
+    res.json({ success: true, data: employers });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/impact/admin/organizations?q= - Find the organisation to list
+router.get('/admin/organizations', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const q = text(req.query.q, 100);
+    if (!q || q.length < 2) throw new ApiError(400, 'q: type at least two letters of the organisation name');
+    const organizations = await prisma.organization.findMany({
+      where: { name: { contains: q, mode: 'insensitive' } },
+      select: { id: true, name: true, industry: true, city: true, state: true, disabilityFriendlyListings: { select: { id: true, verifiedAt: true } } },
+      orderBy: [{ name: 'asc' }, { id: 'asc' }],
+      take: 20,
+    });
+    res.json({ success: true, data: organizations });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/impact/admin/disability-employers - List an employer staff have checked
+router.post('/admin/disability-employers', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { basis, organizationId, ...assessment } = parse(employerCreateSchema, req.body);
+
+    const organization = await prisma.organization.findUnique({ where: { id: organizationId }, select: { id: true, name: true } });
+    if (!organization) throw new ApiError(404, 'No such organisation');
+
+    const existing = await prisma.disabilityFriendlyEmployer.findUnique({ where: { organizationId }, select: { id: true, verifiedAt: true } });
+    if (existing) {
+      throw new ApiError(
+        409,
+        existing.verifiedAt
+          ? `${organization.name} is already on the list. Edit its listing instead.`
+          : `${organization.name} was listed before and retired. Edit that listing to put it back, so its history stays in one place.`
+      );
+    }
+
+    const employer = await prisma.disabilityFriendlyEmployer.create({
+      data: { organizationId, ...assessment, badgeType: null, verifiedAt: new Date() },
+      include: { organization: EMPLOYER_ORG_SELECT },
+    });
+
+    await recordStaffAction(req, 'DISABILITY_EMPLOYER_LISTED', {
+      resourceType: 'DisabilityFriendlyEmployer',
+      resourceId: employer.id,
+      organizationId,
+      organizationName: organization.name,
+      after: employerAssessment(employer),
+      basis,
+    });
+
+    res.status(201).json({ success: true, data: employer, message: `${organization.name} is on the list.` });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PATCH /api/impact/admin/disability-employers/:id - Re-check a listing, and put a retired one back
+router.patch('/admin/disability-employers/:id', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { basis, ...changes } = parse(employerUpdateSchema, req.body);
+    const before = await prisma.disabilityFriendlyEmployer.findUnique({ where: { id: req.params.id }, include: { organization: EMPLOYER_ORG_SELECT } });
+    if (!before) throw new ApiError(404, 'Listing not found');
+
+    // An edit is somebody looking at the employer again and vouching for what
+    // the listing now says, so it is dated as a fresh check, and it lists a
+    // retired employer again.
+    const employer = await prisma.disabilityFriendlyEmployer.update({
+      where: { id: before.id },
+      data: { ...changes, verifiedAt: new Date() },
+      include: { organization: EMPLOYER_ORG_SELECT },
+    });
+
+    await recordStaffAction(req, 'DISABILITY_EMPLOYER_UPDATED', {
+      resourceType: 'DisabilityFriendlyEmployer',
+      resourceId: employer.id,
+      organizationId: employer.organizationId,
+      organizationName: employer.organization.name,
+      before: employerAssessment(before),
+      after: employerAssessment(employer),
+      relisted: before.verifiedAt === null,
+      basis,
+    });
+
+    res.json({
+      success: true,
+      data: employer,
+      message: before.verifiedAt === null ? `${employer.organization.name} is back on the list.` : 'Updated, and dated as checked today.',
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/impact/admin/disability-employers/:id/retire - Take an employer off the list
+router.post('/admin/disability-employers/:id/retire', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { reason } = parse(z.object({ reason: staffReason('the employer is coming off the list') }), req.body);
+    const before = await prisma.disabilityFriendlyEmployer.findUnique({ where: { id: req.params.id }, include: { organization: EMPLOYER_ORG_SELECT } });
+    if (!before) throw new ApiError(404, 'Listing not found');
+    if (!before.verifiedAt) throw new ApiError(409, `${before.organization.name} is already off the list.`);
+
+    const employer = await prisma.disabilityFriendlyEmployer.update({
+      where: { id: before.id },
+      data: { verifiedAt: null },
+      include: { organization: EMPLOYER_ORG_SELECT },
+    });
+
+    await recordStaffAction(req, 'DISABILITY_EMPLOYER_RETIRED', {
+      resourceType: 'DisabilityFriendlyEmployer',
+      resourceId: employer.id,
+      organizationId: employer.organizationId,
+      organizationName: employer.organization.name,
+      before: employerAssessment(before),
+      reason,
+    });
+
+    res.json({ success: true, data: employer, message: `${employer.organization.name} is off the list.` });
   } catch (error) {
     next(error);
   }

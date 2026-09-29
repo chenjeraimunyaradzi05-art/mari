@@ -165,6 +165,8 @@ jest.mock('../utils/prisma', () => {
       })),
       update: jest.fn(async () => ({})),
     },
+    // The ban list every new account is checked against; nobody here is on it.
+    bannedIdentity: { findUnique: jest.fn(async () => null) },
     verificationToken: {
       create: jest.fn(async () => ({})),
       deleteMany: jest.fn(async () => ({})),

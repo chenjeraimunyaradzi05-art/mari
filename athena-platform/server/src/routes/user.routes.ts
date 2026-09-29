@@ -1,5 +1,5 @@
 import { Router, Response, NextFunction } from 'express';
-import { body, param, query, validationResult } from 'express-validator';
+import { body, validationResult } from 'express-validator';
 import { Prisma, WomanVerificationStatus } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
@@ -18,6 +18,7 @@ import { parsePagination } from '../utils/pagination';
 import { notifySocial, socialLinks } from '../utils/social-notifications';
 import { getBlockedRelationshipIds } from '../utils/safety-store';
 import { approvesFollowers, profileAccess } from '../services/audience.service';
+import { hiddenMemberWhere, viewerContextFor, type ViewerContext } from '../services/search.service';
 import { followLimiter } from '../middleware/socialLimits';
 import {
   DATE_OF_BIRTH_REFUSAL,
@@ -925,6 +926,14 @@ router.delete(
 // The composer's @ autocomplete: a handful of members whose name starts with
 // what was typed. People you follow come first, since they are who you are
 // most likely to mean. Must sit above /:id or "suggest" is read as a user id.
+//
+// It used to answer from every active account, so a man she had blocked could
+// type her first name into a comment box and be handed her id, her photo and
+// her headline — and the id is the key to her profile and her follower lists.
+// It now applies the same filter as search: nobody on either side of a block,
+// and nobody who asked to be hidden from search. The block list is read, not
+// guessed; a failure to read it fails the request, as search does, because an
+// empty list standing in for one that could not be read would put him back.
 router.get('/suggest', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const q = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 40) : '';
@@ -933,8 +942,12 @@ router.get('/suggest', authenticate, async (req: AuthRequest, res, next) => {
       return;
     }
 
+    const me = req.user!.id;
+    const viewer = await viewerContextFor(me);
+    const hidden = hiddenMemberWhere(viewer);
+
     const select = { id: true, displayName: true, firstName: true, lastName: true, avatar: true, headline: true };
-    const nameMatch = {
+    const nameMatch: Prisma.UserWhereInput = {
       OR: [
         { displayName: { startsWith: q, mode: 'insensitive' as const } },
         { firstName: { startsWith: q, mode: 'insensitive' as const } },
@@ -945,12 +958,12 @@ router.get('/suggest', authenticate, async (req: AuthRequest, res, next) => {
 
     const [followed, others] = await Promise.all([
       prisma.user.findMany({
-        where: { isActive: true, followers: { some: { followerId: req.user!.id } }, ...nameMatch },
+        where: { AND: [{ isActive: true, followers: { some: { followerId: me } } }, nameMatch, hidden] },
         select,
         take: 6,
       }),
       prisma.user.findMany({
-        where: { isActive: true, id: { not: req.user!.id }, ...nameMatch },
+        where: { AND: [{ isActive: true, id: { not: me } }, nameMatch, hidden] },
         select,
         orderBy: { displayName: 'asc' },
         take: 8,
@@ -1854,15 +1867,68 @@ router.delete('/:id/follow', authenticate, async (req: AuthRequest, res, next) =
 });
 
 // ===========================================
+// FOLLOWER AND FOLLOWING LISTS
+// ===========================================
+/*
+ * Both lists were open to anyone on the internet, signed in or not, for any
+ * member at all. A private profile and a connections-only one refused their
+ * page and handed over the names, photos and headlines of everyone they
+ * followed and everyone who followed them — the social graph of the women who
+ * had most reason to keep it closed, a man she had blocked included.
+ *
+ * They now ask for an account, answer a profile's lists only to the viewers
+ * who may see that profile in full (the rule GET /:id uses), answer 404 across
+ * a block in either direction, and leave out of the list anyone the viewer
+ * could not find in search: a blocked member on either side, a closed
+ * account, and someone who asked to be hidden. Nothing here is best effort;
+ * a check that cannot be made refuses the request rather than answering
+ * without it.
+ *
+ * On her own lists the hidden-from-search rule is the one thing not applied.
+ * Those are the people who follow her and whom she follows, and a follower
+ * who switched on "hide me from search" must not be able to watch her from a
+ * place she cannot see.
+ */
+async function assertMayReadFollowLists(viewerId: string, targetId: string): Promise<ViewerContext> {
+  const target = await prisma.user.findUnique({
+    where: { id: targetId },
+    select: { id: true, isPublic: true, dvSafetyProfile: { select: { blockedUserIds: true } } },
+  });
+  if (!target) throw new ApiError(404, 'User not found');
+
+  const viewer = await viewerContextFor(viewerId);
+  if (viewerId !== targetId) {
+    // Across a block the profile does not exist, as it does not in search.
+    if (viewer.blockedIds.includes(targetId) || (target.dvSafetyProfile?.blockedUserIds ?? []).includes(viewerId)) {
+      throw new ApiError(404, 'User not found');
+    }
+    if (!target.isPublic) throw new ApiError(403, 'This profile is private');
+    const access = await profileAccess(viewerId, targetId);
+    if (access.access !== 'full') throw new ApiError(403, 'This profile is private');
+  }
+  return viewer;
+}
+
+function listedMemberWhere(viewer: ViewerContext, ownList: boolean): Prisma.UserWhereInput {
+  if (!ownList) return { AND: [hiddenMemberWhere(viewer), { isActive: true }] };
+  const blocks: Prisma.UserWhereInput[] = [{ isActive: true }];
+  if (viewer.viewerId) blocks.push({ NOT: { dvSafetyProfile: { is: { blockedUserIds: { has: viewer.viewerId } } } } });
+  if (viewer.blockedIds.length > 0) blocks.push({ id: { notIn: viewer.blockedIds } });
+  return { AND: blocks };
+}
+
+// ===========================================
 // GET USER'S FOLLOWERS
 // ===========================================
-router.get('/:id/followers', async (req, res, next) => {
+router.get('/:id/followers', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
-    const { page, limit, skip } = parsePagination(req.query as { page?: string; limit?: string });
+    const { page, limit } = parsePagination(req.query as { page?: string; limit?: string });
+    const viewer = await assertMayReadFollowLists(req.user!.id, id);
+    const where: Prisma.FollowWhereInput = { followingId: id, follower: listedMemberWhere(viewer, req.user!.id === id) };
 
     const followers = await prisma.follow.findMany({
-      where: { followingId: id },
+      where,
       include: {
         follower: {
           select: {
@@ -1880,7 +1946,7 @@ router.get('/:id/followers', async (req, res, next) => {
       orderBy: { createdAt: 'desc' },
     });
 
-    const total = await prisma.follow.count({ where: { followingId: id } });
+    const total = await prisma.follow.count({ where });
 
     res.json({
       success: true,
@@ -1900,13 +1966,15 @@ router.get('/:id/followers', async (req, res, next) => {
 // ===========================================
 // GET USER'S FOLLOWING
 // ===========================================
-router.get('/:id/following', async (req, res, next) => {
+router.get('/:id/following', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
-    const { page, limit, skip } = parsePagination(req.query as { page?: string; limit?: string });
+    const { page, limit } = parsePagination(req.query as { page?: string; limit?: string });
+    const viewer = await assertMayReadFollowLists(req.user!.id, id);
+    const where: Prisma.FollowWhereInput = { followerId: id, following: listedMemberWhere(viewer, req.user!.id === id) };
 
     const following = await prisma.follow.findMany({
-      where: { followerId: id },
+      where,
       include: {
         following: {
           select: {
@@ -1924,7 +1992,7 @@ router.get('/:id/following', async (req, res, next) => {
       orderBy: { createdAt: 'desc' },
     });
 
-    const total = await prisma.follow.count({ where: { followerId: id } });
+    const total = await prisma.follow.count({ where });
 
     res.json({
       success: true,

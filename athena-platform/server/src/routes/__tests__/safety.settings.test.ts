@@ -23,6 +23,12 @@ jest.mock('../../utils/logger', () => ({
   logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
 
+const withdrawPresence = jest.fn(async (_userId: string) => 0);
+jest.mock('../../services/presence.service', () => ({
+  ...(jest.requireActual('../../services/presence.service') as object),
+  withdrawPresence: (userId: string) => withdrawPresence(userId),
+}));
+
 import { app } from '../../index';
 import { prisma as prismaTyped } from '../../utils/prisma';
 
@@ -134,5 +140,23 @@ describe('PATCH /api/safety/settings', () => {
       hideReadReceipts: false,
       filterOffensiveContent: true,
     });
+  });
+
+  // Her counterparts saw her come online before she switched hiding on, and
+  // would go on reading "Active now" until they reloaded.
+  it('takes back the online status already shown when she hides it or turns Safe Mode on', async () => {
+    await request(app).patch('/api/safety/settings').send({ hideOnlineStatus: true }).expect(200);
+    expect(withdrawPresence).toHaveBeenCalledWith('user-123');
+
+    withdrawPresence.mockClear();
+    await request(app).patch('/api/safety/settings').send({ isSafeMode: true }).expect(200);
+    expect(withdrawPresence).toHaveBeenCalledWith('user-123');
+  });
+
+  it('leaves presence alone when she shows her status again or changes something else', async () => {
+    await request(app).patch('/api/safety/settings').send({ hideOnlineStatus: false }).expect(200);
+    await request(app).patch('/api/safety/settings').send({ isSafeMode: false }).expect(200);
+    await request(app).patch('/api/safety/settings').send({ profileVisibility: 'private' }).expect(200);
+    expect(withdrawPresence).not.toHaveBeenCalled();
   });
 });

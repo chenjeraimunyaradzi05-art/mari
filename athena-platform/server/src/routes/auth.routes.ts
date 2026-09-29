@@ -39,6 +39,7 @@ import { claimTotpStep } from '../utils/totp-replay';
 import { openSecret, sealSecret } from '../utils/secret-box';
 import { sessionEvents } from '../utils/session-events';
 import { DATE_OF_BIRTH_REFUSAL, isPlausibleDateOfBirth, meetsMinimumAge } from '../middleware/account-gates';
+import { BANNED_REGISTRATION_MESSAGE, isBannedEmail } from '../services/banned-identity.service';
 
 const router = Router();
 
@@ -191,10 +192,11 @@ function socialAccountConflict(error: unknown, provider: SignInProvider): ApiErr
 
 /**
  * Who linked a sign-in provider to an account, from where, and whether a
- * password nobody had proved was theirs went with it. AuditAction has no verb
- * for this, so the row carries the nearest neutral value and the real event in
- * metadata, which is the compromise admin-audit.service makes for the same
- * reason. The link is already committed, so the row is best effort.
+ * password nobody had proved was theirs went with it. This used to borrow
+ * DATA_ACCESS and put the real event in metadata, because AuditAction had no
+ * verb for it; a new way into somebody's account filed as "a record was read"
+ * is the entry an investigation filters straight past. It has its own verb
+ * now. The link is already committed, so the row is best effort.
  */
 async function recordSignInProviderLinked(
   req: Request,
@@ -205,18 +207,38 @@ async function recordSignInProviderLinked(
   await bestEffort(
     `${provider} sign-in link audit row`,
     logAudit({
-      action: AuditAction.DATA_ACCESS,
+      action: AuditAction.SIGN_IN_PROVIDER_LINKED,
       actorUserId: userId,
       targetUserId: userId,
       ipAddress: req.ip ?? null,
       userAgent: req.get('user-agent') || null,
       metadata: {
-        accountAction: 'SIGN_IN_PROVIDER_LINKED',
         provider,
         clearedUnprovenPassword,
       },
     })
   );
+}
+
+/**
+ * Refuses an account for an address that belongs to someone who was banned.
+ *
+ * A ban used to suspend the one account and nothing else, so the man banned
+ * for threatening a member could sign up again the same afternoon with the
+ * same address, or the same address with a "+2" in it, and carry on. Every
+ * path that creates an account asks this first: the email form, Google and
+ * Facebook.
+ *
+ * The answer is BANNED_REGISTRATION_MESSAGE and nothing more. It says the
+ * address cannot be used, never that it was banned, because anyone can type
+ * someone else's address into a sign-up form, and "this person was banned
+ * from ATHENA" is not ours to tell them. A check that cannot run refuses too:
+ * an unreadable ban list must not become an open door.
+ */
+async function refuseUnusableAddress(email: string): Promise<void> {
+  if (await isBannedEmail(email)) {
+    throw new ApiError(403, BANNED_REGISTRATION_MESSAGE);
+  }
 }
 
 /** True when a registration body carries a date of birth an adult could have. */
@@ -762,6 +784,12 @@ router.post(
       if (existingUser) {
         throw new ApiError(409, 'Email already registered');
       }
+
+      // After the check above, so an address that already has an account —
+      // banned or not — gets the same answer it always did, and the ban list
+      // is only consulted for an address that would otherwise become a new
+      // account.
+      await refuseUnusableAddress(email);
 
       // Hash password
       const passwordHash = await hashPassword(password);
@@ -1448,6 +1476,10 @@ router.post(
           throw new ApiError(404, 'No ATHENA account exists for this Google email. Please create an account first.');
         }
 
+        // Before anything else about the new account is weighed; see
+        // refuseUnusableAddress.
+        await refuseUnusableAddress(email);
+
         if (req.body?.womanSelfAttested !== true) {
           throw new ApiError(400, 'You must confirm you are a woman to join ATHENA');
         }
@@ -1787,6 +1819,9 @@ router.post(
         if (fbMode !== 'register') {
           throw new ApiError(404, 'No ATHENA account exists for this Facebook email. Please create an account first.');
         }
+
+        // As on the Google route; see refuseUnusableAddress.
+        await refuseUnusableAddress(fbEmail);
 
         if (req.body?.womanSelfAttested !== true) {
           throw new ApiError(400, 'You must confirm you are a woman to join ATHENA');

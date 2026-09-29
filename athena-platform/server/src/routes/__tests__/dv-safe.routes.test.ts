@@ -33,12 +33,17 @@ const service = {
     async (_userId: string, _chatId: string, _content: string, _minutes?: number, _pin?: string) => ({}) as any
   ),
   deleteSafeChat: jest.fn(async (_userId: string, _chatId: string, _pin?: string) => true),
-  clearActivityTraces: jest.fn(async (_userId: string) => true),
   getDVResources: jest.fn((_region?: string) => [] as any),
   getSafeNotificationContent: jest.fn((_settings: unknown, _title: string, _message: string) => ({}) as any),
 };
 
 jest.mock('../../services/dv-safe.service', () => ({ __esModule: true, default: service, ...service }));
+
+const withdrawPresence = jest.fn(async (_userId: string) => 0);
+jest.mock('../../services/presence.service', () => ({
+  ...(jest.requireActual('../../services/presence.service') as object),
+  withdrawPresence: (userId: string) => withdrawPresence(userId),
+}));
 
 jest.mock('../../middleware/auth', () => ({
   authenticate: (req: any, _res: any, next: any) => {
@@ -64,7 +69,6 @@ beforeEach(() => {
   service.removeEmergencyContact.mockResolvedValue(true);
   service.isUserVisible.mockResolvedValue(true);
   service.deleteSafeChat.mockResolvedValue(true);
-  service.clearActivityTraces.mockResolvedValue(true);
   service.getDVResources.mockReturnValue([]);
 });
 
@@ -97,6 +101,23 @@ describe('Settings', () => {
 
     expect(service.enableSafeMode).toHaveBeenCalledWith('her');
     expect(res.body.settings.isSafeMode).toBe(true);
+  });
+
+  // The people in her threads saw her come online before she switched Safe
+  // Mode on, and would go on reading "Active now" until they reloaded.
+  it('takes back the online status her counterparts already saw when Safe Mode goes on', async () => {
+    await request(app).post('/api/safety/dv/safe-mode').send({}).expect(200);
+    expect(withdrawPresence).toHaveBeenCalledWith('her');
+
+    withdrawPresence.mockClear();
+    await request(app).put('/api/safety/dv/settings').send({ isSafeMode: true }).expect(200);
+    expect(withdrawPresence).toHaveBeenCalledWith('her');
+  });
+
+  it('leaves presence alone for a switch that is not Safe Mode going on', async () => {
+    await request(app).put('/api/safety/dv/settings').send({ isSafeMode: false }).expect(200);
+    await request(app).put('/api/safety/dv/settings').send({ hideFromSearch: true }).expect(200);
+    expect(withdrawPresence).not.toHaveBeenCalled();
   });
 });
 
@@ -226,7 +247,7 @@ describe('Safe chats', () => {
 });
 
 describe('Traces and resources', () => {
-  it('tells the client to clear only what a page can actually clear', async () => {
+  it('tells the client to clear only what a page can actually clear, and claims no deletion it never made', async () => {
     const res = await request(app).post('/api/safety/dv/clear-traces').send({}).expect(200);
 
     // It used to name two cookies that exist nowhere in the codebase and ask
@@ -236,6 +257,22 @@ describe('Traces and resources', () => {
       clearLocalStorage: true,
       clearSessionStorage: true,
     });
+    // And it answered "Activity traces cleared" from a server that holds no
+    // trace of her browsing and had deleted nothing.
+    expect(res.body.serverTracesKept).toBe(false);
+    expect(res.body.message).not.toMatch(/traces cleared/i);
+  });
+
+  it('keeps no record of her having used it', async () => {
+    const { logger } = jest.requireMock('../../utils/logger') as { logger: Record<string, jest.Mock> };
+
+    await request(app).post('/api/safety/dv/clear-traces').send({}).expect(200);
+
+    // The line that logged her user id against "Activity traces cleared for
+    // safety" was the one server-side trace of the tool it was clearing.
+    for (const level of ['debug', 'info', 'warn', 'error']) {
+      expect(JSON.stringify(logger[level].mock.calls)).not.toContain('"her"');
+    }
   });
 
   it('hands out the support lines for the region asked for', async () => {

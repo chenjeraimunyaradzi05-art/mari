@@ -2,8 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useQueryClient } from '@tanstack/react-query';
 import { Accessibility, Loader2, CheckCircle, Building2, Briefcase } from 'lucide-react';
 import { impactApi } from '@/lib/api';
+import { ACCESSIBILITY_PROFILE_QUERY_KEY } from '@/app/providers';
+import { useAuthStore } from '@/lib/hooks';
+import { formatDate } from '@/lib/utils';
+import { StaffDisabilityEmployers } from './StaffDisabilityEmployers';
 
 type AccessibilityProfile = {
   id: string;
@@ -29,16 +34,21 @@ type DisabilityFriendlyEmployer = {
   hasFlexibleWork: boolean;
   hasRemoteOptions: boolean;
   hasMentalHealthSupport: boolean;
-  badgeType?: string;
+  /** When ATHENA staff last checked this employer. The public list holds only checked ones. */
+  verifiedAt: string;
   organization: {
     id: string;
     name: string;
-    logoUrl?: string;
-    industry?: string;
+    // The server sends the organisation's `logo`. This read `logoUrl`, which
+    // nothing sends, so no employer's logo could ever have shown.
+    logo?: string | null;
+    industry?: string | null;
   };
 };
 
 export default function AccessibilityPage() {
+  const queryClient = useQueryClient();
+  const isStaff = useAuthStore().user?.role === 'ADMIN';
   const [profile, setProfile] = useState<AccessibilityProfile | null>(null);
   const [employers, setEmployers] = useState<DisabilityFriendlyEmployer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -116,6 +126,8 @@ export default function AccessibilityPage() {
         otherNeeds: otherNeeds || undefined,
         workAccommodations: workAccommodations ? workAccommodations.split('\n').filter(Boolean) : [],
       });
+      // So high contrast and reduced motion take effect now, not on the next visit.
+      void queryClient.invalidateQueries({ queryKey: ACCESSIBILITY_PROFILE_QUERY_KEY });
       setShowForm(false);
       await loadData();
     } catch (err: unknown) {
@@ -227,13 +239,13 @@ export default function AccessibilityPage() {
                       Captions required
                     </label>
                   </div>
-                  {/* These two sat under "preferences" as though ticking them
-                      changed the site, and nothing on the site reads them. Said
-                      plainly rather than left to be discovered. */}
+                  {/* These two used to be a record and nothing more, and this
+                      note said so. The app now applies them (ThemeSync in
+                      providers.tsx), so the note says what they do. */}
                   <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-                    High contrast and reduced motion are kept with your profile as a record of what you need. They do not
-                    change how ATHENA looks. ATHENA does follow your device&apos;s own reduce-motion setting, and your
-                    device&apos;s contrast settings apply here as they do everywhere.
+                    High contrast and reduced motion change how ATHENA looks wherever you are signed in: stronger text and
+                    borders, deeper button colours and a clear focus outline, and no animations. Your device&apos;s own
+                    reduce-motion and contrast settings still apply as well.
                   </p>
                 </div>
 
@@ -332,8 +344,17 @@ export default function AccessibilityPage() {
           {/* Disability-Friendly Employers */}
           <section>
             <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
-              <Briefcase className="w-5 h-5" /> Disability-Confident Employers
+              <Briefcase className="w-5 h-5" /> Disability-friendly employers
             </h2>
+            {/*
+              The heading used to say "Disability-Confident", the name of a UK
+              government scheme ATHENA has nothing to do with. These are
+              employers ATHENA staff have checked themselves; the rating is
+              theirs, and each card says when they last looked.
+            */}
+            <p className="text-sm text-slate-500 dark:text-slate-400 -mt-2 mb-4">
+              Workplaces ATHENA staff have checked themselves. The rating out of five is our staff&rsquo;s assessment, not an accreditation.
+            </p>
 
             {loadFailed ? (
               <p className="text-sm text-slate-500">We could not load employers just now.</p>
@@ -341,7 +362,7 @@ export default function AccessibilityPage() {
               // Not "none found": nothing has searched. No employer has been
               // listed here, and the page says that rather than implying a
               // search came back empty.
-              <p className="text-sm text-slate-500">No employers have been listed here.</p>
+              <p className="text-sm text-slate-500">No employer has been listed here yet.</p>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {employers.map((employer) => (
@@ -351,8 +372,8 @@ export default function AccessibilityPage() {
                   >
                     <div className="flex items-start gap-4">
                       <div className="w-12 h-12 bg-slate-100 dark:bg-slate-800 rounded-lg flex items-center justify-center flex-shrink-0">
-                        {employer.organization.logoUrl ? (
-                          <img src={employer.organization.logoUrl} alt="" className="w-8 h-8 object-contain" />
+                        {employer.organization.logo ? (
+                          <img src={employer.organization.logo} alt="" className="w-8 h-8 object-contain" />
                         ) : (
                           <Building2 className="w-6 h-6 text-slate-400" />
                         )}
@@ -368,11 +389,9 @@ export default function AccessibilityPage() {
                           <div className="mt-1">{renderStars(employer.accessibilityRating)}</div>
                         )}
                       </div>
-                      {employer.badgeType && (
-                        <span className="text-xs bg-teal-50 text-teal-700 px-2 py-1 rounded-full">
-                          {employer.badgeType.replace('_', ' ')}
-                        </span>
-                      )}
+                      <span className="text-xs bg-teal-50 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300 px-2 py-1 rounded-full whitespace-nowrap">
+                        Checked {formatDate(employer.verifiedAt)}
+                      </span>
                     </div>
 
                     <div className="flex flex-wrap gap-2 mt-4">
@@ -411,6 +430,12 @@ export default function AccessibilityPage() {
           </section>
         </>
       )}
+
+      {/*
+        Staff only. The server refuses these routes to anyone else; this only
+        keeps the panel off members' screens.
+      */}
+      {isStaff && <StaffDisabilityEmployers onChanged={() => loadData()} />}
 
       <div className="text-center">
         <Link href="/dashboard/impact" className="text-sm text-primary-600 hover:underline">

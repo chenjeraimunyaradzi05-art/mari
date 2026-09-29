@@ -7,9 +7,6 @@ import {
   ChevronRight,
   ChevronLeft,
   Sparkles,
-  Briefcase,
-  GraduationCap,
-  Target,
   CheckCircle,
   FileText,
   Plus,
@@ -18,16 +15,23 @@ import {
 import { useUpdateProfile, useAuth, useMySkills, useRemoveSkill } from '@/lib/hooks';
 import { userApi } from '@/lib/api';
 import toast from 'react-hot-toast';
-import { PERSONA_LABELS, cn } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 
+/*
+ * There was a Goals step between Skills and the finish: six tiles to pick
+ * from, "select all that apply". What she picked was kept in this page's
+ * state and never sent anywhere — no field on the profile holds it — so it
+ * asked for her time and threw the answer away. It is gone until there is
+ * somewhere to keep it.
+ */
 const steps = [
   { id: 'welcome', title: 'Welcome' },
   { id: 'basics', title: 'Basic Info' },
   { id: 'experience', title: 'Experience' },
   { id: 'skills', title: 'Skills' },
-  { id: 'goals', title: 'Goals' },
   { id: 'complete', title: 'Complete' },
 ];
+const LAST_STEP = steps.length - 1;
 
 const skillSuggestions = [
   'JavaScript', 'TypeScript', 'Python', 'React', 'Node.js',
@@ -36,14 +40,8 @@ const skillSuggestions = [
   'Communication', 'Problem Solving', 'Team Management', 'Agile',
 ];
 
-const goalOptions = [
-  { id: 'new_job', label: 'Find a new job', icon: Briefcase },
-  { id: 'career_change', label: 'Change careers', icon: Target },
-  { id: 'skill_up', label: 'Learn new skills', icon: GraduationCap },
-  { id: 'networking', label: 'Build my network', icon: Sparkles },
-  { id: 'mentorship', label: 'Find a mentor', icon: GraduationCap },
-  { id: 'start_business', label: 'Start a business', icon: Target },
-];
+const serverMessage = (error: unknown): string | undefined =>
+  (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -61,7 +59,6 @@ export default function OnboardingPage() {
     currentCompany: '',
     yearsExperience: '',
     skills: [] as string[],
-    goals: [] as string[],
   });
   const [newSkill, setNewSkill] = useState('');
 
@@ -92,7 +89,7 @@ export default function OnboardingPage() {
   };
 
   const handleNext = () => {
-    if (currentStep < steps.length - 1) {
+    if (currentStep < LAST_STEP) {
       setCurrentStep(currentStep + 1);
     }
   };
@@ -119,19 +116,31 @@ export default function OnboardingPage() {
 
     setIsSavingSkills(true);
     try {
-      await updateProfile.mutateAsync(payload as any);
+      await updateProfile.mutateAsync(payload);
 
       const skillsToSave = Array.from(
         new Set(formData.skills.map((s) => s.trim()).filter(Boolean))
       );
 
+      // Every skill is tried, and the ones that did not save are named. The
+      // results used to be thrown away, so a skill the server refused vanished
+      // behind "You're all set" and she never knew to add it again.
       if (skillsToSave.length) {
-        await Promise.allSettled(skillsToSave.map((skillName) => userApi.addSkill(skillName)));
+        const results = await Promise.allSettled(skillsToSave.map((skillName) => userApi.addSkill(skillName)));
+        const unsaved = skillsToSave.filter((_skill, index) => results[index].status === 'rejected');
+        if (unsaved.length > 0) {
+          toast.error(
+            `${unsaved.length === 1 ? 'This skill was' : 'These skills were'} not saved: ${unsaved.join(', ')}. You can add ${
+              unsaved.length === 1 ? 'it' : 'them'
+            } from your profile.`,
+            { duration: 8000 }
+          );
+        }
       }
 
       router.push('/dashboard');
-    } catch (error: any) {
-      toast.error(error?.response?.data?.message || 'Failed to complete onboarding');
+    } catch (error: unknown) {
+      toast.error(serverMessage(error) || 'Failed to complete onboarding');
     } finally {
       setIsSavingSkills(false);
     }
@@ -157,17 +166,6 @@ export default function OnboardingPage() {
       ...formData,
       skills: formData.skills.filter((s) => s !== skill),
     });
-  };
-
-  const toggleGoal = (goalId: string) => {
-    if (formData.goals.includes(goalId)) {
-      setFormData({
-        ...formData,
-        goals: formData.goals.filter((g) => g !== goalId),
-      });
-    } else {
-      setFormData({ ...formData, goals: [...formData.goals, goalId] });
-    }
   };
 
   return (
@@ -233,10 +231,13 @@ export default function OnboardingPage() {
                 Let's set up your profile to unlock personalized recommendations
                 and connect you with the right opportunities.
               </p>
+              {/* This tip promised "5x more visibility" for a complete
+                  profile. Nothing measured that; it was a number made up for
+                  the page. What is true is who reads the profile. */}
               <div className="bg-primary-50 dark:bg-primary-900/30 rounded-lg p-4 mb-8">
                 <p className="text-sm text-primary-700 dark:text-primary-300">
-                  <strong>Tip:</strong> A complete profile gets 5x more visibility
-                  and better job matches!
+                  <strong>Tip:</strong> Your profile is what mentors, employers and other members see when they find
+                  you, so a line about what you do goes a long way. Everything here can be changed later.
                 </p>
               </div>
             </div>
@@ -447,62 +448,8 @@ export default function OnboardingPage() {
             </div>
           )}
 
-          {/* Step 4: Goals */}
-          {currentStep === 4 && (
-            <div>
-              <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
-                Your goals
-              </h2>
-              <p className="text-slate-500 dark:text-slate-400 mb-6">
-                What are you looking to achieve with ATHENA? (Select all that apply)
-              </p>
-              <div className="grid grid-cols-2 gap-3">
-                {goalOptions.map((goal) => (
-                  <button
-                    key={goal.id}
-                    onClick={() => toggleGoal(goal.id)}
-                    className={cn(
-                      'flex items-center space-x-3 p-4 rounded-lg border-2 transition text-left',
-                      formData.goals.includes(goal.id)
-                        ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30'
-                        : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
-                    )}
-                  >
-                    <div
-                      className={cn(
-                        'p-2 rounded-lg',
-                        formData.goals.includes(goal.id)
-                          ? 'bg-primary-100 dark:bg-primary-900'
-                          : 'bg-slate-100 dark:bg-slate-800'
-                      )}
-                    >
-                      <goal.icon
-                        className={cn(
-                          'w-5 h-5',
-                          formData.goals.includes(goal.id)
-                            ? 'text-primary-600'
-                            : 'text-slate-500'
-                        )}
-                      />
-                    </div>
-                    <span
-                      className={cn(
-                        'font-medium',
-                        formData.goals.includes(goal.id)
-                          ? 'text-primary-700 dark:text-primary-300'
-                          : 'text-slate-700 dark:text-slate-300'
-                      )}
-                    >
-                      {goal.label}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Step 5: Complete */}
-          {currentStep === 5 && (
+          {/* Last step: Complete */}
+          {currentStep === LAST_STEP && (
             <div className="text-center">
               <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
                 <CheckCircle className="w-10 h-10 text-green-600" />
@@ -538,7 +485,7 @@ export default function OnboardingPage() {
           {/* Navigation */}
           <div className="flex items-center justify-between mt-8 pt-6 border-t border-slate-100 dark:border-slate-800">
             <div>
-              {currentStep > 0 && currentStep < 5 && (
+              {currentStep > 0 && currentStep < LAST_STEP && (
                 <button
                   onClick={handlePrevious}
                   className="flex items-center text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition"
@@ -549,7 +496,7 @@ export default function OnboardingPage() {
               )}
             </div>
             <div className="flex items-center space-x-3">
-              {currentStep < 5 && (
+              {currentStep < LAST_STEP && (
                 <button
                   onClick={handleSkipOnboarding}
                   className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition"
@@ -557,7 +504,7 @@ export default function OnboardingPage() {
                   Skip for now
                 </button>
               )}
-              {currentStep < 5 ? (
+              {currentStep < LAST_STEP ? (
                 <button
                   onClick={handleNext}
                   className="btn-primary px-6 py-2.5 flex items-center"
@@ -568,10 +515,10 @@ export default function OnboardingPage() {
               ) : (
                 <button
                   onClick={handleComplete}
-                  disabled={updateProfile.isPending}
+                  disabled={updateProfile.isPending || isSavingSkills}
                   className="btn-primary px-8 py-2.5"
                 >
-                  {updateProfile.isPending ? 'Saving...' : 'Go to Dashboard'}
+                  {updateProfile.isPending || isSavingSkills ? 'Saving...' : 'Go to Dashboard'}
                 </button>
               )}
             </div>

@@ -2,43 +2,61 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { FileText, Loader2, TrendingUp, Users, Briefcase, Home, GraduationCap, DollarSign } from 'lucide-react';
+import { FileText, Loader2, TrendingUp, Users, Briefcase, Home, GraduationCap, DollarSign, ShieldCheck } from 'lucide-react';
 import { impactApi } from '@/lib/api';
+import { useAuthStore } from '@/lib/hooks';
+import { StaffImpactReports, COMMUNITY_OPTIONS } from './StaffImpactReports';
 
-type ImpactReport = {
+type CountField = 'totalUsersSupported' | 'employmentGained' | 'housingSecured' | 'qualificationsObtained' | 'businessesStarted' | 'safetyAchieved';
+
+/**
+ * A published report as the server gives it to the public. A count from one
+ * to four comes back as null and is named in `suppressed`: the server will
+ * not print a number small enough to point at a woman, and this page says
+ * "fewer than five" in its place rather than a zero, which would be false.
+ */
+type ImpactReport = Record<CountField, number | null> & {
   id: string;
   reportPeriod: string;
-  communityType?: string;
+  communityType?: string | null;
   region: string;
-  totalUsersSupported: number;
-  employmentGained: number;
-  avgIncomeIncrease?: string | number;
-  housingSecured: number;
-  qualificationsObtained: number;
-  businessesStarted: number;
-  safetyAchieved: number;
-  totalEconomicImpact?: string | number;
-  narrativeSummary?: string;
+  avgIncomeIncrease?: number | null;
+  totalEconomicImpact?: number | null;
+  narrativeSummary?: string | null;
+  suppressed?: CountField[];
+  minPublishedCount?: number;
+  basis?: {
+    period: { description: string };
+    outcomesRecorded: number;
+    outcomesVerified: number;
+    programmeMembers: number;
+  } | null;
 };
 
-const communityTypeLabels: Record<string, string> = {
-  FIRST_NATIONS: 'First Nations',
-  REFUGEE_IMMIGRANT: 'Refugee & Immigrant',
-  DV_SURVIVOR: 'DV Survivor',
-  DISABILITY: 'Disability',
-  LGBTQIA: 'LGBTQIA+',
-  SINGLE_PARENT: 'Single Parent',
-  RURAL_REGIONAL: 'Rural & Regional',
-  GENERAL: 'All Communities',
-};
+const communityLabel = (value?: string | null) =>
+  value ? COMMUNITY_OPTIONS.find((c) => c.value === value)?.label ?? value : 'All communities';
 
-const formatCurrency = (value?: string | number) => {
-  if (!value) return '$0';
-  const num = typeof value === 'string' ? parseFloat(value) : value;
-  return new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 }).format(num);
-};
+const formatCurrency = (value: number) =>
+  new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 }).format(value);
+
+/** A count as the public may read it. */
+function Count({ value, floor }: { value: number | null; floor: number }) {
+  if (value === null) return <span title="Withheld so nobody can be identified">Fewer than {floor}</span>;
+  return <>{value.toLocaleString()}</>;
+}
+
+function Basis({ basis }: { basis: NonNullable<ImpactReport['basis']> }) {
+  return (
+    <p className="text-xs text-slate-500">
+      Counted from ATHENA&rsquo;s records for {basis.period.description}: the outcomes women recorded for themselves ({basis.outcomesRecorded}
+      {basis.outcomesVerified > 0 ? `, ${basis.outcomesVerified} of them verified by staff` : ''}) and the {basis.programmeMembers === 1 ? 'woman' : 'women'} who began or
+      completed a community programme ({basis.programmeMembers}). Each woman is counted once per outcome.
+    </p>
+  );
+}
 
 export default function ReportsPage() {
+  const isStaff = useAuthStore().user?.role === 'ADMIN';
   const [reports, setReports] = useState<ImpactReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterCommunity, setFilterCommunity] = useState('');
@@ -70,19 +88,15 @@ export default function ReportsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterCommunity]);
 
-  // Aggregate stats across all reports
-  const aggregateStats = reports.reduce(
-    (acc, report) => ({
-      totalUsers: acc.totalUsers + report.totalUsersSupported,
-      employment: acc.employment + report.employmentGained,
-      housing: acc.housing + report.housingSecured,
-      qualifications: acc.qualifications + report.qualificationsObtained,
-      businesses: acc.businesses + report.businessesStarted,
-      safety: acc.safety + report.safetyAchieved,
-      economicImpact: acc.economicImpact + (parseFloat(String(report.totalEconomicImpact || 0)) || 0),
-    }),
-    { totalUsers: 0, employment: 0, housing: 0, qualifications: 0, businesses: 0, safety: 0, economicImpact: 0 }
-  );
+  /*
+   * The tiles show the latest report, named, rather than a total across every
+   * report listed. They used to add the reports up, which counted a woman
+   * twice the moment an all-communities report and a community's own report
+   * covered the same quarter, and turned periods of different lengths into
+   * one number that described none of them.
+   */
+  const latest = reports[0];
+  const floor = latest?.minPublishedCount ?? 5;
 
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-8">
@@ -95,7 +109,7 @@ export default function ReportsPage() {
           Community Impact & Outcomes
         </h1>
         <p className="text-slate-500 dark:text-slate-400 mt-1">
-          Tracking real outcomes for women across all communities
+          What happened for women on ATHENA, counted a period at a time
         </p>
       </div>
 
@@ -104,21 +118,11 @@ export default function ReportsPage() {
       )}
 
       {/*
-        Seven tiles reading nought is not a report, it is a claim that ATHENA
-        supported nobody, housed nobody and got nobody to safety.
-        ImpactReport has two read paths in the whole server and no write path
-        at all — no admin builder, no aggregation worker, no seed — so the
-        table cannot hold a row and every one of those tiles was structurally
-        zero for every visitor. Rendering them anyway, under the headline
-        "Tracking real outcomes for women", said something false about the
-        women this platform is for.
-        Until something writes a report, the page says there are none. The
-        tiles come back the moment there is one to total.
-
-        The empty state used to add that reports "are published by ATHENA
-        staff for a period at a time". Nothing can publish one — there is no
-        admin screen, route or job that writes an ImpactReport — so that was
-        a description of a process that does not exist, and it is gone.
+        With no report published, the page says so rather than showing seven
+        tiles reading nought, which would claim ATHENA supported nobody. Staff
+        publish a report for a period from the panel at the foot of this page
+        (admins only); its figures are counted from the platform's records, not
+        typed in.
       */}
       {!loading && !loadFailed && reports.length === 0 ? (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6">
@@ -126,7 +130,7 @@ export default function ReportsPage() {
           <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
             {filterCommunity
               ? 'Nothing has been published for this community. Try another filter.'
-              : 'An impact report totals what actually happened over a period: women supported, jobs gained, housing secured, safety reached. None has been published, so rather than show you a row of zeros we are telling you plainly.'}
+              : 'An impact report counts what actually happened over a period: women supported, jobs gained, housing secured, safety reached. None has been published, so rather than show you a row of zeros we are telling you plainly.'}
           </p>
           <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">
             Your own progress is on the{' '}
@@ -138,79 +142,76 @@ export default function ReportsPage() {
         </div>
       ) : null}
 
-      {reports.length > 0 && (
+      {latest && (
         <>
-      {/* Aggregate Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
-          <div className="flex items-center gap-2 text-indigo-600 mb-2">
-            <Users className="w-4 h-4" />
-            <span className="text-xs font-medium">Users Supported</span>
-          </div>
-          <p className="text-2xl font-bold text-slate-900 dark:text-white">
-            {aggregateStats.totalUsers.toLocaleString()}
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            Latest report: <span className="font-semibold">{latest.reportPeriod}</span> · {communityLabel(latest.communityType)} · {latest.region}
           </p>
-        </div>
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
-          <div className="flex items-center gap-2 text-emerald-600 mb-2">
-            <Briefcase className="w-4 h-4" />
-            <span className="text-xs font-medium">Jobs Gained</span>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+              <div className="flex items-center gap-2 text-indigo-600 mb-2">
+                <Users className="w-4 h-4" />
+                <span className="text-xs font-medium">Women supported</span>
+              </div>
+              <p className="text-2xl font-bold text-slate-900 dark:text-white"><Count value={latest.totalUsersSupported} floor={floor} /></p>
+            </div>
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+              <div className="flex items-center gap-2 text-emerald-600 mb-2">
+                <Briefcase className="w-4 h-4" />
+                <span className="text-xs font-medium">Gained employment</span>
+              </div>
+              <p className="text-2xl font-bold text-slate-900 dark:text-white"><Count value={latest.employmentGained} floor={floor} /></p>
+            </div>
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+              <div className="flex items-center gap-2 text-blue-600 mb-2">
+                <Home className="w-4 h-4" />
+                <span className="text-xs font-medium">Secured housing</span>
+              </div>
+              <p className="text-2xl font-bold text-slate-900 dark:text-white"><Count value={latest.housingSecured} floor={floor} /></p>
+            </div>
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+              <div className="flex items-center gap-2 text-rose-600 mb-2">
+                <ShieldCheck className="w-4 h-4" />
+                <span className="text-xs font-medium">Reached safety</span>
+              </div>
+              <p className="text-2xl font-bold text-slate-900 dark:text-white"><Count value={latest.safetyAchieved} floor={floor} /></p>
+            </div>
           </div>
-          <p className="text-2xl font-bold text-slate-900 dark:text-white">
-            {aggregateStats.employment.toLocaleString()}
-          </p>
-        </div>
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
-          <div className="flex items-center gap-2 text-blue-600 mb-2">
-            <Home className="w-4 h-4" />
-            <span className="text-xs font-medium">Housing Secured</span>
-          </div>
-          <p className="text-2xl font-bold text-slate-900 dark:text-white">
-            {aggregateStats.housing.toLocaleString()}
-          </p>
-        </div>
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
-          <div className="flex items-center gap-2 text-amber-600 mb-2">
-            <DollarSign className="w-4 h-4" />
-            <span className="text-xs font-medium">Economic Impact</span>
-          </div>
-          <p className="text-2xl font-bold text-slate-900 dark:text-white">
-            {formatCurrency(aggregateStats.economicImpact)}
-          </p>
-        </div>
-      </div>
 
-      {/* Additional Stats Row */}
-      <div className="grid grid-cols-3 gap-4">
-        <div className="bg-gradient-to-br from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 border border-purple-200 dark:border-purple-800 rounded-xl p-4 text-center">
-          <GraduationCap className="w-6 h-6 text-purple-600 mx-auto mb-2" />
-          <p className="text-2xl font-bold text-purple-800 dark:text-purple-200">{aggregateStats.qualifications.toLocaleString()}</p>
-          <p className="text-xs text-purple-600 dark:text-purple-400">Qualifications Obtained</p>
-        </div>
-        <div className="bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-4 text-center">
-          <TrendingUp className="w-6 h-6 text-amber-600 mx-auto mb-2" />
-          <p className="text-2xl font-bold text-amber-800 dark:text-amber-200">{aggregateStats.businesses.toLocaleString()}</p>
-          <p className="text-xs text-amber-600 dark:text-amber-400">Businesses Started</p>
-        </div>
-        <div className="bg-gradient-to-br from-red-50 to-pink-50 dark:from-red-900/20 dark:to-pink-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4 text-center">
-          <Users className="w-6 h-6 text-red-600 mx-auto mb-2" />
-          <p className="text-2xl font-bold text-red-800 dark:text-red-200">{aggregateStats.safety.toLocaleString()}</p>
-          <p className="text-xs text-red-600 dark:text-red-400">Achieved Safety</p>
-        </div>
-      </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="bg-gradient-to-br from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 border border-purple-200 dark:border-purple-800 rounded-xl p-4 text-center">
+              <GraduationCap className="w-6 h-6 text-purple-600 mx-auto mb-2" />
+              <p className="text-2xl font-bold text-purple-800 dark:text-purple-200"><Count value={latest.qualificationsObtained} floor={floor} /></p>
+              <p className="text-xs text-purple-600 dark:text-purple-400">Obtained a qualification</p>
+            </div>
+            <div className="bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-4 text-center">
+              <TrendingUp className="w-6 h-6 text-amber-600 mx-auto mb-2" />
+              <p className="text-2xl font-bold text-amber-800 dark:text-amber-200"><Count value={latest.businessesStarted} floor={floor} /></p>
+              <p className="text-xs text-amber-600 dark:text-amber-400">Started a business</p>
+            </div>
+            <div className="bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl p-4 text-center">
+              <DollarSign className="w-6 h-6 text-emerald-600 mx-auto mb-2" />
+              <p className="text-2xl font-bold text-emerald-800 dark:text-emerald-200">
+                {latest.avgIncomeIncrease === null || latest.avgIncomeIncrease === undefined ? 'Too few to average' : formatCurrency(latest.avgIncomeIncrease)}
+              </p>
+              <p className="text-xs text-emerald-600 dark:text-emerald-400">Average income increase recorded</p>
+            </div>
+          </div>
+          {latest.basis && <Basis basis={latest.basis} />}
         </>
       )}
 
       {/* Filter */}
       <div className="flex items-center gap-4">
-        <label className="text-sm text-slate-600 dark:text-slate-400">Filter by community:</label>
+        <label htmlFor="report-filter" className="text-sm text-slate-600 dark:text-slate-400">Filter by community:</label>
         <select
+          id="report-filter"
           value={filterCommunity}
           onChange={(e) => setFilterCommunity(e.target.value)}
           className="bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
         >
-          <option value="">All communities</option>
-          {Object.entries(communityTypeLabels).map(([value, label]) => (
+          <option value="">All reports</option>
+          {COMMUNITY_OPTIONS.map(({ value, label }) => (
             <option key={value} value={value}>{label}</option>
           ))}
         </select>
@@ -224,54 +225,67 @@ export default function ReportsPage() {
         </div>
       ) : reports.length === 0 ? null : (
         <div className="space-y-4">
-          {reports.map((report) => (
-            <div
-              key={report.id}
-              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6"
-            >
-              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between mb-4">
-                <div>
-                  <h3 className="font-semibold text-slate-900 dark:text-white">{report.reportPeriod}</h3>
-                  <p className="text-xs text-slate-500">
-                    {report.communityType ? communityTypeLabels[report.communityType] : 'All Communities'} • {report.region}
-                  </p>
+          {reports.map((report) => {
+            const reportFloor = report.minPublishedCount ?? 5;
+            return (
+              <div
+                key={report.id}
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6"
+              >
+                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between mb-4">
+                  <div>
+                    <h3 className="font-semibold text-slate-900 dark:text-white">{report.reportPeriod}</h3>
+                    <p className="text-xs text-slate-500">
+                      {communityLabel(report.communityType)} • {report.region}
+                    </p>
+                  </div>
+                  {typeof report.totalEconomicImpact === 'number' && (
+                    <div className="text-right">
+                      <p className="text-lg font-bold text-emerald-600">{formatCurrency(report.totalEconomicImpact)}</p>
+                      <p className="text-xs text-slate-500">Total economic impact</p>
+                    </div>
+                  )}
                 </div>
-                {report.totalEconomicImpact && (
-                  <div className="text-right">
-                    <p className="text-lg font-bold text-emerald-600">{formatCurrency(report.totalEconomicImpact)}</p>
-                    <p className="text-xs text-slate-500">Total economic impact</p>
+
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                  {(
+                    [
+                      ['totalUsersSupported', 'Women supported'],
+                      ['employmentGained', 'Gained employment'],
+                      ['housingSecured', 'Secured housing'],
+                      ['safetyAchieved', 'Reached safety'],
+                      ['qualificationsObtained', 'Obtained a qualification'],
+                      ['businessesStarted', 'Started a business'],
+                    ] as Array<[CountField, string]>
+                  ).map(([field, label]) => (
+                    <div key={field}>
+                      <p className="text-slate-500 text-xs">{label}</p>
+                      <p className="font-semibold text-slate-900 dark:text-white"><Count value={report[field]} floor={reportFloor} /></p>
+                    </div>
+                  ))}
+                </div>
+
+                {report.narrativeSummary && (
+                  <p className="mt-4 text-sm text-slate-600 dark:text-slate-300 border-t border-slate-100 dark:border-slate-800 pt-4">
+                    {report.narrativeSummary}
+                  </p>
+                )}
+                {report.basis && (
+                  <div className="mt-3">
+                    <Basis basis={report.basis} />
                   </div>
                 )}
               </div>
-
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                <div>
-                  <p className="text-slate-500 text-xs">Users supported</p>
-                  <p className="font-semibold text-slate-900 dark:text-white">{report.totalUsersSupported.toLocaleString()}</p>
-                </div>
-                <div>
-                  <p className="text-slate-500 text-xs">Employment gained</p>
-                  <p className="font-semibold text-slate-900 dark:text-white">{report.employmentGained.toLocaleString()}</p>
-                </div>
-                <div>
-                  <p className="text-slate-500 text-xs">Housing secured</p>
-                  <p className="font-semibold text-slate-900 dark:text-white">{report.housingSecured.toLocaleString()}</p>
-                </div>
-                <div>
-                  <p className="text-slate-500 text-xs">Qualifications</p>
-                  <p className="font-semibold text-slate-900 dark:text-white">{report.qualificationsObtained.toLocaleString()}</p>
-                </div>
-              </div>
-
-              {report.narrativeSummary && (
-                <p className="mt-4 text-sm text-slate-600 dark:text-slate-300 border-t border-slate-100 dark:border-slate-800 pt-4">
-                  {report.narrativeSummary}
-                </p>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
+
+      {/*
+        Staff only. The server refuses these routes to anyone else; this only
+        keeps the panel off members' screens.
+      */}
+      {isStaff && <StaffImpactReports onPublished={() => loadData()} />}
 
       <div className="text-center">
         <Link href="/dashboard/impact" className="text-sm text-primary-600 hover:underline">

@@ -23,6 +23,8 @@ process.env.GOOGLE_CLIENT_ID = 'athena-google-client';
 jest.mock('../../utils/prisma', () => ({
   prisma: {
     user: { findUnique: jest.fn(), update: jest.fn(), create: jest.fn(), findMany: jest.fn(async () => []) },
+    // Nobody here is banned; auth.banned-identity.test.ts covers the ones who are.
+    bannedIdentity: { findUnique: jest.fn(async () => null) },
     auditLog: { create: jest.fn(async () => ({})) },
     appeal: { findFirst: jest.fn(async () => null), create: jest.fn() },
     notification: { createMany: jest.fn(async () => ({ count: 0 })) },
@@ -175,8 +177,9 @@ describe('POST /api/auth/google on an existing account', () => {
     // Her own password, on an address she had already proved, stays.
     expect(data).not.toHaveProperty('passwordHash');
     expect(prisma.auditLog.create).toHaveBeenCalledTimes(1);
+    // Its own verb, not DATA_ACCESS with the real event tucked in metadata.
+    expect(prisma.auditLog.create.mock.calls[0][0].data.action).toBe('SIGN_IN_PROVIDER_LINKED');
     expect(prisma.auditLog.create.mock.calls[0][0].data.metadata).toMatchObject({
-      accountAction: 'SIGN_IN_PROVIDER_LINKED',
       provider: 'Google',
       clearedUnprovenPassword: false,
     });

@@ -16,7 +16,7 @@
  * it is a plain module, not a route.
  */
 
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useId, useSyncExternalStore } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { DoorOpen } from 'lucide-react';
 import { dvSafeApi } from '@/lib/api';
@@ -84,6 +84,62 @@ export function useQuickExit(): { exit: () => void; exitUrl: string; escapeEnabl
   return { exit, exitUrl, escapeEnabled };
 }
 
+/*
+ * One floating exit on screen, however many places ask for one.
+ *
+ * The floating button is mounted by section layouts (wellness) and by single
+ * pages (the public wellness and housing pages, the housing plan), and the
+ * dashboard layout is meant to carry one for every page beneath it. Without
+ * this, a page under two of those would stack two identical buttons in the
+ * same corner — harmless to press, but a second copy of the one control she
+ * must find without looking is a second thing to doubt. Every floating
+ * instance registers here and only the first one registered draws itself; if
+ * that one unmounts, the next takes over, so the corner is never left empty
+ * while any of them is on the page.
+ */
+let floatingClaims: string[] = [];
+const floatingListeners = new Set<() => void>();
+
+function announceFloating(): void {
+  floatingListeners.forEach((listener) => listener());
+}
+
+function subscribeFloating(listener: () => void): () => void {
+  floatingListeners.add(listener);
+  return () => {
+    floatingListeners.delete(listener);
+  };
+}
+
+const firstFloatingClaim = (): string | undefined => floatingClaims[0];
+const noFloatingClaimOnServer = (): string | undefined => undefined;
+
+/** Test-only: forget every claim, so one test's buttons do not decide the next's. */
+export function resetFloatingExitClaims(): void {
+  floatingClaims = [];
+  announceFloating();
+}
+
+/**
+ * Whether this floating instance is the one that draws. Before any claim is
+ * registered (the first render) every instance draws, so the exit is never
+ * missing even for a frame; once they have registered, only the first does.
+ */
+function useDrawsFloatingExit(active: boolean): boolean {
+  const id = useId();
+  useEffect(() => {
+    if (!active) return;
+    floatingClaims = [...floatingClaims, id];
+    announceFloating();
+    return () => {
+      floatingClaims = floatingClaims.filter((claim) => claim !== id);
+      announceFloating();
+    };
+  }, [active, id]);
+  const first = useSyncExternalStore(subscribeFloating, firstFloatingClaim, noFloatingClaimOnServer);
+  return !active || first === undefined || first === id;
+}
+
 /**
  * The button itself. `variant` is only about where it sits: `inline` for a
  * page header that has somewhere to put it, `floating` for a page that does
@@ -97,6 +153,9 @@ export function QuickExitButton({
   className?: string;
 }) {
   const { exit, escapeEnabled } = useQuickExit();
+  const draws = useDrawsFloatingExit(variant === 'floating');
+
+  if (!draws) return null;
 
   return (
     <button

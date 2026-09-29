@@ -7,6 +7,25 @@ import { authenticate, optionalAuth, requireRole, AuthRequest } from '../middlew
 import { logger } from '../utils/logger';
 import { bestEffort, labelSegment } from '../utils/best-effort';
 import { mayEnterConfidentialSpace, requireWomanMember, womanGateState } from '../middleware/account-gates';
+import {
+  HOUSING_CSV_COLUMNS,
+  MAX_IMPORT_ROWS,
+  SAFETY_CHECK_QUEUE_WHERE,
+  SAFETY_CHECK_SLA_HOURS,
+  SAFETY_CHECK_WINDOW,
+  adminRecipients,
+  byWaitingLongest,
+  checkDueLine,
+  dvSafeNoteOf,
+  planHousingImport,
+  publicFeatures,
+  safetyCheckClock,
+  staffListingData,
+  staffListingSchema,
+  withSafetyCheckRequest,
+  withoutSafetyCheckRequest,
+} from '../services/housing-supply.service';
+import { recordStaffAction } from '../services/staff-record.service';
 
 /**
  * Housing: listings, inquiries, and the safety rules around them.
@@ -33,10 +52,19 @@ import { mayEnterConfidentialSpace, requireWomanMember, womanGateState } from '.
  *   her details are shared only once the lister has approved her and she has
  *   chosen to share them.
  *
- * Two things ride on existing columns because the schema has no room for them
- * yet (a dedicated column each would be cleaner):
+ * - Supply does not depend on members alone. Staff can list a housing
+ *   partner's places, singly or from the partner's spreadsheet, each attached
+ *   to a member account that answers the women asking; every such listing is
+ *   in the audit log under the member of staff who made it. A DV-safe listing
+ *   waiting for its check has a due time, and the queue shows what is late
+ *   (housing-supply.service holds the rules for both).
+ *
+ * Three things ride on existing columns because the schema has no room for
+ * them yet (a dedicated column each would be cleaner):
  * - the lister's DV-safe note is kept in `features` under a `dv-safe-note:`
- *   prefix and stripped from every member-facing response;
+ *   prefix, and the moment the check was asked for under
+ *   `dv-safe-check-requested:`; both are stripped from every member-facing
+ *   response;
  * - the inquiry thread and the asker's share-details decision are kept as JSON
  *   in `HousingInquiry.notes`. A plain-text note from before is read as the
  *   asker's first entry.
@@ -52,7 +80,6 @@ const LISTING_STATUSES = ['ACTIVE', 'PENDING', 'LEASED', 'WITHDRAWN'] as const;
 const CONFIDENTIAL_TYPES = ['EMERGENCY', 'TRANSITIONAL'];
 /** The inquiry states at which the lister has answered, and the address may be shown to the asker. */
 const ADDRESS_RELEASED_AT = ['CONTACTED', 'VIEWING_SCHEDULED', 'APPLICATION_SUBMITTED', 'APPROVED'];
-const DV_SAFE_NOTE_PREFIX = 'dv-safe-note:';
 
 const ANONYMOUS_REASON = 'Safe housing listings are shown to signed-in members only.';
 const MEMBER_REASON = 'Safe housing listings are shown to members who have Safe Mode on or a verified account. Safe Mode is free and one switch away, under Safety.';
@@ -72,6 +99,7 @@ type ListingRow = {
   suburb?: string | null;
   postcode?: string | null;
   features?: string[];
+  createdAt?: Date | string | null;
 };
 
 type PersonSelect = { id: true; firstName: true; lastName: true; displayName: true; avatar: true };
@@ -81,21 +109,14 @@ const isAdmin = (req: AuthRequest) => req.user?.role === 'ADMIN';
 const isConfidential = (l: Pick<ListingRow, 'dvSafe' | 'type'>) => Boolean(l.dvSafe) || CONFIDENTIAL_TYPES.includes(l.type);
 const isReleased = (status: string) => ADDRESS_RELEASED_AT.includes(status);
 
-/** The lister's note on why the place is DV-safe, kept in `features`. */
-const dvSafeNoteOf = (features: string[] | undefined | null): string | null => {
-  const tagged = (features ?? []).find((f) => typeof f === 'string' && f.startsWith(DV_SAFE_NOTE_PREFIX));
-  return tagged ? tagged.slice(DV_SAFE_NOTE_PREFIX.length) : null;
-};
-const withoutNote = (features: string[] | undefined | null): string[] => (features ?? []).filter((f) => !(typeof f === 'string' && f.startsWith(DV_SAFE_NOTE_PREFIX)));
-const withNote = (features: string[] | undefined | null, note: string): string[] => [...withoutNote(features), `${DV_SAFE_NOTE_PREFIX}${note}`];
-
 /**
  * The listing as a member may see it. The address goes only where the header
  * says; a confidential listing loses its suburb and postcode too. The DV-safe
- * note is never in a member response; the lister's and admin's views add it.
+ * note and the check clock are never in a member response; the lister's and
+ * admin's views add the note.
  */
 function present<T extends ListingRow>(l: T, showAddress: boolean) {
-  const base = { ...l, features: withoutNote(l.features) };
+  const base = { ...l, features: publicFeatures(l.features) };
   if (showAddress) return { ...base, addressReleased: true };
   const confidential = isConfidential(l);
   return {
@@ -243,8 +264,43 @@ async function noteAdmins(title: string, message: string, link: string, data: Re
   // listing waiting longer than it should, never one going live unchecked. The
   // `.catch(() => [])` that used to be here made that indistinguishable from a
   // site with no admins at all.
-  const admins = await bestEffort('housing.admin-notification-recipients', () => prisma.user.findMany({ where: { role: 'ADMIN' }, select: { id: true }, take: 5 }), [] as Array<{ id: string }>);
+  //
+  // It also used to tell the first five admin accounts and nobody else, so on
+  // a team of six the sixth never heard of a single safety check. Every active
+  // admin is told now, the same set the overdue sweep tells.
+  const admins = await bestEffort('housing.admin-notification-recipients', adminRecipients, [] as Array<{ id: string }>);
   await Promise.all(admins.map((a) => note(a.id, title, message, link, data)));
+}
+
+/**
+ * The member account a staff-entered listing belongs to: the one that is told
+ * about inquiries and answers them. Named by email, because that is what a
+ * housing partner gives staff; without one, the member of staff is the lister
+ * herself. An account that is suspended, banned or closed cannot answer
+ * anyone, so a listing is never attached to one.
+ */
+async function resolveLister(req: AuthRequest, listerEmail: unknown): Promise<{ id: string; isStaff: boolean }> {
+  const email = typeof listerEmail === 'string' ? listerEmail.trim().toLowerCase() : '';
+  if (!email) return { id: req.user!.id, isStaff: true };
+  const lister = await prisma.user.findFirst({
+    where: { email: { equals: email, mode: 'insensitive' } },
+    select: { id: true, isActive: true, isSuspended: true, bannedAt: true },
+  });
+  if (!lister) throw new ApiError(404, 'No member account has that email. The partner needs an ATHENA account to answer the women who ask.');
+  if (!lister.isActive || lister.isSuspended || lister.bannedAt) {
+    throw new ApiError(400, 'That account is suspended or closed, so it could not answer anyone who asks. Choose another.');
+  }
+  return { id: lister.id, isStaff: lister.id === req.user!.id };
+}
+
+/** A zod refusal on staff input as a 400 naming the field. */
+function staffInput(input: unknown) {
+  const parsed = staffListingSchema.safeParse(input ?? {});
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    throw new ApiError(400, issue ? `${issue.path.join('.') || 'listing'} ${issue.message}` : 'Invalid listing');
+  }
+  return parsed.data;
 }
 
 const failOnErrors = (req: AuthRequest) => {
@@ -545,7 +601,9 @@ router.post(
       const safeNote = typeof dvSafeNote === 'string' ? dvSafeNote.trim() : '';
       if (wantsDvSafe && !safeNote) throw new ApiError(400, NEEDS_NOTE);
 
-      const cleanFeatures = withoutNote(Array.isArray(features) ? features.filter((f: unknown) => typeof f === 'string') : []);
+      // Anything in the body shaped like one of the internal tags is dropped,
+      // so a lister cannot write her own check clock or somebody else's note.
+      const cleanFeatures = publicFeatures(features);
 
       const listing = await prisma.housingListing.create({
         data: {
@@ -564,7 +622,7 @@ router.post(
           bedrooms: bedrooms ? Number(bedrooms) : undefined,
           bathrooms: bathrooms ? Number(bathrooms) : undefined,
           parking: parking ? Number(parking) : undefined,
-          features: wantsDvSafe ? withNote(cleanFeatures, safeNote) : cleanFeatures,
+          features: wantsDvSafe ? withSafetyCheckRequest(cleanFeatures, safeNote) : cleanFeatures,
           safetyVerified: false,
           dvSafe: wantsDvSafe,
           petFriendly: petFriendly === true,
@@ -580,7 +638,7 @@ router.post(
       if (wantsDvSafe) {
         await noteAdmins(
           'A housing listing asks to be shown as DV-safe',
-          `"${listing.title}"${listing.city ? ` in ${listing.city}` : ''} is held until someone checks it.`,
+          `"${listing.title}"${listing.city ? ` in ${listing.city}` : ''} is held until someone checks it. ${checkDueLine()}`,
           '/admin/housing',
           { kind: 'HOUSING_DV_SAFE_CHECK', listingId: listing.id }
         );
@@ -678,17 +736,26 @@ router.patch(
       if (dvSafe === true && !listing.dvSafe) {
         // Asking for DV-safe on a listing that is already up: held again until
         // staff have looked, whatever else this call says about the status.
+        //
+        // The check is of this claim, so an earlier one does not carry over.
+        // It used to: a listing checked once, lowered, and raised again kept
+        // `safetyVerified` from the first time, never entered the queue, and
+        // could be put straight back live by its lister — "Checked by ATHENA
+        // staff" over whatever she had changed in between.
         const safeNote = typeof dvSafeNote === 'string' ? dvSafeNote.trim() : '';
         if (!safeNote) throw new ApiError(400, NEEDS_NOTE);
         data.dvSafe = true;
+        data.safetyVerified = false;
         data.status = 'PENDING';
-        data.features = withNote(listing.features, safeNote);
+        data.features = withSafetyCheckRequest(listing.features, safeNote);
         requestedCheck = true;
         message = 'Asked. ATHENA staff will look at the listing before it shows as DV-safe; it is off the list until then.';
       } else if (dvSafe === false && listing.dvSafe) {
-        // Lowering a claim needs no check.
+        // Lowering a claim needs no check, and ends the one it had: the badge
+        // said this listing was checked as DV-safe, which it no longer claims.
         data.dvSafe = false;
-        data.features = withoutNote(listing.features);
+        data.safetyVerified = false;
+        data.features = withoutSafetyCheckRequest(listing.features);
       }
 
       if (status && !requestedCheck) {
@@ -703,7 +770,7 @@ router.patch(
       if (requestedCheck) {
         await noteAdmins(
           'A housing listing asks to be shown as DV-safe',
-          `"${listing.title}"${listing.city ? ` in ${listing.city}` : ''} is held until someone checks it.`,
+          `"${listing.title}"${listing.city ? ` in ${listing.city}` : ''} is held until someone checks it. ${checkDueLine()}`,
           '/admin/housing',
           { kind: 'HOUSING_DV_SAFE_CHECK', listingId: id }
         );
@@ -789,15 +856,22 @@ router.patch(
 // ===========================================
 // A listing that asks to be shown as DV-safe waits here. Staff approve it as
 // checked, let it show as an ordinary listing, or take it down; the lister is
-// told either way.
+// told either way, and the decision is in the audit log under whoever made it.
+//
+// The queue used to be every DV-safe listing nobody had checked, oldest
+// created first, with nothing to say how long any of them had waited. It is
+// now ordered by when the check was asked for, each row carries its due time,
+// and the answer says how many are late.
 
-// GET /api/housing/admin/pending - DV-safe listings nobody has checked yet
+// GET /api/housing/admin/pending - DV-safe listings waiting for a check
 router.get('/admin/pending', authenticate, requireRole('ADMIN'), async (_req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const listings = await prisma.housingListing.findMany({
-      where: { dvSafe: true, safetyVerified: false },
+    const rows = await prisma.housingListing.findMany({
+      where: SAFETY_CHECK_QUEUE_WHERE,
       orderBy: { createdAt: 'asc' },
+      take: SAFETY_CHECK_WINDOW,
     });
+    const listings = byWaitingLongest(rows);
     const agentIds = [...new Set(listings.map((l) => l.agentId).filter((id): id is string => Boolean(id)))];
     const agents = agentIds.length
       ? await prisma.user.findMany({
@@ -806,9 +880,16 @@ router.get('/admin/pending', authenticate, requireRole('ADMIN'), async (_req: Au
         })
       : [];
     const byId = new Map(agents.map((a) => [a.id, a]));
+    const now = new Date();
+    const data = listings.map((l) => ({
+      ...presentOwn(l),
+      lister: l.agentId ? byId.get(l.agentId) ?? null : null,
+      safetyCheck: safetyCheckClock(l, now),
+    }));
     res.json({
       success: true,
-      data: listings.map((l) => ({ ...presentOwn(l), lister: l.agentId ? byId.get(l.agentId) ?? null : null })),
+      data,
+      sla: { hours: SAFETY_CHECK_SLA_HOURS, waiting: data.length, overdue: data.filter((l) => l.safetyCheck.overdue).length },
     });
   } catch (error) {
     next(error);
@@ -848,6 +929,8 @@ router.patch(
         throw new ApiError(400, 'A DV-safe listing goes live only once it is marked as checked');
       }
 
+      const clock = listing.dvSafe && !listing.safetyVerified ? safetyCheckClock(listing) : null;
+
       const updated = await prisma.housingListing.update({
         where: { id },
         data: {
@@ -874,7 +957,19 @@ router.patch(
         listingId: id,
       });
 
-      logger.info(`Housing listing ${id} reviewed by ${req.user!.id}: ${JSON.stringify(after)}`);
+      // Who decided, what the listing was before and after, and how long it
+      // had waited. This used to be a log line, which is not a record anyone
+      // can be held to: the badge a woman trusts could not be traced to a
+      // person.
+      await recordStaffAction(req, 'HOUSING_LISTING_SAFETY_CHECKED', {
+        resourceType: 'HousingListing',
+        resourceId: id,
+        targetUserId: listing.agentId,
+        before: { safetyVerified: listing.safetyVerified, dvSafe: listing.dvSafe, status: listing.status },
+        after,
+        ...(clock ? { waitedHours: clock.hoursWaiting, overdue: clock.overdue } : {}),
+        ...(extra ? { noteToLister: extra.trim() } : {}),
+      });
 
       res.json({ success: true, data: presentOwn(updated) });
     } catch (error) {
@@ -882,5 +977,160 @@ router.patch(
     }
   }
 );
+
+// ===========================================
+// ADMIN: HOUSING SUPPLY
+// ===========================================
+// Staff put a housing partner's places on the platform: one through the form,
+// or a partner's whole list from a spreadsheet. Each listing belongs to a
+// member account that answers the women who ask about it. A DV-safe place
+// staff have already checked goes live checked, with what they checked in the
+// audit row; one they have not waits in the queue above like any other.
+
+// POST /api/housing/admin/listings - One listing, entered by staff
+router.post('/admin/listings', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const input = staffInput(req.body);
+    const safetyVerified = req.body?.safetyVerified === true;
+    const checkNote = typeof req.body?.safetyCheckNote === 'string' ? req.body.safetyCheckNote.trim().slice(0, 1000) : '';
+    if (safetyVerified && !input.dvSafe) {
+      throw new ApiError(400, 'Only a DV-safe listing is marked as checked. Tick DV-safe, or leave the check off.');
+    }
+    // Marking a listing checked is the promise the badge makes, so the person
+    // making it says what she checked, and that goes in the audit row.
+    if (safetyVerified && checkNote.length < 10) {
+      throw new ApiError(400, 'Say what you checked — who you spoke to, and how you know the place is safe — before marking it checked.');
+    }
+
+    const lister = await resolveLister(req, req.body?.listerEmail);
+    const listing = await prisma.housingListing.create({ data: staffListingData(input, lister.id, { safetyVerified }) });
+
+    if (!lister.isStaff) {
+      await note(
+        lister.id,
+        'ATHENA staff listed a place for you',
+        `"${listing.title}" is on ATHENA under your account${listing.status === 'PENDING' ? ', waiting for its safety check' : ''}. Inquiries about it come to you, under Your listings.`,
+        '/dashboard/housing#list-a-place',
+        { kind: 'HOUSING_LISTED_FOR_YOU', listingId: listing.id }
+      );
+    }
+    if (listing.status === 'PENDING') {
+      await noteAdmins(
+        'A housing listing asks to be shown as DV-safe',
+        `"${listing.title}"${listing.city ? ` in ${listing.city}` : ''} was entered by staff and is held until someone checks it. ${checkDueLine()}`,
+        '/admin/housing',
+        { kind: 'HOUSING_DV_SAFE_CHECK', listingId: listing.id }
+      );
+    }
+
+    await recordStaffAction(req, 'HOUSING_LISTING_CREATED', {
+      resourceType: 'HousingListing',
+      resourceId: listing.id,
+      targetUserId: lister.isStaff ? null : lister.id,
+      listerId: lister.id,
+      dvSafe: listing.dvSafe,
+      safetyVerified: listing.safetyVerified,
+      status: listing.status,
+      ...(safetyVerified ? { safetyCheckNote: checkNote } : {}),
+    });
+
+    res.status(201).json({
+      success: true,
+      data: presentOwn(listing),
+      message:
+        listing.status === 'PENDING'
+          ? 'Listed and held for a safety check. Another member of staff can check it from the queue.'
+          : listing.safetyVerified
+            ? 'Listed and live, marked as checked by ATHENA staff.'
+            : 'Listed and live.',
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/housing/admin/listings/import-template - The columns a partner's sheet needs
+router.get('/admin/listings/import-template', authenticate, requireRole('ADMIN'), (_req: AuthRequest, res: Response) => {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="athena-housing-import.csv"');
+  res.send(`${HOUSING_CSV_COLUMNS.join(',')}\r\n`);
+});
+
+// POST /api/housing/admin/listings/import - A partner's spreadsheet: every row, or none
+router.post('/admin/listings/import', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const csv = typeof req.body?.csv === 'string' ? req.body.csv : '';
+    if (!csv.trim()) throw new ApiError(400, 'Paste the spreadsheet as CSV, with the header row first.');
+    if (csv.length > 1_000_000) throw new ApiError(400, 'That file is larger than one import takes; split the sheet.');
+
+    const plan = planHousingImport(csv);
+    // A sheet with any bad row writes nothing, and every problem is listed at
+    // once with its line, so staff fix the sheet in one pass rather than
+    // learning of each mistake from a partial import.
+    if (plan.errors.length > 0) {
+      res.status(400).json({
+        success: false,
+        message: `${plan.errors.length} problem${plan.errors.length === 1 ? '' : 's'} in the sheet. Nothing was imported.`,
+        errors: plan.errors,
+        maxRows: MAX_IMPORT_ROWS,
+      });
+      return;
+    }
+
+    const lister = await resolveLister(req, req.body?.listerEmail);
+    const held = plan.rows.filter((r) => r.input.dvSafe).length;
+
+    if (req.body?.dryRun === true) {
+      res.json({
+        success: true,
+        dryRun: true,
+        data: { rows: plan.rows.length, heldForCheck: held, listerIsStaff: lister.isStaff, titles: plan.rows.map((r) => r.input.title) },
+      });
+      return;
+    }
+
+    // Imported DV-safe rows are never marked checked: a spreadsheet is the
+    // partner's word, and the badge is a person's.
+    const now = new Date();
+    const created = await prisma.$transaction(
+      plan.rows.map((row) => prisma.housingListing.create({ data: staffListingData(row.input, lister.id, { safetyVerified: false, now }) }))
+    );
+
+    if (!lister.isStaff) {
+      await note(
+        lister.id,
+        'ATHENA staff listed your places',
+        `${created.length} place${created.length === 1 ? ' is' : 's are'} on ATHENA under your account${held ? `, ${held} waiting for a safety check` : ''}. Inquiries come to you, under Your listings.`,
+        '/dashboard/housing#list-a-place',
+        { kind: 'HOUSING_LISTED_FOR_YOU', count: created.length }
+      );
+    }
+    if (held > 0) {
+      await noteAdmins(
+        `${held} imported listing${held === 1 ? '' : 's'} ask${held === 1 ? 's' : ''} to be shown as DV-safe`,
+        `A housing import held ${held} DV-safe listing${held === 1 ? '' : 's'} until someone checks ${held === 1 ? 'it' : 'them'}. ${checkDueLine(now)}`,
+        '/admin/housing',
+        { kind: 'HOUSING_DV_SAFE_CHECK', count: held }
+      );
+    }
+
+    await recordStaffAction(req, 'HOUSING_LISTINGS_IMPORTED', {
+      resourceType: 'HousingListing',
+      targetUserId: lister.isStaff ? null : lister.id,
+      listerId: lister.id,
+      imported: created.length,
+      heldForCheck: held,
+      listingIds: created.map((l) => l.id),
+    });
+
+    res.status(201).json({
+      success: true,
+      data: { imported: created.length, heldForCheck: held, listings: created.map((l) => presentOwn(l)) },
+      message: `${created.length} imported${held ? `; ${held} held for a safety check` : ''}.`,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 
 export default router;

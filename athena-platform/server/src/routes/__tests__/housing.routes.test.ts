@@ -222,7 +222,7 @@ describe('Housing safety rules', () => {
       expect(res.body.message).toContain('staff');
       expect(res.body.data.awaitingSafetyCheck).toBe(true);
 
-      expect(prisma.user.findMany.mock.calls[0][0].where).toEqual({ role: 'ADMIN' });
+      expect(prisma.user.findMany.mock.calls[0][0].where).toEqual({ role: 'ADMIN', isActive: true });
       const staffNote = prisma.notification.create.mock.calls[0][0].data;
       expect(staffNote.userId).toBe('admin-1');
       expect(staffNote.link).toBe('/admin/housing');
@@ -271,7 +271,7 @@ describe('Housing safety rules', () => {
 
       const res = await request(app).get('/api/housing/admin/pending').set(as('staff', 'ADMIN')).expect(200);
 
-      expect(lastListingWhere()).toEqual({ dvSafe: true, safetyVerified: false });
+      expect(lastListingWhere()).toEqual({ dvSafe: true, safetyVerified: false, status: { notIn: ['WITHDRAWN', 'LEASED'] } });
       const [row] = res.body.data;
       expect(row.dvSafeNote).toBe('I live upstairs and nobody else has the address');
       expect(row.address).toBe('7 Hidden Lane');

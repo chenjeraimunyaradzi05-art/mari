@@ -53,7 +53,29 @@ interface SafetySettings {
   hideFromSearch: boolean;
 }
 
-type ReportTargetType = 'post' | 'video' | 'user' | 'message' | 'channel' | 'other';
+// No "other": a report has to name something the moderation queue can trace
+// to an account, and "other" never could, so choosing it always failed.
+type ReportTargetType = 'post' | 'video' | 'user' | 'message' | 'channel';
+
+// The reasons the server's intake knows, in the words the report dialogs use.
+// The field used to be free text; a reason the intake does not recognise is
+// now refused, because one it did not recognise used to be filed as
+// "medium" and alert nobody, however serious it was.
+const REPORT_REASONS = [
+  { value: 'harassment', label: 'Harassment or bullying' },
+  { value: 'violence', label: 'Violence or threats' },
+  { value: 'hate', label: 'Hate or discrimination' },
+  { value: 'sexual', label: 'Sexual or explicit content' },
+  { value: 'impersonation', label: 'Impersonation or a fake account' },
+  { value: 'self_harm', label: 'Someone may hurt themselves' },
+  { value: 'spam', label: 'Spam or misleading' },
+  { value: 'other', label: 'Something else' },
+] as const;
+
+const REASON_LABELS: Record<string, string> = Object.fromEntries(REPORT_REASONS.map((r) => [r.value, r.label]));
+
+const serverMessage = (error: unknown): string | undefined =>
+  (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
 
 const resources = [
   {
@@ -135,24 +157,37 @@ export default function SafetyCenterPage() {
   }, []);
 
   const handleReportSubmit = async () => {
-    if (!reportForm.reason.trim()) return;
+    if (!reportForm.reason || !reportForm.targetId.trim()) return;
     try {
-      await safetyApi.createReport({
+      const created = await safetyApi.createReport({
         targetType: reportForm.targetType,
-        targetId: reportForm.targetId || undefined,
+        targetId: reportForm.targetId.trim(),
         reason: reportForm.reason,
         details: reportForm.details || undefined,
       });
-      const reportsRes = await safetyApi.getReports();
-      setReports(reportsRes.data.data || []);
+      const filed = created.data?.data as { reference?: string; reviewHours?: number } | undefined;
       setIsReportOpen(false);
       setReportForm({ targetType: 'post', targetId: '', reason: '', details: '' });
-      setSuccessMessage('Report submitted. Our safety team will review it soon.');
+      // The server now gives every report a reference and a review clock; she
+      // is told both rather than "soon".
+      setSuccessMessage(
+        filed?.reference && filed.reviewHours
+          ? `Report submitted. Your reference is ${filed.reference}, and a person will look at it within ${filed.reviewHours} hours.`
+          : 'Report submitted. A person on the safety team will look at it.'
+      );
       setErrorMessage(null);
       toast.success('Report submitted.');
+      // The list is refreshed separately, so a list that fails to reload does
+      // not turn a report that was filed into "we could not submit".
+      try {
+        const reportsRes = await safetyApi.getReports();
+        setReports(reportsRes.data.data || []);
+      } catch {
+        toast.error('Your report was filed, but the list could not be refreshed. Reload the page to see it.');
+      }
     } catch (error) {
       console.error('Failed to submit report', error);
-      setErrorMessage('We could not submit your report. Please try again.');
+      setErrorMessage(serverMessage(error) || 'We could not submit your report. Please try again.');
       setSuccessMessage(null);
       toast.error('Report submission failed.');
     }
@@ -289,7 +324,7 @@ export default function SafetyCenterPage() {
                       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                         <div>
                           <p className="text-sm text-slate-500">{report.targetType.toUpperCase()}</p>
-                          <h3 className="text-lg font-semibold text-slate-900">{report.reason}</h3>
+                          <h3 className="text-lg font-semibold text-slate-900">{REASON_LABELS[report.reason] ?? report.reason}</h3>
                           <p className="text-sm text-slate-500">Reported on {new Date(report.createdAt).toLocaleDateString()}</p>
                         </div>
                         <div className="flex items-center gap-3">
@@ -566,25 +601,43 @@ export default function SafetyCenterPage() {
               <option value="user">User</option>
               <option value="message">Message</option>
               <option value="channel">Channel</option>
-              <option value="other">Other</option>
             </select>
           </div>
+          {/* Not optional, whatever it used to say: the server refuses a
+              report it cannot trace to an account, and the id is how it
+              traces one. */}
           <div className="grid gap-2">
-            <label className="text-sm font-medium text-slate-700">Target ID (optional)</label>
+            <label htmlFor="report-target-id" className="text-sm font-medium text-slate-700">
+              ID of what you are reporting
+            </label>
             <input
+              id="report-target-id"
               value={reportForm.targetId}
               onChange={(event) => setReportForm((prev) => ({ ...prev, targetId: event.target.value }))}
               className="w-full rounded-lg border border-slate-200 p-2"
             />
+            <p className="text-xs text-slate-500">
+              It is the last part of the page address. The quickest way is the Report option on the post, video or
+              profile itself, which already knows which one you mean.
+            </p>
           </div>
           <div className="grid gap-2">
-            <label className="text-sm font-medium text-slate-700">Reason</label>
-            <input
+            <label htmlFor="report-reason" className="text-sm font-medium text-slate-700">
+              Reason
+            </label>
+            <select
+              id="report-reason"
               value={reportForm.reason}
               onChange={(event) => setReportForm((prev) => ({ ...prev, reason: event.target.value }))}
-              placeholder="e.g. Harassment, spam, impersonation"
               className="w-full rounded-lg border border-slate-200 p-2"
-            />
+            >
+              <option value="">Choose a reason</option>
+              {REPORT_REASONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="grid gap-2">
             <label className="text-sm font-medium text-slate-700">Additional details</label>
@@ -600,7 +653,9 @@ export default function SafetyCenterPage() {
           <Button variant="outline" onClick={() => setIsReportOpen(false)}>
             Cancel
           </Button>
-          <Button onClick={handleReportSubmit}>Submit report</Button>
+          <Button onClick={handleReportSubmit} disabled={!reportForm.reason || !reportForm.targetId.trim()}>
+            Submit report
+          </Button>
         </ModalFooter>
       </Modal>
 

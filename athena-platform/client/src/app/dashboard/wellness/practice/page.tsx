@@ -12,9 +12,15 @@ import { Stethoscope, Save } from 'lucide-react';
 import { wellnessApi, wellnessError } from '@/lib/wellness-api';
 import { Chip, ErrorBox, Loading, PageTitle, WellnessNav, fmtWhen, useLoad } from '@/components/wellness/WellnessUi';
 import { Check, Field, NumberInput, Panel, SelectInput, inputClass, num } from '@/components/strategy/StrategyUi';
-import { cn } from '@/lib/utils';
+import { cn, formatDate } from '@/lib/utils';
 
-type Profile = { id: string; slug: string; name: string; kind: string; headline: string; bio: string; qualifications: string[]; modalities: string[]; specialties: string[]; languages: string[]; suburb: string | null; city: string | null; state: string | null; telehealth: boolean; inPerson: boolean; bulkBilling: boolean; medicareRebate: boolean; privateHealth: boolean; feeFrom: number | null; feeNote: string | null; ahpraNumber: string | null; website: string | null; phone: string | null; bookingUrl: string | null; availability: Record<string, Array<[string, string]>> | null; slotMinutes: number; acceptsBookings: boolean; isVerified: boolean };
+type Profile = { id: string; slug: string; name: string; kind: string; headline: string; bio: string; qualifications: string[]; modalities: string[]; specialties: string[]; languages: string[]; suburb: string | null; city: string | null; state: string | null; telehealth: boolean; inPerson: boolean; bulkBilling: boolean; medicareRebate: boolean; privateHealth: boolean; feeFrom: number | null; feeNote: string | null; ahpraNumber: string | null; website: string | null; phone: string | null; bookingUrl: string | null; availability: Record<string, Array<[string, string]>> | null; slotMinutes: number; acceptsBookings: boolean; isVerified: boolean; verification?: Verification | null };
+/**
+ * Where her verification stands. It used to be permanent; registration is now
+ * checked again every year, and she sees when, so a listing that comes down
+ * for its yearly check is never a surprise.
+ */
+type Verification = { checkedAt: string | null; dueAt: string; lapsesAt: string; status: 'CURRENT' | 'DUE' | 'LAPSED' };
 type Data = { profile: Profile | null; counts: Record<string, number>; kinds: Array<{ key: string; label: string }>; modalities: string[]; specialties: string[] };
 type Booking = { id: string; scheduledAt: string; durationMinutes: number; mode: string; status: string; reason: string | null; practitionerNote: string | null; meetingLink: string | null; member: { name: string; email: string } };
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -59,6 +65,7 @@ export default function PracticePage() {
     <div className="mx-auto max-w-5xl space-y-6 p-6">
       <PageTitle icon={Stethoscope} kicker="Wellness" title="Your practice" blurb="Your entry in the directory, your hours, and the requests that come in. Members see it once it is verified." action={p ? <Chip tone={p.isVerified ? 'emerald' : 'amber'}>{p.isVerified ? 'Verified and listed' : 'Awaiting verification'}</Chip> : undefined} />
       <WellnessNav current="/dashboard/wellness/practitioners" />
+      {p?.isVerified && p.verification && <VerificationNote verification={p.verification} />}
       {data.loading && <Loading />}
       <ErrorBox error={data.error} />
       {data.data && (
@@ -114,5 +121,21 @@ export default function PracticePage() {
         </>
       )}
     </div>
+  );
+}
+
+function VerificationNote({ verification }: { verification: Verification }) {
+  const checked = verification.checkedAt ? `ATHENA checked your registration on ${formatDate(verification.checkedAt)}. ` : '';
+  if (verification.status === 'CURRENT') {
+    return (
+      <p className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-900 dark:bg-emerald-900/20 dark:text-emerald-100">
+        {checked}Registration is checked again every year; your next check is due by {formatDate(verification.dueAt)}. There is nothing you need to do for it.
+      </p>
+    );
+  }
+  return (
+    <p role="status" className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-900/20 dark:text-amber-100">
+      {checked}Your yearly registration check is due. Your profile stays in the directory until {formatDate(verification.lapsesAt)} while an admin looks you up on the register; after that it comes out until the check is done.
+    </p>
   );
 }

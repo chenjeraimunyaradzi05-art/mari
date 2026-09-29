@@ -3,7 +3,15 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 jest.mock('../../utils/prisma', () => ({
   prisma: {
     dvSafetyProfile: { upsert: jest.fn(), update: jest.fn(), findUnique: jest.fn() },
-    dvSafeChat: { create: jest.fn(), findMany: jest.fn(), findFirst: jest.fn(), update: jest.fn(), delete: jest.fn() },
+    dvSafeChat: {
+      create: jest.fn(),
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
+      findUnique: jest.fn(),
+      update: jest.fn(),
+      updateMany: jest.fn(),
+      delete: jest.fn(),
+    },
     dvSafeMessage: { create: jest.fn(), findMany: jest.fn(), deleteMany: jest.fn() },
     dvPanicAlert: { create: jest.fn() },
     user: { findUnique: jest.fn(), update: jest.fn() },
@@ -26,13 +34,53 @@ import { prisma as prismaTyped } from '../../utils/prisma';
 import { sendEmail } from '../../utils/email';
 import { isSmsConfigured, sendSms } from '../dv-sms.service';
 import { blockUser as platformBlock } from '../../utils/safety-store';
-import dvSafe, { decryptMessage, resetPinAttemptMemory } from '../dv-safe.service';
-
-// The PIN counters use Redis only when it is configured; these tests hold the
-// in-process path, which is also what a deployment without Redis runs.
-delete process.env.REDIS_URL;
+import dvSafe, { decryptMessage } from '../dv-safe.service';
 
 const prisma: any = prismaTyped;
+
+/**
+ * One safe-chat row that the mocked client really updates, applying the same
+ * conditional writes the database would: `increment`, `decrement`, and the
+ * `where` conditions the PIN code relies on to stay atomic. The counters live
+ * in this row and nowhere else, which is the point of the change under test.
+ */
+function chatRowStore(initial: Record<string, unknown>) {
+  const row: Record<string, any> = { wrongPinAttempts: 0, pinLockedUntil: null, wrongPinsSinceOpen: 0, ...initial };
+
+  const matches = (where: Record<string, any>): boolean => {
+    if (where.id !== undefined && where.id !== row.id) return false;
+    if (where.wrongPinAttempts?.gte !== undefined && !(row.wrongPinAttempts >= where.wrongPinAttempts.gte)) return false;
+    if (where.wrongPinsSinceOpen?.gte !== undefined && !(row.wrongPinsSinceOpen >= where.wrongPinsSinceOpen.gte)) return false;
+    if (Array.isArray(where.OR)) {
+      // notLockedAt(now): no lock, or a lock that has already ended.
+      const at: Date = where.OR[1].pinLockedUntil.lte;
+      if (!(row.pinLockedUntil === null || row.pinLockedUntil <= at)) return false;
+    }
+    return true;
+  };
+
+  const apply = (data: Record<string, any>) => {
+    for (const [key, value] of Object.entries(data)) {
+      if (value && typeof value === 'object' && 'increment' in value) row[key] += value.increment;
+      else if (value && typeof value === 'object' && 'decrement' in value) row[key] -= value.decrement;
+      else row[key] = value;
+    }
+  };
+
+  prisma.dvSafeChat.findFirst.mockImplementation(async () => ({ ...row }));
+  prisma.dvSafeChat.findUnique.mockImplementation(async () => ({ ...row }));
+  prisma.dvSafeChat.update.mockImplementation(async ({ where, data }: any) => {
+    if (where.id !== row.id) throw new Error('Record to update not found');
+    apply(data);
+    return { ...row };
+  });
+  prisma.dvSafeChat.updateMany.mockImplementation(async ({ where, data }: any) => {
+    if (!matches(where)) return { count: 0 };
+    apply(data);
+    return { count: 1 };
+  });
+  return row;
+}
 
 const profile = (overrides: Record<string, unknown> = {}) => ({
   id: 'prof-1',
@@ -132,8 +180,7 @@ describe('Safe chats', () => {
     const chat = { id: 'c1', profileId: 'prof-1', name: 'Plan', disguisedName: 'Recipes', participants: [], createdAt: new Date(), lastActivity: new Date(), accessPinHash: '' };
     prisma.dvSafeChat.create.mockImplementation(async (args: any) => ({ ...chat, ...args.data }));
     const created = await dvSafe.createSafeChat('u1', { name: 'Plan', accessPin: '1357' });
-    chat.accessPinHash = prisma.dvSafeChat.create.mock.calls[0][0].data.accessPinHash;
-    prisma.dvSafeChat.findFirst.mockResolvedValue(chat);
+    chatRowStore({ ...chat, accessPinHash: prisma.dvSafeChat.create.mock.calls[0][0].data.accessPinHash });
 
     await expect(dvSafe.accessSafeChat('u1', created.id, '0000')).rejects.toMatchObject({ statusCode: 403 });
     await expect(dvSafe.accessSafeChat('u1', created.id)).rejects.toMatchObject({ statusCode: 403 });
@@ -276,22 +323,103 @@ describe('Panic button', () => {
 });
 
 describe('Wrong PINs on a safe chat', () => {
-  // A chat with a known PIN, built the way the service builds one.
+  // A chat with a known PIN, built the way the service builds one, held in a
+  // row the mocked database really updates.
   async function lockedChat(pin = '2468') {
     const chat: Record<string, unknown> = { id: 'chat-pin', profileId: 'prof-1', name: 'Plan', disguisedName: 'Recipes', createdAt: new Date(), lastActivity: new Date(), accessPinHash: null };
     prisma.dvSafeChat.create.mockImplementation(async (args: any) => ({ ...chat, ...args.data }));
     await dvSafe.createSafeChat('u1', { name: 'Plan', accessPin: pin });
-    chat.accessPinHash = prisma.dvSafeChat.create.mock.calls[0][0].data.accessPinHash;
-    prisma.dvSafeChat.findFirst.mockResolvedValue(chat);
-    return chat;
+    return chatRowStore({ ...chat, accessPinHash: prisma.dvSafeChat.create.mock.calls[0][0].data.accessPinHash });
   }
 
   beforeEach(() => {
     jest.clearAllMocks();
-    resetPinAttemptMemory();
     prisma.dvSafetyProfile.upsert.mockResolvedValue(profile());
     prisma.dvSafeMessage.deleteMany.mockResolvedValue({ count: 0 });
     prisma.dvSafeMessage.findMany.mockResolvedValue([]);
+  });
+
+  // The counters were in Redis or in this process, because the row had
+  // nowhere to keep them; without Redis a restart forgot every lock. A lock
+  // written to the row is what every instance, and every restart, reads.
+  it('keeps the lock in the chat row, so a restart or a second server cannot lift it', async () => {
+    const row = await lockedChat();
+
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      await dvSafe.accessSafeChat('u1', 'chat-pin', '0000').catch(() => undefined);
+    }
+
+    expect(row.pinLockedUntil).toBeInstanceOf(Date);
+    expect((row.pinLockedUntil as Date).getTime()).toBeGreaterThan(Date.now() + 14 * 60 * 1000);
+    // Nothing is held in this process: the next read of the row is the lock.
+    const lockedCopy = { ...row };
+    prisma.dvSafeChat.findFirst.mockResolvedValueOnce(lockedCopy);
+    await expect(dvSafe.accessSafeChat('u1', 'chat-pin', '2468')).rejects.toMatchObject({ statusCode: 429 });
+  });
+
+  it('counts a wrong PIN with a single increment rather than reading the count and writing it back', async () => {
+    await lockedChat();
+
+    await expect(dvSafe.accessSafeChat('u1', 'chat-pin', '0000')).rejects.toMatchObject({ statusCode: 403 });
+
+    const write = prisma.dvSafeChat.update.mock.calls[0][0];
+    expect(write.data).toEqual({ wrongPinAttempts: { increment: 1 }, wrongPinsSinceOpen: { increment: 1 } });
+  });
+
+  it('opens once the lock has run out, and a right PIN ends the run of wrong ones', async () => {
+    const row = await lockedChat();
+    row.wrongPinAttempts = 3;
+    row.pinLockedUntil = new Date(Date.now() - 1000);
+
+    const opened = await dvSafe.accessSafeChat('u1', 'chat-pin', '2468');
+
+    expect(opened.messages).toEqual([]);
+    expect(row.wrongPinAttempts).toBe(0);
+    expect(row.pinLockedUntil).toBeNull();
+  });
+
+  it('does not let the right PIN through when a guess sent alongside it has just locked the chat', async () => {
+    const row = await lockedChat();
+    // This request read the row while it was still open; a parallel guess
+    // locked it while the PIN was being checked.
+    prisma.dvSafeChat.findFirst.mockImplementationOnce(async () => {
+      const snapshot = { ...row };
+      row.pinLockedUntil = new Date(Date.now() + 15 * 60 * 1000);
+      return snapshot;
+    });
+
+    await expect(dvSafe.accessSafeChat('u1', 'chat-pin', '2468')).rejects.toMatchObject({ statusCode: 429 });
+  });
+
+  it('keeps a wrong PIN made while she was opening the chat for next time, rather than losing it', async () => {
+    const row = await lockedChat();
+    row.wrongPinsSinceOpen = 2;
+    prisma.dvSafeChat.findFirst.mockImplementationOnce(async () => {
+      const snapshot = { ...row };
+      row.wrongPinsSinceOpen += 1;
+      return snapshot;
+    });
+
+    const opened = await dvSafe.accessSafeChat('u1', 'chat-pin', '2468');
+
+    expect(opened.wrongPinAttemptsSinceLastOpen).toBe(2);
+    expect(row.wrongPinsSinceOpen).toBe(1);
+  });
+
+  it('never tells whoever is guessing how many wrong PINs came before, not even on the lock', async () => {
+    const row = await lockedChat();
+    row.wrongPinsSinceOpen = 7;
+
+    const refusals: string[] = [];
+    for (let attempt = 1; attempt <= 6; attempt += 1) {
+      await dvSafe.accessSafeChat('u1', 'chat-pin', '0000').catch((error: Error) => refusals.push(error.message));
+    }
+
+    expect(refusals).toHaveLength(6);
+    for (const message of refusals) {
+      expect(message).not.toMatch(/\b(7|8|9|1[0-3])\b/);
+      expect(message).not.toMatch(/times|attempts/i);
+    }
   });
 
   it('locks the chat after five wrong PINs, and the right PIN does not open it while it is locked', async () => {
@@ -414,6 +542,19 @@ describe('Safety blocks', () => {
     expect(prisma.dvSafetyProfile.update.mock.calls[0][0].data).toEqual({ blockedUserIds: { push: 'abuser' } });
     expect(platformBlock).toHaveBeenCalledWith('u1', 'abuser');
     await expect(dvSafe.blockUser('u1', 'u1')).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  // The platform half used to be logged and forgotten when it failed, so she
+  // was told he was blocked while messages, posts and the socket — which read
+  // the platform list — still let him reach her.
+  it('refuses the whole block, and says nothing changed, when the platform-wide half cannot be written', async () => {
+    (platformBlock as any).mockRejectedValueOnce(new Error('database unavailable'));
+
+    await expect(dvSafe.blockUser('u1', 'abuser')).rejects.toMatchObject({
+      statusCode: 503,
+      message: expect.stringMatching(/Nothing was changed/),
+    });
+    expect(prisma.dvSafetyProfile.update).not.toHaveBeenCalled();
   });
 
   it('hides a member who asked to be hidden from search, and from anyone they blocked', async () => {

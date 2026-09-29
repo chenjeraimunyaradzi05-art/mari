@@ -5,6 +5,10 @@ const store: { entries: any[]; settings: any; posts: any[]; replies: any[]; revi
 
 jest.mock('../../utils/prisma', () => ({
   prisma: {
+    // A practitioner's listing now lapses a year after her last approval, and the
+    // approval date is read from the audit rows the verify route writes. None
+    // here: these practitioners were approved before re-checks were recorded.
+    auditLog: { findMany: jest.fn(async () => []), create: jest.fn(async () => ({})) },
     user: { findUnique: jest.fn(async () => ({ timezone: 'Australia/Brisbane' })), findMany: jest.fn(async ({ where }: any) => (where?.id?.in ?? []).map((id: string) => ({ id, timezone: 'Australia/Brisbane' }))), update: jest.fn(async () => ({})), count: jest.fn(async () => 1) },
     healthSettings: {
       findUnique: jest.fn(async () => store.settings),
@@ -98,7 +102,7 @@ jest.mock('../../utils/prisma', () => ({
   },
 }));
 
-const practitioner = { id: 'pr1', slug: 'dr-k', name: 'Dr K', kind: 'GP', headline: 'A women\'s health GP', bio: 'Bio', qualifications: [], modalities: [], specialties: ['Menopause'], languages: ['English'], suburb: null, city: 'Brisbane', state: 'QLD', telehealth: true, inPerson: false, bulkBilling: false, medicareRebate: true, privateHealth: false, feeFrom: null, feeNote: null, ahpraNumber: null, website: null, phone: null, bookingUrl: null, availability: { '1': [['09:00', '12:00']], '2': [['09:00', '12:00']], '3': [['09:00', '12:00']], '4': [['09:00', '12:00']], '5': [['09:00', '12:00']] }, slotMinutes: 60, acceptsBookings: true, ownerUserId: 'doctor', isVerified: true, isActive: true, ratingAvg: 0, ratingCount: 0 };
+const practitioner = { id: 'pr1', slug: 'dr-k', name: 'Dr K', kind: 'GP', headline: 'A women\'s health GP', bio: 'Bio', qualifications: [], modalities: [], specialties: ['Menopause'], languages: ['English'], suburb: null, city: 'Brisbane', state: 'QLD', telehealth: true, inPerson: false, bulkBilling: false, medicareRebate: true, privateHealth: false, feeFrom: null, feeNote: null, ahpraNumber: null, website: null, phone: null, bookingUrl: null, availability: { '1': [['09:00', '12:00']], '2': [['09:00', '12:00']], '3': [['09:00', '12:00']], '4': [['09:00', '12:00']], '5': [['09:00', '12:00']] }, slotMinutes: 60, acceptsBookings: true, ownerUserId: 'doctor', isVerified: true, isActive: true, ratingAvg: 0, ratingCount: 0, createdAt: new Date() };
 
 jest.mock('../../middleware/auth', () => ({
   authenticate: (req: any, _res: any, next: any) => {
