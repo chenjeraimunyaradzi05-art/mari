@@ -23,7 +23,7 @@ function Browser() {
   const ref = useReference();
   const [f, setF] = useState({ q: search.get('q') ?? '', make: search.get('make') ?? '', bodyType: search.get('bodyType') ?? '', fuelType: search.get('fuelType') ?? '', electrified: false, currentRating: false, minStars: '', maxPrice: '', sevenSeats: false, lowEmissions: false, sort: search.get('sort') ?? 'name' });
   const [tray, setTray] = useState<string[]>([]);
-  const data = useLoad<{ cars: CarCard[]; total: number; makes: string[]; asAt: string }>(() => autoApi.catalogue({ ...f, electrified: f.electrified ? 'true' : undefined, currentRating: f.currentRating ? 'true' : undefined, sevenSeats: f.sevenSeats ? 'true' : undefined, lowEmissions: f.lowEmissions ? 'true' : undefined, minStars: f.minStars || undefined, maxPrice: f.maxPrice || undefined }), [JSON.stringify(f)]);
+  const data = useLoad<{ cars: CarCard[]; total: number; makes: string[]; asAt: string | null }>(() => autoApi.catalogue({ ...f, electrified: f.electrified ? 'true' : undefined, currentRating: f.currentRating ? 'true' : undefined, sevenSeats: f.sevenSeats ? 'true' : undefined, lowEmissions: f.lowEmissions ? 'true' : undefined, minStars: f.minStars || undefined, maxPrice: f.maxPrice || undefined }), [JSON.stringify(f)]);
   const set = (k: string, v: string | boolean) => setF((x) => ({ ...x, [k]: v }));
   const toggle = (slug: string) => setTray((t) => (t.includes(slug) ? t.filter((s) => s !== slug) : t.length >= 4 ? t : [...t, slug]));
 
@@ -62,7 +62,11 @@ function Browser() {
           </li>
         ))}
       </ul>
-      <p className="mt-6 text-xs text-slate-500">{data.data?.asAt ?? ref.data?.catalogueAsAt}. Prices and equipment change; the spec sheet for the grade you buy decides.</p>
+      {/* One as-at for the page only when every car on it shares one. The team
+          checks cars one at a time, so once they differ each car's page says
+          when its own figures were checked, rather than this line claiming a
+          date for all of them. */}
+      {data.data && <p className="mt-6 text-xs text-slate-500">{data.data.asAt ? `${data.data.asAt}.` : 'Each car’s page says when its figures were checked and where they came from.'} Prices and equipment change; the spec sheet for the grade you buy decides.</p>}
       <div className="mt-2"><AutoDisclaimer /></div>
     </PageShell>
   );

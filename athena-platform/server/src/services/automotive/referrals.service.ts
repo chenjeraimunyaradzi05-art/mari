@@ -1,8 +1,9 @@
 /**
  * What ATHENA is paid by a partner when an introduction made here becomes
  * a sale, a loan or a policy: the fee for each kind, worked out from the
- * blueprint's figures, and kept in a ledger the admin sees and the partner
- * can check against. The member never pays these, and the figures are
+ * blueprint's figures. What has actually been paid against each fee is kept
+ * by referral-ledger.service, and a fee is PAID only when the payments
+ * recorded there cover it. The member never pays these, and the figures are
  * published on the public pages so the introduction is never a secret.
  */
 
@@ -35,15 +36,7 @@ export function referralFee(kind: ReferralKind, basisAmount: number): { fee: num
 
 export const REFERRAL_KIND_WORDS: Record<ReferralKind, string> = { DEALER_SALE: 'Dealership sale', FINANCE: 'Loan settled', INSURANCE: 'Policy taken', WARRANTY: 'Extended warranty', PARTS: 'Parts supplied', FLEET: 'Fleet programme' };
 
-/** The ledger's totals: what is owed, what has been agreed, what has arrived, and each kind's share. */
-export function summariseReferrals(rows: Array<{ kind: string; status: string; fee: number }>) {
-  const by = (status: ReferralStatus) => rows.filter((r) => r.status === status).reduce((s, r) => s + r.fee, 0);
-  const byKind: Record<string, { count: number; fee: number }> = {};
-  for (const r of rows) {
-    if (r.status === 'VOID') continue;
-    byKind[r.kind] = byKind[r.kind] ?? { count: 0, fee: 0 };
-    byKind[r.kind].count += 1;
-    byKind[r.kind].fee += r.fee;
-  }
-  return { pending: by('PENDING'), confirmed: by('CONFIRMED'), paid: by('PAID'), byKind };
-}
+// The ledger's totals used to be worked out here from the status column
+// alone, so "paid" was the sum of the fees an admin had marked PAID in a
+// dropdown. They are now sums of the payments actually recorded against each
+// fee: see summariseLedger in referral-ledger.service.

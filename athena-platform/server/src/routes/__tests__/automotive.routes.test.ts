@@ -370,7 +370,7 @@ describe('The automotive routes', () => {
     // Who decided where twenty-one thousand dollars went, kept apart from the
     // purchase row that the next change to it would overwrite.
     expect(store.audits).toHaveLength(1);
-    expect(store.audits[0]).toMatchObject({ action: 'DATA_ACCESS', actorUserId: 'admin', targetUserId: 'member', metadata: { adminAction: 'CAR_PURCHASE_DISPUTE_RESOLVED', area: 'automotive', resourceType: 'VehiclePurchase', resourceId: pid, outcome: 'REFUND', amount: 21000, status: { from: 'DISPUTED', to: 'REFUNDED' } } });
+    expect(store.audits[0]).toMatchObject({ action: 'ADMIN_CONTENT_UPDATE', actorUserId: 'admin', targetUserId: 'member', metadata: { adminAction: 'CAR_PURCHASE_DISPUTE_RESOLVED', area: 'automotive', resourceType: 'VehiclePurchase', resourceId: pid, outcome: 'REFUND', amount: 21000, status: { from: 'DISPUTED', to: 'REFUNDED' } } });
   });
 
   it('releases the money to the seller when the buyer is satisfied', async () => {
@@ -751,10 +751,17 @@ describe('The automotive routes', () => {
     const overview = await request(app).get('/api/automotive/admin/overview').set(as('admin', 'ADMIN')).expect(200);
     expect(overview.body.data.referrals.totals).toMatchObject({ pending: 180, confirmed: 420, paid: 0 });
     expect(overview.body.data.referrals.open).toHaveLength(2);
-    await request(app).patch(`/api/automotive/admin/referrals/${added.body.data.id}`).set(as('admin', 'ADMIN')).send({ status: 'PAID' }).expect(200);
-    const after = await request(app).get('/api/automotive/admin/referrals?status=PAID').set(as('admin', 'ADMIN')).expect(200);
-    expect(after.body.data.referrals).toHaveLength(1);
-    expect(after.body.data.totals.paid).toBe(180);
+    // A fee is no longer marked paid from a dropdown. It becomes paid when a
+    // payment with its bank or Stripe reference is recorded against it and the
+    // payments cover it; flipping the status by hand, with no money behind it,
+    // is refused. That path, and the ledger behind it, is covered in
+    // services/automotive/__tests__/referral-ledger.routes.test.ts.
+    const byHand = await request(app)
+      .patch(`/api/automotive/admin/referrals/${added.body.data.id}`)
+      .set(as('admin', 'ADMIN'))
+      .send({ status: 'PAID' })
+      .expect(400);
+    expect(byHand.body.message).toMatch(/Record the payment/);
   });
 
   /**
@@ -1173,13 +1180,16 @@ describe('The automotive routes', () => {
     await request(app).patch(`/api/automotive/admin/listings/${held.body.data.id}`).set(as('admin', 'ADMIN')).send({ status: 'WITHDRAWN', suspendedReason: reason }).expect(200);
     const byVerb = (verb: string) => store.audits.filter((a) => a.metadata?.adminAction === verb);
     expect(byVerb('CAR_LISTING_REVIEWED')).toHaveLength(1);
-    expect(byVerb('CAR_LISTING_REVIEWED')[0]).toMatchObject({ action: 'DATA_ACCESS', actorUserId: 'admin', targetUserId: 'newbie', metadata: { area: 'automotive', resourceType: 'VehicleListing', resourceId: held.body.data.id, status: { from: 'SUSPENDED', to: 'WITHDRAWN' }, reason } });
+    expect(byVerb('CAR_LISTING_REVIEWED')[0]).toMatchObject({ action: 'ADMIN_CONTENT_UPDATE', actorUserId: 'admin', targetUserId: 'newbie', metadata: { area: 'automotive', resourceType: 'VehicleListing', resourceId: held.body.data.id, status: { from: 'SUSPENDED', to: 'WITHDRAWN' }, reason } });
 
     const fee = await request(app).post('/api/automotive/admin/referrals').set(as('admin', 'ADMIN')).send({ kind: 'INSURANCE', partner: 'An insurer', basisAmount: 1200 }).expect(201);
     expect(byVerb('CAR_REFERRAL_CREATED')[0]).toMatchObject({ actorUserId: 'admin', metadata: { resourceId: fee.body.data.id, fee: 180, standardFee: 180, status: 'PENDING' } });
-    await request(app).patch(`/api/automotive/admin/referrals/${fee.body.data.id}`).set(as('admin', 'ADMIN')).send({ status: 'PAID', fee: 150 }).expect(200);
+    // CONFIRMED, not PAID: a fee becomes paid only when a payment is recorded
+    // against it, so the change an admin can still make by hand is confirming
+    // the sale happened and settling the amount — and that is what is audited.
+    await request(app).patch(`/api/automotive/admin/referrals/${fee.body.data.id}`).set(as('admin', 'ADMIN')).send({ status: 'CONFIRMED', fee: 150 }).expect(200);
     expect(byVerb('CAR_REFERRAL_UPDATED')).toHaveLength(1);
-    expect(byVerb('CAR_REFERRAL_UPDATED')[0]).toMatchObject({ actorUserId: 'admin', metadata: { resourceType: 'CarReferral', resourceId: fee.body.data.id, status: { from: 'PENDING', to: 'PAID' }, fee: { from: 180, to: 150 } } });
+    expect(byVerb('CAR_REFERRAL_UPDATED')[0]).toMatchObject({ actorUserId: 'admin', metadata: { resourceType: 'CarReferral', resourceId: fee.body.data.id, status: { from: 'PENDING', to: 'CONFIRMED' }, fee: { from: 180, to: 150 } } });
 
     const enquiry = await request(app).post('/api/automotive/finance/applications').set(as('member')).send({ purpose: 'USED', vehiclePrice: 25000, deposit: 5000, termMonths: 60, incomeAnnual: 78000, expensesMonthly: 2400, employment: 'FULL_TIME', employmentMonths: 30, residency: 'CITIZEN', submit: true }).expect(201);
     await request(app).patch(`/api/automotive/admin/finance/${enquiry.body.data.id}`).set(as('admin', 'ADMIN')).send({ status: 'WITHDRAWN', decisionNote: 'Take the estimate to a broker; we cannot assess credit.' }).expect(200);

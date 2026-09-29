@@ -3,7 +3,9 @@
  * garage is due (service by time or kilometres, registration, insurance,
  * the warranty running out), each sent once a month at most; the buyer
  * protection window, nudged two days out and released when it passes
- * without a dispute; inspection requests no workshop has taken, raised
+ * without a dispute; the hold on the buyer's card, which lasts about a week
+ * against a two-week inspection period, warned about two days before it runs
+ * out and followed up when it has; inspection requests no workshop has taken, raised
  * with the buyer and the admins instead of left to sit; trade-in requests
  * that have run their time; featured flags that have expired; and the
  * retraction of the car finance "pre-approvals" ATHENA was never licensed
@@ -16,7 +18,7 @@ import { logger } from '../../utils/logger';
 import { bestEffort, labelSegment } from '../../utils/best-effort';
 import { cancelEscrowPayment, captureEscrowPayment } from '../stripe-connect.service';
 import { markSent, shouldSend, vehicleReminders } from './garage.service';
-import { readHoldState, settlePurchaseHold } from './purchase-escrow.service';
+import { CARD_HOLD_DAYS, holdHasEnded, holdLapsesAt, readHoldState, recheckLiveHold, settlePurchaseHold } from './purchase-escrow.service';
 import { inspectionWorkshopOwners } from './broadcast.service';
 import { runExclusively } from '../../utils/redis';
 
@@ -130,19 +132,29 @@ type SweptPurchase = Prisma.VehiclePurchaseGetPayload<{ include: { escrow: true;
  * repeating, and the admin console already has the release-or-refund controls
  * pointed at it. The purchase carries the reason in `disputeReason`, and the
  * status copy on the detail page no longer claims the buyer raised it.
+ *
+ * A hold that ran out used to be described here as a card that was "never
+ * authorised", because the only test was whether the row still said
+ * AUTHORIZED. That told a buyer who had paid, and a seller who had been told
+ * the money was held, that neither was ever true. A CANCELED row is a hold
+ * that existed and ended, and it is now called that.
  */
-async function stopTryingToRelease(p: SweptPurchase, now: Date): Promise<void> {
-  const neverAuthorised = !p.escrow || !['AUTHORIZED', 'CAPTURED'].includes(p.escrow.status);
-  const why = neverAuthorised
-    ? 'The buyer\'s card was never authorised for this purchase, so there is no money held to release.'
-    : 'The money held for this purchase could not be taken from the card when the inspection period ended.';
-  await prisma.vehiclePurchase.update({ where: { id: p.id }, data: { status: 'DISPUTED', disputeOpenedAt: now, disputeReason: `Opened by ATHENA: ${why} Three days of automatic attempts did not clear it.` } });
-  await notify(p.sellerId, 'The payment for your car could not be released', `${why} ATHENA has stopped trying and is looking at "${p.listing.title}" now. Do not hand anything else over, and reply here with anything that helps.`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_RELEASE_FAILED', id: p.id });
+async function stopTryingToRelease(p: SweptPurchase, now: Date, attempted: boolean): Promise<void> {
+  const ended = p.escrow?.status === 'CANCELED';
+  const neverAuthorised = !ended && (!p.escrow || !['AUTHORIZED', 'CAPTURED'].includes(p.escrow.status));
+  const why = ended
+    ? `The hold on the buyer's card ended before the inspection period did (a hold on a card lasts about ${CARD_HOLD_DAYS} days), so there is no money held to release.`
+    : neverAuthorised
+      ? 'The buyer\'s card was never authorised for this purchase, so there is no money held to release.'
+      : 'The money held for this purchase could not be taken from the card when the inspection period ended.';
+  const tried = attempted ? ' Three days of automatic attempts did not clear it.' : '';
+  await prisma.vehiclePurchase.update({ where: { id: p.id }, data: { status: 'DISPUTED', disputeOpenedAt: now, disputeReason: `Opened by ATHENA: ${why}${tried}` } });
+  await notify(p.sellerId, 'The payment for your car could not be released', `${why} ${attempted ? 'ATHENA has stopped trying and is' : 'ATHENA is'} looking at "${p.listing.title}" now. Do not hand anything else over, and reply here with anything that helps.`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_RELEASE_FAILED', id: p.id });
   await notify(p.buyerId, 'There is a problem with the payment for your car', `${why} Nothing has been taken from your card. ATHENA is looking at "${p.listing.title}" and will be in touch; please do not pay the seller outside ATHENA.`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_RELEASE_FAILED', id: p.id });
   await notifyAdmins('A car purchase could not be released', `"${p.listing.title}", $${(p.agreedAmount ?? p.offerAmount).toLocaleString('en-AU')}: ${why} The car has been handed over. Both sides have been told and it is waiting on a decision.`, '/dashboard/cars/admin', { kind: 'CAR_RELEASE_FAILED', id: p.id });
 }
 
-export async function sweepPurchases(now = new Date()): Promise<{ released: number; nudged: number; stuck: number; abandoned: number; unstarted: number }> {
+export async function sweepPurchases(now = new Date()): Promise<{ released: number; nudged: number; stuck: number; abandoned: number; unstarted: number; settled: number; lapsing: number; ended: number }> {
   let released = 0;
   let nudged = 0;
   let stuck = 0;
@@ -152,8 +164,23 @@ export async function sweepPurchases(now = new Date()): Promise<{ released: numb
     if (ends > now.getTime()) {
       if (ends - now.getTime() > 2 * DAY) continue;
       if (await alreadyNotified(p.buyerId, 'CAR_PURCHASE_WINDOW', p.id)) continue;
-      await notify(p.buyerId, 'Two days left on your inspection period', `The money for "${p.listing.title}" is released to the seller when the period ends. If something is not as described, open a dispute before then.`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_PURCHASE_WINDOW', id: p.id });
+      // Once the hold has ended there is nothing to release when the period
+      // ends, and she has already been told so; saying it would be released
+      // anyway would undo that.
+      const release = holdHasEnded(p.escrow) ? '' : `The money for "${p.listing.title}" is released to the seller when the period ends. `;
+      await notify(p.buyerId, 'Two days left on your inspection period', `${release}If something is not as described, open a dispute before then.`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_PURCHASE_WINDOW', id: p.id });
       nudged += 1;
+      continue;
+    }
+
+    // A hold the row already says has ended cannot be captured, now or after
+    // three more days of trying; the retry exists for a processor that is
+    // briefly unreachable, not for money that is no longer there. It goes
+    // straight to a person, which is also what the buyer and seller were told
+    // would happen when the hold ended.
+    if (holdHasEnded(p.escrow)) {
+      stuck += 1;
+      await stopTryingToRelease(p, now, false);
       continue;
     }
 
@@ -171,7 +198,7 @@ export async function sweepPurchases(now = new Date()): Promise<{ released: numb
         // Every six hours for three days, and then never again: past the grace
         // the failure is not going to clear itself, and a silent retry loop is
         // how the seller ended up unpaid with nobody told.
-        if (now.getTime() - ends >= RELEASE_GRACE) await stopTryingToRelease(p, now);
+        if (now.getTime() - ends >= RELEASE_GRACE) await stopTryingToRelease(p, now, true);
         continue;
       }
     }
@@ -194,6 +221,9 @@ export async function sweepPurchases(now = new Date()): Promise<{ released: numb
     stuck,
     abandoned: await sweepAbandonedHolds(now),
     unstarted: await releaseUnstartedHolds(now),
+    settled: await settleAuthorisedHolds(now),
+    lapsing: await warnLapsingHolds(now),
+    ended: await followEndedHolds(now),
   };
 }
 
@@ -207,9 +237,19 @@ export async function sweepPurchases(now = new Date()): Promise<{ released: numb
  * re-read from the processor rather than the row before anything is undone,
  * because a purchase whose webhook simply never landed is a real sale and
  * must be finished, not cancelled.
+ *
+ * A CANCELED hold is left out, deliberately. Since the pay route stopped
+ * writing PAID_HELD ahead of the card, a purchase only reaches PAID_HELD
+ * through a hold that authorised, so a CANCELED row behind one is a hold that
+ * existed and ended — on the live processor, most often because a hold on a
+ * card lasts about a week and the car had not changed hands by then. This
+ * sweep used to catch those too, a week after payment, and cancel the sale
+ * with "the card was never authorised … despite what you were told at the
+ * time": untrue to both women, and the end of a deal neither of them had
+ * walked away from. followEndedHolds asks the buyer to pay once more instead.
  */
 async function sweepAbandonedHolds(now: Date): Promise<number> {
-  const stale = await prisma.vehiclePurchase.findMany({ where: { status: 'PAID_HELD', paidAt: { lt: new Date(now.getTime() - ABANDONED_HOLD) }, escrow: { status: { notIn: ['AUTHORIZED', 'CAPTURED'] } } }, include: { escrow: true, listing: { select: { id: true, title: true, status: true } } }, take: 200 });
+  const stale = await prisma.vehiclePurchase.findMany({ where: { status: 'PAID_HELD', paidAt: { lt: new Date(now.getTime() - ABANDONED_HOLD) }, escrow: { status: { notIn: ['AUTHORIZED', 'CAPTURED', 'CANCELED'] } } }, include: { escrow: true, listing: { select: { id: true, title: true, status: true } } }, take: 200 });
   let abandoned = 0;
   for (const p of stale) {
     if (!p.escrow) continue;
@@ -290,6 +330,152 @@ async function releaseUnstartedHolds(now: Date): Promise<number> {
   }
 
   return released;
+}
+
+/**
+ * Holds that authorised with nobody there to say so.
+ *
+ * The webhook moves the escrow row to AUTHORIZED when a card goes through, but
+ * it does not move the purchase: only the buyer's own browser confirming, or
+ * her coming back to the pay button, does that. A buyer who authorised and
+ * closed the tab before the confirmation went out left a purchase at ACCEPTED
+ * with her money really held, a seller never told, and — because
+ * releaseUnstartedHolds only looks at holds that have not authorised — no
+ * sweep that would ever notice. The hold then ran out a week later with the
+ * deal still waiting on a payment that had happened.
+ */
+async function settleAuthorisedHolds(now: Date): Promise<number> {
+  const waiting = await prisma.vehiclePurchase.findMany({ where: { status: 'ACCEPTED', escrow: { status: 'AUTHORIZED' } }, select: { id: true }, take: 200 });
+  let settled = 0;
+  for (const p of waiting) {
+    const result = await bestEffort('automotive.authorised-hold-settled', () => settlePurchaseHold(p.id, now), null);
+    if (result?.status === 'PAID_HELD') settled += 1;
+  }
+  return settled;
+}
+
+/**
+ * How long before a hold on a card runs out the people who can act on it are
+ * told. Two days is eight sweeps, so a round that fails still leaves several
+ * to get the warning out, and it leaves the buyer time to release the money if
+ * she is happy with the car and the admins time to reach both sides.
+ */
+export const HOLD_LAPSE_WARNING = 2 * DAY;
+
+/** A day as a member reads it: "Friday 2 October". */
+const dayWords = (d: Date) => d.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Australia/Brisbane' });
+
+const dollars = (p: { agreedAmount: number | null; offerAmount: number }) => `$${(p.agreedAmount ?? p.offerAmount).toLocaleString('en-AU')}`;
+
+/**
+ * The warning before a hold runs out.
+ *
+ * BUYER_PROTECTION promised that "where a bank will not hold for the full
+ * period ATHENA asks the buyer to re-authorise rather than releasing early".
+ * Nothing did. A hold on a card lasts about a week, the inspection period is
+ * two, and the first sign of the gap was the release failing at the end of the
+ * period, with the car long since handed over. This is the step the note now
+ * describes: two days before a hold that will not last until the release runs
+ * out, the buyer, the seller and the admins are each told what will happen and
+ * what they can do. Nothing is captured early to beat the clock; that would
+ * pay the seller before the buyer has had her inspection period.
+ *
+ * A hold that is released before it runs out needs none of this — the buyer
+ * releasing it, or an inspection period that ends first — so those are left
+ * alone. The seller's notification is the marker that the warning has gone
+ * out, keyed to the hold rather than the purchase, so a second hold after the
+ * buyer pays once more is warned about in its own right. It is sent last, so a
+ * round that fails part-way is tried again whole rather than half-told.
+ */
+async function warnLapsingHolds(now: Date): Promise<number> {
+  const soon = await prisma.vehiclePurchase.findMany({
+    where: { status: { in: ['PAID_HELD', 'HANDED_OVER'] }, paidAt: { lt: new Date(now.getTime() - (CARD_HOLD_DAYS * DAY - HOLD_LAPSE_WARNING)) }, escrow: { status: 'AUTHORIZED' } },
+    include: { escrow: true, listing: { select: { id: true, title: true, status: true } } },
+    take: 200,
+  });
+  let warned = 0;
+  for (const p of soon) {
+    const lapses = holdLapsesAt(p);
+    // Past the day itself, the processor is asked instead (followEndedHolds):
+    // a warning that it "runs out on" a day already gone is no use to anyone.
+    if (!lapses || !p.escrow || lapses.getTime() <= now.getTime()) continue;
+    if (p.status === 'HANDED_OVER' && p.inspectionEndsAt && p.inspectionEndsAt.getTime() <= lapses.getTime()) continue;
+    const marker = `${p.id}:${p.escrow.id}`;
+    if (await alreadyNotified(p.sellerId, 'CAR_HOLD_LAPSING', marker)) continue;
+
+    const day = dayWords(lapses);
+    const link = `/dashboard/cars/purchases/${p.id}`;
+    const data = { kind: 'CAR_HOLD_LAPSING', id: marker, purchaseId: p.id };
+    if (p.status === 'PAID_HELD') {
+      await notify(p.buyerId, 'The hold on your card runs out soon', `The hold on your card for "${p.listing.title}" lasts until about ${day}: a hold on a card lasts about ${CARD_HOLD_DAYS} days. If you have not collected the car by then, you will be asked to pay once more before you do. The old hold simply ends; nothing extra is taken.`, link, data);
+      await notifyAdmins('A car purchase hold runs out before the handover', `"${p.listing.title}", ${dollars(p)}: the hold on the buyer's card runs out around ${day} and the car has not changed hands. If it runs out first she is asked to pay once more, and the seller has been told not to hand the car over until the money is held again.`, link, data);
+      await notify(p.sellerId, 'The hold on the buyer\'s card runs out soon', `The ${dollars(p)} for "${p.listing.title}" is held on the buyer's card until about ${day}: a hold on a card lasts about ${CARD_HOLD_DAYS} days, which is shorter than the inspection period. If the car has not changed hands by then, do not hand it over until the purchase page says the money is held again; she will be asked to pay once more. If it has, the hold still runs out during her inspection period, and ATHENA's team, who have been told, will settle the payment with you both.`, link, data);
+    } else {
+      const end = dayWords(p.inspectionEndsAt!);
+      await notify(p.buyerId, 'The hold on your card runs out before your inspection period ends', `The hold on your card for "${p.listing.title}" runs out around ${day}, before your inspection period ends on ${end}: a hold on a card lasts about ${CARD_HOLD_DAYS} days. If you are happy with the car, release the money before then from the purchase page. If it is not as described, open a dispute. ATHENA's team has been told and will be in touch if the hold runs out first.`, link, data);
+      await notifyAdmins('A car purchase hold runs out during the inspection period', `"${p.listing.title}", ${dollars(p)}: the car has been handed over and the hold on the buyer's card runs out around ${day}, before her inspection period ends on ${end}. Unless she releases it first, nothing can be released automatically. Speak to both sides.`, link, data);
+      await notify(p.sellerId, 'The hold on the buyer\'s card runs out before her inspection period ends', `A hold on a card lasts about ${CARD_HOLD_DAYS} days, and the one behind "${p.listing.title}" runs out around ${day}, before the buyer's inspection period ends on ${end}. If she has not released the money by then, it cannot be released to you automatically. ATHENA's team has been told and will settle it with you both.`, link, data);
+    }
+    warned += 1;
+  }
+  return warned;
+}
+
+/**
+ * Holds that have ended while the car still depended on them.
+ *
+ * First the ones only the processor knows about: a row still saying AUTHORIZED
+ * past the day its hold was due to run out is checked, because without a
+ * webhook nothing else would ever move it, and until it moves the purchase page
+ * goes on telling both sides the money is held and the pay route will not let
+ * the buyer pay again.
+ *
+ * Then every purchase whose hold has ended with the car not yet released is
+ * followed up, once per hold. Before the handover the buyer is asked to pay
+ * once more and the seller told to wait — the pay route mints a fresh hold from
+ * PAID_HELD, the handover route refuses until there is one, and
+ * settlePurchaseHold tells the seller when there is. During the inspection
+ * period there is no second hold to ask for, so it goes to the admins, and
+ * both sides are told exactly that. A period that has already ended is the
+ * release loop's, which sends it straight to a person.
+ */
+async function followEndedHolds(now: Date): Promise<number> {
+  const overdue = await prisma.vehiclePurchase.findMany({
+    where: { status: { in: ['PAID_HELD', 'HANDED_OVER'] }, paidAt: { lt: new Date(now.getTime() - CARD_HOLD_DAYS * DAY) }, escrow: { status: 'AUTHORIZED' } },
+    select: { id: true, paidAt: true, escrow: { select: { id: true, status: true, paymentIntentId: true } } },
+    take: 200,
+  });
+  for (const p of overdue) {
+    if (p.escrow && holdLapsesAt(p)) await recheckLiveHold(p.escrow);
+  }
+
+  const ended = await prisma.vehiclePurchase.findMany({
+    where: { status: { in: ['PAID_HELD', 'HANDED_OVER'] }, escrow: { status: 'CANCELED' } },
+    include: { escrow: true, listing: { select: { id: true, title: true, status: true } } },
+    take: 200,
+  });
+  let followed = 0;
+  for (const p of ended) {
+    if (!p.escrow) continue;
+    if (p.status === 'HANDED_OVER' && (!p.inspectionEndsAt || p.inspectionEndsAt.getTime() <= now.getTime())) continue;
+    const marker = `${p.id}:${p.escrow.id}`;
+    if (await alreadyNotified(p.sellerId, 'CAR_HOLD_ENDED', marker)) continue;
+
+    const link = `/dashboard/cars/purchases/${p.id}`;
+    const data = { kind: 'CAR_HOLD_ENDED', id: marker, purchaseId: p.id };
+    if (p.status === 'PAID_HELD') {
+      await notify(p.buyerId, 'Pay once more to keep the car', `The hold on your card for "${p.listing.title}" has ended (a hold on a card lasts about ${CARD_HOLD_DAYS} days), so nothing is held and nothing was taken. To keep the purchase, pay once more from the purchase page before you collect the car. The seller has been asked to wait until you have.`, link, data);
+      await notifyAdmins('A car purchase hold ended before the handover', `"${p.listing.title}", ${dollars(p)}: the hold on the buyer's card has ended and the car has not changed hands. She has been asked to pay once more, and the seller told not to hand the car over until she has.`, link, data);
+      await notify(p.sellerId, 'The money for your car is not held right now', `The hold on the buyer's card for "${p.listing.title}" has ended, so nothing is held. Do not hand the car over. She has been asked to pay once more, and you will be told when the money is held again. If you would rather not wait, you can cancel from the purchase page.`, link, data);
+    } else {
+      const end = dayWords(p.inspectionEndsAt!);
+      await notify(p.buyerId, 'The hold on your card has ended', `The hold on your card for "${p.listing.title}" has ended before your inspection period did, so nothing is held and nothing has been taken. ATHENA's team will be in touch about paying for the car. If it is not as described, you can still open a dispute until ${end}.`, link, data);
+      await notifyAdmins('A car purchase hold ended during the inspection period', `"${p.listing.title}", ${dollars(p)}: the car has been handed over and the hold on the buyer's card has ended, so nothing can be released to the seller. Speak to both sides.`, link, data);
+      await notify(p.sellerId, 'The money for your car is no longer held', `The hold on the buyer's card for "${p.listing.title}" ended before her inspection period did, so there is no money held to release to you automatically. ATHENA's team has been told and will settle it with you both.`, link, data);
+    }
+    followed += 1;
+  }
+  return followed;
 }
 
 /**
@@ -402,7 +588,7 @@ let timer: NodeJS.Timeout | null = null;
 
 export function startAutomotiveSweeper(intervalMs = 6 * 60 * 60 * 1000): void {
   if (timer || process.env.NODE_ENV === 'test') return;
-  const run = () => runExclusively('automotive', () => runAutomotiveSweep()).then((r) => { if (r && (r.garage.sent || r.purchases.released || r.purchases.nudged || r.purchases.stuck || r.purchases.abandoned || r.inspections.untaken || r.expiries.retracted)) logger.info('Automotive sweep', r); }).catch((err) => logger.warn('Automotive sweep failed', { error: (err as Error).message }));
+  const run = () => runExclusively('automotive', () => runAutomotiveSweep()).then((r) => { if (r && (r.garage.sent || r.purchases.released || r.purchases.nudged || r.purchases.stuck || r.purchases.abandoned || r.purchases.settled || r.purchases.lapsing || r.purchases.ended || r.inspections.untaken || r.expiries.retracted)) logger.info('Automotive sweep', r); }).catch((err) => logger.warn('Automotive sweep failed', { error: (err as Error).message }));
   setTimeout(run, 120_000).unref();
   timer = setInterval(run, intervalMs);
   timer.unref();

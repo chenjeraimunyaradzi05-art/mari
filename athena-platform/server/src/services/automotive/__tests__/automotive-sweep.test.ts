@@ -8,6 +8,15 @@
  * works, it is retried and logged, or it stops and everybody hears about it —
  * and the cleanup of purchases marked paid against a card that never went
  * through.
+ *
+ * And the hold itself, which with the live processor lasts about a week
+ * against a two-week inspection period. BUYER_PROTECTION used to promise that
+ * ATHENA "asks the buyer to re-authorise" when a bank would not hold for the
+ * whole period; nothing did. These cover what happens instead: the warning two
+ * days before, the buyer asked to pay once more when a hold ends before the
+ * handover (rather than the sale being cancelled as a card "never
+ * authorised"), a person when it ends during the period, and the processor
+ * asked when no webhook has said.
  */
 
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
@@ -21,10 +30,16 @@ jest.mock('../../../utils/prisma', () => ({
     vehiclePurchase: {
       findMany: jest.fn(async ({ where }: { where: Record<string, any> }) =>
         store.purchases
-          .filter((p) => p.status === where.status)
+          .filter((p) => (typeof where.status === 'string' ? p.status === where.status : where.status?.in ? where.status.in.includes(p.status) : true))
           .filter((p) => (where.inspectionEndsAt ? p.inspectionEndsAt !== null && p.inspectionEndsAt !== undefined : true))
           .filter((p) => (where.paidAt?.lt ? Boolean(p.paidAt) && (p.paidAt as Date) < where.paidAt.lt : true))
-          .filter((p) => (where.escrow?.status?.notIn ? Boolean(p.escrow) && !where.escrow.status.notIn.includes((p.escrow as Row).status) : true))
+          .filter((p) => {
+            const wanted = where.escrow?.status;
+            if (wanted === undefined) return true;
+            if (!p.escrow) return false;
+            const status = (p.escrow as Row).status as string;
+            return typeof wanted === 'string' ? status === wanted : !wanted.notIn.includes(status);
+          })
           .map((p) => ({ ...p })),
       ),
       update: jest.fn(async ({ where, data }: { where: { id: string }; data: Row }) => {
@@ -38,7 +53,10 @@ jest.mock('../../../utils/prisma', () => ({
     vehicleListing: { update: jest.fn(async ({ data }: { data: Row }) => data) },
     notification: {
       create: jest.fn(async ({ data }: { data: Row }) => { store.notifications.push(data); return data; }),
-      findFirst: jest.fn(async () => null),
+      // The duplicate check the sweeps make, answered from what has actually
+      // been sent, so a second run can be seen to stay quiet.
+      findFirst: jest.fn(async ({ where }: { where: { userId: string; data: { equals: string }; AND: Array<{ data: { equals: string } }> } }) =>
+        store.notifications.find((n) => n.userId === where.userId && (n.data as Row).kind === where.data.equals && (n.data as Row).id === where.AND[0].data.equals) ?? null),
     },
     user: { findMany: jest.fn(async () => [{ id: 'admin' }]) },
     vehicle: { findMany: jest.fn(async () => []), update: jest.fn(async () => ({})) },
@@ -55,14 +73,21 @@ jest.mock('../../stripe-connect.service', () => ({
   cancelEscrowPayment: jest.fn(async () => ({ status: 'canceled' })),
 }));
 jest.mock('../purchase-escrow.service', () => ({
+  CARD_HOLD_DAYS: 7,
   readHoldState: jest.fn(async () => 'AWAITING_CARD'),
   settlePurchaseHold: jest.fn(async () => ({ state: 'HELD', status: 'PAID_HELD' })),
+  recheckLiveHold: jest.fn(async () => null),
+  // The live-processor rule, without the processor: a real, uncaptured hold
+  // runs out seven days after it was taken; a mock one never does.
+  holdLapsesAt: (p: { paidAt: Date | null; escrow: { status: string; paymentIntentId: string | null } | null }) =>
+    p.paidAt && p.escrow?.status === 'AUTHORIZED' && !String(p.escrow.paymentIntentId).startsWith('pi_mock_') ? new Date(p.paidAt.getTime() + 7 * 86400000) : null,
+  holdHasEnded: (e: { status: string } | null | undefined) => Boolean(e) && ['CANCELED', 'FAILED'].includes(e!.status),
 }));
 
 import { sweepPurchases } from '../automotive-reminders.service';
 import { logger } from '../../../utils/logger';
 import { cancelEscrowPayment, captureEscrowPayment } from '../../stripe-connect.service';
-import { readHoldState, settlePurchaseHold } from '../purchase-escrow.service';
+import { readHoldState, recheckLiveHold, settlePurchaseHold } from '../purchase-escrow.service';
 
 const DAY = 86400000;
 const NOW = new Date('2026-09-23T09:00:00Z');
@@ -85,6 +110,7 @@ describe('the car purchase sweep', () => {
     store.notifications = [];
     (captureEscrowPayment as jest.Mock).mockImplementation(async () => ({ status: 'captured', amountCaptured: 100 }));
     (readHoldState as jest.Mock).mockImplementation(async () => 'AWAITING_CARD');
+    (recheckLiveHold as jest.Mock).mockImplementation(async () => null);
   });
 
   it('releases the money when the inspection period has passed, and tells both sides', async () => {
@@ -141,5 +167,105 @@ describe('the car purchase sweep', () => {
     expect(settlePurchaseHold).toHaveBeenCalledWith('p1', NOW);
     expect(cancelEscrowPayment).not.toHaveBeenCalled();
     expect(store.purchases[0].status).toBe('PAID_HELD');
+  });
+});
+
+/** A purchase whose hold was taken `paidDaysAgo` days ago, in the state and period given. */
+const held = (status: 'PAID_HELD' | 'HANDED_OVER', paidDaysAgo: number, inspectionEndsInDays: number | null, escrowStatus = 'AUTHORIZED'): Row => ({
+  id: 'p2', buyerId: 'buyer', sellerId: 'seller', listingId: 'l2', status,
+  offerAmount: 18500, agreedAmount: 18000, paidAt: new Date(NOW.getTime() - paidDaysAgo * DAY),
+  inspectionEndsAt: inspectionEndsInDays === null ? null : new Date(NOW.getTime() + inspectionEndsInDays * DAY),
+  escrow: { id: 'e2', paymentIntentId: 'pi_2', status: escrowStatus },
+  listing: { id: 'l2', title: '2019 Mazda CX-5 Maxx', status: status === 'PAID_HELD' ? 'UNDER_OFFER' : 'SOLD' },
+});
+
+const sentTo = (kind: string) => store.notifications.filter((n) => (n.data as Row).kind === kind).map((n) => n.userId).sort();
+const bodyFor = (kind: string, userId: string) => String(store.notifications.find((n) => (n.data as Row).kind === kind && n.userId === userId)?.message ?? '');
+
+describe('the hold on the buyer\'s card', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    store.purchases = [];
+    store.notifications = [];
+    (captureEscrowPayment as jest.Mock).mockImplementation(async () => ({ status: 'captured', amountCaptured: 100 }));
+    (readHoldState as jest.Mock).mockImplementation(async () => 'AWAITING_CARD');
+    (recheckLiveHold as jest.Mock).mockImplementation(async () => null);
+  });
+
+  it('warns the buyer, the seller and the admins two days before a hold runs out inside the inspection period, once', async () => {
+    store.purchases = [held('HANDED_OVER', 5.5, 9)];
+    const result = await sweepPurchases(NOW);
+    expect(result.lapsing).toBe(1);
+    expect(sentTo('CAR_HOLD_LAPSING')).toEqual(['admin', 'buyer', 'seller']);
+    // The buyer is told what she can do about it, and the seller what will
+    // happen, rather than either being told the money is safe.
+    expect(bodyFor('CAR_HOLD_LAPSING', 'buyer')).toContain('release the money before then');
+    expect(bodyFor('CAR_HOLD_LAPSING', 'seller')).toContain('cannot be released to you automatically');
+    // Nothing is captured early to beat the clock.
+    expect(captureEscrowPayment).not.toHaveBeenCalled();
+
+    const sent = store.notifications.length;
+    expect((await sweepPurchases(NOW)).lapsing).toBe(0);
+    expect(store.notifications).toHaveLength(sent);
+  });
+
+  it('warns before the handover too, and tells the seller not to hand the car over after it', async () => {
+    store.purchases = [held('PAID_HELD', 5.5, null)];
+    expect((await sweepPurchases(NOW)).lapsing).toBe(1);
+    expect(bodyFor('CAR_HOLD_LAPSING', 'seller')).toContain('do not hand it over until the purchase page says the money is held again');
+    expect(bodyFor('CAR_HOLD_LAPSING', 'buyer')).toContain('asked to pay once more');
+  });
+
+  it('says nothing when the inspection period ends before the hold does', async () => {
+    store.purchases = [held('HANDED_OVER', 5.5, 1)];
+    expect((await sweepPurchases(NOW)).lapsing).toBe(0);
+    expect(sentTo('CAR_HOLD_LAPSING')).toEqual([]);
+  });
+
+  it('asks the buyer to pay once more when a hold ends before the handover, and does not call off the sale', async () => {
+    store.purchases = [held('PAID_HELD', 8, null, 'CANCELED')];
+    const result = await sweepPurchases(NOW);
+    // The abandoned-hold sweep used to take this for a card that was never
+    // authorised, cancel the sale and tell the seller she had been misled.
+    expect(result.abandoned).toBe(0);
+    expect(cancelEscrowPayment).not.toHaveBeenCalled();
+    expect(store.purchases[0].status).toBe('PAID_HELD');
+    expect(result.ended).toBe(1);
+    expect(sentTo('CAR_HOLD_ENDED')).toEqual(['admin', 'buyer', 'seller']);
+    expect(bodyFor('CAR_HOLD_ENDED', 'buyer')).toContain('pay once more');
+    expect(bodyFor('CAR_HOLD_ENDED', 'seller')).toContain('Do not hand the car over');
+    expect(store.notifications.some((n) => String(n.message).includes('never authorised'))).toBe(false);
+
+    expect((await sweepPurchases(NOW)).ended).toBe(0);
+  });
+
+  it('hands a hold that ended during the inspection period to a person at once, and calls it what it is', async () => {
+    store.purchases = [handedOver(1, 'CANCELED')];
+    const result = await sweepPurchases(NOW);
+    expect(captureEscrowPayment).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ released: 0, stuck: 1 });
+    expect(store.purchases[0].status).toBe('DISPUTED');
+    const reason = String(store.purchases[0].disputeReason);
+    expect(reason).toContain('ended before the inspection period did');
+    expect(reason).not.toContain('never authorised');
+    expect(reason).not.toContain('Three days of automatic attempts');
+    expect(sentTo('CAR_RELEASE_FAILED')).toEqual(['admin', 'buyer', 'seller']);
+  });
+
+  it('asks the processor about a hold past its day that no webhook has recorded, and follows it up when it has gone', async () => {
+    store.purchases = [held('HANDED_OVER', 8, 6)];
+    (recheckLiveHold as jest.Mock).mockImplementation(async (e: unknown) => { (e as Row).status = 'CANCELED'; return 'GONE'; });
+    const result = await sweepPurchases(NOW);
+    expect(recheckLiveHold).toHaveBeenCalledWith(expect.objectContaining({ id: 'e2', paymentIntentId: 'pi_2' }));
+    expect(result.ended).toBe(1);
+    expect(sentTo('CAR_HOLD_ENDED')).toEqual(['admin', 'buyer', 'seller']);
+    expect(bodyFor('CAR_HOLD_ENDED', 'seller')).toContain('no money held to release to you automatically');
+  });
+
+  it('moves on a purchase whose hold the webhook recorded but nobody confirmed', async () => {
+    store.purchases = [{ ...held('PAID_HELD', 0, null), status: 'ACCEPTED', paidAt: null }];
+    const result = await sweepPurchases(NOW);
+    expect(settlePurchaseHold).toHaveBeenCalledWith('p2', NOW);
+    expect(result.settled).toBe(1);
   });
 });

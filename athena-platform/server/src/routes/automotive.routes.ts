@@ -26,16 +26,21 @@
  * Money: a purchase, a paid inspection and a workshop job use the same
  * escrow as the rest of the platform (a hold on the buyer's card, captured
  * on release, cancelled or refunded otherwise). A card authorisation lasts
- * about a week with a live processor; the fourteen-day inspection period
- * therefore assumes the hold is re-authorised or converted to a captured
- * balance before that. The mock processor used until keys are configured
- * has no such limit.
+ * about a week with a live processor, and the inspection period is two, so
+ * with live keys the hold runs out before the period does unless the buyer
+ * releases first. This file used to say the period "assumes the hold is
+ * re-authorised or converted to a captured balance" — nothing did either.
+ * What happens is in purchase-escrow.service (CARD_HOLD_DAYS) and the
+ * automotive sweep: everyone is warned two days ahead, a hold that runs out
+ * before the handover is paid once more before the car changes hands, and
+ * one that runs out during the period goes to a person. Nothing is captured
+ * early. The mock processor used until keys are configured has no such limit.
  */
 
 import { Router, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { httpUrl } from '../utils/http-url';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import { AuditAction, Prisma, type CarModel, type Mechanic, type Dealership, type Vehicle, type CarFinanceApplication } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
@@ -50,19 +55,29 @@ import { availableSlots, canCancel, nextAvailableDays, normaliseAvailability, sl
 import { buildBookingIcs } from '../services/wellness/wellness-calendar';
 import { addDays, dayDate, localParts } from '../services/wellness/wellness-dates';
 import {
-  ANCAP_EXPLAINED, AUTOMOTIVE_AS_AT, AU_STATES, BODY_TYPES, BUYER_PROTECTION, CAR_CONDITIONS, CATALOGUE_AS_AT, CLAIMS_GUIDE, COVER_TYPES, EMPLOYMENT_KINDS, FINANCE_GLOSSARY, FRAUD_SIGNS, FUEL_TYPES,
+  ANCAP_EXPLAINED, AUTOMOTIVE_AS_AT, AU_STATES, BODY_TYPES, BUYER_PROTECTION, CAR_CONDITIONS, CLAIMS_GUIDE, COVER_TYPES, EMPLOYMENT_KINDS, FINANCE_GLOSSARY, FRAUD_SIGNS, FUEL_TYPES,
   EXTENDED_WARRANTY, FLEET_PROGRAMME, INSPECTION_SECTIONS, LENDER_CHECKS, LOW_EMISSIONS_G_KM, MAINTENANCE_GUIDE, MAKES, PREMIUM_FACTORS, REFERRAL_FEES, SAFETY_FEATURES, SERVICE_KINDS, SOURCES, TRANSMISSIONS, WOMEN_AND_INSURANCE, ancapStatus, bodyLabel, co2ForCar, fuelLabel, serviceKind,
   type AuState, type BodyKey, type FuelKey,
 } from '../services/automotive/automotive-library';
 import { assessAffordability, assessReadiness, calculateRepayment, compareCarLoans, costOfOwnership, financeReference, monthlyPayment } from '../services/automotive/car-finance.service';
 import { benchmarkPrice, estimateValue, upgradePath } from '../services/automotive/valuation.service';
 import { compareInsuranceQuotes, estimatePremium, insuranceReference } from '../services/automotive/car-insurance.service';
-import { REFERRAL_KIND_WORDS, referralFee, summariseReferrals, type ReferralKind } from '../services/automotive/referrals.service';
+import { REFERRAL_KIND_WORDS, referralFee, type ReferralKind, type ReferralStatus } from '../services/automotive/referrals.service';
+import {
+  LEDGER_VERBS, PAYMENT_METHOD_WORDS, RECONCILE_TOLERANCE_DAYS, brisbaneMidnight, checkStripePayment, columnMapSchema, dollarWords, isReconciled, ledgerAttention, ledgerPosition, liveReceipts, planReconciliation, readLedger,
+  readStatement, receiptSchema, receiptsToCsv, recordedAgainst, referenceKey, referralColumnsAfter, reversalSchema, statusAfterPayments, stripeProblem, summariseLedger, toCents,
+  type Ledger, type Receipt, type ReceiptExportRow,
+} from '../services/automotive/referral-ledger.service';
+import { isStripeConfigured } from '../utils/stripe';
 import {
   DEFAULT_INSPECTION_FEE, INSPECTION_FEE_PERCENT, PURCHASE_FEE_PERCENT, SERVICE_FEE_PERCENT, assessListingRisk, emptyInspectionReport, historyChecks, inspectionDays, inspectionEnds, inspectionOutcome, isValidVin, maskRego, maskVin,
   normaliseInspectionReport, purchaseFee, purchaseTransition, withinInspection, type Party, type PurchaseStatus,
 } from '../services/automotive/marketplace.service';
-import { readHoldState, settlePurchaseHold } from '../services/automotive/purchase-escrow.service';
+import { CARD_HOLD_DAYS, holdHasEnded, holdLapsesAt, readHoldState, recheckLiveHold, settlePurchaseHold } from '../services/automotive/purchase-escrow.service';
+import {
+  CATALOGUE_CSV_COLUMNS, CATALOGUE_RECHECK_DAYS, catalogueCheckedSchema, catalogueCreateSchema, catalogueFlags, cataloguePatchSchema, catalogueSlug, catalogueToCsv, changesFigures, crossFieldProblem, diffCatalogue, fieldsOf, isDue,
+  latestCatalogueChecks, mergeFields, planCatalogueImport, slugSchema, type CatalogueCheck, type FieldChange,
+} from '../services/automotive/catalogue-admin.service';
 import { inspectionWorkshopOwners, tradeInDealerOwners } from '../services/automotive/broadcast.service';
 import { drivesClash, hoursWords, openAt } from '../services/automotive/test-drives.service';
 import {
@@ -73,7 +88,10 @@ const router = Router();
 
 // ------------------------------------------------------------------ helpers
 
-function parse<T>(schema: z.ZodType<T>, body: unknown): T {
+// Typed by the schema's output rather than a single T, so a schema whose
+// input differs from its output (a blank form field read as null by a
+// preprocess, for one) still hands back the parsed type and not `unknown`.
+function parse<S extends z.ZodTypeAny>(schema: S, body: unknown): z.output<S> {
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
@@ -263,18 +281,29 @@ const OFFERS_PER_CAR_PER_DAY = 3;
 // action could not be attributed, and a fee marked PAID could not be traced
 // to the person who said so.
 //
-// The platform's answer for staff actions the AuditAction enum has no verb
-// for is in services/admin-audit.service.ts: the row carries the nearest
-// neutral enum value and the real verb rides in metadata.adminAction. The
-// rows written here take exactly that shape (adminAction, resourceType,
-// resourceId), so a query for staff actions finds these beside the rest; they
-// add `area: 'automotive'` the way auditVerification below always has. They
-// are written here rather than through recordAdminAction only because that
-// module's verb list is a closed union with no car verbs in it yet — see the
-// handoff asking for them, after which this helper is one import away from
-// being replaced. The write is best effort for the same reason it is there:
-// the change has already happened, so a failed audit write must not report
-// the change as failed, and it must not vanish either.
+// These rows used to be filed under DATA_ACCESS, the neutral value the
+// platform borrowed while AuditAction had no verb for a staff member changing
+// what members see. That put a listing taken down or a fee marked PAID in the
+// same column as "someone read a record", so a search for staff edits had to
+// know to dig through metadata, and a search for data access turned up car
+// admin work that had nothing to do with it. ADMIN_CONTENT_UPDATE is that verb
+// now, and every row here carries it; the specific action still rides in
+// metadata.adminAction (with resourceType and resourceId), which is what
+// tells a fee rewrite from a hidden review. Each row adds `area: 'automotive'`
+// the way auditVerification below always has, so the vertical can be pulled
+// out on its own.
+//
+// The referral ledger and the catalogue go one step further: their rows are
+// written in the same transaction as the change, not best effort, because
+// they are read back — the catalogue's "last checked" and the ledger's
+// payments live in them. See the referrals section and
+// referral-ledger.service.
+//
+// They are written here rather than through recordAdminAction because that
+// module's verb list is a closed union with no car verbs in it. The write is
+// best effort for the same reason it is there: the change has already
+// happened, so a failed audit write must not report the change as failed, and
+// it must not vanish either.
 
 type CarAdminAction =
   | 'CAR_WORKSHOP_UPDATED'
@@ -286,13 +315,21 @@ type CarAdminAction =
   | 'CAR_FINANCE_ENQUIRY_UPDATED'
   | 'CAR_REFERRAL_CREATED'
   | 'CAR_REFERRAL_UPDATED'
+  | 'CAR_REFERRAL_PAYMENT_RECORDED'
+  | 'CAR_REFERRAL_PAYMENT_REVERSED'
+  | 'CAR_REFERRAL_PAYMENT_RECONCILED'
   | 'CAR_PURCHASE_RELEASED_BY_ADMIN'
   | 'CAR_PURCHASE_CANCELLED_BY_ADMIN'
   | 'CAR_PURCHASE_DISPUTE_RESOLVED'
-  | 'CAR_INSPECTION_UPDATED_BY_ADMIN';
+  | 'CAR_INSPECTION_UPDATED_BY_ADMIN'
+  | 'CAR_CATALOGUE_MODEL_ADDED'
+  | 'CAR_CATALOGUE_MODEL_UPDATED'
+  | 'CAR_CATALOGUE_MODEL_CHECKED'
+  | 'CAR_CATALOGUE_MODEL_RETIRED'
+  | 'CAR_CATALOGUE_MODEL_RESTORED';
 
-/** The same neutral value admin-audit.service uses, for the same reason: the enum has no verb for this yet. */
-const CAR_ADMIN_AUDIT_ACTION: AuditAction = AuditAction.DATA_ACCESS;
+/** A staff member changing something members see; the specific action is in metadata.adminAction. */
+const CAR_ADMIN_AUDIT_ACTION: AuditAction = AuditAction.ADMIN_CONTENT_UPDATE;
 
 async function auditCarAdmin(req: AuthRequest, adminAction: CarAdminAction, detail: { resourceType: string; resourceId: string; targetUserId?: string | null } & Record<string, unknown>): Promise<void> {
   const { resourceType, resourceId, targetUserId, ...rest } = detail;
@@ -364,7 +401,7 @@ function carCard(c: CarRow, now = new Date()) {
     id: c.id, slug: c.slug, make: c.make, model: c.model, variant: c.variant, year: c.year, bodyType: c.bodyType, bodyLabel: bodyLabel(c.bodyType), fuelType: c.fuelType, fuelLabel: fuelLabel(c.fuelType), transmission: c.transmission, seats: c.seats,
     priceFrom: c.priceFrom, ancapStars: c.ancapStars, ancapYear: c.ancapYear, ancap: ancapStatus(c.ancapStars, c.ancapYear, now), fuelPer100: n(c.fuelPer100), kwhPer100: n(c.kwhPer100), rangeKm: c.rangeKm, energy,
     warrantyYears: c.warrantyYears, warrantyKm: c.warrantyKm, warranty: warrantyWords(c.warrantyYears, c.warrantyKm), serviceIntervalMonths: c.serviceIntervalMonths, serviceIntervalKm: c.serviceIntervalKm, servicingCostYear: c.servicingCostYear,
-    safetyFeatures: c.safetyFeatures, highlights: c.highlights, asAt: c.asAt, ratingAvg: num0(c.ratingAvg), ratingCount: c.ratingCount, reliabilityAvg: num0(c.reliabilityAvg),
+    safetyFeatures: c.safetyFeatures, highlights: c.highlights, asAt: c.asAt, sourceUrl: c.sourceUrl, ratingAvg: num0(c.ratingAvg), ratingCount: c.ratingCount, reliabilityAvg: num0(c.reliabilityAvg),
     co2GramsKm: co2.gramsKm, emissions: co2.label,
   };
 }
@@ -422,7 +459,7 @@ function vehicleCard(v: VehicleRow, now = new Date()) {
   };
 }
 
-type PurchaseRow = Prisma.VehiclePurchaseGetPayload<{ include: { listing: { include: { seller: { select: { id: true; firstName: true; lastName: true; displayName: true; createdAt: true } }; dealership: true } }; buyer: { select: { id: true; firstName: true; lastName: true; displayName: true; email: true } }; seller: { select: { id: true; firstName: true; lastName: true; displayName: true; email: true } }; escrow: { select: { status: true; paymentIntentId: true; amount: true; platformFee: true } } } }>;
+type PurchaseRow = Prisma.VehiclePurchaseGetPayload<{ include: { listing: { include: { seller: { select: { id: true; firstName: true; lastName: true; displayName: true; createdAt: true } }; dealership: true } }; buyer: { select: { id: true; firstName: true; lastName: true; displayName: true; email: true } }; seller: { select: { id: true; firstName: true; lastName: true; displayName: true; email: true } }; escrow: { select: { id: true; status: true; paymentIntentId: true; amount: true; platformFee: true } } } }>;
 
 function purchaseCard(p: PurchaseRow, viewerId: string, admin = false, now = new Date()) {
   const role: Party = admin && p.buyerId !== viewerId && p.sellerId !== viewerId ? 'admin' : p.buyerId === viewerId ? 'buyer' : p.sellerId === viewerId ? 'seller' : 'other';
@@ -432,13 +469,34 @@ function purchaseCard(p: PurchaseRow, viewerId: string, admin = false, now = new
   // paid yet" and "she is part-way through paying" — and the seller is told
   // which, rather than being told the money is held when no card was charged.
   const unfinishedHold = Boolean(p.escrow) && !['AUTHORIZED', 'CAPTURED', 'CANCELED', 'REFUNDED'].includes(p.escrow!.status);
+  // The hold on the buyer's card lasts about a week with the live processor,
+  // against a two-week inspection period. These pages used to say "the money
+  // is held" and "released to you when the period ends" for the whole of both,
+  // which stopped being true the day the hold ran out: the seller of a car
+  // whose buyer had not yet collected it was still being told to hand it over.
+  // The copy now follows the hold — when it runs out, whether it runs out
+  // before the release, and whether it already has.
+  const inPlay = p.status === 'PAID_HELD' || p.status === 'HANDED_OVER';
+  const holdRunsOutAt = inPlay ? holdLapsesAt(p) : null;
+  const holdEnded = inPlay && holdHasEnded(p.escrow);
+  const runsOutFirst = holdRunsOutAt !== null && (p.status === 'PAID_HELD' || (p.inspectionEndsAt !== null && p.inspectionEndsAt.getTime() > holdRunsOutAt.getTime()));
+  const runsOutOn = holdRunsOutAt ? holdRunsOutAt.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Australia/Brisbane' }) : '';
+  const days = `${daysLeft} day${daysLeft === 1 ? '' : 's'}`;
   const next: Record<PurchaseStatus, { buyer: string; seller: string }> = {
     OFFERED: { buyer: 'Waiting for the seller to accept or decline.', seller: 'Accept the offer to agree the price, or decline it.' },
     ACCEPTED: unfinishedHold
       ? { buyer: 'Your card has not been authorised, so nothing is held yet. Finish paying and the money is held for you.', seller: 'The buyer has started paying. Nothing is held, and nothing should change hands, until her card goes through.' }
       : { buyer: 'Pay through ATHENA. The money is held, not sent, until you have the car.', seller: 'Waiting for the buyer to pay. Nothing changes hands until the money is held.' },
-    PAID_HELD: { buyer: 'The money is held. Arrange the handover, check the papers, then confirm you have the car.', seller: 'The money is held. Hand the car over with the papers; the buyer confirms receipt and the inspection period starts.' },
-    HANDED_OVER: { buyer: `${daysLeft} day${daysLeft === 1 ? '' : 's'} to check the car. Release the money when you are satisfied, or open a dispute if it is not as described.`, seller: `The buyer has ${daysLeft} day${daysLeft === 1 ? '' : 's'} to check the car. The money is released to you when the period ends or sooner.` },
+    PAID_HELD: holdEnded
+      ? { buyer: `The hold on your card has ended${p.escrow?.status === 'CANCELED' ? ` (a hold on a card lasts about ${CARD_HOLD_DAYS} days)` : ''}, so nothing is held and nothing was taken. Pay once more before you collect the car.`, seller: 'The hold on the buyer\'s card has ended, so nothing is held right now. Do not hand the car over until this page says the money is held again. She has been asked to pay once more; you can also cancel.' }
+      : runsOutFirst
+        ? { buyer: `The money is held on your card until about ${runsOutOn}. Arrange the handover, check the papers, then confirm you have the car. If the hold runs out first, you will be asked to pay once more before you collect it.`, seller: `The money is held on the buyer's card until about ${runsOutOn}. Hand the car over with the papers; the buyer confirms receipt and the inspection period starts. A hold on a card is shorter than the inspection period, so ATHENA's team settles the payment with you both if it runs out before the money is released.` }
+        : { buyer: 'The money is held. Arrange the handover, check the papers, then confirm you have the car.', seller: 'The money is held. Hand the car over with the papers; the buyer confirms receipt and the inspection period starts.' },
+    HANDED_OVER: holdEnded
+      ? { buyer: `The hold on your card has ended, so nothing is held and nothing has been taken. ATHENA's team will be in touch about paying for the car. You have ${days} left to open a dispute if it is not as described.`, seller: `The hold on the buyer's card has ended before her inspection period did, so there is no money held to release to you automatically. ATHENA's team will settle it with you both.` }
+      : runsOutFirst
+        ? { buyer: `${days} to check the car. The hold on your card runs out around ${runsOutOn}, before the period ends: if you are satisfied, release the money before then. If it is not as described, open a dispute.`, seller: `The buyer has ${days} to check the car. The hold on her card runs out around ${runsOutOn}, before the period ends, so unless she releases the money first it cannot reach you automatically; ATHENA's team is warned beforehand and settles it with you both.` }
+        : { buyer: `${days} to check the car. Release the money when you are satisfied, or open a dispute if it is not as described.`, seller: `The buyer has ${days} to check the car. The money is released to you when the period ends or sooner.` },
     RELEASED: { buyer: 'Done. Leave a word for the next buyer.', seller: 'The money has been released to your payout account.' },
     // Neutral about who raised it: the buyer usually does, but the sweep also
     // brings a purchase here when the money cannot be released at all, and
@@ -458,6 +516,11 @@ function purchaseCard(p: PurchaseRow, viewerId: string, admin = false, now = new
     seller: { id: p.seller.id, name: role === 'seller' ? 'You' : personName(p.seller), email: role === 'buyer' && ['ACCEPTED', 'PAID_HELD', 'HANDED_OVER', 'RELEASED', 'DISPUTED'].includes(p.status) ? p.seller.email : undefined },
     nextStep: role === 'seller' ? next[p.status as PurchaseStatus].seller : next[p.status as PurchaseStatus].buyer,
     inspectionDays: inspectionDays(),
+    // For the page's own buttons: a buyer whose hold has ended is offered the
+    // card step again instead of the handover or the release, neither of
+    // which has any money behind it.
+    holdEnded,
+    holdRunsOutAt: holdRunsOutAt ? holdRunsOutAt.toISOString() : null,
   };
 }
 
@@ -477,12 +540,85 @@ function bookingCard(b: BookingRow, forWorkshop = false) {
 
 const bookingInclude = { mechanic: { select: { id: true, slug: true, name: true, suburb: true, city: true, state: true, phone: true, ownerUserId: true, partsWarrantyMonths: true, labourWarrantyMonths: true } }, vehicle: { select: { id: true, nickname: true, make: true, model: true, year: true } }, review: { select: { rating: true, transparency: true } }, escrow: { select: { status: true } } } as const;
 const listingInclude = { seller: { select: { id: true, firstName: true, lastName: true, displayName: true, createdAt: true } }, dealership: true } as const;
-const purchaseInclude = { listing: { include: listingInclude }, buyer: { select: { id: true, firstName: true, lastName: true, displayName: true, email: true } }, seller: { select: { id: true, firstName: true, lastName: true, displayName: true, email: true } }, escrow: { select: { status: true, paymentIntentId: true, amount: true, platformFee: true } } } as const;
+const purchaseInclude = { listing: { include: listingInclude }, buyer: { select: { id: true, firstName: true, lastName: true, displayName: true, email: true } }, seller: { select: { id: true, firstName: true, lastName: true, displayName: true, email: true } }, escrow: { select: { id: true, status: true, paymentIntentId: true, amount: true, platformFee: true } } } as const;
 
 const referralKindEnum = z.enum(['DEALER_SALE', 'FINANCE', 'INSURANCE', 'WARRANTY', 'PARTS', 'FLEET']);
 const referralInclude = { user: { select: { firstName: true, lastName: true, displayName: true, email: true } }, dealership: { select: { name: true, slug: true } } } as const;
 type ReferralRow = Prisma.CarReferralGetPayload<{ include: typeof referralInclude }>;
 const referralCard = (r: ReferralRow) => ({ id: r.id, kind: r.kind, kindLabel: REFERRAL_KIND_WORDS[r.kind as ReferralKind], status: r.status, partner: r.partner ?? r.dealership?.name ?? null, dealership: r.dealership, member: r.user ? { name: personName(r.user), email: r.user.email } : null, referenceId: r.referenceId, basisAmount: r.basisAmount, feePercent: num0(r.feePercent), fee: r.fee, note: r.note, confirmedAt: r.confirmedAt, paidAt: r.paidAt, createdAt: r.createdAt });
+
+/**
+ * The referral ledger's entries: the audit rows about CarReferral, for one
+ * fee or for all of them. Never capped with a `take`, unlike the catalogue's
+ * window: a sum of money read from the newest few thousand rows would be
+ * wrong without saying so, and the rows are few — a handful per fee.
+ */
+function ledgerWhere(referralId?: string): Prisma.AuditLogWhereInput {
+  return {
+    action: CAR_ADMIN_AUDIT_ACTION,
+    metadata: { path: ['resourceType'], equals: 'CarReferral' },
+    ...(referralId ? { AND: [{ metadata: { path: ['resourceId'], equals: referralId } }] } : {}),
+  };
+}
+
+async function loadLedger(client: Prisma.TransactionClient = prisma, referralId?: string): Promise<Ledger> {
+  const rows = await client.auditLog.findMany({ where: ledgerWhere(referralId), orderBy: { createdAt: 'asc' }, select: { createdAt: true, actorUserId: true, metadata: true, actorUser: { select: { firstName: true, lastName: true, displayName: true } } } });
+  return readLedger(rows);
+}
+
+/** A ledger entry's audit row, written in the same transaction as the change to the fee it is about. */
+function referralAuditRow(req: AuthRequest, adminAction: CarAdminAction, r: { id: string; kind: string; userId: string | null }, detail: { targetUserId?: string | null } & Record<string, unknown>): Prisma.AuditLogUncheckedCreateInput {
+  const { targetUserId, ...rest } = detail;
+  const metadata = { adminAction, area: 'automotive', resourceType: 'CarReferral', resourceId: r.id, kind: r.kind, ...rest };
+  return {
+    action: CAR_ADMIN_AUDIT_ACTION,
+    actorUserId: req.user?.id ?? null,
+    targetUserId: targetUserId === undefined ? r.userId : targetUserId,
+    ipAddress: req.ip ?? null,
+    userAgent: req.get('user-agent') || null,
+    // Through JSON and back, as logAudit does, so an undefined in the detail
+    // is dropped rather than refused by the Json column.
+    metadata: JSON.parse(JSON.stringify(metadata)) as Prisma.InputJsonValue,
+  };
+}
+
+function paymentView(p: Receipt) {
+  return {
+    paymentId: p.paymentId, amountCents: p.amountCents, receivedOn: p.receivedOn, method: p.method, methodLabel: PAYMENT_METHOD_WORDS[p.method].label, reference: p.reference, note: p.note,
+    recordedAt: p.recordedAt, recordedBy: p.recordedBy.name, stripe: p.stripe,
+    reversal: p.reversal ? { at: p.reversal.at, by: p.reversal.by.name, reason: p.reversal.reason } : null,
+    reconciliation: p.reconciliation ? { at: p.reconciliation.at, by: p.reconciliation.by.name, statement: p.reconciliation.statement, bankLine: p.reconciliation.bankLine, stripe: p.reconciliation.stripe } : null,
+    reconciled: isReconciled(p),
+  };
+}
+
+/** A fee as the admin ledger shows it: the card, where it stands against the money, who confirmed it, every payment, and what needs a person. */
+function adminReferralCard(r: ReferralRow, ledger: Ledger) {
+  const payments = ledger.receipts.get(r.id) ?? [];
+  const confirmed = ledger.confirmations.get(r.id);
+  const card = referralCard(r);
+  return {
+    ...card,
+    ledger: {
+      ...ledgerPosition(r.fee, payments),
+      confirmedBy: confirmed ? { at: confirmed.at, by: confirmed.by.name, how: confirmed.how } : null,
+      payments: [...payments].sort((a, b) => a.receivedOn.localeCompare(b.receivedOn) || a.recordedAt.getTime() - b.recordedAt.getTime()).map(paymentView),
+    },
+    attention: ledgerAttention({ id: r.id, status: r.status, fee: r.fee, partner: card.partner, paidAt: r.paidAt }, payments),
+  };
+}
+
+const ledgerRowLite = { id: true, kind: true, status: true, fee: true, partner: true, paidAt: true, dealership: { select: { name: true } } } as const;
+type LedgerRowLite = Prisma.CarReferralGetPayload<{ select: typeof ledgerRowLite }>;
+
+/** Everything on the ledger that needs a person, across every fee, with enough to find the fee it is about. */
+function attentionFor(rows: LedgerRowLite[], ledger: Ledger) {
+  return rows.flatMap((r) => {
+    const partner = r.partner ?? r.dealership?.name ?? null;
+    return ledgerAttention({ id: r.id, status: r.status, fee: r.fee, partner, paidAt: r.paidAt }, ledger.receipts.get(r.id) ?? [])
+      .map((a) => ({ ...a, kindLabel: REFERRAL_KIND_WORDS[r.kind as ReferralKind], partner, fee: r.fee, status: r.status }));
+  });
+}
 
 // ---------------------------------------------------------------- reference
 
@@ -495,11 +631,16 @@ const referralCard = (r: ReferralRow) => ({ id: r.id, kind: r.kind, kindLabel: R
  * the server is deployed, so a browser (or anything between) may keep it for
  * an hour and serve a stale copy for a day while it checks. Express already
  * sets a weak ETag on the body, so that check is a 304 rather than the payload.
+ *
+ * It no longer carries the catalogue's as-at. That was one line for every
+ * car, true only while every row came from the same literals; now the team
+ * checks rows one at a time, each row carries its own, and a line cached here
+ * for a day would have been read next to figures checked that morning.
  */
 router.get('/reference', (_req, res) => {
   res.set('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
   ok(res, {
-    asAt: AUTOMOTIVE_AS_AT, catalogueAsAt: CATALOGUE_AS_AT, states: AU_STATES, bodyTypes: BODY_TYPES, fuelTypes: FUEL_TYPES, transmissions: TRANSMISSIONS, makes: MAKES, conditions: CAR_CONDITIONS,
+    asAt: AUTOMOTIVE_AS_AT, states: AU_STATES, bodyTypes: BODY_TYPES, fuelTypes: FUEL_TYPES, transmissions: TRANSMISSIONS, makes: MAKES, conditions: CAR_CONDITIONS,
     safetyFeatures: SAFETY_FEATURES, ancap: ANCAP_EXPLAINED, maintenance: MAINTENANCE_GUIDE, serviceKinds: SERVICE_KINDS, inspectionSections: INSPECTION_SECTIONS, buyerProtection: { ...BUYER_PROTECTION, inspectionDays: inspectionDays() }, fraudSigns: FRAUD_SIGNS,
     finance: { ...financeReference(), glossary: FINANCE_GLOSSARY, lenderChecks: LENDER_CHECKS, employment: EMPLOYMENT_KINDS }, insurance: { ...insuranceReference(), coverTypes: COVER_TYPES, factors: PREMIUM_FACTORS, claims: CLAIMS_GUIDE, women: WOMEN_AND_INSURANCE }, sources: SOURCES,
     warranty: EXTENDED_WARRANTY, fleet: FLEET_PROGRAMME, referralFees: REFERRAL_FEES,
@@ -537,7 +678,12 @@ router.get('/catalogue', async (req: AuthRequest, res: Response, next: NextFunct
     else if (sort === 'emissions') cars.sort((a, b) => (a.co2GramsKm ?? 999) - (b.co2GramsKm ?? 999));
     if (qBool(req, 'lowEmissions')) cars = cars.filter((c) => c.co2GramsKm !== null && c.co2GramsKm <= LOW_EMISSIONS_G_KM);
     const makes = [...new Set(rows.map((r) => r.make))].sort();
-    ok(res, { cars, total: cars.length, makes, asAt: CATALOGUE_AS_AT });
+    // One as-at for the page only when every car on it shares one. This used
+    // to be the starter list's line whatever the rows said, which was true
+    // until the first row was checked again and then described that car
+    // wrongly; with mixed dates the page says each car carries its own.
+    const asAts = new Set(cars.map((c) => c.asAt).filter((a): a is string => Boolean(a)));
+    ok(res, { cars, total: cars.length, makes, asAt: asAts.size === 1 ? [...asAts][0] : null });
   } catch (error) { next(error); }
 });
 
@@ -547,7 +693,11 @@ router.get('/catalogue/compare', async (req: AuthRequest, res: Response, next: N
     if (slugs.length < 2) throw new ApiError(400, 'Pick at least two cars to compare');
     const rows = await prisma.carModel.findMany({ where: { slug: { in: slugs }, isActive: true } });
     const cars = slugs.map((s) => rows.find((r) => r.slug === s)).filter((r): r is CarRow => Boolean(r)).map((c) => ({ ...carCard(c), ownership: costOfOwnership({ price: c.priceFrom, fuelType: c.fuelType as FuelKey, bodyType: c.bodyType as BodyKey, fuelPer100: n(c.fuelPer100), kwhPer100: n(c.kwhPer100), servicingYear: c.servicingCostYear, years: 5 }).totals, repayment: calculateRepayment({ amount: c.priceFrom * 0.9, ratePct: financeReference().defaults.newCarSecured.typical, termMonths: 60 }).repayment }));
+    // The team checks cars one at a time now, so two prices side by side can
+    // have been checked a year apart; the table says so, in the first row,
+    // rather than setting a checked figure beside a starter one as equals.
     const rows2 = [
+      { key: 'asAt', label: 'Figures as at', values: cars.map((c) => c.asAt ?? 'Not stated') },
       { key: 'price', label: 'From (before on-roads)', values: cars.map((c) => `$${c.priceFrom.toLocaleString('en-AU')}`) },
       { key: 'ancap', label: 'ANCAP', values: cars.map((c) => c.ancap.label) },
       { key: 'body', label: 'Body and seats', values: cars.map((c) => `${c.bodyLabel}, ${c.seats} seats`) },
@@ -823,8 +973,11 @@ router.get('/garage/:id', authenticate, async (req: AuthRequest, res: Response, 
     ]);
     const valuation = estimateValue({ year: v.year, odometerKm: projectedOdometer(v, now) ?? 0, bodyType: v.bodyType as BodyKey | null, fuelType: v.fuelType as FuelKey, newPrice: v.newPrice ?? (v.boughtNew ? v.purchasePrice : null) ?? model?.priceFrom ?? null, make: v.make, now });
     const spent = services.reduce((s, r) => s + (r.cost ?? 0), 0);
+    // A retired catalogue row still gives the valuation its last list price,
+    // but it is not offered as "the catalogue page": that page is gone, and
+    // its figures are no longer kept up to date.
     ok(res, {
-      ...vehicleCard(v, now), valuation, catalogue: model ? carCard(model, now) : null,
+      ...vehicleCard(v, now), valuation, catalogue: model && model.isActive ? carCard(model, now) : null,
       services: services.map((r) => ({ id: r.id, date: r.date.toISOString().slice(0, 10), odometerKm: r.odometerKm, kind: r.kind, kindLabel: serviceKind(r.kind)?.label ?? r.kind, title: r.title, workshop: r.mechanic?.name ?? r.workshop, mechanicSlug: r.mechanic?.slug ?? null, cost: r.cost, notes: r.notes, partsWarrantyMonths: r.partsWarrantyMonths, labourWarrantyMonths: r.labourWarrantyMonths, invoiceUrl: r.invoiceUrl, bookingId: r.bookingId,
         warrantyUntil: r.partsWarrantyMonths || r.labourWarrantyMonths ? (() => { const d = new Date(r.date); d.setUTCMonth(d.getUTCMonth() + Math.max(r.partsWarrantyMonths ?? 0, r.labourWarrantyMonths ?? 0)); return d.toISOString().slice(0, 10); })() : null })),
       spent, bookings: bookings.map((b) => bookingCard(b)), tradeIns: tradeIns.map((t) => ({ id: t.id, status: t.status, estimateMid: t.estimateMid, expiresAt: t.expiresAt, quotes: Array.isArray(t.quotes) ? t.quotes.length : 0 })),
@@ -1320,7 +1473,14 @@ router.post('/purchases/:id/pay', authenticate, async (req: AuthRequest, res: Re
     transition('pay', p, party);
     const amount = p.agreedAmount ?? p.offerAmount;
     if (p.escrow?.paymentIntentId) {
-      const state = await readHoldState(p.escrow);
+      // A purchase already marked paid whose hold has passed the day it was
+      // due to run out is asked about at the processor first. The row alone
+      // would still say AUTHORIZED wherever no webhook has recorded the end,
+      // and the buyer who had been asked to pay once more was handed back the
+      // old hold and told the payment "has already gone through".
+      const lapses = p.status === 'PAID_HELD' ? holdLapsesAt(p) : null;
+      const recheck = lapses && lapses.getTime() <= Date.now() ? await recheckLiveHold(p.escrow) : null;
+      const state = recheck === 'GONE' ? 'GONE' : await readHoldState(p.escrow);
       if (state !== 'GONE') {
         // She has been here before. Creating a second intent would leave two
         // holds against one car and two ways for the money to move, so the
@@ -1379,12 +1539,23 @@ router.post('/purchases/:id/handover', authenticate, async (req: AuthRequest, re
   try {
     const { p, party } = await loadPurchase(req, req.params.id);
     const to = transition('handover', p, party);
+    // The inspection period is the buyer's protection and the seller's wait,
+    // and both assume money behind them. Starting it against a hold that has
+    // already ended would tell the seller her car was paid for when nothing is
+    // held; the buyer pays once more first, which the pay route allows from
+    // here and which tells the seller when it is done.
+    if (holdHasEnded(p.escrow)) throw new ApiError(409, 'The hold on your card has ended, so nothing is held for this car. Pay once more from this page, then confirm you have the car.');
     const data = parse(z.object({ note: z.string().trim().max(1000).optional() }), req.body ?? {});
     const now = new Date();
-    const updated = await prisma.vehiclePurchase.update({ where: { id: p.id }, data: { status: to, handedOverAt: now, inspectionEndsAt: inspectionEnds(now), transferNote: data.note ?? null }, include: purchaseInclude });
+    const ends = inspectionEnds(now);
+    const updated = await prisma.vehiclePurchase.update({ where: { id: p.id }, data: { status: to, handedOverAt: now, inspectionEndsAt: ends, transferNote: data.note ?? null }, include: purchaseInclude });
     await prisma.vehicleListing.update({ where: { id: p.listingId }, data: { status: 'SOLD', soldAt: now } });
     await prisma.vehiclePurchase.updateMany({ where: { listingId: p.listingId, id: { not: p.id }, status: { in: ['OFFERED', 'ACCEPTED'] } }, data: { status: 'CANCELLED', cancelledAt: now, cancelReason: 'The car was sold to another buyer' } });
-    await note(p.sellerId, 'The buyer has confirmed she has the car', `The ${inspectionDays()}-day inspection period on "${p.listing.title}" has started. The money is released to you when it ends, or sooner if she releases it.`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_HANDED_OVER', id: p.id });
+    const lapses = holdLapsesAt(p);
+    const lapseWords = lapses && lapses.getTime() < ends.getTime()
+      ? ` The hold on her card runs out around ${lapses.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Australia/Brisbane' })}, before the period ends; unless she releases it first, ATHENA's team is warned beforehand and settles the payment with you both.`
+      : ' The money is released to you when it ends, or sooner if she releases it.';
+    await note(p.sellerId, 'The buyer has confirmed she has the car', `The ${inspectionDays()}-day inspection period on "${p.listing.title}" has started.${lapseWords}`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_HANDED_OVER', id: p.id });
     ok(res, purchaseCard(updated, req.user!.id));
   } catch (error) { next(error); }
 });
@@ -1399,6 +1570,16 @@ router.post('/purchases/:id/release', authenticate, async (req: AuthRequest, res
       // nothing about what to do next. It can only happen to a purchase from
       // before the hold and the status were tied together, but it is exactly
       // the case where a plain answer matters most.
+      //
+      // The other way there is nothing to take is a hold that existed and ran
+      // out, which with the live processor is about a week after payment —
+      // inside the inspection period. That buyer used to be told no money
+      // "was ever authorised", which was not true, and a hold past its day
+      // that no webhook had recorded went to the processor and failed there.
+      // It is asked about first and described as what it is.
+      const lapses = holdLapsesAt(p);
+      const gone = lapses && lapses.getTime() <= Date.now() && (await recheckLiveHold(p.escrow)) === 'GONE';
+      if (gone || p.escrow.status === 'CANCELED') throw new ApiError(409, 'The hold on your card has ended, so there is no money held to release and nothing has been taken. ATHENA\'s team is told when a hold ends and will be in touch about paying for the car.');
       if (await readHoldState(p.escrow) !== 'HELD') throw new ApiError(409, 'No money was ever authorised for this purchase, so there is nothing to release. Tell us what happened and ATHENA will sort it out with the seller.');
       await captureEscrowPayment(p.escrow.paymentIntentId, { id: p.buyerId, role: party === 'admin' ? 'ADMIN' : undefined });
     }
@@ -1416,7 +1597,11 @@ router.post('/purchases/:id/dispute', authenticate, async (req: AuthRequest, res
     if (!withinInspection(p.inspectionEndsAt)) throw new ApiError(400, 'The inspection period has ended');
     const data = parse(z.object({ reason: z.string().trim().min(20).max(4000) }), req.body);
     const updated = await prisma.vehiclePurchase.update({ where: { id: p.id }, data: { status: to, disputeReason: data.reason, disputeOpenedAt: new Date() }, include: purchaseInclude });
-    await note(p.sellerId, 'The buyer has opened a dispute', `On "${p.listing.title}": ${data.reason.slice(0, 200)}. The money stays held while ATHENA looks at it; you will be asked for your side.`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_DISPUTE', id: p.id });
+    // "The money stays held" was not something ATHENA could say: a hold on a
+    // card runs out after about a week whether or not anyone is looking at
+    // it. What is true, and what the seller needs, is that nothing reaches
+    // anyone until the dispute is decided.
+    await note(p.sellerId, 'The buyer has opened a dispute', `On "${p.listing.title}": ${data.reason.slice(0, 200)}. Nothing is released while ATHENA looks at it; you will be asked for your side.`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_DISPUTE', id: p.id });
     await noteAdmins('A car purchase is in dispute', `"${p.listing.title}", $${(p.agreedAmount ?? p.offerAmount).toLocaleString('en-AU')}: ${data.reason.slice(0, 200)}`, `/dashboard/cars/admin`, { kind: 'CAR_DISPUTE', id: p.id });
     ok(res, purchaseCard(updated, req.user!.id));
   } catch (error) { next(error); }
@@ -1443,12 +1628,20 @@ router.post('/purchases/:id/resolve', authenticate, requireRole('ADMIN'), async 
     const { p } = await loadPurchase(req, req.params.id);
     const data = parse(z.object({ outcome: z.enum(['RELEASE', 'REFUND']), note: z.string().trim().min(5).max(2000) }), req.body);
     const to = transition(data.outcome === 'RELEASE' ? 'resolve_release' : 'resolve_refund', p, 'admin');
+    // A hold that has already ended — run out, which on the live processor is
+    // how most disputes over a lapsed hold arrive here — has nothing to
+    // capture and nothing to return. Deciding RELEASE used to skip the capture
+    // for it, mark the purchase released and tell the seller "the money has
+    // been released" when not a cent had moved; deciding REFUND told the buyer
+    // money had come back that had never left. Neither is said any more.
+    const holdOver = Boolean(p.escrow) && ['CANCELED', 'FAILED', 'REFUNDED'].includes(p.escrow!.status);
+    if (data.outcome === 'RELEASE' && holdOver) throw new ApiError(409, 'The hold on the buyer\'s card has ended, so there is no money here to release to the seller. Settle the payment with both sides, then record the outcome as a refund: nothing is taken or returned, and both are told the hold had ended.');
     if (p.escrow?.paymentIntentId) {
       if (data.outcome === 'RELEASE' && (p.escrow.status === 'PENDING' || p.escrow.status === 'AUTHORIZED')) await captureEscrowPayment(p.escrow.paymentIntentId, { id: req.user!.id, role: 'ADMIN' });
       if (data.outcome === 'REFUND' && !['CANCELED', 'REFUNDED', 'FAILED'].includes(p.escrow.status)) await cancelEscrowPayment(p.escrow.paymentIntentId, { id: req.user!.id, role: 'ADMIN' }, data.note);
     }
     const updated = await prisma.vehiclePurchase.update({ where: { id: p.id }, data: { status: to, disputeResolution: data.note, resolvedAt: new Date(), resolvedById: req.user!.id, ...(to === 'RELEASED' ? { releasedAt: new Date() } : {}) }, include: purchaseInclude });
-    const words = data.outcome === 'RELEASE' ? 'The money has been released to the seller.' : 'The money has been returned to the buyer.';
+    const words = data.outcome === 'RELEASE' ? 'The money has been released to the seller.' : holdOver ? 'Nothing was taken from the buyer\'s card: the hold on it had already ended.' : 'The money has been returned to the buyer.';
     await Promise.all([p.buyerId, p.sellerId].map((u) => note(u, 'The dispute has been decided', `${words} ${data.note.slice(0, 300)}`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_DISPUTE_RESOLVED', id: p.id })));
     // resolvedById is on the row, but the row is overwritten by whatever
     // happens to the purchase next; the audit row is the record that stays.
@@ -1996,6 +2189,14 @@ router.post('/test-drives', authenticate, requestCeiling, async (req: AuthReques
   try {
     const data = parse(z.object({ dealershipId: uuid.optional(), carModelId: uuid.optional(), listingId: uuid.optional(), preferredAt: z.string().datetime(), alternativeAt: z.string().datetime().optional(), note: z.string().trim().max(1000).optional() }), req.body);
     if (!data.dealershipId && !data.listingId) throw new ApiError(400, 'Pick a dealership, or a dealer\'s listing');
+    // The car was never looked up: an id that matched nothing reached the
+    // insert and came back as a foreign-key 500, and now that the team can
+    // retire a model, one taken out of the catalogue would have gone to the
+    // dealership as though it were still on offer.
+    if (data.carModelId) {
+      const car = await prisma.carModel.findFirst({ where: { id: data.carModelId, isActive: true }, select: { id: true } });
+      if (!car) throw new ApiError(404, 'That car is no longer in the catalogue');
+    }
     let dealershipId = data.dealershipId ?? null;
     if (data.listingId) { const l = await prisma.vehicleListing.findUnique({ where: { id: data.listingId }, select: { dealershipId: true, sellerId: true } }); if (!l) throw new ApiError(404, 'Listing not found'); if (!l.dealershipId) throw new ApiError(400, 'Private sellers arrange a look at the car by message; test drives are booked with dealerships'); dealershipId = l.dealershipId; }
     const d = await prisma.dealership.findFirst({ where: { id: dealershipId!, isActive: true, isVerified: true }, select: { id: true, name: true, ownerUserId: true, hours: true } });
@@ -2227,10 +2428,17 @@ router.get('/admin/overview', authenticate, requireRole('ADMIN'), async (_req: A
       prisma.carFinanceApplication.findMany({ where: { status: { in: ['SUBMITTED', 'IN_REVIEW'] } }, orderBy: { submittedAt: 'asc' }, take: 50, include: { user: { select: { firstName: true, lastName: true, email: true } } } }),
       prisma.vehicleInspection.findMany({ where: { status: 'REQUESTED', kind: { not: 'SELLER_PROVIDED' } }, orderBy: { createdAt: 'asc' }, take: 50, include: inspectionInclude }),
     ]);
-    const [verifiedMechanics, verifiedDealers, liveListings, openPurchases, referralRows, pendingReferrals] = await Promise.all([prisma.mechanic.count({ where: { isVerified: true, isActive: true } }), prisma.dealership.count({ where: { isVerified: true, isActive: true } }), prisma.vehicleListing.count({ where: { status: { in: ['ACTIVE', 'UNDER_OFFER'] } } }), prisma.vehiclePurchase.count({ where: { status: { in: ['PAID_HELD', 'HANDED_OVER'] } } }), prisma.carReferral.findMany({ select: { kind: true, status: true, fee: true } }), prisma.carReferral.findMany({ where: { status: { in: ['PENDING', 'CONFIRMED'] } }, orderBy: { createdAt: 'desc' }, take: 50, include: referralInclude })]);
+    const [verifiedMechanics, verifiedDealers, liveListings, openPurchases, referralRows, pendingReferrals] = await Promise.all([prisma.mechanic.count({ where: { isVerified: true, isActive: true } }), prisma.dealership.count({ where: { isVerified: true, isActive: true } }), prisma.vehicleListing.count({ where: { status: { in: ['ACTIVE', 'UNDER_OFFER'] } } }), prisma.vehiclePurchase.count({ where: { status: { in: ['PAID_HELD', 'HANDED_OVER'] } } }), prisma.carReferral.findMany({ select: ledgerRowLite }), prisma.carReferral.findMany({ where: { status: { in: ['PENDING', 'CONFIRMED'] } }, orderBy: { createdAt: 'desc' }, take: 50, include: referralInclude })]);
+    const ledger = await loadLedger();
+    // The catalogue has a queue too now: rows nobody has checked, or not for
+    // longer than the team's own recheck period, and ratings that have lapsed.
+    const [catalogueRows, checks] = await Promise.all([prisma.carModel.findMany({ where: { isActive: true }, select: { id: true, isActive: true, ancapStars: true, ancapYear: true, sourceUrl: true } }), catalogueChecks()]);
+    const now = new Date();
+    const catalogueFlagged = catalogueRows.map((c) => catalogueFlags(c, checks.get(c.id), now));
     ok(res, {
       counts: { verifiedMechanics, verifiedDealers, liveListings, openPurchases },
-      referrals: { totals: summariseReferrals(referralRows), open: pendingReferrals.map(referralCard), fees: REFERRAL_FEES },
+      catalogue: { active: catalogueRows.length, due: catalogueFlagged.filter(isDue).length, ancapLapsed: catalogueFlagged.filter((f) => f.some((x) => x.key === 'ANCAP_LAPSED')).length, recheckDays: CATALOGUE_RECHECK_DAYS },
+      referrals: { totals: summariseLedger(referralRows, ledger), open: pendingReferrals.map((r) => adminReferralCard(r, ledger)), attention: attentionFor(referralRows, ledger), fees: REFERRAL_FEES, methods: PAYMENT_METHOD_WORDS, stripeConfigured: isStripeConfigured() },
       mechanics: mechanics.map((m) => ({ ...mechanicCard(m), about: m.about, licenceNumber: m.licenceNumber, createdAt: m.createdAt })), dealerships: dealerships.map((d) => ({ ...dealershipCard(d), about: d.about, email: d.email, createdAt: d.createdAt })),
       listings: listings.map((l) => ({ ...listingCard(l, { full: true, admin: true }) })), disputes: disputes.map((p) => purchaseCard(p, '', true)),
       applications: applications.map((a) => ({ ...applicationCard(a), applicant: { name: personName(a.user), email: a.user.email } })), inspections: inspections.map((i) => inspectionCard(i)),
@@ -2258,20 +2466,24 @@ const featured = (days?: number | null) => (days === undefined ? {} : days === n
  * automotive decision is never confused with an identity one. The other admin
  * actions in this file — suspending a listing, featuring a business, closing a
  * finance enquiry, hiding a review, moving a referral through the ledger,
- * deciding a disputed purchase — have no value of their own in AuditAction and
- * go through auditCarAdmin near the top of this file, which files them the way
- * admin-audit.service files every other staff action without a verb: a neutral
- * value, with the real one in metadata.adminAction.
+ * deciding a disputed purchase — are staff changes to what members see, and go
+ * through auditCarAdmin near the top of this file under ADMIN_CONTENT_UPDATE,
+ * with the specific action in metadata.adminAction.
+ *
+ * The write is best effort, like auditCarAdmin's. It used to be awaited bare
+ * after the update had committed, so a failed audit insert answered a 500 for
+ * a verification that had in fact gone through — and the admin's obvious next
+ * move, trying again, found nothing left to change and wrote no row at all.
  */
 async function auditVerification(req: AuthRequest, entity: 'mechanic' | 'dealership', target: { id: string; name: string; ownerUserId: string | null; isVerified: boolean }): Promise<void> {
-  await logAudit({
+  await bestEffort(`admin audit verification ${entity}`, () => logAudit({
     action: target.isVerified ? 'ADMIN_VERIFICATION_APPROVE' : 'ADMIN_VERIFICATION_REJECT',
     actorUserId: req.user?.id ?? null,
     targetUserId: target.ownerUserId,
     ipAddress: req.ip ?? null,
     userAgent: req.get('user-agent') || null,
     metadata: { area: 'automotive', entity, entityId: target.id, name: target.name, isVerified: target.isVerified },
-  });
+  }));
 }
 
 router.patch('/admin/mechanics/:id', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -2372,44 +2584,459 @@ router.patch('/admin/mechanic-reviews/:id', authenticate, requireRole('ADMIN'), 
   } catch (error) { next(error); }
 });
 
+// ---------------------------------------------------------------- catalogue
+//
+// The new-car catalogue, kept by the team: every row readable here with when
+// it was last checked and what needs looking at, a form to add, correct,
+// confirm, retire and restore a car, and a CSV to export, edit in a
+// spreadsheet and import again. The rules a row has to keep — an as-at with
+// every figure change, a slug that never moves, nothing ever deleted — are in
+// catalogue-admin.service, with the reasons.
+//
+// Every change here writes its audit row in the same transaction as the
+// change, unlike auditCarAdmin's best-effort rows above. That is deliberate:
+// for a catalogue row the audit trail is not only the record of who did what,
+// it is where "last checked, and by whom" is read from, and a check that
+// changed the as-at but left no row would show the car as never checked while
+// telling members it had been. If the audit insert fails the change is
+// rolled back and the admin is told, and trying again is safe.
+
+/** A catalogue change's audit row, to be written in one transaction with the change. */
+function catalogueAuditRow(req: AuthRequest, adminAction: CarAdminAction, car: { id: string; slug: string; make: string; model: string }, detail: Record<string, unknown>): Prisma.AuditLogUncheckedCreateInput {
+  const metadata = { adminAction, area: 'automotive', resourceType: 'CarModel', resourceId: car.id, slug: car.slug, name: `${car.make} ${car.model}`, ...detail };
+  return {
+    action: CAR_ADMIN_AUDIT_ACTION,
+    actorUserId: req.user?.id ?? null,
+    targetUserId: null,
+    ipAddress: req.ip ?? null,
+    userAgent: req.get('user-agent') || null,
+    // Through JSON and back, as logAudit does, so an undefined in the detail
+    // is dropped rather than refused by the Json column.
+    metadata: JSON.parse(JSON.stringify(metadata)) as Prisma.InputJsonValue,
+  };
+}
+
+/**
+ * How many of the most recent catalogue audit rows are read to find each
+ * car's last check. A row that is not among them has had that many catalogue
+ * changes made since anyone looked at it, which in a catalogue of a few dozen
+ * cars is years of work; it is shown as due, which is what it is.
+ */
+const CATALOGUE_AUDIT_WINDOW = 5000;
+
+/** When each catalogue row was last checked, and by whom, newest audit row first. */
+async function catalogueChecks(): Promise<Map<string, CatalogueCheck>> {
+  const rows = await prisma.auditLog.findMany({
+    where: { action: CAR_ADMIN_AUDIT_ACTION, metadata: { path: ['resourceType'], equals: 'CarModel' } },
+    orderBy: { createdAt: 'desc' },
+    take: CATALOGUE_AUDIT_WINDOW,
+    select: { createdAt: true, actorUserId: true, metadata: true, actorUser: { select: { firstName: true, lastName: true, displayName: true } } },
+  });
+  return latestCatalogueChecks(rows);
+}
+
+function adminCarCard(c: CarRow, check: CatalogueCheck | undefined, now = new Date()) {
+  const flags = catalogueFlags(c, check, now);
+  return {
+    ...carCard(c, now), isActive: c.isActive, createdAt: c.createdAt, updatedAt: c.updatedAt,
+    lastCheck: check ? { at: check.at, by: check.byName, asAt: check.asAt, action: check.adminAction } : null,
+    flags, due: c.isActive && isDue(flags),
+  };
+}
+
+/** The check a write has just recorded, for the card the route answers with. */
+const checkedNow = (req: AuthRequest, adminAction: CarAdminAction, asAt: string): CatalogueCheck => ({ at: new Date(), byUserId: req.user?.id ?? null, byName: null, adminAction, asAt });
+
+/** Only the fields a change actually moves, typed as the patch they came from. */
+function pickChanged<T extends object>(patch: T, changes: Record<string, FieldChange>): Partial<T> {
+  const out: Partial<T> = {};
+  for (const key of Object.keys(changes)) if (key in patch) (out as Record<string, unknown>)[key] = (patch as Record<string, unknown>)[key];
+  return out;
+}
+
+/** Two admins adding the same slug in the same moment: the unique index decides, and the loser is told plainly. */
+const duplicateSlug = (error: unknown) => error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+
+router.get('/admin/catalogue', authenticate, requireRole('ADMIN'), async (_req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const [rows, checks] = await Promise.all([prisma.carModel.findMany({ orderBy: [{ make: 'asc' }, { model: 'asc' }, { slug: 'asc' }] }), catalogueChecks()]);
+    const now = new Date();
+    const models = rows.map((c) => adminCarCard(c, checks.get(c.id), now));
+    ok(res, {
+      models,
+      counts: { active: models.filter((m) => m.isActive).length, retired: models.filter((m) => !m.isActive).length, due: models.filter((m) => m.due).length },
+      recheckDays: CATALOGUE_RECHECK_DAYS, columns: CATALOGUE_CSV_COLUMNS,
+    });
+  } catch (error) { next(error); }
+});
+
+router.post('/admin/catalogue', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { slug: asked, isActive, ...fields } = parse(catalogueCreateSchema, req.body);
+    const problem = crossFieldProblem(fields);
+    if (problem) throw new ApiError(400, problem);
+    const slug = asked ?? catalogueSlug(fields.make, fields.model, fields.variant);
+    if (!slugSchema.safeParse(slug).success) throw new ApiError(400, 'Give this car a slug: lower-case words joined by hyphens, like toyota-corolla-hybrid');
+    const taken = await prisma.carModel.findUnique({ where: { slug }, select: { isActive: true } });
+    if (taken) throw new ApiError(409, taken.isActive ? `${slug} is already in the catalogue` : `${slug} is in the catalogue but retired; restore it rather than adding it again`);
+    const row = { id: randomUUID(), slug, ...fields, isActive: isActive ?? true };
+    const [created] = await prisma.$transaction([
+      prisma.carModel.create({ data: row }),
+      prisma.auditLog.create({ data: catalogueAuditRow(req, 'CAR_CATALOGUE_MODEL_ADDED', row, { via: 'form', asAt: fields.asAt, sourceUrl: fields.sourceUrl, figures: fields }) }),
+    ]).catch((error: unknown) => { if (duplicateSlug(error)) throw new ApiError(409, `${slug} is already in the catalogue`); throw error; });
+    ok(res, adminCarCard(created, checkedNow(req, 'CAR_CATALOGUE_MODEL_ADDED', fields.asAt)), 201);
+  } catch (error) { next(error); }
+});
+
+router.patch('/admin/catalogue/:id', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (req.body && typeof req.body === 'object' && 'slug' in req.body) throw new ApiError(400, 'A car\'s slug is the address of its page and never changes. Retire this one and add the car again if it has to move.');
+    const c = await prisma.carModel.findUnique({ where: { id: req.params.id } });
+    if (!c) throw new ApiError(404, 'That car is not in the catalogue');
+    const data = parse(cataloguePatchSchema, req.body);
+    const before = { ...fieldsOf(c), isActive: c.isActive };
+    const changes = diffCatalogue(before, data);
+    if (Object.keys(changes).length === 0) { ok(res, adminCarCard(c, (await catalogueChecks()).get(c.id))); return; }
+    const { isActive: _isActive, ...fieldPatch } = data;
+    const problem = crossFieldProblem(mergeFields(before, fieldPatch));
+    if (problem) throw new ApiError(400, problem);
+    if (changesFigures(changes) && data.asAt === undefined) throw new ApiError(400, 'This changes figures members read, so it needs the as-at line: when, and against what, they were checked.');
+    const write = pickChanged(data, changes);
+    // The as-at goes with the change even when it reads as before, so the
+    // audit row holds the line the admin confirmed with these figures.
+    if (data.asAt !== undefined) write.asAt = data.asAt;
+    const onlyActive = Object.keys(changes).length === 1 && changes.isActive !== undefined;
+    const verb: CarAdminAction = onlyActive ? (data.isActive ? 'CAR_CATALOGUE_MODEL_RESTORED' : 'CAR_CATALOGUE_MODEL_RETIRED') : 'CAR_CATALOGUE_MODEL_UPDATED';
+    const [updated] = await prisma.$transaction([
+      prisma.carModel.update({ where: { id: c.id }, data: write }),
+      prisma.auditLog.create({ data: catalogueAuditRow(req, verb, c, { via: 'form', changes, ...(data.asAt !== undefined ? { asAt: data.asAt } : {}) }) }),
+    ]);
+    ok(res, adminCarCard(updated, data.asAt !== undefined ? checkedNow(req, verb, data.asAt) : (await catalogueChecks()).get(c.id)));
+  } catch (error) { next(error); }
+});
+
+/**
+ * "I have checked this car against the maker's price list and ANCAP, and it
+ * is still right." Nothing about the car changes except, usually, the as-at;
+ * what it records is that a person looked, which is the thing a catalogue of
+ * figures goes stale without.
+ */
+router.post('/admin/catalogue/:id/checked', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const c = await prisma.carModel.findUnique({ where: { id: req.params.id } });
+    if (!c) throw new ApiError(404, 'That car is not in the catalogue');
+    const data = parse(catalogueCheckedSchema, req.body);
+    const changes = diffCatalogue({ ...fieldsOf(c), isActive: c.isActive }, { asAt: data.asAt, ...(data.sourceUrl !== undefined ? { sourceUrl: data.sourceUrl } : {}) });
+    const [updated] = await prisma.$transaction([
+      prisma.carModel.update({ where: { id: c.id }, data: { asAt: data.asAt, ...(data.sourceUrl !== undefined ? { sourceUrl: data.sourceUrl } : {}) } }),
+      prisma.auditLog.create({ data: catalogueAuditRow(req, 'CAR_CATALOGUE_MODEL_CHECKED', c, { via: 'form', asAt: data.asAt, sourceUrl: data.sourceUrl ?? c.sourceUrl, changes }) }),
+    ]);
+    ok(res, adminCarCard(updated, checkedNow(req, 'CAR_CATALOGUE_MODEL_CHECKED', data.asAt)));
+  } catch (error) { next(error); }
+});
+
+/** The whole catalogue, retired rows included, as the CSV the import reads. */
+router.get('/admin/catalogue/export', authenticate, requireRole('ADMIN'), async (_req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const rows = await prisma.carModel.findMany({ orderBy: [{ make: 'asc' }, { model: 'asc' }, { slug: 'asc' }] });
+    res.set('Content-Type', 'text/csv; charset=utf-8');
+    res.set('Content-Disposition', `attachment; filename="athena-car-catalogue-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.set('Cache-Control', 'no-store');
+    res.send(catalogueToCsv(rows));
+  } catch (error) { next(error); }
+});
+
+/**
+ * A CSV of catalogue rows: previewed first (apply false), carried out on
+ * apply. The plan is worked out again at apply time against the rows as they
+ * stand then, so an edit made between the preview and the apply is compared
+ * with, not written over blindly; and a file with any row in error changes
+ * nothing at all, because half an import is a catalogue nobody can describe.
+ */
+router.post('/admin/catalogue/import', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const data = parse(z.object({ csv: z.string().min(1, 'Choose a CSV file').max(1_000_000, 'That file is too big to be a catalogue'), apply: z.boolean().optional() }), req.body);
+    const existing = await prisma.carModel.findMany();
+    const plan = planCatalogueImport(data.csv, existing);
+    const summary = {
+      columns: plan.columns, unchanged: plan.unchanged, warnings: plan.warnings, errors: plan.errors,
+      creates: plan.creates.map((c) => ({ line: c.line, slug: c.slug, name: `${c.data.make} ${c.data.model}${c.data.variant ? ` ${c.data.variant}` : ''}`, priceFrom: c.data.priceFrom, isActive: c.data.isActive })),
+      updates: plan.updates.map((u) => ({ line: u.line, slug: u.slug, changes: u.changes })),
+    };
+    if (!data.apply) { ok(res, { applied: false, ...summary }); return; }
+    if (plan.errors.length) throw new ApiError(400, `${plan.errors.length} ${plan.errors.length === 1 ? 'row has a problem' : 'rows have problems'}, so nothing was changed. Fix ${plan.errors.length === 1 ? 'it' : 'them'} and import again.`);
+    const importId = randomUUID();
+    const byId = new Map(existing.map((r) => [r.id, r]));
+    const writes: Prisma.PrismaPromise<unknown>[] = [];
+    for (const c of plan.creates) {
+      const row = { id: randomUUID(), slug: c.slug, ...c.data };
+      writes.push(prisma.carModel.create({ data: row }), prisma.auditLog.create({ data: catalogueAuditRow(req, 'CAR_CATALOGUE_MODEL_ADDED', row, { via: 'csv', importId, line: c.line, asAt: c.data.asAt, sourceUrl: c.data.sourceUrl, figures: c.data }) }));
+    }
+    for (const u of plan.updates) {
+      const car = byId.get(u.id)!;
+      const onlyActive = Object.keys(u.changes).length === 1 && u.changes.isActive !== undefined;
+      const verb: CarAdminAction = onlyActive ? (u.patch.isActive ? 'CAR_CATALOGUE_MODEL_RESTORED' : 'CAR_CATALOGUE_MODEL_RETIRED') : 'CAR_CATALOGUE_MODEL_UPDATED';
+      writes.push(prisma.carModel.update({ where: { id: u.id }, data: u.patch }), prisma.auditLog.create({ data: catalogueAuditRow(req, verb, car, { via: 'csv', importId, line: u.line, changes: u.changes, ...(u.patch.asAt !== undefined ? { asAt: u.patch.asAt } : {}) }) }));
+    }
+    if (writes.length) await prisma.$transaction(writes).catch((error: unknown) => { if (duplicateSlug(error)) throw new ApiError(409, 'A car in this file was added by someone else while you were importing. Nothing was changed; preview it again.'); throw error; });
+    ok(res, { applied: true, importId, ...summary });
+  } catch (error) { next(error); }
+});
+
 // ---------------------------------------------------------------- referrals
+//
+// What partners owe ATHENA for introductions made here, and what they have
+// actually paid. A fee moves from PENDING to CONFIRMED when an admin has
+// checked it with the partner, and to PAID only when payments recorded
+// against it cover it; an admin can no longer choose PAID. Why, and where the
+// payments are kept, is in referral-ledger.service.
+//
+// Every write that touches money, or a status the money decides, runs under
+// serialised() with its ledger entry in the same transaction. Two admins
+// recording the same bank line in the same second would otherwise both find
+// no duplicate and both write; and a status worked out from a ledger read
+// just before somebody else's reversal would be wrong the moment it was
+// saved. Stripe is asked before the transaction and never inside it, so a slow
+// answer from Stripe does not hold a serialisable transaction open.
+
+const referralStatusEnum = z.enum(['PENDING', 'CONFIRMED', 'PAID', 'VOID']);
+
+/** What an admin is told when she tries to set PAID by hand. */
+const PAID_BY_PAYMENT = 'A fee becomes paid when the money is recorded against it. Record the payment with its bank or Stripe reference, and the fee is marked paid once the payments cover it.';
+
+/** A fee and its ledger, read fresh, as the answer to a write. */
+async function referralAnswer(id: string) {
+  const [r, ledger] = await Promise.all([prisma.carReferral.findUnique({ where: { id }, include: referralInclude }), loadLedger(prisma, id)]);
+  if (!r) throw new ApiError(404, 'Referral not found');
+  return adminReferralCard(r, ledger);
+}
 
 router.get('/admin/referrals', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const where: Prisma.CarReferralWhereInput = {};
-    if (q(req, 'status')) where.status = q(req, 'status') as never;
-    if (q(req, 'kind')) where.kind = q(req, 'kind') as never;
-    const [rows, all] = await Promise.all([prisma.carReferral.findMany({ where, orderBy: { createdAt: 'desc' }, take: 200, include: referralInclude }), prisma.carReferral.findMany({ select: { kind: true, status: true, fee: true } })]);
-    ok(res, { referrals: rows.map(referralCard), totals: summariseReferrals(all), fees: REFERRAL_FEES });
+    // Both were handed to Prisma `as never`, so a status or kind that is not
+    // one answered with a 500 from the enum rather than a 400 saying so.
+    if (q(req, 'status')) where.status = parse(referralStatusEnum, q(req, 'status'));
+    if (q(req, 'kind')) where.kind = parse(referralKindEnum, q(req, 'kind'));
+    const [rows, all, ledger] = await Promise.all([
+      prisma.carReferral.findMany({ where, orderBy: { createdAt: 'desc' }, take: 200, include: referralInclude }),
+      prisma.carReferral.findMany({ select: ledgerRowLite }),
+      loadLedger(),
+    ]);
+    ok(res, { referrals: rows.map((r) => adminReferralCard(r, ledger)), totals: summariseLedger(all, ledger), attention: attentionFor(all, ledger), fees: REFERRAL_FEES, methods: PAYMENT_METHOD_WORDS, toleranceDays: RECONCILE_TOLERANCE_DAYS, stripeConfigured: isStripeConfigured() });
   } catch (error) { next(error); }
 });
 
 /** A fee agreed with a partner outside the flows that record their own: an insurer, a warranty provider, a parts supplier. */
 router.post('/admin/referrals', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const data = parse(z.object({ kind: referralKindEnum, partner: z.string().trim().min(1).max(80), basisAmount: money, fee: money.optional(), userId: uuid.nullable().optional(), dealershipId: uuid.nullable().optional(), referenceId: z.string().trim().max(80).nullable().optional(), note: z.string().trim().max(500).nullable().optional(), status: z.enum(['PENDING', 'CONFIRMED', 'PAID']).optional() }), req.body);
+    const data = parse(z.object({ kind: referralKindEnum, partner: z.string().trim().min(1).max(80), basisAmount: money, fee: money.optional(), userId: uuid.nullable().optional(), dealershipId: uuid.nullable().optional(), referenceId: z.string().trim().max(80).nullable().optional(), note: z.string().trim().max(500).nullable().optional(), status: referralStatusEnum.optional() }), req.body);
+    if (data.status === 'PAID') throw new ApiError(400, `${PAID_BY_PAYMENT} Add the fee as confirmed, then record what was paid.`);
+    if (data.status === 'VOID') throw new ApiError(400, 'A fee is added as pending or confirmed');
     const f = referralFee(data.kind, data.basisAmount);
-    const now = new Date();
-    const r = await prisma.carReferral.create({ data: { kind: data.kind, partner: data.partner, basisAmount: Math.round(data.basisAmount), feePercent: f.percent, fee: data.fee !== undefined ? Math.round(data.fee) : f.fee, userId: data.userId ?? null, dealershipId: data.dealershipId ?? null, referenceId: data.referenceId ?? null, note: data.note ?? null, createdById: req.user!.id, status: data.status ?? 'PENDING', confirmedAt: data.status && data.status !== 'PENDING' ? now : null, paidAt: data.status === 'PAID' ? now : null }, include: referralInclude });
-    await auditCarAdmin(req, 'CAR_REFERRAL_CREATED', { resourceType: 'CarReferral', resourceId: r.id, targetUserId: r.userId, kind: r.kind, partner: r.partner, basisAmount: r.basisAmount, fee: r.fee, standardFee: f.fee, status: r.status });
-    ok(res, referralCard(r), 201);
+    const status = data.status ?? 'PENDING';
+    const id = randomUUID();
+    const row = { id, kind: data.kind, partner: data.partner, basisAmount: Math.round(data.basisAmount), feePercent: f.percent, fee: data.fee !== undefined ? Math.round(data.fee) : f.fee, userId: data.userId ?? null, dealershipId: data.dealershipId ?? null, referenceId: data.referenceId ?? null, note: data.note ?? null, createdById: req.user!.id, status, confirmedAt: status === 'CONFIRMED' ? new Date() : null };
+    const [created] = await prisma.$transaction([
+      prisma.carReferral.create({ data: row, include: referralInclude }),
+      prisma.auditLog.create({ data: referralAuditRow(req, 'CAR_REFERRAL_CREATED', row, { partner: row.partner, basisAmount: row.basisAmount, fee: row.fee, standardFee: f.fee, status }) }),
+    ]);
+    ok(res, adminReferralCard(created, await loadLedger(prisma, created.id)), 201);
   } catch (error) { next(error); }
 });
 
 router.patch('/admin/referrals/:id', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const r = await prisma.carReferral.findUnique({ where: { id: req.params.id } });
+    const data = parse(z.object({ status: referralStatusEnum.optional(), fee: money.optional(), note: z.string().trim().max(500).nullable().optional(), partner: z.string().trim().max(80).nullable().optional() }), req.body);
+    if (data.status === 'PAID') throw new ApiError(400, PAID_BY_PAYMENT);
+    const id = await serialised('automotive.referral-update', async (tx) => {
+      const r = await tx.carReferral.findUnique({ where: { id: req.params.id } });
+      if (!r) throw new ApiError(404, 'Referral not found');
+      const payments = (await loadLedger(tx, r.id)).receipts.get(r.id) ?? [];
+      const received = ledgerPosition(r.fee, payments).receivedCents;
+      if (received > 0 && (data.status === 'VOID' || data.status === 'PENDING')) {
+        throw new ApiError(409, `${dollarWords(received)} has been recorded as paid against this fee, so it cannot go back to ${data.status.toLowerCase()}. Reverse any payment recorded in error first; if the partner paid for a sale that did not happen, the money has to go back to them before the fee is voided.`);
+      }
+      const fee = data.fee !== undefined ? Math.round(data.fee) : r.fee;
+      if (received > 0 && fee <= 0) throw new ApiError(409, 'Money has been recorded against this fee, so it cannot be set to nothing. Reverse the payments first.');
+      // What the admin asked for, then what the money says. They disagree only
+      // when she asks for a status the payments rule out — confirmed, on a fee
+      // the payments already cover — and then she is told rather than
+      // quietly overruled. The one exception is restoring a void fee that
+      // money has already been recorded against: "confirmed" there means "this
+      // fee is real", and it comes back as whatever the payments make it.
+      const asked = (data.status ?? r.status) as ReferralStatus;
+      const status = statusAfterPayments(asked, fee, payments);
+      const restoring = r.status === 'VOID' && data.status === 'CONFIRMED';
+      if (data.status && status !== data.status && !restoring) throw new ApiError(409, `The payments recorded against this fee make it ${status.toLowerCase()}. Reverse a payment if one was recorded in error.`);
+      const paidOn = ledgerPosition(fee, payments).paidOn;
+      // A fee marked PAID before payments were recorded keeps the day it was
+      // marked until someone records the payment; one the payments cover takes
+      // the day the money arrived; anything else is not paid.
+      const paidAt = status !== 'PAID' ? null : liveReceipts(payments).length && paidOn ? brisbaneMidnight(paidOn) : r.paidAt;
+      const confirmedAt = status === 'CONFIRMED' || status === 'PAID' ? (r.confirmedAt ?? new Date()) : r.confirmedAt;
+      const updated = await tx.carReferral.update({ where: { id: r.id }, data: { status, fee, note: data.note, partner: data.partner, confirmedAt, paidAt } });
+      // PAID and a rewritten fee used to be the two moves that changed what
+      // ATHENA said it had been paid; the fee still is. The note's previous
+      // wording goes in the row because a PATCH replaces it whole, and on a
+      // dealer sale it is where the member's and the dealership's accounts of
+      // the sale are written down.
+      await tx.auditLog.create({ data: referralAuditRow(req, 'CAR_REFERRAL_UPDATED', r, { status: changed(r.status, updated.status), fee: changed(r.fee, updated.fee), partner: changed(r.partner, data.partner), previousNote: data.note !== undefined && data.note !== r.note ? r.note : undefined }) });
+      return r.id;
+    });
+    ok(res, await referralAnswer(id));
+  } catch (error) { next(error); }
+});
+
+/**
+ * Money received from a partner against one fee. The fee is confirmed by it
+ * if nobody had confirmed it yet, and paid once the payments cover it.
+ */
+router.post('/admin/referrals/:id/payments', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const data = parse(receiptSchema(), req.body);
+    const amountCents = toCents(data.amount);
+    const key = referenceKey(data.reference);
+    if (!(await prisma.carReferral.findUnique({ where: { id: req.params.id }, select: { id: true } }))) throw new ApiError(404, 'Referral not found');
+    const stripe = data.method === 'STRIPE' ? await checkStripePayment(data.reference) : null;
+    const paymentId = randomUUID();
+    const id = await serialised('automotive.referral-payment', async (tx) => {
+      const r = await tx.carReferral.findUnique({ where: { id: req.params.id } });
+      if (!r) throw new ApiError(404, 'Referral not found');
+      if (r.status === 'VOID') throw new ApiError(409, 'This fee is void. Set it back to confirmed before recording money against it; if the partner paid for a sale that did not happen, the money has to go back to them.');
+      if (r.fee <= 0) throw new ApiError(409, 'This fee has no amount yet, so there is nothing to pay against. Set the fee first.');
+      // The whole ledger, not just this fee's: one Stripe payment can settle
+      // several fees, and what may be recorded against it is a sum across them.
+      const ledger = await loadLedger(tx);
+      const mine = ledger.receipts.get(r.id) ?? [];
+      const twin = liveReceipts(mine).find((p) => p.referenceKey === key && p.amountCents === amountCents && p.receivedOn === data.receivedOn);
+      if (twin) throw new ApiError(409, `That payment is already recorded against this fee${twin.recordedBy.name ? ` by ${twin.recordedBy.name}` : ''} on ${twin.recordedAt.toISOString().slice(0, 10)}.`);
+      if (stripe?.checked) {
+        const problem = stripeProblem(stripe, recordedAgainst(ledger, key), amountCents);
+        if (problem) throw new ApiError(400, problem);
+      }
+      const payment: Receipt = { paymentId, referralId: r.id, amountCents, receivedOn: data.receivedOn, method: data.method, reference: data.reference, referenceKey: key, note: data.note ?? null, recordedAt: new Date(), recordedBy: { id: req.user!.id, name: null }, stripe, reversal: null, reconciliation: null };
+      const columns = referralColumnsAfter({ status: r.status as ReferralStatus, fee: r.fee, confirmedAt: r.confirmedAt }, [...mine, payment]);
+      await tx.carReferral.update({ where: { id: r.id }, data: columns });
+      await tx.auditLog.create({ data: referralAuditRow(req, LEDGER_VERBS.recorded, r, { targetUserId: null, paymentId, amountCents, receivedOn: data.receivedOn, method: data.method, reference: data.reference, note: data.note, stripe, status: changed(r.status, columns.status), confirmedByPayment: r.status === 'PENDING' ? true : undefined }) });
+      return r.id;
+    });
+    ok(res, await referralAnswer(id), 201);
+  } catch (error) { next(error); }
+});
+
+/** A payment recorded in error, taken back with a reason. Nothing on the ledger is ever deleted. */
+router.post('/admin/referrals/:id/payments/:paymentId/reverse', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const data = parse(reversalSchema, req.body);
+    const id = await serialised('automotive.referral-payment-reversal', async (tx) => {
+      const r = await tx.carReferral.findUnique({ where: { id: req.params.id } });
+      if (!r) throw new ApiError(404, 'Referral not found');
+      const mine = (await loadLedger(tx, r.id)).receipts.get(r.id) ?? [];
+      const payment = mine.find((p) => p.paymentId === req.params.paymentId);
+      if (!payment) throw new ApiError(404, 'That payment is not on this fee');
+      if (payment.reversal) throw new ApiError(409, `That payment was already reversed${payment.reversal.by.name ? ` by ${payment.reversal.by.name}` : ''} on ${payment.reversal.at.toISOString().slice(0, 10)}.`);
+      const after = mine.map((p) => (p.paymentId === payment.paymentId ? { ...p, reversal: { at: new Date(), by: { id: req.user!.id, name: null }, reason: data.reason } } : p));
+      const columns = referralColumnsAfter({ status: r.status as ReferralStatus, fee: r.fee, confirmedAt: r.confirmedAt }, after);
+      await tx.carReferral.update({ where: { id: r.id }, data: columns });
+      await tx.auditLog.create({ data: referralAuditRow(req, LEDGER_VERBS.reversed, r, { targetUserId: null, paymentId: payment.paymentId, amountCents: payment.amountCents, reference: payment.reference, reason: data.reason, wasReconciled: payment.reconciliation ? true : undefined, status: changed(r.status, columns.status) }) });
+      return r.id;
+    });
+    ok(res, await referralAnswer(id));
+  } catch (error) { next(error); }
+});
+
+/**
+ * A Stripe payment recorded while this server had no Stripe key, checked now
+ * that it has one. What Stripe says is kept with the payment; a payment Stripe
+ * disagrees with is left as it is and the admin is told why, because the
+ * right correction (reverse it, record what Stripe shows) is hers to make.
+ */
+router.post('/admin/referrals/:id/payments/:paymentId/check-stripe', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const r = await prisma.carReferral.findUnique({ where: { id: req.params.id }, select: { id: true, kind: true, userId: true } });
     if (!r) throw new ApiError(404, 'Referral not found');
-    const data = parse(z.object({ status: z.enum(['PENDING', 'CONFIRMED', 'PAID', 'VOID']).optional(), fee: money.optional(), note: z.string().trim().max(500).nullable().optional(), partner: z.string().trim().max(80).nullable().optional() }), req.body);
-    const now = new Date();
-    const updated = await prisma.carReferral.update({ where: { id: r.id }, data: { status: data.status, fee: data.fee !== undefined ? Math.round(data.fee) : undefined, note: data.note, partner: data.partner, ...(data.status === 'CONFIRMED' ? { confirmedAt: r.confirmedAt ?? now } : {}), ...(data.status === 'PAID' ? { confirmedAt: r.confirmedAt ?? now, paidAt: now } : {}) }, include: referralInclude });
-    // PAID and a rewritten fee are the two moves on the ledger that change
-    // what ATHENA says it has been paid, and until now neither said by whom.
-    // The note's previous wording goes in the row because a PATCH replaces it
-    // whole, and on a dealer sale it is where the member's and the
-    // dealership's accounts of the sale are written down.
-    await auditCarAdmin(req, 'CAR_REFERRAL_UPDATED', { resourceType: 'CarReferral', resourceId: r.id, targetUserId: r.userId, kind: r.kind, status: changed(r.status, updated.status), fee: changed(r.fee, updated.fee), partner: changed(r.partner, data.partner), previousNote: data.note !== undefined && data.note !== r.note ? r.note : undefined });
-    ok(res, referralCard(updated));
+    const first = (await loadLedger(prisma, r.id)).receipts.get(r.id)?.find((p) => p.paymentId === req.params.paymentId);
+    if (!first) throw new ApiError(404, 'That payment is not on this fee');
+    if (first.method !== 'STRIPE') throw new ApiError(400, 'Only a Stripe payment is checked with Stripe. A bank payment is matched against the bank statement.');
+    if (first.reversal) throw new ApiError(409, 'That payment has been reversed');
+    if (isReconciled(first)) throw new ApiError(409, 'That payment has already been checked with Stripe');
+    if (!isStripeConfigured()) throw new ApiError(409, 'This server still has no Stripe key, so the payment cannot be checked with Stripe yet.');
+    const check = await checkStripePayment(first.reference);
+    if (!check.checked) throw new ApiError(409, check.reason);
+    await serialised('automotive.referral-stripe-check', async (tx) => {
+      const ledger = await loadLedger(tx);
+      const payment = ledger.byPayment.get(first.paymentId);
+      if (!payment || payment.reversal || isReconciled(payment)) throw new ApiError(409, 'That payment changed while it was being checked. Reload the ledger and look again.');
+      const problem = stripeProblem(check, recordedAgainst(ledger, payment.referenceKey, payment.paymentId), payment.amountCents);
+      if (problem) throw new ApiError(409, `${problem} The payment stays recorded as it is, unchecked; reverse it and record what Stripe shows.`);
+      await tx.auditLog.create({ data: referralAuditRow(req, LEDGER_VERBS.reconciled, r, { targetUserId: null, paymentId: payment.paymentId, reconciliationId: randomUUID(), stripe: check }) });
+    });
+    ok(res, await referralAnswer(r.id));
+  } catch (error) { next(error); }
+});
+
+/** Every payment ever recorded, reversals included, as a CSV for the accountant. */
+router.get('/admin/referrals/payments/export', authenticate, requireRole('ADMIN'), async (_req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const [rows, ledger] = await Promise.all([prisma.carReferral.findMany({ select: ledgerRowLite }), loadLedger()]);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const out: ReceiptExportRow[] = [...ledger.byPayment.values()].map((p) => {
+      const r = byId.get(p.referralId);
+      return { ...p, kind: r ? REFERRAL_KIND_WORDS[r.kind as ReferralKind] : 'Fee no longer on the ledger', partner: r ? r.partner ?? r.dealership?.name ?? null : null, fee: r?.fee ?? 0, feeStatus: r?.status ?? '' };
+    });
+    res.set('Content-Type', 'text/csv; charset=utf-8');
+    res.set('Content-Disposition', `attachment; filename="athena-referral-payments-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.set('Cache-Control', 'no-store');
+    res.send(receiptsToCsv(out));
+  } catch (error) { next(error); }
+});
+
+/**
+ * A bank statement, exported from ATHENA's bank as CSV, matched against the
+ * payments recorded on the ledger. Previewed first; on apply, each match is
+ * written as a reconciliation entry on the payments it covers, with the bank
+ * line kept beside it. The plan is worked out again inside the transaction
+ * against the ledger as it stands then, and a suggestion (amount and day
+ * only, no reference) is written only if the admin ticked it.
+ */
+router.post('/admin/referrals/reconcile', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const data = parse(z.object({
+      csv: z.string().min(1, 'Choose the statement file').max(5_000_000, 'That file is too big for one statement; export a shorter period'),
+      statement: z.string().trim().max(120).optional(),
+      map: columnMapSchema.optional(),
+      apply: z.boolean().optional(),
+      accept: z.array(z.number().int().min(1)).max(2_000).optional(),
+    }), req.body);
+    const read = readStatement(data.csv, data.map ?? null);
+    const about = { header: read.header, columns: read.columns, sample: read.sample, map: read.map, skipped: read.skipped, errors: read.errors };
+    if (!read.map) { ok(res, { applied: false, needsMapping: read.errors.length === 0, ...about }); return; }
+    if (!data.apply) {
+      const plan = planReconciliation(read.lines, [...(await loadLedger()).byPayment.values()]);
+      ok(res, { applied: false, needsMapping: false, ...about, ...plan });
+      return;
+    }
+    if (read.errors.length) throw new ApiError(400, `${read.errors.length} ${read.errors.length === 1 ? 'line' : 'lines'} of the statement could not be read, so nothing was matched. Export it again, or choose the columns by hand.`);
+    const accept = new Set(data.accept ?? []);
+    const reconciliationId = randomUUID();
+    const { plan, written } = await serialised('automotive.referral-reconcile', async (tx) => {
+      const fresh = planReconciliation(read.lines, [...(await loadLedger(tx)).byPayment.values()]);
+      const chosen = [...fresh.matches.map((m) => ({ line: m, suggested: false })), ...fresh.suggestions.filter((s) => accept.has(s.line)).map((s) => ({ line: s, suggested: true }))];
+      const ids = [...new Set(chosen.flatMap((c) => c.line.receipts.map((p) => p.referralId)))];
+      const fees = new Map((ids.length ? await tx.carReferral.findMany({ where: { id: { in: ids } }, select: { id: true, kind: true, userId: true } }) : []).map((r) => [r.id, r]));
+      let count = 0;
+      for (const { line, suggested } of chosen) {
+        for (const p of line.receipts) {
+          const fee = fees.get(p.referralId);
+          if (!fee) continue;
+          await tx.auditLog.create({ data: referralAuditRow(req, LEDGER_VERBS.reconciled, fee, { targetUserId: null, paymentId: p.paymentId, reconciliationId, statement: data.statement ?? null, line: line.line, bankLine: { date: line.date, amountCents: line.amountCents, description: line.description }, suggested: suggested || undefined }) });
+          count += 1;
+        }
+      }
+      return { plan: fresh, written: count };
+    });
+    ok(res, { applied: true, reconciliationId, reconciled: written, needsMapping: false, ...about, ...plan });
   } catch (error) { next(error); }
 });
 

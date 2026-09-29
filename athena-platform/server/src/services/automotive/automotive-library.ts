@@ -10,9 +10,16 @@
  * most Australians actually buy, kept so a rating is never shown without
  * the year it was given. ANCAP ratings expire six years after the year of
  * test, and the pages say so rather than quoting an old star as current.
+ *
+ * CAR_SEEDS below is where the catalogue starts, not where it lives. The
+ * rows are created from it once and are the team's to keep from then on,
+ * through the admin catalogue page (see catalogue-admin.service); each row
+ * carries its own as-at and source, and a change to this list reaches the
+ * database only as a new model, never over one already there.
  */
 
 export const AUTOMOTIVE_AS_AT = '2025-26';
+/** The as-at the starter rows were written against, and carry until someone checks them. */
 export const CATALOGUE_AS_AT = '2025 model year, indicative list prices before on-road costs';
 
 /** ANCAP ratings carry a date stamp and lapse six years after the year of test. */
@@ -169,7 +176,14 @@ export const BUYER_PROTECTION = {
   ],
   covers: ['The car is not as described (damage, kilometres, history, a warning light that was hidden)', 'The papers do not match (VIN, registration, money owing)', 'The seller does not hand it over'],
   doesNotCover: ['Changing your mind about a car that matches its listing', 'Wear and tear consistent with the age and kilometres', 'Damage after you took delivery'],
-  note: 'A card authorisation holds funds for a limited time; where a bank will not hold for the full period ATHENA asks the buyer to re-authorise rather than releasing early.',
+  // This used to promise that where a bank would not hold the money for the
+  // full period "ATHENA asks the buyer to re-authorise rather than releasing
+  // early". Nothing asked anyone: the hold ran out about a week after payment,
+  // the release failed at the end of the period, and the seller had handed the
+  // car over against it. Every sentence below is now something the code does —
+  // see CARD_HOLD_DAYS in purchase-escrow.service and warnLapsingHolds and
+  // followEndedHolds in automotive-reminders.service.
+  note: 'A hold on a card lasts about seven days, which is shorter than the inspection period. Two days before a hold runs out, the buyer, the seller and ATHENA\'s team are all warned. If it runs out before the handover, the buyer is asked to pay once more and the seller to wait until she has. If it runs out during the inspection period, nothing is sent to the seller early and a person at ATHENA settles the payment with you both.',
 };
 
 export const FRAUD_SIGNS = [
@@ -450,11 +464,20 @@ export const CAR_SEEDS: CarSeed[] = [
   { slug: 'volvo-xc40', make: 'Volvo', model: 'XC40', variant: 'B4 Plus', year: 2025, bodyType: 'SUV', fuelType: 'PETROL', priceFrom: 55000, ancapStars: 5, ancapYear: 2018, fuelPer100: 7.3, warrantyYears: 5, warrantyKm: null, serviceIntervalMonths: 12, serviceIntervalKm: 15000, servicingCostYear: 600, safetyFeatures: COMMON_PLUS, highlights: ['Volvo\'s safety reputation in a small package', 'Mild hybrid', 'The 2018 rating has lapsed'] },
 ];
 
-/** ANCAP status for a catalogue row or a used car with a known rating year. */
+/**
+ * ANCAP status for a catalogue row or a used car with a known rating year.
+ *
+ * Zero stars is a rating, not the absence of one: ANCAP has given it, and a
+ * car that earned it must never be shown as merely "not rated". The check
+ * used to be `!stars`, which read 0 as missing; it did no harm while every
+ * row came from a list with no zero in it, and would have the moment an
+ * admin recorded one.
+ */
 export function ancapStatus(stars: number | null | undefined, year: number | null | undefined, now = new Date()): { status: 'current' | 'expired' | 'unrated'; label: string } {
-  if (!stars || !year) return { status: 'unrated', label: 'Not rated by ANCAP' };
-  if (now.getFullYear() - year >= ANCAP_VALID_YEARS) return { status: 'expired', label: `${stars} stars in ${year}, rating lapsed` };
-  return { status: 'current', label: `${stars} stars, tested ${year}` };
+  if (stars === null || stars === undefined || !year) return { status: 'unrated', label: 'Not rated by ANCAP' };
+  const starWords = `${stars} star${stars === 1 ? '' : 's'}`;
+  if (now.getFullYear() - year >= ANCAP_VALID_YEARS) return { status: 'expired', label: `${starWords} in ${year}, rating lapsed` };
+  return { status: 'current', label: `${starWords}, tested ${year}` };
 }
 
 export function bodyLabel(key: string): string { return BODY_TYPES.find((b) => b.key === key)?.label ?? key; }

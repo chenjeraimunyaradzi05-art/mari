@@ -78,6 +78,10 @@ export default function CarPage() {
                   <div><dt className="text-[11px] uppercase tracking-wide text-slate-500">Transmission</dt><dd className="text-slate-800 dark:text-slate-200">{c.transmission === 'MANUAL' ? 'Manual' : 'Automatic'}</dd></div>
                   <div><dt className="text-[11px] uppercase tracking-wide text-slate-500">ANCAP</dt><dd className="text-slate-800 dark:text-slate-200">{c.ancap.label}. <a href="https://www.ancap.com.au" target="_blank" rel="noopener noreferrer" className="text-rose-600">Check it</a></dd></div>
                 </dl>
+                {/* The as-at is in the title above. Once the team has checked a car
+                    against the maker's own page, that page is linked here, so she
+                    can see where the numbers came from rather than take them on trust. */}
+                {safeHref(c.sourceUrl) && <p className="mt-3 text-xs text-slate-500">These figures were checked against <a href={safeHref(c.sourceUrl)} target="_blank" rel="noopener noreferrer" className="font-semibold text-rose-600">the source</a>{c.asAt ? ` (${c.asAt})` : ''}.</p>}
               </Panel>
 
               <Panel icon={ShieldCheck} title="Safety, feature by feature" intro="Fitted means typically standard across the range. Check means confirm it on the grade you are looking at; it may be on a higher grade or in a pack.">

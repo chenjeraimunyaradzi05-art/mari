@@ -117,7 +117,7 @@ export function CarsMenuPanel({ onNavigate }: { onNavigate?: () => void }) {
           <div className="mt-5 border-t border-rose-300/40 pt-4 text-xs dark:border-white/10">
             <p className="inline-flex items-center gap-1.5 font-semibold text-rose-700 dark:text-rose-300"><ShieldCheck className="h-3.5 w-3.5" /> Buyer protection</p>
             <p className="mt-1 leading-5 text-slate-700 dark:text-slate-300">
-              On a pre-loved car the money is held by ATHENA for fourteen days after you have it, and released only when you say so.
+              On a pre-loved car you pay through ATHENA, and the money reaches the seller only when you release it or after fourteen days with the car.
               {' '}<Link href={CARS_HOME} onClick={onNavigate} className="underline-offset-2 hover:underline">The whole map</Link>.
             </p>
           </div>

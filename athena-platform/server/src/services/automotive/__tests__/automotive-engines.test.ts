@@ -2,7 +2,7 @@ import { describe, it, expect } from '@jest/globals';
 import { assessAffordability, assessReadiness, calculateRepayment, compareCarLoans, costOfOwnership, effectiveRate, monthlyPayment, netAnnualIncome, presentValue } from '../car-finance.service';
 import { benchmarkPrice, estimateValue, projectValue, retainedShare, upgradePath } from '../valuation.service';
 import { compareInsuranceQuotes, estimatePremium } from '../car-insurance.service';
-import { dealerSaleFee, referralFee, summariseReferrals } from '../referrals.service';
+import { dealerSaleFee, referralFee } from '../referrals.service';
 import { assessListingRisk, historyChecks, inspectionEnds, inspectionOutcome, isValidVin, maskRego, maskVin, normaliseInspectionReport, purchaseFee, purchaseTransition, withinInspection } from '../marketplace.service';
 import { bookingMinutes, markSent, nextServiceAfter, normaliseQuoteLines, priceFor, projectedOdometer, quoteTotal, shouldSend, vehicleReminders } from '../garage.service';
 import { CAR_SEEDS, SAFETY_FEATURES, SERVICE_KINDS, ancapStatus, co2ForCar } from '../automotive-library';
@@ -288,7 +288,6 @@ describe('the referral ledger, emissions and the quote comparison', () => {
     expect(referralFee('INSURANCE', 1200).fee).toBe(180);
     expect(referralFee('WARRANTY', 2000).fee).toBe(200);
     expect(referralFee('FLEET', 5000).fee).toBe(0);
-    expect(summariseReferrals([{ kind: 'FINANCE', status: 'PENDING', fee: 300 }, { kind: 'DEALER_SALE', status: 'PAID', fee: 400 }, { kind: 'PARTS', status: 'VOID', fee: 50 }])).toEqual({ pending: 300, confirmed: 0, paid: 400, byKind: { FINANCE: { count: 1, fee: 300 }, DEALER_SALE: { count: 1, fee: 400 } } });
   });
 
   it('derives tailpipe emissions from the published consumption and says when a car has none', () => {
