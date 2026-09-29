@@ -52,11 +52,13 @@ describe('registerRecurringJobs', () => {
     jest.clearAllMocks();
   });
 
+  const schedulerCall = (id: string) =>
+    scheduledTasks().upsertJobScheduler.mock.calls.find((call: any[]) => call[0] === id);
+
   it('registers the data-retention purge as a keyed scheduler on the scheduled-tasks queue', async () => {
     await registerRecurringJobs();
 
-    expect(scheduledTasks().upsertJobScheduler).toHaveBeenCalledTimes(1);
-    const [schedulerId, repeatOpts, template] = scheduledTasks().upsertJobScheduler.mock.calls[0];
+    const [schedulerId, repeatOpts, template] = schedulerCall(SCHEDULED_TASKS.DATA_RETENTION_PURGE);
 
     expect(schedulerId).toBe(SCHEDULED_TASKS.DATA_RETENTION_PURGE);
     expect(repeatOpts.pattern).toBe('0 3 * * *');
@@ -66,12 +68,45 @@ describe('registerRecurringJobs', () => {
     expect(template.opts.attempts).toBe(1);
   });
 
-  it('re-registers under the same id so repeated boots cannot stack two schedules', async () => {
+  it('runs the report-deadline sweep hourly, in the venture timezone, with the next hour as its retry', async () => {
+    await registerRecurringJobs();
+
+    const [schedulerId, repeatOpts, template] = schedulerCall(SCHEDULED_TASKS.REPORT_DEADLINE_SWEEP);
+    expect(schedulerId).toBe('report-deadline-sweep');
+    expect(repeatOpts.pattern).toBe('15 * * * *');
+    expect(repeatOpts.tz).toBe('Australia/Brisbane');
+    expect(template.data).toEqual({ task: SCHEDULED_TASKS.REPORT_DEADLINE_SWEEP });
+    expect(template.opts.attempts).toBe(1);
+  });
+
+  it('re-registers under the same ids so repeated boots cannot stack two schedules', async () => {
     await registerRecurringJobs();
     await registerRecurringJobs();
 
     const ids = scheduledTasks().upsertJobScheduler.mock.calls.map((call: any[]) => call[0]);
-    expect(new Set(ids).size).toBe(1);
+    expect(ids).toHaveLength(8);
+    expect(new Set(ids)).toEqual(
+      new Set([
+        SCHEDULED_TASKS.DATA_RETENTION_PURGE,
+        SCHEDULED_TASKS.REPORT_DEADLINE_SWEEP,
+        SCHEDULED_TASKS.HOUSING_SAFETY_CHECK_SWEEP,
+        SCHEDULED_TASKS.PRACTITIONER_RECHECK_SWEEP,
+      ])
+    );
+  });
+
+  it('no longer has an ML inference queue to report on', async () => {
+    const stats = await getAllQueueStats();
+    expect(Object.keys(stats)).not.toContain('ml-inference');
+  });
+
+  it('reports depth only for queues that have a producer, so a zero means work is keeping up', async () => {
+    // The email, push, search-indexing, data-export and analytics queues were
+    // reported at zero because nothing could put work in them, which
+    // /health/detailed read as a healthy backlog.
+    const stats = await getAllQueueStats();
+    expect(Object.keys(stats).sort()).toEqual([QUEUE_NAMES.SCHEDULED_TASKS, QUEUE_NAMES.VIDEO_PROCESSING].sort());
+    expect(Array.from(queueInstances.keys()).sort()).toEqual([QUEUE_NAMES.SCHEDULED_TASKS, QUEUE_NAMES.VIDEO_PROCESSING].sort());
   });
 
   it('reports the scheduled-tasks queue in queue stats, where a stalled purge would show', async () => {

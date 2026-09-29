@@ -38,6 +38,12 @@ jest.mock('../src/utils/opensearch', () => ({ getOpenSearchClient: () => null })
 jest.mock('../src/services/ml.service', () => ({ mlService: { healthCheck: jest.fn() } }));
 jest.mock('../src/services/feed-ml.service', () => ({ mlRankingStats: () => ({}) }));
 jest.mock('../src/services/moderation.service', () => ({ isTextModerationConfigured: () => true }));
+// The media check asks S3 whether the bucket answers. That question has its
+// own suite (launch-readiness-media.test.ts); here the bucket is reachable, so
+// a test about video fails on video and never on a HeadBucket to AWS.
+jest.mock('../src/utils/media-storage', () => ({
+  probeMediaStorage: jest.fn(async () => ({ reachable: true, detail: 'S3 bucket athena-uploads is reachable' })),
+}));
 
 // Imported after the jest.mock calls above on purpose: the router's module body
 // resolves prisma, Redis, OpenSearch and the ML client at import time, and the

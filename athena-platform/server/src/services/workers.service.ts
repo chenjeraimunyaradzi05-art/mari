@@ -1,7 +1,12 @@
 /**
  * BullMQ Workers
  * ==============
- * Background job processors for all queues.
+ * One worker per queue in utils/queue: the video pipeline for queued reels,
+ * and the scheduled tasks (the retention purge and the report-deadline
+ * sweep). The email, push, search-indexing, data-export, analytics and ML
+ * workers that used to sit beside them are gone with their queues, because
+ * nothing ever gave them a job; the header of utils/queue says why, and what
+ * adding one back involves.
  */
 
 import { Worker, Job } from 'bullmq';
@@ -11,35 +16,21 @@ import {
   QUEUE_NAMES,
   SCHEDULED_TASKS,
   VideoProcessingJob,
-  EmailJob,
-  PushNotificationJob,
-  SearchIndexingJob,
-  MLInferenceJob,
-  DataExportJob,
-  AnalyticsJob,
   ScheduledTaskJob,
   registerRecurringJobs,
 } from '../utils/queue';
 import { dataRetentionService } from '../scripts/data-retention';
-import { indexDocument, deleteDocument, isOpenSearchEnabled } from '../utils/opensearch';
-import { mlService } from './ml.service';
-import { sendEmail } from '../utils/email';
-import { resolveWorkerRedisUrl } from '../utils/worker-config';
+import { markWorkersRunning, resolveWorkerRedisUrl } from '../utils/worker-config';
 import { processVideo } from './video-pipeline.service';
-import type { NotificationType } from '@prisma/client';
-import { pushToUser } from './push.service';
-import { runDataExport } from './data-export.service';
+import { alertOverdueReports } from './content-report.service';
+import { alertOverdueSafetyChecks } from './housing-supply.service';
+import { sweepPractitionerRechecks } from './wellness/practitioner-recheck.service';
 
 const isProductionRuntime =
   process.env.NODE_ENV === 'production' ||
   process.env.VERCEL_ENV === 'production' ||
   process.env.RENDER_ENV === 'production';
 const VIDEO_PROCESSOR_URL = process.env.VIDEO_PROCESSOR_URL;
-// Optional overrides. Push and data export run in this process (see
-// push.service and data-export.service); a URL here hands the job to an
-// external service instead, for deployments that already have one.
-const PUSH_NOTIFICATION_PROVIDER_URL = process.env.PUSH_NOTIFICATION_PROVIDER_URL;
-const DATA_EXPORT_PROCESSOR_URL = process.env.DATA_EXPORT_PROCESSOR_URL;
 const WORKER_STARTUP_TIMEOUT_MS = parseInt(process.env.WORKER_STARTUP_TIMEOUT_MS || '10000', 10);
 // A full retention sweep walks every table with a cutoff and can hard-delete
 // users one transaction at a time, so it comfortably outlives BullMQ's 30s
@@ -73,14 +64,6 @@ async function postJson<T>(baseUrl: string | undefined, path: string, payload: R
 
 async function callVideoProcessor<T>(path: string, payload: Record<string, any>): Promise<T> {
   return postJson<T>(VIDEO_PROCESSOR_URL, path, payload, 'Video processor');
-}
-
-async function callPushProvider<T>(payload: Record<string, any>): Promise<T> {
-  return postJson<T>(PUSH_NOTIFICATION_PROVIDER_URL, '/send', payload, 'Push notification provider');
-}
-
-async function callDataExportProcessor<T>(payload: Record<string, any>): Promise<T> {
-  return postJson<T>(DATA_EXPORT_PROCESSOR_URL, '/export', payload, 'Data export processor');
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
@@ -125,6 +108,10 @@ export const videoWorker = new Worker<VideoProcessingJob>(
     logger.info('Processing video', { jobId: job.id, videoId });
 
     try {
+      // The same rule as videoWorkerRunsPipelineInProcess in utils/worker-config,
+      // which is what utils/video-queue asks before queueing a reel. It queues
+      // only when this branch is not taken, because nothing here applies the
+      // outputs an external transcoder sends back.
       if (!canSimulateWorker('VIDEO_PROCESSING')) {
         const result = await callVideoProcessor<{ outputs: Record<string, string> }>('/process', {
           jobId: job.id,
@@ -159,263 +146,6 @@ export const videoWorker = new Worker<VideoProcessingJob>(
 );
 
 // ===========================================
-// EMAIL WORKER
-// ===========================================
-
-export const emailWorker = new Worker<EmailJob>(
-  QUEUE_NAMES.EMAIL_NOTIFICATIONS,
-  async (job: Job<EmailJob>) => {
-    const { to, templateId, variables, type } = job.data;
-    logger.info('Sending email', { jobId: job.id, to, templateId, type });
-
-    try {
-      // Build email content from template/variables
-      // In production, use a proper template engine
-      const subject = variables?.subject || `ATHENA Notification: ${type}`;
-      const html = variables?.html || `<p>${variables?.body || 'You have a new notification from ATHENA.'}</p>`;
-      
-      const sent = await sendEmail({
-        to,
-        subject,
-        html,
-      });
-
-      if (!sent) {
-        throw new Error('Email provider did not accept the message');
-      }
-
-      logger.info('Email sent successfully', { jobId: job.id, to });
-      return { success: true, sentAt: new Date().toISOString() };
-    } catch (error: any) {
-      logger.error('Email sending failed', { jobId: job.id, to, error: error.message });
-      throw error;
-    }
-  },
-  workerOptions
-);
-
-// ===========================================
-// PUSH NOTIFICATION WORKER
-// ===========================================
-
-export const pushWorker = new Worker<PushNotificationJob>(
-  QUEUE_NAMES.PUSH_NOTIFICATIONS,
-  async (job: Job<PushNotificationJob>) => {
-    const { userId, title, body, data, deviceTokens, type } = job.data;
-    logger.info('Sending push notification', { jobId: job.id, userId });
-
-    try {
-      if (!PUSH_NOTIFICATION_PROVIDER_URL) {
-        // In process: Expo tokens through Expo, FCM tokens through Firebase.
-        const delivery = await pushToUser(userId, (type as NotificationType) ?? 'SYSTEM', {
-          title,
-          body,
-          data,
-          link: typeof data?.link === 'string' ? data.link : undefined,
-        });
-        logger.info('Push notification delivered in process', { jobId: job.id, userId, ...delivery });
-        return { success: true, sentAt: new Date().toISOString(), ...delivery };
-      }
-
-      {
-        const result = await callPushProvider<{
-          sentCount?: number;
-          failureCount?: number;
-          providerMessageId?: string;
-        }>({
-          jobId: job.id,
-          userId,
-          title,
-          body,
-          data,
-          deviceTokens,
-        });
-
-        logger.info('Push notification sent by provider', {
-          jobId: job.id,
-          userId,
-          sentCount: result.sentCount,
-          failureCount: result.failureCount,
-        });
-        return { success: true, sentAt: new Date().toISOString(), ...result };
-      }
-    } catch (error: any) {
-      logger.error('Push notification failed', { jobId: job.id, userId, error: error.message });
-      throw error;
-    }
-  },
-  workerOptions
-);
-
-// ===========================================
-// SEARCH INDEXING WORKER
-// ===========================================
-
-export const searchIndexingWorker = new Worker<SearchIndexingJob>(
-  QUEUE_NAMES.SEARCH_INDEXING,
-  async (job: Job<SearchIndexingJob>) => {
-    const { operation, indexName, documentId, document } = job.data;
-    logger.debug('Search indexing job', { jobId: job.id, operation, indexName, documentId });
-
-    try {
-      if (!isOpenSearchEnabled()) {
-        logger.debug('Search indexing skipped because OpenSearch is disabled', {
-          jobId: job.id,
-          operation,
-          indexName,
-          documentId,
-        });
-        return { success: true, skipped: true, reason: 'opensearch_disabled', operation, documentId };
-      }
-
-      let indexed = false;
-      switch (operation) {
-        case 'index':
-        case 'update':
-          if (document) {
-            indexed = await indexDocument(indexName, documentId, document);
-          }
-          break;
-        case 'delete':
-          indexed = await deleteDocument(indexName, documentId);
-          break;
-      }
-
-      if (!indexed) {
-        throw new Error('OpenSearch is enabled but the document was not indexed');
-      }
-
-      return { success: true, operation, documentId };
-    } catch (error: any) {
-      logger.error('Search indexing failed', { jobId: job.id, operation, documentId, error: error.message });
-      throw error;
-    }
-  },
-  { ...workerOptions, concurrency: 10 } // Higher concurrency for fast operations
-);
-
-// ===========================================
-// ML INFERENCE WORKER
-// ===========================================
-
-export const mlInferenceWorker = new Worker<MLInferenceJob>(
-  QUEUE_NAMES.ML_INFERENCE,
-  async (job: Job<MLInferenceJob>) => {
-    const { algorithm, userId, input, callbackUrl } = job.data;
-    logger.info('ML inference job', { jobId: job.id, algorithm, userId });
-
-    try {
-      let result: any;
-      // Cast input as any since the full profile is expected in job.data.input
-      const profileInput = { user_id: userId, ...input } as any;
-
-      switch (algorithm) {
-        case 'career_compass':
-          result = await mlService.predictCareerGrowth(profileInput);
-          break;
-        case 'safety_score':
-          result = await mlService.calculateSafetyScore(profileInput);
-          break;
-        case 'mentor_match':
-          result = await mlService.findMentorMatches(profileInput);
-          break;
-        default:
-          throw new Error(`Unknown algorithm: ${algorithm}`);
-      }
-
-      // If callback URL provided, POST result
-      if (callbackUrl) {
-        await fetch(callbackUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ jobId: job.id, result }),
-        });
-      }
-
-      logger.info('ML inference completed', { jobId: job.id, algorithm });
-      return { success: true, result };
-    } catch (error: any) {
-      logger.error('ML inference failed', { jobId: job.id, algorithm, error: error.message });
-      throw error;
-    }
-  },
-  { ...workerOptions, concurrency: 3 }
-);
-
-// ===========================================
-// DATA EXPORT WORKER
-// ===========================================
-
-export const dataExportWorker = new Worker<DataExportJob>(
-  QUEUE_NAMES.DATA_EXPORT,
-  async (job: Job<DataExportJob>) => {
-    const { userId, exportType, format, dsarId } = job.data;
-    logger.info('Data export job', { jobId: job.id, userId, exportType });
-
-    try {
-      await job.updateProgress(10);
-
-      if (!DATA_EXPORT_PROCESSOR_URL) {
-        // In process: the same export the API route produces, minting a
-        // single-use download path the member fetches from the privacy centre.
-        const result = await runDataExport({ userId, dsarId, exportType, format });
-        await job.updateProgress(100);
-        logger.info('Data export completed in process', { jobId: job.id, userId, requestId: result.requestId });
-        return { success: true, requestId: result.requestId, exportUrl: result.exportUrl, expiresAt: result.expiresAt.toISOString() };
-      }
-
-      {
-        const result = await callDataExportProcessor<{ exportUrl: string; expiresAt?: string }>({
-          jobId: job.id,
-          userId,
-          exportType,
-          format,
-        });
-
-        if (!result.exportUrl) {
-          throw new Error('Data export processor completed without an exportUrl');
-        }
-
-        await job.updateProgress(100);
-        logger.info('Data export completed by processor', { jobId: job.id, userId, exportUrl: result.exportUrl });
-        return { success: true, exportUrl: result.exportUrl, expiresAt: result.expiresAt };
-      }
-    } catch (error: any) {
-      logger.error('Data export failed', { jobId: job.id, userId, error: error.message });
-      throw error;
-    }
-  },
-  { ...workerOptions, concurrency: 2 }
-);
-
-// ===========================================
-// ANALYTICS WORKER
-// ===========================================
-
-export const analyticsWorker = new Worker<AnalyticsJob>(
-  QUEUE_NAMES.ANALYTICS,
-  async (job: Job<AnalyticsJob>) => {
-    const { eventType, userId } = job.data;
-
-    // There is no analytics store behind this queue: no table, no provider,
-    // nothing that keeps a product event. The body used to say "in
-    // production, this would send to analytics service" and log at debug,
-    // which read as a pipeline waiting for a key when it is a pipeline with
-    // no end. The one producer today is the data-retention job asking for
-    // analytics events past their retention period to be purged, and with no
-    // store there is nothing to purge. So the job is acknowledged, the log
-    // says in so many words that nothing was recorded, and the result says
-    // the same to anyone reading the job back.
-    logger.info('Analytics job received; this platform has no analytics store, so nothing was recorded', {
-      eventType,
-      hasUser: Boolean(userId),
-    });
-    return { success: true, recorded: false };
-  },
-  { ...workerOptions, concurrency: 20 } // High concurrency for analytics
-);
-
-// ===========================================
 // SCHEDULED TASKS WORKER
 // ===========================================
 
@@ -446,6 +176,31 @@ export const scheduledTasksWorker = new Worker<ScheduledTaskJob>(
 
         return { success: summary.errors.length === 0, totalPurged: summary.totalPurged };
       }
+      case SCHEDULED_TASKS.REPORT_DEADLINE_SWEEP: {
+        // Reports past the review deadline promised to the person who filed
+        // them. alertOverdueReports never throws on a failed send; the count
+        // it returns is the truth either way, so it is logged at info even
+        // when nothing is late, as the record that the sweep ran.
+        const { overdue, alerted } = await alertOverdueReports();
+        logger.info('Report deadline sweep finished', { jobId: job.id, overdue, alerted });
+        return { success: true, overdue, alerted };
+      }
+      case SCHEDULED_TASKS.HOUSING_SAFETY_CHECK_SWEEP: {
+        // DV-safe listings whose safety check was asked for and is still not
+        // done. Like the report sweep it never throws on a failed send, and
+        // the counts are logged at info as the record that it ran.
+        const { waiting, overdue, notified } = await alertOverdueSafetyChecks();
+        logger.info('Housing safety-check sweep finished', { jobId: job.id, waiting, overdue, notified });
+        return { success: true, waiting, overdue, notified };
+      }
+      case SCHEDULED_TASKS.PRACTITIONER_RECHECK_SWEEP: {
+        // Practitioner verifications a year on: the admins hear who is due,
+        // and a lapsed listing comes out of the directory. Never throws; a
+        // failure is logged and shown on the operations screen by the service.
+        const result = await sweepPractitionerRechecks();
+        logger.info('Practitioner re-check sweep finished', { jobId: job.id, ...result });
+        return { success: true, ...result };
+      }
       default:
         // Unreachable while ScheduledTaskName is exhaustive, but a job left in
         // Redis by an older deploy can carry a task this build never knew.
@@ -455,7 +210,9 @@ export const scheduledTasksWorker = new Worker<ScheduledTaskJob>(
   {
     ...workerOptions,
     // Retention work is serialised: two overlapping sweeps would race on the
-    // same hard-delete transactions for no throughput gain.
+    // same hard-delete transactions for no throughput gain. The cost is that
+    // the hourly report-deadline sweep waits behind a long overnight purge;
+    // it runs as soon as the purge finishes, reading the clock then.
     concurrency: 1,
     lockDuration: SCHEDULED_TASK_LOCK_MS,
   }
@@ -465,16 +222,7 @@ export const scheduledTasksWorker = new Worker<ScheduledTaskJob>(
 // WORKER EVENT HANDLERS
 // ===========================================
 
-const workers = [
-  videoWorker,
-  emailWorker,
-  pushWorker,
-  searchIndexingWorker,
-  mlInferenceWorker,
-  dataExportWorker,
-  analyticsWorker,
-  scheduledTasksWorker,
-];
+const workers = [videoWorker, scheduledTasksWorker];
 
 workers.forEach((worker) => {
   worker.on('completed', (job) => {
@@ -489,10 +237,6 @@ workers.forEach((worker) => {
     logger.error('Worker error', { queue: worker.name, error: err.message });
   });
 });
-
-// ===========================================
-// HELPERS
-// ===========================================
 
 // ===========================================
 // WORKER LIFECYCLE
@@ -519,6 +263,10 @@ export async function startAllWorkers(): Promise<void> {
   // replicas, so every instance calling this still yields one schedule.
   await registerRecurringJobs();
 
+  // From here a new reel may go on the video queue (utils/video-queue); before
+  // it, and in any process where this never ran, reels are processed in memory.
+  markWorkersRunning(true);
+
   logger.info(`All ${workers.length} workers started successfully`);
 }
 
@@ -527,6 +275,9 @@ export async function startAllWorkers(): Promise<void> {
  */
 export async function stopAllWorkers(): Promise<void> {
   logger.info('Stopping all workers...');
+  // First, so an upload that lands during shutdown is processed in memory
+  // rather than queued behind workers that are closing.
+  markWorkersRunning(false);
   await Promise.all(workers.map((w) => w.close()));
   await redisConnection.quit();
   logger.info('All workers stopped');

@@ -36,13 +36,24 @@ export function validateLaunchReadinessDocs(): LaunchReadinessDocValidationResul
   });
 
   // Push and data export must run in process, so a production queue never
-  // waits on a service that was never built.
+  // waits on a service that was never built. Their queues are gone: push is
+  // sent by notification.service as the notification is written, and an export
+  // is built by the GDPR route when the member asks for it.
   const workersServiceFile = path.join(root, 'src', 'services', 'workers.service.ts');
   const workersServiceContent = fs.existsSync(workersServiceFile) ? fs.readFileSync(workersServiceFile, 'utf8') : '';
+  const notificationServiceFile = path.join(root, 'src', 'services', 'notification.service.ts');
+  const notificationServiceContent = fs.existsSync(notificationServiceFile)
+    ? fs.readFileSync(notificationServiceFile, 'utf8')
+    : '';
+  const gdprRoutesFile = path.join(root, 'src', 'routes', 'gdpr.routes.ts');
+  const gdprRoutesContent = fs.existsSync(gdprRoutesFile) ? fs.readFileSync(gdprRoutesFile, 'utf8') : '';
   checks.push({
     name: 'in-process-push-and-export',
-    ok: workersServiceContent.includes('pushToUser(') && workersServiceContent.includes('runDataExport('),
-    details: 'Push and data export workers should deliver in process rather than require external processors',
+    ok:
+      notificationServiceContent.includes('pushToUser(') &&
+      gdprRoutesContent.includes('processExportRequest(') &&
+      !/PUSH_NOTIFICATION_PROVIDER_URL|PUSH_PROCESSOR_URL|DATA_EXPORT_PROCESSOR_URL/.test(workersServiceContent),
+    details: 'Push and data export should be delivered in process rather than handed to external processors',
   });
 
   const workerEntryContent = fs.existsSync(workerEntryFile) ? fs.readFileSync(workerEntryFile, 'utf8') : '';

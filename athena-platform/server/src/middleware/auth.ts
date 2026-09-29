@@ -29,21 +29,51 @@ interface JwtPayload {
 /**
  * Said to a suspended or banned principal on every surface, so the account
  * state is never inferable from the wording and moderation detail never leaks.
+ *
+ * It used to end "Contact support if you believe this is a mistake", which
+ * pointed at a support route a suspended member cannot reach: the help desk
+ * sits behind the same sign-in that has just refused her. The sign-in page is
+ * where the working appeal is (POST /api/auth/suspension-appeal), on the web
+ * and in the app. Keep the word "suspended": both sign-in screens look for it
+ * to open the appeal.
  */
 export const SUSPENDED_ACCOUNT_MESSAGE =
-  'This account has been suspended. Contact support if you believe this is a mistake.';
+  'This account has been suspended. If you believe this is a mistake, you can appeal from the sign-in page.';
 
 /**
- * What a staff member without a second factor may still reach: the routes
- * that enrol one, and the ones that read or end their own session. Every
- * other authenticated route is refused until the factor is enrolled, whether
- * it checks the role through the role middleware or inline. The client reads
- * the refusal's code and opens the security settings.
+ * What a staff member without a second factor may still reach: enrolling one,
+ * reading who she is, and keeping or ending her session. Every other authenticated route is
+ * refused until the factor is enrolled, whether it checks the role through
+ * the role middleware or inline. The client reads the refusal's code and
+ * opens the security settings.
+ *
+ * This used to be every path under /api/auth/, which waved an unenrolled
+ * staff account through all of the auth router — changing the password,
+ * listing and revoking sessions, resending verification — and would have
+ * waved it through anything added under that prefix later. It is an exact
+ * list of method and path now, so a new route is refused until someone
+ * decides it belongs here.
  */
-const TWO_FACTOR_ENROLMENT_PREFIX = '/api/auth/';
+const TWO_FACTOR_ENROLMENT_ROUTES: ReadonlySet<string> = new Set([
+  // The security page reads where she is, starts enrolment and confirms it.
+  'GET /api/auth/2fa/status',
+  'POST /api/auth/2fa/setup',
+  'POST /api/auth/2fa/enable',
+  // Who she is, so the app can draw the page that asks her to enrol.
+  'GET /api/auth/me',
+  // Keeping the session alive while she enrols, and ending it.
+  'POST /api/auth/refresh',
+  'POST /api/auth/logout',
+  'POST /api/auth/logout-all',
+]);
 
-export function isTwoFactorEnrolmentPath(path: string): boolean {
-  return path.startsWith(TWO_FACTOR_ENROLMENT_PREFIX);
+/**
+ * `path` is the request path without its query string. A trailing slash is
+ * not a different route to Express, so it is not a different entry here.
+ */
+export function isTwoFactorEnrolmentPath(method: string, path: string): boolean {
+  const normalised = path.length > 1 ? path.replace(/\/+$/, '') : path;
+  return TWO_FACTOR_ENROLMENT_ROUTES.has(`${method.toUpperCase()} ${normalised}`);
 }
 
 async function resolveAuthenticatedUser(token: string) {
@@ -62,6 +92,7 @@ async function resolveAuthenticatedUser(token: string) {
       role: true,
       persona: true,
       isSuspended: true,
+      bannedAt: true,
       twoFactorEnabled: true,
     },
   });
@@ -70,7 +101,13 @@ async function resolveAuthenticatedUser(token: string) {
     throw UnauthorizedError('User not found');
   }
 
-  return { user, sessionId: session.id };
+  // A ban is recorded in its own column now (bannedAt, with who and why), and
+  // nothing says every path that bans will also set isSuspended. Either one
+  // closes the account here, so a ban never depends on a second write having
+  // happened. The wording stays the suspended one: the account's state is not
+  // for the refusal to tell.
+  const { bannedAt, ...principal } = user;
+  return { user: { ...principal, isSuspended: user.isSuspended || Boolean(bannedAt) }, sessionId: session.id };
 }
 
 /**
@@ -134,7 +171,7 @@ export const authenticate = async (
     // middlewares refuse without one, but forty-odd routes check the role
     // inline, so the refusal has to happen here, before any handler runs.
     const refusal = staffTwoFactorRefusal(req.user);
-    if (refusal && !isTwoFactorEnrolmentPath(req.originalUrl.split('?')[0])) {
+    if (refusal && !isTwoFactorEnrolmentPath(req.method, req.originalUrl.split('?')[0])) {
       return res.status(403).json(refusal);
     }
 
@@ -206,9 +243,30 @@ export const requireRole = (...roles: string[]) => {
   };
 };
 
+/**
+ * A signed-in member refused for her plan.
+ *
+ * Both plan gates below used to refuse with 401 through UnauthorizedError. A
+ * 401 is what the web app's axios interceptor reads as an expired session, so
+ * every paywall refusal rotated her refresh token and retried before it gave
+ * up and showed the error. Being on the wrong plan is a 403, and it carries a
+ * code the client can recognise without parsing the sentence, the same one
+ * the AI router's own gate answers with.
+ */
+function refuseForPlan(res: Response, message: string) {
+  return res.status(403).json({ success: false, code: 'PREMIUM_REQUIRED', message });
+}
+
+const hasLiveSubscription = (status: string) => status === 'ACTIVE' || status === 'TRIALING';
+
+/**
+ * A paid tier on a subscription that is ACTIVE or TRIALING. The AI router
+ * applies the same rule through its own requireAiPremium, which also tells a
+ * lapsed member which state her subscription is in.
+ */
 export const requirePremium = async (
   req: AuthRequest,
-  _res: Response,
+  res: Response,
   next: NextFunction
 ) => {
   try {
@@ -218,14 +276,15 @@ export const requirePremium = async (
 
     const subscription = await prisma.subscription.findUnique({
       where: { userId: req.user.id },
+      select: { tier: true, status: true },
     });
 
     if (!subscription || subscription.tier === 'FREE') {
-      throw UnauthorizedError('Premium subscription required');
+      return refuseForPlan(res, 'Premium subscription required');
     }
 
-    if (subscription.status !== 'ACTIVE' && subscription.status !== 'TRIALING') {
-      throw UnauthorizedError('Active subscription required');
+    if (!hasLiveSubscription(subscription.status)) {
+      return refuseForPlan(res, 'Active subscription required');
     }
 
     next();
@@ -235,7 +294,7 @@ export const requirePremium = async (
 };
 
 export const requireSubscriptionTier = (...tiers: string[]) => {
-  return async (req: AuthRequest, _res: Response, next: NextFunction) => {
+  return async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       if (!req.user) {
         throw UnauthorizedError('Authentication required');
@@ -247,18 +306,15 @@ export const requireSubscriptionTier = (...tiers: string[]) => {
 
       const subscription = await prisma.subscription.findUnique({
         where: { userId: req.user.id },
+        select: { tier: true, status: true },
       });
 
-      if (!subscription) {
-        throw UnauthorizedError('Active subscription required');
-      }
-
-      if (subscription.status !== 'ACTIVE' && subscription.status !== 'TRIALING') {
-        throw UnauthorizedError('Active subscription required');
+      if (!subscription || !hasLiveSubscription(subscription.status)) {
+        return refuseForPlan(res, 'Active subscription required');
       }
 
       if (tiers.length > 0 && !tiers.includes(subscription.tier)) {
-        throw UnauthorizedError('Subscription tier upgrade required');
+        return refuseForPlan(res, 'Subscription tier upgrade required');
       }
 
       next();

@@ -64,6 +64,19 @@ process.on('unhandledRejection', (reason) => {
 });
 
 async function bootstrap() {
+  // Sentry before index.ts, not after. Its tracing attaches to express and
+  // http as they are first required, and index.ts requires both on its first
+  // line, so an init from inside startServer (where it used to be the only
+  // one) reported errors but never traced a request. Loaded here rather than
+  // imported at the top so that a failure in it is caught below like any
+  // other, and a missing DSN is the ordinary "skipping" line.
+  try {
+    const { initSentry } = await import('./utils/sentry');
+    initSentry('before-app');
+  } catch (sentryErr) {
+    console.error('[ATHENA] Sentry could not be started before the app loaded:', sentryErr);
+  }
+
   try {
     console.log('[ATHENA] Loading index module...');
     const indexModule = await import('./index');

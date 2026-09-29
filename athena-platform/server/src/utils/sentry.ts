@@ -1,33 +1,52 @@
 import * as Sentry from '@sentry/node';
 import { logger } from './logger';
 
+let skipLogged = false;
+
 /**
- * Initialize Sentry error tracking for production
+ * Initialize Sentry error tracking for production. Returns whether Sentry is
+ * running once it has been called.
+ *
+ * Called twice on a normal boot, and safe to call again. start.ts calls it
+ * before it loads index.ts, because Sentry's tracing attaches to express and
+ * http as they are first required, and index.ts requires both on its first
+ * line: initialised from startServer, as it used to be, errors were reported
+ * (errorHandler sends them) but no request was ever traced. startServer calls
+ * it again after the secrets manager has been read ('after-secrets'), for a
+ * deployment whose DSN only arrives from there; that late start still reports
+ * errors, and says that tracing will not attach.
  */
-export function initSentry(): void {
+export function initSentry(phase: 'before-app' | 'after-secrets' = 'before-app'): boolean {
+  if (Sentry.getClient()) return true;
+
   const dsn = process.env.SENTRY_DSN;
-  
+
   if (!dsn || process.env.NODE_ENV !== 'production') {
-    logger.info('Sentry: Skipping initialization (not in production or DSN not set)');
-    return;
+    if (!skipLogged) {
+      skipLogged = true;
+      logger.info('Sentry: Skipping initialization (not in production or DSN not set)');
+    }
+    return false;
   }
 
   Sentry.init({
     dsn,
     environment: process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV,
     release: process.env.npm_package_version || '1.0.0',
-    
+
     // Performance Monitoring
     tracesSampleRate: 0.1, // 10% of transactions
-    
+
     // Set sampling rate for profiling
     profilesSampleRate: 0.1,
-    
-    // Capture unhandled promise rejections
-    integrations: [
-      Sentry.captureConsoleIntegration({ levels: ['error', 'warn'] }),
-    ],
-    
+
+    // There used to be a captureConsoleIntegration here. The server logs
+    // through winston, which writes to the stream and not through console,
+    // so it heard nothing it was meant to; the one thing it would have picked
+    // up is a stray console.warn, and a warning line can carry a member's
+    // details to a third party. Failures reach Sentry from errorHandler and
+    // the process-level handlers instead.
+
     // Filter out sensitive data
     beforeSend(event) {
       // Don't send events in development
@@ -53,7 +72,14 @@ export function initSentry(): void {
     ],
   });
 
-  logger.info('Sentry: Initialized successfully');
+  if (phase === 'after-secrets') {
+    logger.warn(
+      'Sentry: started after the app was loaded, because its DSN came from the secrets manager. Errors are reported; requests are not traced. Set SENTRY_DSN in the environment to trace them.'
+    );
+  } else {
+    logger.info('Sentry: Initialized successfully');
+  }
+  return true;
 }
 
 /**

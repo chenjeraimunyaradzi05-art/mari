@@ -14,7 +14,8 @@ dotenv.config();
 import { validateEnvironmentOrExit } from './utils/env';
 import { loadSecretsIfConfigured } from './utils/secrets';
 
-// Initialize Sentry import (initialization will run after secrets loaded)
+// Sentry is started by start.ts before this module loads (see initSentry), and
+// again from startServer for a DSN that only the secrets manager holds.
 import { initSentry, Sentry } from './utils/sentry';
 
 import { prisma, connectWithRetry } from './utils/prisma';
@@ -37,6 +38,7 @@ import closeFriendRoutes from './routes/close-friends.routes';
 import postInsightsRoutes from './routes/post-insights.routes';
 import storyHighlightRoutes from './routes/story-highlights.routes';
 import { startScheduledPostPublisher } from './services/scheduled-posts.service';
+import { resumeStrandedVideos } from './workers/stranded-videos';
 import organizationRoutes from './routes/organization.routes';
 import courseRoutes from './routes/course.routes';
 import mentorRoutes from './routes/mentor.routes';
@@ -69,6 +71,9 @@ import searchRoutes from './routes/search.routes';
 import engagementRoutes from './routes/engagement.routes';
 import formationRoutes from './routes/formation.routes';
 import eventRoutes from './routes/event.routes';
+// Separate from the default import above: scripts/check-api-contract.js reads
+// the `import xRoutes from './routes/...'` lines to find the mounted routers.
+import { startEventReminderSweeper } from './routes/event.routes';
 import groupRoutes from './routes/group.routes';
 import statusRoutes from './routes/status.routes';
 import webhookRoutes from './routes/webhook.routes';
@@ -121,7 +126,7 @@ import { startWellnessCatalogue } from './services/wellness/wellness-catalogue';
 import complianceRoutes from './routes/compliance.routes';
 
 // Import middleware
-import { ApiError, errorHandler } from './middleware/errorHandler';
+import { ApiError, errorHandler, normalizeErrorBodies } from './middleware/errorHandler';
 import { requestIdMiddleware } from './middleware/requestId';
 import { responseTimeMiddleware } from './middleware/responseTime';
 import { localeMiddleware } from './middleware/locale';
@@ -206,8 +211,10 @@ async function initializeSearchIfConfigured(): Promise<void> {
 // INITIALIZE SERVICES
 // ===========================================
 
-// Note: OpenSearch sync is handled via Prisma middleware extension
-// See: prisma client extensions or use queueSearchIndexing in services
+// OpenSearch is kept in step by the code that changes a record: the post and
+// user routes and services/search.service call indexDocument directly. This
+// comment used to point at a Prisma extension that was never written and at a
+// search-indexing queue that nothing ever fed, which is gone (see utils/queue).
 
 function logCorsRejection(origin: string | undefined) {
   logger.warn('CORS rejected origin', { origin, allowedOrigins: getAllowedOrigins() });
@@ -291,6 +298,13 @@ app.use(helmet({
 
 // Request correlation ID
 app.use(requestIdMiddleware);
+
+// Every error body carries its reason under both `message` and `error`. About
+// a hundred routes answer a refusal inline as `{ error }` and the client
+// screens that read `.data.message` showed a blank or a generic line for
+// every one of them. It wraps res.json, so it has to be mounted before any
+// router can call it; see normalizeErrorBodies in middleware/errorHandler.
+app.use(normalizeErrorBodies);
 
 // Response time tracking + Prometheus metrics
 app.use(responseTimeMiddleware);
@@ -789,6 +803,10 @@ export { app, httpServer };
  * Also called directly when this file is the entry point (require.main === module).
  */
 export async function startServer() {
+  // Reels uploaded before this moment belong to a previous process; see the
+  // stranded-reel sweep in the listen callback below.
+  const processStartedAt = new Date();
+
   // The boot banner was two console.log lines, so the first thing the server
   // ever said was the only thing it said outside the logger: no timestamp, no
   // level, and no JSON in production, where every other line is searchable.
@@ -820,8 +838,11 @@ export async function startServer() {
 
   validateEnvironmentOrExit();
 
-  // Initialize Sentry now that secrets/DSN may be available
-  initSentry();
+  // start.ts has already started Sentry before this file was loaded, which is
+  // what lets its tracing attach to express. This second call starts it only
+  // for a deployment whose DSN arrived from the secrets manager just now, and
+  // does nothing otherwise.
+  initSentry('after-secrets');
 
   // Whether the media bucket answers. Not awaited and never throws: S3 being
   // briefly unreachable is not a reason to keep the API down, and what an
@@ -881,6 +902,21 @@ export async function startServer() {
     if (process.env.NODE_ENV === 'production' && !process.env.REDIS_URL) {
       logger.error('REDIS_URL is not set: rate limits and scheduled-sweep locks are per instance on this deployment');
     }
+    // Realtime is one instance wide whatever REDIS_URL says. Socket.IO has no
+    // Redis adapter here, so a room only reaches the sockets held by the
+    // process that emits to it: on a second instance a message, a presence
+    // change or a notification reaches only the members connected to the
+    // same machine as the sender, and nothing fails to say so. render.yaml
+    // and fly.toml hold the API to one instance; this line is for whoever
+    // changes that before the adapter (@socket.io/redis-adapter) is wired.
+    // A warning, not an error: on the one-instance deployment this is the
+    // expected state, and an error line on every boot would train whoever
+    // reads the alerts to ignore error lines.
+    if (process.env.NODE_ENV === 'production') {
+      logger.warn(
+        'Socket.IO has no Redis adapter: this API must run as exactly one instance, or realtime messages, presence and notifications split between instances'
+      );
+    }
     startMessageExpirySweeper();
     // Grant applications left in draft: a nudge a week out and the day before.
     startGrantReminderSweeper();
@@ -896,6 +932,15 @@ export async function startServer() {
     startCarCatalogue();
     // Scheduled posts: publish what has come due, once a minute.
     startScheduledPostPublisher();
+    // Events: the day-before reminder to everyone who said she is going. The
+    // sweeper was exported and nothing called it, so no reminder ever went.
+    startEventReminderSweeper();
+    // Reels the last process was still transcoding when it stopped. Without
+    // this they stayed on "processing" for good; see workers/stranded-videos.
+    // After startBackgroundWorkersIfEnabled, so a reel goes on the queue when
+    // the workers are up here, and after listen, so a slow database cannot
+    // hold the port closed.
+    void bestEffort('video.resume-stranded', () => resumeStrandedVideos(processStartedAt));
   });
 
   // ===========================================

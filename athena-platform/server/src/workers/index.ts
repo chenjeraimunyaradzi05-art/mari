@@ -7,10 +7,16 @@
  * in a dedicated container. This allows scaling workers
  * independently from the main API server.
  *
- * This process also owns the recurring schedule: startAllWorkers() upserts the
- * BullMQ job schedulers (see registerRecurringJobs in utils/queue), so the
- * nightly data-retention purge runs wherever this container runs. The upsert is
- * keyed, so scaling this container to N replicas still yields one schedule.
+ * What it runs, in full: reels queued for the video pipeline, and the
+ * scheduled tasks (the nightly retention purge and the hourly report-deadline
+ * sweep). startAllWorkers() also upserts the BullMQ job schedulers (see
+ * registerRecurringJobs in utils/queue), so those run wherever this container
+ * runs; the upsert is keyed, so N replicas still yield one schedule.
+ *
+ * A reel is only queued by an API process whose own workers are running (see
+ * utils/video-queue), so an API with ENABLE_WORKERS off keeps processing its
+ * uploads in memory even while this container is up; the queue is not a way
+ * to move transcoding off the API box.
  */
 
 import dotenv from 'dotenv';

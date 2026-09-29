@@ -1,10 +1,34 @@
 /**
  * BullMQ Job Queue Configuration
  * ===============================
- * Background job processing for heavy tasks.
+ * The two kinds of background work this platform actually has:
+ *
+ *   - video-processing: a newly uploaded reel, when the BullMQ workers are
+ *     running in the process that received it (utils/video-queue decides;
+ *     otherwise the reel is processed in memory by video-pipeline.service).
+ *     Redis holding the job is what lets a reel survive a restart.
+ *   - scheduled-tasks: the nightly retention purge and the hourly
+ *     report-deadline sweep, from registerRecurringJobs.
+ *
+ * There used to be six more queues here: email, push, search indexing, data
+ * export, analytics and ML inference. Each had a worker, and not one of them
+ * ever had a producer. Every email, push, index update and data export on the
+ * platform is done directly by the service that needs it, where its failure is
+ * recorded against the thing that failed; the analytics queue fed a worker
+ * with no store behind it; and the ML worker POSTed its results, safety
+ * scores included, to any callback URL a job named. Meanwhile the worker
+ * container, the ENABLE_WORKERS flag and /health/detailed all described an
+ * eight-queue pipeline that did one nightly purge, and the queue-depth check
+ * reported zero for queues nothing could fill, which read as work keeping up.
+ *
+ * So the queues nothing fed are gone, with their workers, rather than left
+ * defined "for later". Routing one of those jobs through Redis is a real
+ * change with a real producer to write, and the place to start it is here:
+ * add the queue, the producer, the worker in services/workers.service and a
+ * case in getQueue, all in the same change.
  */
 
-import { Queue, Worker, Job, QueueEvents, QueueOptions } from 'bullmq';
+import { Queue, QueueOptions } from 'bullmq';
 import Redis from 'ioredis';
 import { logger } from './logger';
 
@@ -45,12 +69,14 @@ redisConnection.on('error', (err) => {
 
 export const QUEUE_NAMES = {
   VIDEO_PROCESSING: 'video-processing',
-  EMAIL_NOTIFICATIONS: 'email-notifications',
-  PUSH_NOTIFICATIONS: 'push-notifications',
-  SEARCH_INDEXING: 'search-indexing',
-  ML_INFERENCE: 'ml-inference',
-  DATA_EXPORT: 'data-export',
-  ANALYTICS: 'analytics',
+  // There was an ML_INFERENCE queue here. Nothing ever enqueued to it, and
+  // its worker POSTed each result, safety scores included, to whatever
+  // callbackUrl the job named: a server-side request to any address, with a
+  // member's data in the body, one producer away from being live. The ML
+  // service is called directly where it is used (the feed ranker), so the
+  // queue, its producer and its worker are gone rather than fenced. The
+  // email, push, search-indexing, data-export and analytics queues went for
+  // the plainer reason in the header: nothing ever put a job on them.
   SCHEDULED_TASKS: 'scheduled-tasks',
 } as const;
 
@@ -78,80 +104,37 @@ const defaultQueueOptions: QueueOptions = {
 };
 
 export const videoProcessingQueue = new Queue(QUEUE_NAMES.VIDEO_PROCESSING, defaultQueueOptions);
-export const emailQueue = new Queue(QUEUE_NAMES.EMAIL_NOTIFICATIONS, defaultQueueOptions);
-export const pushQueue = new Queue(QUEUE_NAMES.PUSH_NOTIFICATIONS, defaultQueueOptions);
-export const searchIndexingQueue = new Queue(QUEUE_NAMES.SEARCH_INDEXING, defaultQueueOptions);
-export const mlInferenceQueue = new Queue(QUEUE_NAMES.ML_INFERENCE, defaultQueueOptions);
-export const dataExportQueue = new Queue(QUEUE_NAMES.DATA_EXPORT, defaultQueueOptions);
-export const analyticsQueue = new Queue(QUEUE_NAMES.ANALYTICS, defaultQueueOptions);
 export const scheduledTasksQueue = new Queue(QUEUE_NAMES.SCHEDULED_TASKS, defaultQueueOptions);
 
 // ===========================================
 // JOB TYPES
 // ===========================================
 
+/**
+ * One reel to process. processVideo reads everything else it needs (the
+ * source file, a duet's original, the chosen sound) from the Video row, so
+ * the id is the whole job; utils/video-queue is the producer. The optional
+ * fields are what the external-transcoder branch of the worker forwards to
+ * VIDEO_PROCESSOR_URL, and a reel is only ever queued when that branch is off
+ * (see tryQueueVideoProcessing), so they are absent in practice.
+ */
 export interface VideoProcessingJob {
-  type: 'transcode' | 'thumbnail' | 'caption';
   videoId: string;
   userId: string;
-  inputUrl: string;
-  options: {
+  type?: 'transcode' | 'thumbnail' | 'caption';
+  inputUrl?: string;
+  options?: {
     formats?: string[];
     generateCaptions?: boolean;
     generateThumbnail?: boolean;
   };
 }
 
-export interface EmailJob {
-  type: 'transactional' | 'marketing' | 'digest';
-  to: string;
-  templateId: string;
-  variables: Record<string, any>;
-  userId?: string;
-}
-
-export interface PushNotificationJob {
-  userId: string;
-  title: string;
-  body: string;
-  data?: Record<string, any>;
-  deviceTokens?: string[];
-  /** The notification kind, so the member's push preferences can be honoured. */
-  type?: string;
-}
-
-export interface SearchIndexingJob {
-  operation: 'index' | 'update' | 'delete';
-  indexName: string;
-  documentId: string;
-  document?: Record<string, any>;
-}
-
-export interface MLInferenceJob {
-  algorithm: 'career_compass' | 'mentor_match' | 'safety_score' | 'ranker' | 'feed';
-  userId: string;
-  input: Record<string, any>;
-  callbackUrl?: string;
-}
-
-export interface DataExportJob {
-  userId: string;
-  exportType: 'gdpr' | 'analytics' | 'full';
-  format: 'json' | 'csv' | 'zip';
-  callbackUrl?: string;
-  /** An existing DSAR request to complete; opened when absent. */
-  dsarId?: string;
-}
-
-export interface AnalyticsJob {
-  eventType: string;
-  userId?: string;
-  properties: Record<string, any>;
-  timestamp: Date;
-}
-
 export const SCHEDULED_TASKS = {
   DATA_RETENTION_PURGE: 'data-retention-purge',
+  REPORT_DEADLINE_SWEEP: 'report-deadline-sweep',
+  HOUSING_SAFETY_CHECK_SWEEP: 'housing-safety-check-sweep',
+  PRACTITIONER_RECHECK_SWEEP: 'practitioner-recheck-sweep',
 } as const;
 
 export type ScheduledTaskName = (typeof SCHEDULED_TASKS)[keyof typeof SCHEDULED_TASKS];
@@ -172,41 +155,12 @@ export interface ScheduledTaskJob {
 export async function queueVideoProcessing(job: VideoProcessingJob, priority?: number) {
   return videoProcessingQueue.add('process-video', job, {
     priority: priority || 5,
+    // Deliberately not keyed on the video alone. BullMQ ignores an add whose
+    // id matches a job it still holds, and it holds failed jobs for a week, so
+    // a reel whose first run failed could never be queued again. Duplicates of
+    // a reel that is already waiting are avoided by the caller instead: the
+    // restart sweep asks videoIdsWithLiveJobs before it re-queues anything.
     jobId: `video-${job.videoId}-${Date.now()}`,
-  });
-}
-
-export async function queueEmail(job: EmailJob, delay?: number) {
-  return emailQueue.add('send-email', job, {
-    delay,
-    jobId: `email-${job.to}-${Date.now()}`,
-  });
-}
-
-export async function queuePushNotification(job: PushNotificationJob) {
-  return pushQueue.add('send-push', job, {
-    jobId: `push-${job.userId}-${Date.now()}`,
-  });
-}
-
-export async function queueSearchIndexing(job: SearchIndexingJob) {
-  return searchIndexingQueue.add('index-document', job, {
-    // Dedupe by document ID - only latest update matters
-    jobId: `${job.indexName}-${job.documentId}`,
-  });
-}
-
-export async function queueMLInference(job: MLInferenceJob, priority?: number) {
-  return mlInferenceQueue.add('ml-inference', job, {
-    priority: priority || 5,
-    jobId: `ml-${job.algorithm}-${job.userId}-${Date.now()}`,
-  });
-}
-
-export async function queueDataExport(job: DataExportJob) {
-  return dataExportQueue.add('export-data', job, {
-    jobId: `export-${job.userId}-${job.exportType}`,
-    attempts: 1, // Don't retry exports
   });
 }
 
@@ -218,6 +172,27 @@ export async function queueDataExport(job: DataExportJob) {
 // tables (messages, notifications), so it runs when traffic is lowest.
 const DATA_RETENTION_CRON = process.env.DATA_RETENTION_CRON || '0 3 * * *';
 const SCHEDULER_TIMEZONE = process.env.SCHEDULER_TIMEZONE || 'Australia/Brisbane';
+
+// Reports carry a promised review deadline (24 hours for illegal content, 48
+// for the rest). alertOverdueReports in content-report.service tells Trust &
+// Safety when one has passed, and until this nothing ever ran it, so a report
+// could sit past its promise with nobody told. Hourly, a quarter past, so a
+// deadline missed is heard about within the hour rather than the next day,
+// and clear of the retention purge on the hour.
+const REPORT_DEADLINE_SWEEP_CRON = process.env.REPORT_DEADLINE_SWEEP_CRON || '15 * * * *';
+
+// DV-safe listings whose safety check was asked for and has not been done.
+// alertOverdueSafetyChecks in housing-supply.service tells the people meant
+// to do it; it was built for this worker and until now nothing ran it, so a
+// check could stay undone with nobody told. Hourly, at a quarter to, clear of
+// the report sweep and the hour.
+const HOUSING_SAFETY_CHECK_SWEEP_CRON = process.env.HOUSING_SAFETY_CHECK_SWEEP_CRON || '45 * * * *';
+
+// Practitioner verifications are re-checked a year on. sweepPractitionerRechecks
+// in wellness/practitioner-recheck.service tells the admins who is due and
+// takes a lapsed listing out of the directory; daily, in the early hours, after
+// the retention purge has had its window.
+const PRACTITIONER_RECHECK_CRON = process.env.PRACTITIONER_RECHECK_CRON || '30 4 * * *';
 
 // Deliberately absent: an auto-save job for SavingsGoal.autoSaveEnabled /
 // autoSaveAmount. Savings contributions are a self-reported ledger and the
@@ -255,21 +230,50 @@ export async function registerRecurringJobs(): Promise<void> {
     }
   );
 
+  await scheduledTasksQueue.upsertJobScheduler(
+    SCHEDULED_TASKS.REPORT_DEADLINE_SWEEP,
+    { pattern: REPORT_DEADLINE_SWEEP_CRON, tz: SCHEDULER_TIMEZONE },
+    {
+      name: SCHEDULED_TASKS.REPORT_DEADLINE_SWEEP,
+      data: { task: SCHEDULED_TASKS.REPORT_DEADLINE_SWEEP } as ScheduledTaskJob,
+      opts: {
+        // The next hour is the retry. The sweep reads the clock afresh each
+        // run, so a report missed by a failed run is caught by the next one,
+        // and a backoff retry would only send the same alert twice.
+        attempts: 1,
+        removeOnComplete: { count: 48 },
+        removeOnFail: { count: 48 },
+      },
+    }
+  );
+
+  // Both sweeps re-read the records each run, so a failed run is simply
+  // caught up by the next one; a backoff retry would only repeat the alerts.
+  await scheduledTasksQueue.upsertJobScheduler(
+    SCHEDULED_TASKS.HOUSING_SAFETY_CHECK_SWEEP,
+    { pattern: HOUSING_SAFETY_CHECK_SWEEP_CRON, tz: SCHEDULER_TIMEZONE },
+    {
+      name: SCHEDULED_TASKS.HOUSING_SAFETY_CHECK_SWEEP,
+      data: { task: SCHEDULED_TASKS.HOUSING_SAFETY_CHECK_SWEEP } as ScheduledTaskJob,
+      opts: { attempts: 1, removeOnComplete: { count: 48 }, removeOnFail: { count: 48 } },
+    }
+  );
+
+  await scheduledTasksQueue.upsertJobScheduler(
+    SCHEDULED_TASKS.PRACTITIONER_RECHECK_SWEEP,
+    { pattern: PRACTITIONER_RECHECK_CRON, tz: SCHEDULER_TIMEZONE },
+    {
+      name: SCHEDULED_TASKS.PRACTITIONER_RECHECK_SWEEP,
+      data: { task: SCHEDULED_TASKS.PRACTITIONER_RECHECK_SWEEP } as ScheduledTaskJob,
+      opts: { attempts: 1, removeOnComplete: { count: 60 }, removeOnFail: { count: 60 } },
+    }
+  );
+
   logger.info('Recurring jobs registered', {
     dataRetentionPurge: { pattern: DATA_RETENTION_CRON, timezone: SCHEDULER_TIMEZONE },
-  });
-}
-
-/**
- * Queues an analytics job. Nothing stores it: the worker acknowledges it and
- * records nothing, because the platform has no analytics store (see the
- * analytics worker in services/workers.service.ts). Kept because the
- * data-retention job still sends its purge request here.
- */
-export async function queueAnalyticsEvent(job: AnalyticsJob) {
-  return analyticsQueue.add('track-event', job, {
-    removeOnComplete: true,
-    removeOnFail: { age: 3600 }, // Keep failed for 1 hour only
+    reportDeadlineSweep: { pattern: REPORT_DEADLINE_SWEEP_CRON, timezone: SCHEDULER_TIMEZONE },
+    housingSafetyCheckSweep: { pattern: HOUSING_SAFETY_CHECK_SWEEP_CRON, timezone: SCHEDULER_TIMEZONE },
+    practitionerRecheckSweep: { pattern: PRACTITIONER_RECHECK_CRON, timezone: SCHEDULER_TIMEZONE },
   });
 }
 
@@ -306,18 +310,6 @@ function getQueue(name: string): Queue | null {
   switch (name) {
     case QUEUE_NAMES.VIDEO_PROCESSING:
       return videoProcessingQueue;
-    case QUEUE_NAMES.EMAIL_NOTIFICATIONS:
-      return emailQueue;
-    case QUEUE_NAMES.PUSH_NOTIFICATIONS:
-      return pushQueue;
-    case QUEUE_NAMES.SEARCH_INDEXING:
-      return searchIndexingQueue;
-    case QUEUE_NAMES.ML_INFERENCE:
-      return mlInferenceQueue;
-    case QUEUE_NAMES.DATA_EXPORT:
-      return dataExportQueue;
-    case QUEUE_NAMES.ANALYTICS:
-      return analyticsQueue;
     // Omitting this case made getAllQueueStats report null for scheduled tasks,
     // which is exactly where a stalled retention purge would show up.
     case QUEUE_NAMES.SCHEDULED_TASKS:
@@ -334,12 +326,6 @@ function getQueue(name: string): Queue | null {
 export async function closeAllQueues() {
   await Promise.all([
     videoProcessingQueue.close(),
-    emailQueue.close(),
-    pushQueue.close(),
-    searchIndexingQueue.close(),
-    mlInferenceQueue.close(),
-    dataExportQueue.close(),
-    analyticsQueue.close(),
     scheduledTasksQueue.close(),
   ]);
   await redisConnection.quit();

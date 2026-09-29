@@ -34,6 +34,9 @@ function appWithInlineAdminRoute() {
   });
   app.get('/api/auth/2fa/status', authenticate, (req: any, res) => res.json({ user: req.user.id, session: req.user.sessionId }));
   app.get('/api/auth/me', authenticate, (req: any, res) => res.json({ user: req.user.id }));
+  // Under /api/auth/ but not part of enrolling a factor.
+  app.post('/api/auth/change-password', authenticate, (_req: any, res) => res.json({ changed: true }));
+  app.get('/api/auth/sessions', authenticate, (_req: any, res) => res.json({ sessions: [] }));
   app.use(errorHandler);
   return app;
 }
@@ -81,10 +84,28 @@ describe('A staff account without a second factor', () => {
     expect(verify).toHaveBeenCalledWith('tok', 'access');
   });
 
-  it('knows which paths are the enrolment ones', () => {
-    expect(isTwoFactorEnrolmentPath('/api/auth/2fa/setup')).toBe(true);
-    expect(isTwoFactorEnrolmentPath('/api/auth/sessions/abc')).toBe(true);
-    expect(isTwoFactorEnrolmentPath('/api/admin/users')).toBe(false);
-    expect(isTwoFactorEnrolmentPath('/api/authors')).toBe(false);
+  it('is refused on the rest of the auth router, which used to wave it through by prefix', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: 'admin-1', email: 'a@athena.com', role: 'ADMIN', persona: 'EARLY_CAREER', isSuspended: false, twoFactorEnabled: false });
+    const change = await request(appWithInlineAdminRoute())
+      .post('/api/auth/change-password')
+      .set('Authorization', 'Bearer tok')
+      .expect(403);
+    expect(change.body.code).toBe('TWO_FACTOR_REQUIRED');
+    await request(appWithInlineAdminRoute()).get('/api/auth/sessions').set('Authorization', 'Bearer tok').expect(403);
+  });
+
+  it('knows exactly which method and path are the enrolment ones', () => {
+    expect(isTwoFactorEnrolmentPath('POST', '/api/auth/2fa/setup')).toBe(true);
+    expect(isTwoFactorEnrolmentPath('post', '/api/auth/2fa/enable/')).toBe(true);
+    expect(isTwoFactorEnrolmentPath('GET', '/api/auth/me')).toBe(true);
+    expect(isTwoFactorEnrolmentPath('POST', '/api/auth/logout')).toBe(true);
+    // The same path under another method is another route.
+    expect(isTwoFactorEnrolmentPath('DELETE', '/api/auth/me')).toBe(false);
+    expect(isTwoFactorEnrolmentPath('POST', '/api/auth/2fa/disable')).toBe(false);
+    expect(isTwoFactorEnrolmentPath('POST', '/api/auth/change-password')).toBe(false);
+    expect(isTwoFactorEnrolmentPath('DELETE', '/api/auth/sessions/abc')).toBe(false);
+    expect(isTwoFactorEnrolmentPath('GET', '/api/auth/2fa/status/extra')).toBe(false);
+    expect(isTwoFactorEnrolmentPath('GET', '/api/admin/users')).toBe(false);
+    expect(isTwoFactorEnrolmentPath('GET', '/api/authors')).toBe(false);
   });
 });

@@ -34,6 +34,7 @@ import { logger } from '../utils/logger';
 import { bestEffort } from '../utils/best-effort';
 import { localPathForUrl, storeFile } from '../utils/media-storage';
 import { fetchPublic } from '../utils/outbound-url';
+import { tryQueueVideoProcessing } from '../utils/video-queue';
 import { emitToUserRoom } from './socket.service';
 import { checkContentAchievements } from './engagement.service';
 
@@ -512,8 +513,16 @@ export function enqueueVideoProcessing(videoId: string, authorId: string): void 
     });
     return;
   }
-  pending.push(videoId);
-  setImmediate(() => void drain());
+  // Durable first. With the workers running in this process the reel goes on
+  // the BullMQ video queue, which Redis holds across a restart (see
+  // utils/video-queue). Every "no" — no workers here, Redis down or slow —
+  // is a clean false, and the reel falls back to the in-memory pipeline, so a
+  // reel is never left with nobody to process it.
+  void tryQueueVideoProcessing(videoId, authorId).then((queued) => {
+    if (queued) return;
+    pending.push(videoId);
+    setImmediate(() => void drain());
+  });
 }
 
 export function pipelineQueueLength(): number {

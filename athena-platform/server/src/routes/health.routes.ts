@@ -13,6 +13,7 @@ import { mlRankingStats } from '../services/feed-ml.service';
 // Queue utils are dynamically imported to avoid Redis connection when workers disabled
 // import { getAllQueueStats } from '../utils/queue';
 import { isTextModerationConfigured } from '../services/moderation.service';
+import { probeMediaStorage } from '../utils/media-storage';
 import { logger } from '../utils/logger';
 import { secretMatchesAny } from '../utils/secret-compare';
 import {
@@ -113,6 +114,94 @@ function anyEnvCheck(
     required,
     ok,
     message: ok ? `Configured via ${keys.find(isConfiguredEnv)}` : message || `${keys.join(' or ')} is not configured`,
+  };
+}
+
+/** How long launch-readiness waits for S3 before calling the bucket unreachable. */
+const MEDIA_PROBE_TIMEOUT_MS = 5_000;
+
+/** The two variables media storage signs its requests with. */
+const MEDIA_CREDENTIAL_NAMES = ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'] as const;
+
+/**
+ * Whether media can actually be stored, asked of S3 rather than read off the
+ * variables.
+ *
+ * This used to be two presence checks on AWS_ACCESS_KEY_ID and
+ * AWS_SECRET_ACCESS_KEY, and presence says nothing about whether the bucket
+ * answers: the env template's placeholder values passed them, as did a key
+ * that had been revoked or a bucket in another account. The endpoint said
+ * "Configured" for a deployment where every avatar, post image and reel was
+ * failing to store. So it asks the same question the startup probe asks, with
+ * a HeadBucket on the configured credentials, and waits a bounded time for the
+ * answer: an S3 that does not reply is reported as not reachable rather than
+ * holding the operator's request open. The probe also refreshes the
+ * media-storage gauge /health/detailed shows, so the two cannot disagree.
+ */
+async function mediaStorageCheck(required: boolean): Promise<LaunchReadinessCheck> {
+  const missing = MEDIA_CREDENTIAL_NAMES.filter((name) => !isConfiguredEnv(name));
+  if (missing.length > 0) {
+    return {
+      key: 'MEDIA_STORAGE',
+      category: 'media',
+      required,
+      ok: false,
+      message: `${missing.join(' and ')} ${missing.length === 1 ? 'is' : 'are'} not configured, so media cannot be stored in S3`,
+    };
+  }
+
+  let timer: NodeJS.Timeout | undefined;
+  const timedOut = new Promise<{ reachable: boolean; detail: string }>((resolve) => {
+    timer = setTimeout(
+      () =>
+        resolve({
+          reachable: false,
+          detail: `S3 did not answer within ${MEDIA_PROBE_TIMEOUT_MS / 1000} seconds, so the bucket cannot be confirmed reachable`,
+        }),
+      MEDIA_PROBE_TIMEOUT_MS
+    );
+  });
+
+  try {
+    const result = await Promise.race([probeMediaStorage(), timedOut]);
+    return { key: 'MEDIA_STORAGE', category: 'media', required, ok: result.reachable, message: result.detail };
+  } catch (error) {
+    // probeMediaStorage is written not to throw. If it ever does, the answer
+    // is still "not confirmed", never a silent pass.
+    return {
+      key: 'MEDIA_STORAGE',
+      category: 'media',
+      required,
+      ok: false,
+      message: `The S3 probe failed: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * Whether password sign-up has its human check.
+ *
+ * Reported rather than required, as auth.routes.ts decides: the check is
+ * enforced only when TURNSTILE_SECRET_KEY is set, so a developer machine and
+ * the test suite need no Cloudflare account. But a production deployment
+ * without it has nothing on its front door except per-address rate limits, and
+ * the only sign of that was one warning in the log at start. When it is set,
+ * the message says what this server cannot see for itself: the web host needs
+ * the matching site key, or the form never sends a token and every password
+ * sign-up is refused.
+ */
+function humanCheckReadiness(): LaunchReadinessCheck {
+  const ok = isConfiguredEnv('TURNSTILE_SECRET_KEY');
+  return {
+    key: 'TURNSTILE_SECRET_KEY',
+    category: 'security',
+    required: false,
+    ok,
+    message: ok
+      ? 'Configured. The web host must have NEXT_PUBLIC_TURNSTILE_SITE_KEY from the same Turnstile widget, or every password sign-up is refused.'
+      : 'Password sign-up has no human check, only rate limits and email verification. Set TURNSTILE_SECRET_KEY here and NEXT_PUBLIC_TURNSTILE_SITE_KEY on the web host, together.',
   };
 }
 
@@ -334,6 +423,7 @@ router.get('/launch-readiness', async (req: Request, res: Response) => {
     envCheck('ALLOWED_ORIGINS', 'security', production, 'Production CORS allowlist is not configured'),
     envCheck('JWT_SECRET', 'security', true),
     envCheck('DV_ENCRYPTION_KEY', 'security', production, 'DV safe-chat encryption key is not configured'),
+    humanCheckReadiness(),
     envCheck('METRICS_TOKEN', 'observability', production, 'Metrics endpoint token is required in production'),
     anyEnvCheck(
       'HEALTH_DIAGNOSTICS_ACCESS',
@@ -352,8 +442,9 @@ router.get('/launch-readiness', async (req: Request, res: Response) => {
     envCheck('STRIPE_PRICE_CREATOR', 'payments', production, 'Creator subscription price ID is not configured'),
     envCheck('S3_BUCKET', 'media', production, 'Media bucket is not configured'),
     envCheck('AWS_REGION', 'media', production, 'AWS region is not configured'),
-    envCheck('AWS_ACCESS_KEY_ID', 'media', production, 'AWS access key is not configured'),
-    envCheck('AWS_SECRET_ACCESS_KEY', 'media', production, 'AWS secret key is not configured'),
+    // Replaces the presence checks on the two credential variables; see
+    // mediaStorageCheck for why "set" was never the question.
+    await mediaStorageCheck(production),
     // There is no VIDEO_PROCESSOR_URL check in the media category any more.
     // It required a transcoder URL of every production deployment whether the
     // BullMQ workers were running or not, which is a requirement the platform

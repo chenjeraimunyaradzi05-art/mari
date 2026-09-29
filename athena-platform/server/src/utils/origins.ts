@@ -38,6 +38,63 @@ export function arePreviewOriginsEnabled(): boolean {
   return process.env.NODE_ENV !== 'production' || process.env.CORS_ALLOW_PREVIEW_ORIGINS === 'true';
 }
 
+const NETLIFY_SITE_HOST = /^([a-z0-9]+(?:-[a-z0-9]+)*)\.netlify\.app$/i;
+
+/**
+ * The Netlify site names this deployment's own front end is served from,
+ * read from the front-end URLs the operator configured (CLIENT_URL first).
+ * A custom domain names no Netlify site, so a deployment that only has one
+ * admits no preview origins at all.
+ */
+export function ownNetlifySiteNames(): string[] {
+  const names = new Set<string>();
+  for (const configured of [
+    process.env.CLIENT_URL,
+    process.env.FRONTEND_URL,
+    process.env.NEXT_PUBLIC_APP_URL,
+    process.env.NETLIFY_URL,
+    process.env.URL,
+  ]) {
+    if (!configured) continue;
+    try {
+      // A deploy URL (prefix--site) does not match: the name has to come
+      // from the site's own address, not from one of its deploys.
+      const match = NETLIFY_SITE_HOST.exec(new URL(configured).hostname);
+      if (match) names.add(match[1].toLowerCase());
+    } catch {
+      // Not a URL; it names no site.
+    }
+  }
+  return Array.from(names);
+}
+
+/**
+ * A deploy preview, branch deploy or deploy permalink of this deployment's
+ * own site: deploy-preview-12--athena-empress.netlify.app and the like.
+ *
+ * The rule used to be any https://<anything>.netlify.app, which with the
+ * preview flag on gave every free Netlify site on the internet credentialed
+ * CORS against this API: a page anyone could publish in a minute could read
+ * a signed-in member's messages with her cookie. Netlify separates a deploy's
+ * prefix from its site with "--" and does not issue site names containing
+ * it, so "<prefix>--<our site>" is ours; the prefix itself may not contain
+ * "--" either.
+ */
+function isOwnNetlifyPreview(origin: string): boolean {
+  const sites = ownNetlifySiteNames();
+  if (sites.length === 0) return false;
+  let host: string;
+  try {
+    const url = new URL(origin);
+    if (url.protocol !== 'https:' || url.port || url.origin !== origin) return false;
+    host = url.hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  const preview = /^(deploy-preview-\d+|[a-z0-9]+(?:-[a-z0-9]+)*)--([a-z0-9]+(?:-[a-z0-9]+)*)\.netlify\.app$/.exec(host);
+  return Boolean(preview && sites.includes(preview[2]));
+}
+
 export function isCorsOriginAllowed(origin: string | undefined): boolean {
   if (!origin) {
     return true;
@@ -48,10 +105,8 @@ export function isCorsOriginAllowed(origin: string | undefined): boolean {
     return true;
   }
 
-  if (arePreviewOriginsEnabled()) {
-    if (/^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin)) {
-      return true;
-    }
+  if (arePreviewOriginsEnabled() && isOwnNetlifyPreview(origin)) {
+    return true;
   }
 
   if (process.env.NODE_ENV !== 'production') {

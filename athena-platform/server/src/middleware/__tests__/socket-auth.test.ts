@@ -66,6 +66,18 @@ describe('Socket authentication', () => {
     await expect(authenticateSocketToken('tok')).rejects.toMatchObject({ statusCode: 403, message: SUSPENDED_ACCOUNT_MESSAGE });
   });
 
+  it('refuses a banned account even when nothing set isSuspended, in the same words', async () => {
+    sessions.findActiveSessionByAccessToken.mockResolvedValue({ id: 's1', userId: 'u1' });
+    prisma.user.findUnique.mockResolvedValue(user({ isSuspended: false, bannedAt: new Date('2026-09-20') }));
+    await expect(authenticateSocketToken('tok')).rejects.toMatchObject({ statusCode: 403, message: SUSPENDED_ACCOUNT_MESSAGE });
+  });
+
+  it('tells a suspended member where her appeal is, and keeps the word the sign-in screens look for', () => {
+    expect(SUSPENDED_ACCOUNT_MESSAGE).toMatch(/suspended/);
+    expect(SUSPENDED_ACCOUNT_MESSAGE).toMatch(/appeal from the sign-in page/);
+    expect(SUSPENDED_ACCOUNT_MESSAGE).not.toMatch(/contact support/i);
+  });
+
   it('refuses a token that does not verify', async () => {
     verify.mockImplementation(() => {
       throw new Error('jwt malformed');
