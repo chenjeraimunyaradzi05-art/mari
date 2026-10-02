@@ -326,12 +326,20 @@ stay that way: a browser that receives several policies enforces every one of
 them, so a feature one layer refuses is refused everywhere. That is how
 `microphone=()` quietly broke voice notes in chat and the interview coach's
 recorder while the buttons stayed on screen. The policy now lets the site
-itself use the microphone (`microphone=(self)`), keeps the camera, location,
-screen capture and the sensor APIs off because nothing in the client asks for
-them, and delegates `payment` to Stripe's frame on js.stripe.com so the wallet
-buttons inside its payment form can work. A jest test in the client
-(`permissions-policy.test.ts` under `src/__tests__/`) fails if the three files
-drift apart or the policy stops matching what the client code uses.
+itself use the microphone (`microphone=(self)`), keeps the camera, location and
+screen capture off because nothing in the client asks for them, and delegates
+`payment` to Stripe's frame on js.stripe.com so the wallet buttons inside its
+payment form can work. The motion sensors (`accelerometer`, `gyroscope`,
+`magnetometer`) are off as well. One thing does ask for two of them: the
+classroom page's YouTube and Vimeo embed lists `accelerometer; gyroscope` in
+its `allow` attribute, which is YouTube's standard embed snippet and only
+matters for steering a 360-degree video by tilting the phone. The header wins
+over the attribute, so that one gesture is unavailable and the player may log
+a permissions-policy warning in the console; ordinary videos are unaffected.
+Widen those two directives to the three video origins if 360-degree lessons
+are ever wanted. A jest test in the client (`permissions-policy.test.ts` under
+`src/__tests__/`) fails if the three files drift apart or the policy stops
+matching what the client code uses.
 
 Verify at securityheaders.com after the first deploy on the new domain.
 
