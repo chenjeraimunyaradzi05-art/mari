@@ -28,7 +28,7 @@ As a user of the Platform, you agree not to:
 ## 5. Creator & Monetization Terms
 - **Content Ownership:** You retain full ownership of the content you post. However, you grant us a license to display, perform, and distribute your content on the Platform.
 - **Revenue Share:** For paid subscriptions or gifts, ATHENA charges a platform fee (e.g., 20-30%) as detailed in the Creator Revenue Policy.
-- **Payouts:** Payouts are bonded by a minimum threshold (e.g., AU$50) and are processed via Stripe Connect.
+- **Payouts:** The minimum creator payout is AU$50. You ask for a payout once your balance has reached it, and it is sent through Stripe Connect to your own Stripe account once Stripe has verified it. Gift points are bought and paid out in Australian dollars only, and a balance below the minimum carries over. Mentor and marketplace earnings are not part of this balance and have no ATHENA minimum; Stripe pays them to your bank on its own schedule.
 
 ## 6. Liability Limitation
 In no event will we or our directors, employees, or agents be liable to you or any third party for any direct, indirect, consequential, exemplary, incidental, special, or punitive damages, including lost profit, lost revenue, loss of data, or other damages arising from your use of the platform.

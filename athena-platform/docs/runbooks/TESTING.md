@@ -66,8 +66,9 @@ npm run e2e
   service workers, because a request the service worker makes is one the
   route never sees.
 - **Full stack:** the member journey in `tests/critical-paths.spec.ts`
-  (register, find a mentor, request a session, search jobs) needs the API and
-  the fixtures `server/scripts/seed-e2e.js` writes. Without them it is
+  (register, confirm the email address and sign in, find a mentor, request a
+  session, search jobs) needs the API and the fixtures
+  `server/scripts/seed-e2e.js` writes. Without them it is
   skipped, and the skip names what is missing; it used to pass instead, by
   returning early from every step whose page was not there.
 
@@ -77,9 +78,16 @@ described a UI that was never built — `apprenticeship-card`, `service-card`,
 in as `test@example.com` with a password the server has refused since the
 12-character rule, accepting a stay on `/login` as success. `user-journey.spec.ts`
 registered without the date of birth the form requires and expected to land on
-`/onboarding`, when registration sends a new member to `/dashboard/persona`;
-the first step of the full-stack journey registers correctly and checks that
-she lands there.
+`/onboarding`, when registration opens no session at all: it answers every
+address the same way and the link that finishes it is in an email. The first
+step of the full-stack journey registers correctly, checks that she is asked to
+check her email and that she is not signed in yet, confirms the address, and
+signs in. The mailed link cannot be followed from a test (in development the
+API only logs that a mail would be sent, and tokens are stored hashed), so the
+confirmation is `server/scripts/verify-e2e-member.js`, which marks one
+`@athena-e2e.test` member's address confirmed on a disposable database and
+refuses anything else. That the link itself works is covered against a real
+database in `server/tests/integration/auth-recovery.test.ts`.
 Both failed on every run in CI's client job, which has no API, and that job
 gates the release.
 
@@ -91,7 +99,9 @@ cd athena-platform/server
 npx prisma migrate deploy
 node scripts/seed-e2e.js
 
-# The same PROXY_SHARED_SECRET and a JWT_SECRET in both terminals.
+# The same PROXY_SHARED_SECRET and a JWT_SECRET in both terminals, and
+# DATABASE_URL (the disposable database) in the one that runs Playwright: the
+# spec confirms its new member's address with scripts/verify-e2e-member.js.
 npm run dev                                  # API on :5000
 cd ../client && E2E_FULL_STACK=true npx playwright test tests/critical-paths.spec.ts
 ```

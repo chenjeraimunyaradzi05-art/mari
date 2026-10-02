@@ -6,6 +6,7 @@ AI-powered mentor-mentee matching based on compatibility scoring.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional
 from enum import Enum
 
@@ -13,6 +14,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # ===========================================
@@ -160,10 +162,14 @@ async def calculate_match_score(mentee: MenteeProfile, mentor: MentorProfile):
     try:
         score = _compute_compatibility(mentee, mentor)
         return score
-    except Exception as e:
+    except Exception:
+        # What went wrong stays in this service's log. The text of an exception
+        # can name a file path, a model directory or a value out of the request,
+        # and a caller needs none of it to know the call failed.
+        logger.exception("Scoring failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Scoring failed: {str(e)}"
+            detail="Scoring failed"
         )
 
 

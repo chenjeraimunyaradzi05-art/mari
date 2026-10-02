@@ -117,6 +117,15 @@ model UserSafetySettings {
 }
 ```
 
+Which of these the platform enforces (checked 1 October 2026): `allowMessagesFrom`
+(message-permissions.service.ts), `hideReadReceipts` (socket.service.ts),
+`profileVisibility` (audience.service.ts, and people search leaves a private profile out),
+`hideOnlineStatus` (presence.service.ts), `blockedUsers` (utils/safety-store.ts) and
+`blockedKeywords` (utils/muted-words.ts). `filterOffensiveContent`, `hideLastSeen` and
+`enableSafetyAlerts` are reserved: nothing reads them, so the API neither serves nor accepts them
+and no page offers them as a switch. The columns stay so that no migration is needed; they become
+settings again only when something enforces them.
+
 ### Updated Enums
 - `AuditAction` - Added `DATA_ACCESS` for audit logging
 

@@ -325,10 +325,16 @@ photographs written to a disk the next deploy wiped.
 PgBouncer in transaction mode cannot hold the advisory locks Prisma migrations
 take; putting the pooled URL in both is what makes a deploy hang.
 
-`DV_ENCRYPTION_KEY` encrypts the domestic-violence safe-chat messages and the
-wellness records, and `dv-safe.service.ts` refuses it in production unless it is
-64 hex characters. Back it up somewhere the API host cannot take with it:
-without this exact value, those rows cannot be read again.
+`DV_ENCRYPTION_KEY` seals the domestic-violence safe-chat messages, the
+wellness records, members' safety plans and two-factor seeds before they reach
+the database. Production refuses to start unless it is 64 hex characters and a
+random value: all zeros, a placeholder and a repeating pattern are refused, and
+so is the all-zero value the example env file used to ship. Back it up somewhere
+the API host cannot take with it: without this exact value, those rows cannot be
+read again. This is encryption at rest, not end-to-end: the servers decrypt a
+value to show it to the member. What it does and does not protect against, and
+how to rotate the key without losing anything, is in
+`athena-platform/docs/runbooks/ENCRYPTION.md`.
 
 `ALLOWED_ORIGINS` is the whole CORS allowlist; add a custom domain here when the
 site moves. Do not reach for `CORS_ALLOW_PREVIEW_ORIGINS=true` to make a Netlify
@@ -358,20 +364,71 @@ SENDGRID_API_KEY=SG....          # verification and password-reset email
 STRIPE_SECRET_KEY=sk_live_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 STRIPE_CONNECT_WEBHOOK_SECRET=whsec_...  # the Connect endpoint's own secret; see below
-STRIPE_PRICE_CAREER=price_...    # and _PROFESSIONAL, _ENTREPRENEUR, _CREATOR
+STRIPE_PRICE_CAREER=price_...    # and _PROFESSIONAL, _ENTREPRENEUR, _CREATOR; each an AUD price with tax behaviour "Inclusive"
+ATHENA_LEGAL_NAME=               # who ATHENA is on an invoice; with the four below, see "Invoices and GST"
+ATHENA_ABN=
+ATHENA_GST_REGISTERED_FROM=      # YYYY-MM-DD, only once registered for GST
+ATHENA_BILLING_ADDRESS=          # lines separated by |
+ATHENA_BILLING_EMAIL=            # a mailbox ATHENA owns
 AI_OPENAI_API_KEY=sk-...         # read before OPENAI_API_KEY; also gates text moderation
 METRICS_TOKEN=<openssl rand -hex 32>
 HEALTH_DIAGNOSTICS_TOKEN=<openssl rand -hex 32>
 ```
 
 Two Stripe webhook endpoints, two secrets. The platform endpoint
-(`STRIPE_WEBHOOK_SECRET`) carries the platform's own events. Connected-account
+(`STRIPE_WEBHOOK_SECRET`) carries the platform's own events: `checkout.session.completed`,
+`customer.subscription.updated`, `customer.subscription.deleted`,
+`customer.subscription.trial_will_end` (the reminder before a trial's first charge),
+`invoice.paid`, `invoice.payment_failed`, `payment_intent.succeeded`,
+`payment_intent.payment_failed`, `payment_intent.canceled`,
+`payment_intent.amount_capturable_updated`, `charge.refunded`, `charge.dispute.created`,
+`charge.dispute.updated`, `charge.dispute.closed`, `charge.dispute.funds_withdrawn`,
+`charge.dispute.funds_reinstated`, `transfer.created`, `transfer.reversed` and
+`identity.verification_session.verified` / `.requires_input`. Connected-account
 events — `payout.paid`, `payout.failed`, `account.updated` — arrive on a
 second endpoint that you create in the Stripe dashboard with "Listen to events
 on Connected accounts" ticked, and that endpoint has its own signing secret,
 `STRIPE_CONNECT_WEBHOOK_SECRET`. Without it those events are refused, and a
 seller whose payout failed or whose account Stripe stopped paying is told
-nothing.
+nothing. The payments code has never been run against real Stripe: walk
+`athena-platform/docs/runbooks/STRIPE-CONNECT.md` in test mode, and then once
+live, before announcing payouts. It is also where the payout schedule is decided
+(`STRIPE_CONNECT_PAYOUT_SCHEDULE=manual` creates new accounts on a manual
+schedule, so a balance waits until the member presses Withdraw).
+
+A process with no `STRIPE_SECRET_KEY` starts and says so at every boot, and every
+payment, payout and Connect action answers 503; nothing is simulated in its place.
+`ALLOW_STRIPE_SIMULATION=true` in production stops the process starting, and
+`scripts/check-env.js` fails a file that carries it.
+
+Invoices and GST. Every paid membership period and every one-off payment gets an
+ATHENA invoice (a PDF, numbered INV-YYYYMM-NNNNN). Who is invoicing comes from
+`ATHENA_LEGAL_NAME`, `ATHENA_ABN`, `ATHENA_BILLING_ADDRESS` and
+`ATHENA_BILLING_EMAIL`, which have no defaults: until all four are set no
+document is produced (a member's download answers 503 and the staff re-issue with
+an email is refused), and `/health/launch-readiness` fails in production. The
+invoice rows are still filed as sales happen, and the PDF is drawn from the row on
+every download, so each can be downloaded the day the four are set. The ABN has to
+pass its checksum and the billing mailbox has to be on a domain ATHENA owns. A
+document is titled "Tax invoice",
+shows the ABN and the GST amount, and says the total includes GST, only when
+`ATHENA_ABN` passes its checksum and `ATHENA_GST_REGISTERED_FROM` has arrived, and
+only for a sale in Australian dollars. Until then it is titled "Invoice" and says
+no GST is charged, and the pricing page says the same. GST is worked out as one
+eleventh of the amount charged, which is only right if the Stripe Prices were
+created tax-inclusive. Mentor and marketplace payments are receipts for the
+provider's own supply and show no GST. Registering for GST is compulsory once turnover
+reaches A$75,000 a year (optional before); confirm the date with the ATO or the
+accountant before setting it.
+
+Card holds. A hold on a card lasts about a week with a live processor. A
+marketplace order that takes longer asks its buyer to renew the hold in the last two
+days (nothing is taken by renewing); the provider cannot hand the work over against a
+hold that has ended. `ESCROW_CAPTURE_BEFORE_EXPIRY` (default off) lets the sweep take
+the money early for work its flow records as done, and
+`ESCROW_REQUEST_EXTENDED_AUTHORISATION` (default off) asks the card network for a
+longer authorisation where it is available; check both with the owner and with
+Stripe before turning them on.
 
 Moderation is a switch, and its production default is on. With no text
 moderation provider configured (`AI_OPENAI_API_KEY`), the server used to
@@ -396,6 +453,14 @@ reason: local media storage is not a mode this platform runs in. They are now
 required at boot, and set is not the same as working, so the API also asks S3
 at start whether the bucket answers; `/health/launch-readiness` reports that
 answer (`MEDIA_STORAGE`) rather than whether the variables are filled in.
+
+Two kinds of file live in the bucket. Avatars, covers, posts, videos, thumbnails,
+captions and sounds are public and are served through `CDN_URL`. Résumés and
+documents are private: they are addressed at the bucket, never the CDN, and read
+only through the API. So the bucket keeps Block Public Access on and the CDN may
+fetch the public folders only. `athena-platform/infrastructure/README.md` ("Media
+bucket") has the policy, and `GET /health/launch-readiness?probe=media` with the diagnostics
+token proves it from outside once it is set up.
 
 ### API Server (genuinely optional)
 
@@ -469,8 +534,15 @@ setting it needs a new Netlify deploy.
 ```env
 NEXT_PUBLIC_SOCKET_URL=https://api.your-domain.com   # defaults to NEXT_PUBLIC_API_URL
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_...
-NEXT_PUBLIC_SENTRY_DSN=https://...
+NEXT_PUBLIC_MEDIA_HOST=cdn.your-domain.com           # the API's CDN_URL host, so next/image loads avatars from it; build time
+NEXT_PUBLIC_SENTRY_DSN=https://...   # baked in at build time: set it, then deploy again
+SENTRY_ORG=your-org                  # build only: lets the build upload source maps
+SENTRY_PROJECT=your-web-project      # build only
+SENTRY_AUTH_TOKEN=...                # build only, a secret: a Sentry organisation token (Builds scope)
 ```
+
+With the DSN and no `SENTRY_AUTH_TOKEN`, errors are still reported but point at
+minified code, and `scripts/check-web-env.js` says so in the build log.
 
 ## Troubleshooting
 

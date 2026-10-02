@@ -144,3 +144,110 @@ class TestProductionStartup:
         with TestClient(main.app) as client:
             assert client.get("/").status_code == 200
             assert client.get("/docs").status_code == 200
+
+
+class TestFailuresStayInsideTheService:
+    """
+    A router that catches its own exception answers 500 itself, so the global
+    handler's DEBUG gate never sees it. Five routers did, and each put
+    `str(e)` in the answer: a file path, a model directory or a value out of
+    the request, to whoever sent the call.
+    """
+
+    SECRET = "SECRET-PATH /srv/models/career_compass.joblib"
+
+    @staticmethod
+    def _explode(*_args, **_kwargs):
+        raise RuntimeError(TestFailuresStayInsideTheService.SECRET)
+
+    def _cases(self, monkeypatch):
+        """(path, body) for each of the five routers, with the piece that does the work made to fail."""
+        from src.api.routers import career_compass, feed, mentor_match, ranker, safety_score
+        from tests.support import career_profile
+        from tests.test_feed import candidate, request as feed_request
+        from tests.test_income_and_mentors import mentee, mentor
+
+        class ExplodingModel:
+            predict = staticmethod(self._explode)
+
+        monkeypatch.setattr(career_compass.model_loader, "get_model", lambda name: ExplodingModel())
+        monkeypatch.setattr(feed, "_score_candidates", self._explode)
+        monkeypatch.setattr(mentor_match, "_compute_compatibility", self._explode)
+        monkeypatch.setattr(ranker, "_light_rank", self._explode)
+        monkeypatch.setattr(safety_score, "_calculate_user_safety", self._explode)
+
+        return [
+            ("/api/v1/career-compass/predict", career_profile(), "Prediction failed"),
+            ("/api/v1/feed/generate", feed_request([candidate("a")]), "Feed generation failed"),
+            ("/api/v1/mentor-match/score", {"mentee": mentee(), "mentor": mentor()}, "Scoring failed"),
+            (
+                "/api/v1/ranker/rank",
+                {"candidates": [{"id": "a", "content_type": "post", "features": {}}], "user_context": {"user_id": "member-1"}},
+                "Ranking failed",
+            ),
+            ("/api/v1/safety-score/calculate", {"user_id": "a", "account_age_days": 30}, "Safety calculation failed"),
+        ]
+
+    @pytest.mark.parametrize("environment", [{}, {"DEBUG": "true"}, {"ATHENA_ENV": "production", "ML_SERVICE_KEY": KEY}])
+    def test_no_router_puts_the_exception_text_in_its_answer(self, load_main, monkeypatch, environment):
+        # Development, development with DEBUG on, and production: the routers
+        # answer the same way in all three, because the text is the log's.
+        main = load_main(**environment)
+        headers = {"X-ML-Key": KEY} if environment.get("ML_SERVICE_KEY") else {}
+        with TestClient(main.app, raise_server_exceptions=False) as client:
+            for path, body, generic in self._cases(monkeypatch):
+                response = client.post(path, json=body, headers=headers)
+                assert response.status_code == 500, f"{path}: {response.text}"
+                assert response.json()["detail"] == generic, path
+                assert "SECRET-PATH" not in response.text, path
+                assert ".joblib" not in response.text, path
+
+    def test_the_exception_is_in_the_log_instead(self, load_main, monkeypatch, caplog):
+        main = load_main()
+        with TestClient(main.app, raise_server_exceptions=False) as client:
+            path, body, _ = self._cases(monkeypatch)[4]
+            with caplog.at_level("ERROR"):
+                client.post(path, json=body)
+        assert "SECRET-PATH" in caplog.text
+
+
+class TestHealthDoesNotMapTheContainer:
+    """
+    /health is the one path the shared key does not cover. It published the
+    directories the loader searched and the text of its load errors.
+    """
+
+    def test_a_stranger_in_production_gets_which_models_are_missing_and_nothing_more(self, load_main):
+        main = load_main(ATHENA_ENV="production", ML_SERVICE_KEY=KEY)
+        with TestClient(main.app) as client:
+            body = client.get("/health").json()
+        assert "searched" not in body["models"]
+        assert "detail" not in body["models"]
+        assert body["models"]["missing_consumed"] == ["career_compass"]
+        assert body["status"] == "degraded"
+
+    def test_nothing_in_the_answer_names_a_directory(self, load_main, model_dir):
+        main = load_main(ATHENA_ENV="production", ML_SERVICE_KEY=KEY)
+        with TestClient(main.app) as client:
+            text = client.get("/health").text
+        assert str(model_dir) not in text
+
+    def test_the_holder_of_the_key_still_gets_the_whole_account(self, load_main):
+        main = load_main(ATHENA_ENV="production", ML_SERVICE_KEY=KEY)
+        with TestClient(main.app) as client:
+            body = client.get("/health", headers={"X-ML-Key": KEY}).json()
+        assert body["models"]["searched"]
+        assert "career_compass" in body["models"]["detail"]
+
+    def test_a_wrong_key_is_a_stranger(self, load_main):
+        main = load_main(ATHENA_ENV="production", ML_SERVICE_KEY=KEY)
+        with TestClient(main.app) as client:
+            body = client.get("/health", headers={"X-ML-Key": "not-the-key"}).json()
+        assert "searched" not in body["models"]
+
+    def test_development_keeps_the_whole_account_for_whoever_is_debugging(self, load_main):
+        main = load_main()
+        with TestClient(main.app) as client:
+            body = client.get("/health").json()
+        assert body["models"]["searched"]
+        assert "detail" in body["models"]

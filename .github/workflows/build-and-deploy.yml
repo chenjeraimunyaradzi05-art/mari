@@ -154,6 +154,16 @@ jobs:
   # not that the new image is live — watch the Render dashboard, or /health on
   # the API, for that.
   #
+  # Whether the API is configured for production (Stripe and its two webhook
+  # secrets, email, the media bucket, migrations applied) is asked by the daily
+  # readiness job in uptime.yml: GET /health/launch-readiness with the
+  # HEALTH_DIAGNOSTICS_TOKEN secret, which opens an issue listing what is
+  # missing, and which "Run workflow" asks on demand. It is not asked from here
+  # because the hook returns before the build starts, so a check made at this
+  # point would be answered by the build that is still serving. The API also
+  # writes every missing required setting to its log and to Sentry each time it
+  # boots (utils/launch-readiness.ts).
+  #
   # The API is deployed after the migration and before the web app on purpose.
   # A migration is written to be safe against the code already running, so
   # database-then-API is the order that keeps the site up; publishing the web

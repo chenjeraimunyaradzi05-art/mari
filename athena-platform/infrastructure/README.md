@@ -21,7 +21,7 @@ described by the files each host actually reads.
 | Redis (rate limits, lockout counters, queues, sweep locks) | Render Key Value, declared in the same blueprint | [`render.yaml`](../../render.yaml) |
 | PostgreSQL | Neon, `ap-southeast-2` (Sydney). Migrated by the release workflow before the API deploys. | [`server/prisma/schema.prisma`](../server/prisma/schema.prisma) and `server/prisma/migrations/` |
 | Web app (Next.js) | Netlify, with the Next.js runtime plugin | [`netlify.toml`](../../netlify.toml) at the repository root and [`client/netlify.toml`](../client/netlify.toml) |
-| Media | One S3 bucket, `S3_BUCKET`, in `ap-southeast-2` | [`server/.env.example`](../server/.env.example) (AWS section) |
+| Media | One S3 bucket, `S3_BUCKET`, in `ap-southeast-2`, with a CDN in front of the public folders only | [`server/.env.example`](../server/.env.example) (AWS and CDN sections), and "Media bucket" below |
 | Releases | GitHub Actions: CI, then migrate, deploy the API, publish the web app | [`.github/workflows/build-and-deploy.yml`](../../.github/workflows/build-and-deploy.yml) |
 | Uptime check | GitHub Actions on a schedule | [`.github/workflows/uptime.yml`](../../.github/workflows/uptime.yml) |
 | Off-platform database copies | GitHub Actions nightly, to an S3 bucket the owner creates; nothing runs until it is set up | [`.github/workflows/backup.yml`](../../.github/workflows/backup.yml), setup in [`docs/runbooks/ONCALL.md`](../docs/runbooks/ONCALL.md) |
@@ -37,7 +37,90 @@ Start from the table above, not from the file that was here. Whatever is
 written has to describe PostgreSQL rather than MySQL, one API instance rather
 than a cluster per region, and the single media bucket the API writes to. The
 bucket is where members' photographs and résumés live, so it stays private
-with no public ACL, and a CDN in front of it is set through `CDN_URL`. Keep
+with no public ACL, and a CDN in front of it, limited to the public folders, is
+set through `CDN_URL` ("Media bucket" below). Keep
 the database on Neon in Sydney unless there is a decision to move it:
 members' records, including safety settings, are held there, so moving them is
 a privacy decision before it is an infrastructure one.
+
+## Media bucket
+
+One bucket, `S3_BUCKET`, in `ap-southeast-2`, holds two kinds of file. Which is
+which is decided by the top-level folder, and the list is
+`PRIVATE_MEDIA_FOLDERS` in
+[`server/src/utils/media-storage.ts`](../server/src/utils/media-storage.ts).
+
+| Folders | What they hold | Who can read them | How a row refers to them |
+| --- | --- | --- | --- |
+| `avatars/`, `covers/`, `posts/`, `videos/`, `thumbnails/`, `captions/`, `sounds/` | Public by design: they are shown to other members | Anyone, through the CDN | `CDN_URL/key` |
+| `resumes/`, `documents/` | One member's own file | The owner, and hiring staff on an application the file was attached to, through the API (`POST /api/media/download-url` gives a one-hour signed link) | `https://<bucket>.s3.ap-southeast-2.amazonaws.com/key`, which is a name and not a link anyone can open |
+
+The code only chooses which address to hand out. Whether a file can be read is
+decided by the bucket policy and by what the CDN may fetch, so those have to
+agree with the table. Set it up once, in this order:
+
+1. **Create the bucket** in `ap-southeast-2` with S3 Block Public Access on (all
+   four settings) and default encryption on.
+2. **Create an IAM user for the API**, limited to `s3:PutObject`, `s3:GetObject`
+   and `s3:DeleteObject` on `bucket/*`, `s3:ListBucket` on the bucket, and
+   `rekognition:DetectModerationLabels` (image moderation). Its keys are
+   `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` on the API host. The API
+   writes one tiny probe object under each of `avatars/_exposure-check/` and
+   `resumes/_exposure-check/` and deletes it again when step 5 runs, which these
+   permissions already allow.
+3. **Put a CDN in front of the public folders only.** CloudFront with an origin
+   access control, and a bucket policy that lets that distribution read the
+   public folders and nothing else. Block Public Access stays on:
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Sid": "CdnReadsPublicFoldersOnly",
+         "Effect": "Allow",
+         "Principal": { "Service": "cloudfront.amazonaws.com" },
+         "Action": "s3:GetObject",
+         "Resource": [
+           "arn:aws:s3:::BUCKET/avatars/*",
+           "arn:aws:s3:::BUCKET/covers/*",
+           "arn:aws:s3:::BUCKET/posts/*",
+           "arn:aws:s3:::BUCKET/videos/*",
+           "arn:aws:s3:::BUCKET/thumbnails/*",
+           "arn:aws:s3:::BUCKET/captions/*",
+           "arn:aws:s3:::BUCKET/sounds/*"
+         ],
+         "Condition": {
+           "StringEquals": { "AWS:SourceArn": "arn:aws:cloudfront::ACCOUNT:distribution/DISTRIBUTION_ID" }
+         }
+       }
+     ]
+   }
+   ```
+
+   Because the distribution is not allowed to read `resumes/` or `documents/`, a
+   request for one through the CDN is refused even if somebody learns the key.
+4. **Tell the API and the web app where the CDN is.** `CDN_URL=https://<the
+   distribution's domain, or your own>` on the API host. On Netlify,
+   `NEXT_PUBLIC_MEDIA_HOST=<the same host name>` (read at build time, so deploy
+   again), which is what lets `next/image` load avatars from it. Leaving
+   `CDN_URL` empty serves public files from the bucket's own address, which only
+   works if a bucket policy makes those seven folders publicly readable, which
+   Block Public Access forbids; use the CDN.
+5. **Prove it.** With the diagnostics token, call
+   `GET $API_URL/health/launch-readiness?probe=media` and read the
+   `MEDIA_EXPOSURE` check. It passes when a public probe could be read and a
+   private probe could not, at the CDN's address and at the bucket's.
+   A failing check says which: a private file reachable without signing in
+   (fix the policy before anything else), public files that cannot be read
+   (avatars and reels will not load), a probe that could not be written or
+   removed, or an address that did not answer at all (the check then says it
+   could not tell, and never counts silence as safe). The check writes and deletes two small objects, so it only runs when
+   asked with `?probe=media`. The daily job in
+   [`uptime.yml`](../../.github/workflows/uptime.yml) repeats the check when the
+   repository has the `HEALTH_DIAGNOSTICS_TOKEN` secret.
+
+A member's file never reaches the container's disk in production: the API
+refuses to start without S3 and answers a failed write with a 503. The `uploads/`
+folder inside `athena-platform/server` exists only on a developer's machine, and
+is not in version control.

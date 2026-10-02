@@ -10,6 +10,10 @@
 # Every expression reads a metric the API actually produces:
 #   http_requests_total, http_request_duration_seconds   src/utils/metrics.ts,
 #                                                        recorded in middleware/responseTime.ts
+#   athena_auth_email_total                              src/utils/metrics.ts,
+#                                                        recorded in routes/auth.routes.ts
+#   athena_redis_fallback_active                         src/utils/redis-fallback.ts,
+#                                                        set by the lockout and the limiters
 #   process_*, nodejs_*                                  prom-client's default metrics
 #   up                                                   written by the scraper itself
 # and every rule selects job="athena-api", the job name in scrape.yml.
@@ -111,3 +115,62 @@ groups:
         annotations:
           summary: The API has used more than 1.6 GB of its 2 GB for ten minutes.
           runbook: A steady climb across hours is a leak; take a heap snapshot before restarting. A sudden step is usually one large request.
+
+      # The emails a member cannot get in or back in without (the confirmation
+      # link, a resent one, a password reset) failing more often than not. This
+      # is the failure that locks everyone out at once and says nothing: a
+      # sender the provider no longer accepts, a revoked key, or the provider
+      # being down. A few at least, so one mistyped address on a quiet night
+      # does not page anyone. Counted after the retries in utils/email.ts, so a
+      # blip the retry absorbed is a sent email, not a failure.
+      - alert: AthenaAuthEmailFailing
+        expr: |
+          (
+            sum(increase(athena_auth_email_total{job="athena-api", outcome="failed"}[15m]))
+            /
+            sum(increase(athena_auth_email_total{job="athena-api"}[15m]))
+          ) > 0.5
+          and
+          sum(increase(athena_auth_email_total{job="athena-api"}[15m])) >= 3
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: More than half of the sign-up and password-reset emails have failed over the last 15 minutes.
+          runbook: 'athena-platform/docs/runbooks/ONCALL.md: "Sign-up answers 503, or no verification email arrives".'
+
+      # The sign-in lockout and the rate limiters count in Redis so every
+      # instance draws on one budget. When Redis goes away after boot they keep
+      # counting in each process instead (utils/loginAttempts.ts,
+      # utils/rate-limit-store.ts, middleware/rateLimiter.ts), which is the right
+      # thing to do and was invisible: a warning line a minute and "redis: down"
+      # in /health/detailed. With two instances every caller has two budgets, and
+      # a restart hands out a fresh one, so a password-guessing run is slowed and
+      # not stopped. Five minutes, so the seconds it takes Redis to reconnect, or
+      # an API that has just started, do not raise it.
+      - alert: AthenaRedisFallbackActive
+        expr: max by (component) (athena_redis_fallback_active{job="athena-api"}) > 0
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: A sign-in or rate-limit counter has been kept in each API process, not in Redis, for five minutes.
+          runbook: 'Restore Redis (athena-redis in render.yaml). Until then the limits are per instance. athena-platform/docs/runbooks/ONCALL.md: "Redis is unreachable".'
+
+      # Requests refused with 429, held for a quarter of an hour. One refusal is a
+      # person who clicked too fast; a rate of more than one every two seconds,
+      # sustained, is one of two things, and both are worth a ticket: somebody
+      # walking the membership profile by profile or page by page (the per-account
+      # budgets in src/middleware/rateLimiter.ts exist to refuse exactly that), or
+      # a limit set tighter than ordinary use, which refuses members. The metric
+      # cannot say which account: the log can. A caller refused more than twenty
+      # times in an hour is written once as "A caller keeps running into a rate
+      # limit", with the limiter's name and her id.
+      - alert: AthenaSustainedRateLimiting
+        expr: sum(rate(http_requests_total{job="athena-api", status="429"}[10m])) > 0.5
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: The API has refused more than one request every two seconds with a 429 for fifteen minutes.
+          runbook: 'athena-platform/docs/runbooks/ONCALL.md: "High 429 rate (rate limiting)", which says how to tell a crawler from a limit set too tight.'

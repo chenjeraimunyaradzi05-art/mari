@@ -6,6 +6,7 @@ Predicts career growth trajectories and provides personalized recommendations.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, status
@@ -14,6 +15,7 @@ from pydantic import BaseModel, Field
 from src.api.services.model_loader import ModelLoader
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 model_loader = ModelLoader()
 
 
@@ -171,10 +173,14 @@ async def predict_career_growth(profile: CareerProfile):
         
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        # What went wrong stays in this service's log. The text of an exception
+        # can name a file path, a model directory or a value out of the request,
+        # and a caller needs none of it to know the call failed.
+        logger.exception("Prediction failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Prediction failed: {str(e)}"
+            detail="Prediction failed"
         )
 
 

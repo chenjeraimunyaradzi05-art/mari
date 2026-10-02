@@ -12,7 +12,8 @@
     "dev:api": "cd athena-platform/server && npm run dev",
     "dev:web": "cd athena-platform/client && npm run dev",
     "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\"",
-    "db:seed": "cd athena-platform/server && npm run db:seed",
+    "db:seed:admin": "cd athena-platform/server && npm run db:seed:admin",
+    "db:seed:real": "cd athena-platform/server && npm run db:seed:real",
     "db:migrate": "cd athena-platform/server && npx prisma migrate deploy",
     "db:generate": "cd athena-platform/server && npx prisma generate"
   }

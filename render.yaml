@@ -146,13 +146,24 @@ services:
       - key: JWT_REFRESH_EXPIRES_IN
         value: 7d
 
-      # The key that encrypts domestic-violence safe-chat messages and the
-      # wellness records. dv-safe.service.ts requires 64 hex characters in
-      # production — `openssl rand -hex 32`. It is entered by hand rather than
+      # The key that seals domestic-violence safe-chat messages, the wellness
+      # records, safety plans and two-factor seeds. The API refuses to start
+      # without 64 random hex characters (`openssl rand -hex 32`; all zeros and
+      # placeholders are refused). It is entered by hand rather than
       # generated because it has to be backed up somewhere a lost Render
       # service cannot take with it: without this exact value the encrypted
       # rows are unreadable, and those are the rows that matter most.
+      # Changing it is a rotation, not an edit: docs/runbooks/ENCRYPTION.md.
       - key: DV_ENCRYPTION_KEY
+        sync: false
+
+      # The key the list of banned people is hashed with. Unset, it is derived
+      # from JWT_SECRET, and rotating JWT_SECRET would then unban everyone with
+      # nothing to say so. `openssl rand -hex 32`, set once and kept with the
+      # same backup as DV_ENCRYPTION_KEY: a different value later stops every
+      # existing ban matching. docs/runbooks/ONCALL.md says how to set it on a
+      # platform that already has bans.
+      - key: BANNED_IDENTITY_HASH_KEY
         sync: false
 
       # Bearer tokens for /metrics and the health diagnostics detail. Nothing
@@ -168,7 +179,17 @@ services:
         sync: false
       - key: SENDGRID_FROM_EMAIL
         sync: false
+      # The key SendGrid shows when its Signed Event Webhook is switched on, so
+      # that bounced and spam-reported addresses stop being mailed.
+      - key: SENDGRID_WEBHOOK_PUBLIC_KEY
+        sync: false
       - key: TRUST_SAFETY_EMAIL
+        sync: false
+      # Who holds the duty to refer child-safety and terrorism reports to the
+      # authorities (the AFP and eSafety). Nothing is transmitted automatically:
+      # the report lands in the Authority referrals queue and this mailbox is
+      # told. Falls back to TRUST_SAFETY_EMAIL when it is not set.
+      - key: AUTHORITY_ESCALATION_EMAIL
         sync: false
 
       # Payments. The four price ids are the subscription tiers; the server
@@ -176,6 +197,13 @@ services:
       - key: STRIPE_SECRET_KEY
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      # The Connect endpoint's own signing secret. Payout and connected-account
+      # events (payout.paid, payout.failed, account.updated) arrive on a second
+      # Stripe endpoint, "Listen to events on Connected accounts", and are
+      # refused without it: a seller whose payout bounced, or whose account
+      # Stripe stopped paying, is told nothing.
+      - key: STRIPE_CONNECT_WEBHOOK_SECRET
         sync: false
       - key: STRIPE_PRICE_CAREER
         sync: false
@@ -187,6 +215,27 @@ services:
         sync: false
       - key: ALLOW_STRIPE_SIMULATION
         value: "false"
+
+      # Who ATHENA is on an invoice. The first four have no default and no invoice
+      # document is produced until all four are set: a member's download answers
+      # 503, and /health/launch-readiness fails in production, until they are. The
+      # invoices themselves are filed as sales happen and keep, so nothing is lost
+      # by setting them late. The ABN must pass its checksum; the billing mailbox
+      # must be on a domain ATHENA owns; the address lines are separated by |.
+      # ATHENA_GST_REGISTERED_FROM (YYYY-MM-DD) is optional: set it only once ATHENA
+      # is registered for GST. "Tax invoice" and "includes GST" are said only when
+      # it is set and the date has arrived; until then a document is an "Invoice"
+      # that says no GST was charged, and the price pages say the same.
+      - key: ATHENA_LEGAL_NAME
+        sync: false
+      - key: ATHENA_ABN
+        sync: false
+      - key: ATHENA_GST_REGISTERED_FROM
+        sync: false
+      - key: ATHENA_BILLING_ADDRESS
+        sync: false
+      - key: ATHENA_BILLING_EMAIL
+        sync: false
 
       # Media. Uploads and processed video go to S3. There is no disk mounted
       # below on purpose: the container's own directory is replaced on every
@@ -204,6 +253,35 @@ services:
       - key: AWS_REGION
         value: ap-southeast-2
       - key: S3_BUCKET
+        sync: false
+
+      # Malware scanning. Every upload is looked inside by ClamAV before it is
+      # kept, and a résumé or a document that cannot be scanned is refused
+      # (src/services/malware-scan.service.ts), so until this is set a member
+      # cannot attach a résumé to an application and /health/launch-readiness
+      # fails. ClamAV is a service of its own, not part of this container: its
+      # signature database needs about 1.5 GB of memory beside the API's.
+      #
+      # To run it on Render, create a Private Service (not in this blueprint,
+      # because it is a second paid instance and creating one is the owner's call):
+      #   Runtime: Docker image, docker.io/clamav/clamav:stable
+      #   Region:  singapore (the same as this service, so it is on the same
+      #            private network)
+      #   Plan:    Standard (2 GB). Its first start downloads the signature
+      #            database and takes a few minutes before it answers.
+      #   Port:    3310
+      # then set CLAMAV_HOST to its private hostname (the "Internal address"
+      # on its page, without the port). The scanner takes files up to 25 MB as
+      # shipped, which covers every résumé and document. To scan larger files
+      # (reels), raise clamd's StreamMaxLength on the scanner (the image's own
+      # documentation says how to override clamd.conf options) and set
+      # MALWARE_SCAN_MAX_BYTES here to the same figure.
+      #
+      # MALWARE_SCAN_REQUIRED is left unset: in production that means "documents"
+      # (résumés and documents are refused when unscanned; pictures, whose
+      # bytes are rewritten on the way in, are stored). Set it to "all" to refuse
+      # every unscanned upload, or "off" to decide not to scan at all.
+      - key: CLAMAV_HOST
         sync: false
 
       # Where the off-platform database copies are held, as AWS region codes
