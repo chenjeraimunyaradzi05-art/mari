@@ -820,6 +820,125 @@ describe('messages:mark_read', () => {
     expect(messageUpdateMany).toHaveBeenCalledTimes(1);
     expect(readReceipts()).toEqual([]);
   });
+
+  // The inbox list hides a thread across a block, but a client that still had
+  // it open, or any client naming his id, could mark his old messages read and
+  // so tell him she had been there.
+  it('marks them read but tells nobody across a block, in either store', async () => {
+    const reader = account('blocker');
+    const socket = connect(reader);
+    isBlockedRelationship.mockResolvedValue(true);
+
+    await socket.fire('messages:mark_read', 'him');
+
+    expect(isBlockedRelationship).toHaveBeenCalledWith(reader, 'him');
+    expect(messageUpdateMany).toHaveBeenCalledTimes(1);
+    expect(readReceipts()).toEqual([]);
+
+    // A block written to the DV safety page alone, by either of them.
+    isBlockedRelationship.mockResolvedValue(false);
+    dvBlockFindFirst.mockResolvedValue({ userId: 'him' });
+    await socket.fire('messages:mark_read', 'him');
+
+    expect(messageUpdateMany).toHaveBeenCalledTimes(2);
+    expect(readReceipts()).toEqual([]);
+  });
+
+  it('withholds the receipt when the block lists cannot be read', async () => {
+    const socket = connect(account('unreadable-blocks'));
+    isBlockedRelationship.mockRejectedValue(new Error('connection reset'));
+
+    await socket.fire('messages:mark_read', 'sender');
+
+    expect(messageUpdateMany).toHaveBeenCalledTimes(1);
+    expect(readReceipts()).toEqual([]);
+  });
+});
+
+// ------------------------------------------------------------------ the pair room
+
+// The pair room carries the typing notices and the read receipts between two
+// members. Anyone could join any pair's room by naming the other member, and the
+// typing handlers emitted into it with no check while the channel notices had
+// one: a man she had blocked could sit in their room and watch her "typing" come
+// and go.
+describe('the pair room across a block', () => {
+  const pairRoom = (a: string, b: string) => `conversation:${[a, b].sort().join(':')}`;
+  const typingNotices = () =>
+    roomEmissions.filter((e) => e.event === 'messages:user_typing' || e.event === 'messages:user_stopped_typing');
+
+  it('sends a typing notice into the pair room when there is no block, in either payload shape', async () => {
+    const typist = account('typist');
+    const socket = connect(typist);
+
+    await socket.fire('messages:typing', { receiverId: 'bea', conversationId: 'conv-1' });
+    await socket.fire('messages:stop_typing', 'bea');
+
+    expect(typingNotices()).toEqual([
+      { rooms: [pairRoom(typist, 'bea')], except: [], event: 'messages:user_typing', payload: { userId: typist, conversationId: 'conv-1' } },
+      { rooms: [pairRoom(typist, 'bea')], except: [], event: 'messages:user_stopped_typing', payload: { userId: typist, conversationId: undefined } },
+    ]);
+  });
+
+  it('sends no typing notice to someone on either side of a block with her', async () => {
+    const her = account('her');
+    const socket = connect(her);
+    // Read in both stores and both directions by audience.service; here the list simply names him.
+    blockedEitherWayIds.mockResolvedValue(['him']);
+
+    await socket.fire('messages:typing', { receiverId: 'him', conversationId: 'conv-1' });
+    await socket.fire('messages:stop_typing', { receiverId: 'him' });
+    // Someone she has no block with is still told.
+    await socket.fire('messages:typing', { receiverId: 'bea', conversationId: 'conv-2' });
+
+    expect(typingNotices()).toEqual([
+      { rooms: [pairRoom(her, 'bea')], except: [], event: 'messages:user_typing', payload: { userId: her, conversationId: 'conv-2' } },
+    ]);
+  });
+
+  it('sends nothing, rather than everything, when the block lists cannot be read', async () => {
+    const socket = connect(account('unreadable-pair'));
+    blockedEitherWayIds.mockRejectedValue(new Error('connection reset'));
+
+    await socket.fire('messages:typing', 'bea');
+    await socket.fire('messages:stop_typing', 'bea');
+
+    expect(typingNotices()).toEqual([]);
+  });
+
+  it('reads her block lists once in a while, not on every keystroke', async () => {
+    const socket = connect(account('pair-keystrokes'));
+
+    for (let i = 0; i < 5; i += 1) await socket.fire('messages:typing', 'bea');
+
+    expect(blockedEitherWayIds).toHaveBeenCalledTimes(1);
+    expect(typingNotices()).toHaveLength(5);
+  });
+
+  it('does not let a member into the room of a pair she is on either side of a block with', async () => {
+    const him = account('ex');
+    const socket = connect(him);
+    blockedEitherWayIds.mockResolvedValue(['her']);
+
+    await socket.fire('messages:join_conversation', 'her');
+    expect(socket.rooms.has(pairRoom(him, 'her'))).toBe(false);
+
+    // The room of a pair with no block between them is open as before.
+    await socket.fire('messages:join_conversation', 'bea');
+    expect(socket.rooms.has(pairRoom(him, 'bea'))).toBe(true);
+  });
+
+  it('refuses the join when the block lists cannot be read, and ignores a join that names nobody', async () => {
+    const socket = connect(account('unreadable-join'));
+    blockedEitherWayIds.mockRejectedValue(new Error('connection reset'));
+
+    await socket.fire('messages:join_conversation', 'bea');
+    await socket.fire('messages:join_conversation', '');
+    await socket.fire('messages:join_conversation', { not: 'a string' });
+
+    // Her own user room from the connection, and no pair room at all.
+    expect([...socket.rooms].filter((room) => room.startsWith('conversation:'))).toEqual([]);
+  });
 });
 
 // ------------------------------------------------------------------ channel typing

@@ -486,6 +486,16 @@ router.post(
 // Each person's own view of a thread. Pinning holds it at the top of their
 // list, muting stops pushes and the badge, archiving takes it out of the inbox
 // until it is unarchived.
+//
+// Nothing here is told to the other person. A mute changes only her own row;
+// the sender's answer (below, and over the socket) carries the message and
+// never the quiet flag; delivery and read ticks go out as they always did. So
+// there is nothing a sender can read a mute from. This per-thread mute is what
+// the blueprint's "block/mute" (5.2 Messaging Safety) means on the platform:
+// there is no account-level mute, and a member who wants to hear nothing from
+// someone anywhere blocks them, which holds in both directions. Whether an
+// account-level mute (hide without blocking) is wanted as well is a product
+// decision, not something to add here quietly.
 router.patch(
   '/conversations/:id/preferences',
   authenticate,

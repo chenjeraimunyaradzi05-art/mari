@@ -14,7 +14,7 @@ import {
 import { liveChatThrottle, socketMessageThrottle } from '../middleware/socialLimits';
 import { sessionEvents, SessionRevokedEvent } from '../utils/session-events';
 import { isBlockedRelationship } from '../utils/safety-store';
-import { blockedEitherWayIds } from './audience.service';
+import { blockedEitherWayIds, isBlockedEitherWay } from './audience.service';
 import { pushPreview, pushToUser } from './push.service';
 
 /** A direct message reaches the recipient's phone when no client of theirs is connected. */
@@ -238,7 +238,15 @@ export function initializeSocketHandlers(io: SocketIOServer) {
     // MESSAGING HANDLERS
     // ==========================================
 
-    socket.on('messages:join_conversation', (otherUserId: string) => {
+    // The pair room carries the typing notices and the read receipts between
+    // two members, and anyone could join any pair's room by naming the other
+    // member: a man she had blocked could sit in theirs and watch "typing" come
+    // and go. Nobody joins the room of a pair they are on either side of a block
+    // with. If the lists cannot be read the join is refused, which costs a
+    // typing dot and nothing else.
+    socket.on('messages:join_conversation', async (otherUserId: string) => {
+      if (typeof otherUserId !== 'string' || !otherUserId) return;
+      if (await pairIsBlocked(userId, otherUserId)) return;
       const roomId = getConversationRoomId(userId, otherUserId);
       socket.join(roomId);
       logger.debug('User joined conversation', { userId, otherUserId, roomId });
@@ -312,16 +320,23 @@ export function initializeSocketHandlers(io: SocketIOServer) {
       }
     });
 
-    socket.on('messages:typing', (payload: TypingPayload) => {
+    // "Is typing" is a notice to the other member of the pair, and a member on
+    // either side of a block with her is told nothing by her, a typing dot
+    // included; the channel notices below hold to the same rule, and these did
+    // not. If the block lists cannot be read the notice is not sent: it is a
+    // nicety, and the cost of a missing one is nothing.
+    socket.on('messages:typing', async (payload: TypingPayload) => {
       const { receiverId, conversationId } = parseTypingPayload(payload);
       if (!receiverId) return;
+      if (await pairIsBlocked(userId, receiverId)) return;
       const roomId = getConversationRoomId(userId, receiverId);
       socket.to(roomId).emit('messages:user_typing', { userId, conversationId });
     });
 
-    socket.on('messages:stop_typing', (payload: TypingPayload) => {
+    socket.on('messages:stop_typing', async (payload: TypingPayload) => {
       const { receiverId, conversationId } = parseTypingPayload(payload);
       if (!receiverId) return;
+      if (await pairIsBlocked(userId, receiverId)) return;
       const roomId = getConversationRoomId(userId, receiverId);
       socket.to(roomId).emit('messages:user_stopped_typing', { userId, conversationId });
     });
@@ -457,6 +472,23 @@ export function initializeSocketHandlers(io: SocketIOServer) {
           });
         }
         if (hideReceipts) return;
+
+        // And never across a block, in either store and either direction. The
+        // inbox list no longer shows her a thread with someone she has blocked,
+        // but a client that still had it open, or any client naming his id,
+        // could mark his old messages read and so tell him she had been there.
+        // The messages are read all the same, for her own badge. If the lists
+        // cannot be read the receipt is withheld, as above.
+        let acrossBlock = true;
+        try {
+          acrossBlock = await isBlockedEitherWay(userId, senderId);
+        } catch (lookupError) {
+          logger.warn('Read receipt withheld: the block lists could not be read', {
+            userId,
+            error: lookupError instanceof Error ? lookupError.message : String(lookupError),
+          });
+        }
+        if (acrossBlock) return;
 
         // And never to the person who opened a request that has not been
         // accepted: the banner tells the asked person she cannot see when it was
@@ -674,7 +706,8 @@ export function getChannelRoomId(channelId: string): string {
 }
 
 // A typing event is sent as often as someone types, so the block lists behind
-// it are read at most once in half a minute for each member rather than on every
+// it (and behind joining a pair's room, which is what the notices travel in)
+// are read at most once in half a minute for each member rather than on every
 // event. A block made in that half minute holds from the next read; what it
 // lets through meanwhile is a "typing" notice, not a word.
 const TYPING_BLOCK_TTL_MS = 30_000;
@@ -699,6 +732,16 @@ async function blockedRoomsOf(userId: string): Promise<string[] | null> {
     logger.warn('Typing notice not sent: the block lists could not be read', { userId, error });
     return null;
   }
+}
+
+/**
+ * Whether this member and one other are on either side of a block, from the
+ * same cached read the channel notices use. True as well when the lists cannot
+ * be read, so the caller holds back rather than lets through.
+ */
+async function pairIsBlocked(userId: string, otherUserId: string): Promise<boolean> {
+  const rooms = await blockedRoomsOf(userId);
+  return rooms === null || rooms.includes(`user:${otherUserId}`);
 }
 
 export function getLiveRoomId(streamId: string): string {
