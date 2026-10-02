@@ -13,7 +13,7 @@
 
 import request from 'supertest';
 import express from 'express';
-import { describe, it, expect, jest, beforeEach } from '@jest/globals';
+import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
 
 jest.mock('../../utils/prisma', () => ({
   prisma: {
@@ -295,10 +295,62 @@ describe('The earnings statement', () => {
       gte: new Date('2025-06-30T14:00:00.000Z'),
       lt: new Date('2026-06-30T14:00:00.000Z'),
     });
+    // Not registered for GST in this environment, so no GST is inside the fee
+    // and the statement says so, rather than leaving the figure out.
     expect(res.body.data.totals).toEqual([
-      { currency: 'AUD', count: 1, gross: 20000, fee: 3000, net: 17000, refundedCount: 1, refundedNet: 8500 },
+      { currency: 'AUD', count: 1, gross: 20000, fee: 3000, feeGst: 0, net: 17000, refundedCount: 1, refundedNet: 8500 },
     ]);
+    expect(res.body.data.gstRegistered).toBe(false);
     expect(res.headers['cache-control']).toBe('private, no-store');
+  });
+
+  describe('once ATHENA is registered for GST', () => {
+    const saved = { abn: process.env.ATHENA_ABN, from: process.env.ATHENA_GST_REGISTERED_FROM };
+    const setRegistration = (from: string | undefined) => {
+      process.env.ATHENA_ABN = '51824753556';
+      if (from === undefined) delete process.env.ATHENA_GST_REGISTERED_FROM;
+      else process.env.ATHENA_GST_REGISTERED_FROM = from;
+    };
+
+    afterEach(() => {
+      if (saved.abn === undefined) delete process.env.ATHENA_ABN;
+      else process.env.ATHENA_ABN = saved.abn;
+      if (saved.from === undefined) delete process.env.ATHENA_GST_REGISTERED_FROM;
+      else process.env.ATHENA_GST_REGISTERED_FROM = saved.from;
+    });
+
+    it('shows the GST inside the fee as one eleventh of it, on each line and in the totals, and gives the CSV a column for it', async () => {
+      setRegistration('2020-01-01');
+
+      const json = await request(app()).get('/api/connect/earnings/statement?fy=2026');
+      expect(json.status).toBe(200);
+      expect(json.body.data.gstRegistered).toBe(true);
+      // A$30.00 fee: one eleventh is A$2.73, in cents, rounded to the cent.
+      expect(json.body.data.lines[0]).toMatchObject({ fee: 3000, feeGst: 273, net: 17000 });
+      // The refunded line carries its own figure but is not in the totals.
+      expect(json.body.data.lines[1]).toMatchObject({ status: 'REFUNDED', feeGst: 136 });
+      expect(json.body.data.totals).toEqual([
+        { currency: 'AUD', count: 1, gross: 20000, fee: 3000, feeGst: 273, net: 17000, refundedCount: 1, refundedNet: 8500 },
+      ]);
+
+      const csv = await request(app()).get('/api/connect/earnings/statement?fy=2026&format=csv');
+      expect(csv.text).toContain('ATHENA fee,GST in ATHENA fee,Paid to you');
+      expect(csv.text).toContain('200.00,30.00,2.73,170.00,Released');
+      expect(csv.text).toMatch(/one eleventh of the fee/);
+    });
+
+    it('puts no GST in the fee of a payment released before the registration took effect', async () => {
+      // Registered from the day after these payments were released.
+      setRegistration('2026-07-01');
+
+      const json = await request(app()).get('/api/connect/earnings/statement?fy=2026');
+      expect(json.status).toBe(200);
+      expect(json.body.data.lines[0]).toMatchObject({ fee: 3000, feeGst: 0 });
+      expect(json.body.data.totals[0]).toMatchObject({ feeGst: 0 });
+
+      const csv = await request(app()).get('/api/connect/earnings/statement?fy=2026&format=csv');
+      expect(csv.text).toContain('200.00,30.00,0.00,170.00,Released');
+    });
   });
 
   it('downloads as a CSV a spreadsheet cannot be made to run', async () => {
