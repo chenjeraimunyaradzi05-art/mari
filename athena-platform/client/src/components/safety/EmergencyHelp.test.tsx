@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
@@ -25,12 +25,28 @@ jest.mock('@/lib/api', () => ({ dvSafeApi: { getSettings: () => getSettings() } 
 import { EmergencyHelp, SignedInEmergencyHelp } from './EmergencyHelp';
 import { QuickExitButton, exitNavigation, resetFloatingExitClaims } from '@/app/dashboard/safety/QuickExit';
 
+let client: QueryClient;
 function withQueries(children: ReactNode) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
 
 const open = () => fireEvent.click(screen.getByRole('button', { name: /emergency help/i }));
+
+/**
+ * Waits until her settings have been read, or refused, and drawn. react-query
+ * hands a query's answer to the component on a timer (its notifyManager runs on
+ * setTimeout 0), not on the microtask queue, so a single microtask turn after
+ * the mock had resolved raced that timer and the exit was pressed before its
+ * address had arrived. The cache says when the answer is in, and one timer turn
+ * inside act is what lets it reach the dialog.
+ */
+async function settled() {
+  await waitFor(() => expect(['success', 'error']).toContain(client.getQueryState(['dv-safe-settings'])?.status));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
 
 beforeEach(() => {
   signedIn = true;
@@ -130,9 +146,7 @@ describe('leaving', () => {
     render(withQueries(<EmergencyHelp />));
     open();
     // Her settings arrive once the dialog is open and the exit is asking.
-    await act(async () => {
-      await Promise.resolve();
-    });
+    await settled();
 
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /quick exit/i }));
 
@@ -143,9 +157,7 @@ describe('leaving', () => {
     getSettings.mockRejectedValue(new Error('Network Error'));
     render(withQueries(<EmergencyHelp />));
     open();
-    await act(async () => {
-      await Promise.resolve();
-    });
+    await settled();
 
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /quick exit/i }));
 

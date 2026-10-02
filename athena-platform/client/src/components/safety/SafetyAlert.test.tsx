@@ -25,8 +25,9 @@ jest.mock('@/lib/api', () => ({ dvSafeApi: { getSettings: () => getSettings(), p
 import { EmergencyHelp } from './EmergencyHelp';
 import { resetFloatingExitClaims } from '@/app/dashboard/safety/QuickExit';
 
+let client: QueryClient;
 function withQueries(children: ReactNode) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
 
@@ -35,16 +36,30 @@ const settings = (over: Record<string, unknown> = {}) => ({
   data: { safeExitUrl: 'https://www.bom.gov.au', safeExitEnabled: false, panicButtonEnabled: true, emergencyContacts: [contact()], ...over },
 });
 
+/**
+ * Waits until her settings have been read and drawn.
+ *
+ * react-query hands a query's answer to the component on a timer (its
+ * notifyManager runs on setTimeout 0), not on the microtask queue, so counting
+ * microtasks once the mock had resolved raced that timer: whichever of the two
+ * was registered first won, and this file passed on its own and failed in a
+ * batch. The cache says when the answer is in, and one timer turn inside act
+ * is what lets it reach the dialog.
+ */
+async function settled() {
+  await waitFor(() => expect(['success', 'error']).toContain(client.getQueryState(['dv-safe-settings'])?.status));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
 async function openDialog() {
   render(withQueries(<EmergencyHelp />));
   fireEvent.click(screen.getByRole('button', { name: /emergency help/i }));
   // Her settings are asked for once the dialog is open; wait until they have been
   // read and drawn, so a test that expects nothing to be offered is not looking
   // before the answer came.
-  await waitFor(() => expect(getSettings).toHaveBeenCalled());
-  await act(async () => {
-    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
-  });
+  await settled();
   return screen.getByRole('dialog');
 }
 
