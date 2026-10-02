@@ -167,20 +167,23 @@ async function accountsFor(db: SafetyReader, ids: string[], live: boolean): Prom
   return rows.map(toAccount);
 }
 
-/** Of these accounts, which have been reduced to a tombstone by an erasure. The address is matched, never read. */
-async function tombstonedIn(db: SafetyReader, ids: string[]): Promise<string[]> {
-  const found: string[] = [];
-  for (const part of chunks(ids)) {
-    const rows = (await db.user.findMany({
-      where: {
-        id: { in: part },
-        OR: [{ email: { endsWith: '@erased.invalid' } }, { email: { endsWith: '@example.invalid' } }],
-      },
-      select: { id: true },
-    })) as Array<{ id: string }>;
-    found.push(...rows.map((row) => row.id));
-  }
-  return found;
+/** Every account id a database holds, and nothing else about any of them. */
+async function allUserIds(db: SafetyReader): Promise<string[]> {
+  const rows = (await db.user.findMany({ select: { id: true } })) as Array<{ id: string }>;
+  return rows.map((row) => row.id);
+}
+
+/**
+ * Which accounts an erasure has reduced to a tombstone (gdpr.service writes the
+ * address as `…@erased.invalid`). The address is matched, never read: only the
+ * id comes back.
+ */
+async function tombstonedIn(db: SafetyReader): Promise<string[]> {
+  const rows = (await db.user.findMany({
+    where: { OR: [{ email: { endsWith: '@erased.invalid' } }, { email: { endsWith: '@example.invalid' } }] },
+    select: { id: true },
+  })) as Array<{ id: string }>;
+  return rows.map((row) => row.id);
 }
 
 /** The ids and nothing else out of an audit row's metadata; notes and reasons are never read. */
@@ -234,15 +237,22 @@ export async function compareDatabases(live: SafetyReader, restored: SafetyReade
     ]),
   ];
 
-  const [liveAccounts, restoredAccounts, liveTombstoned] = await Promise.all([
+  // Who was erased is decided over the whole account table on both sides, not
+  // only over the members with a safety row: a woman who asked to be erased
+  // and had never touched a safety setting is still one the restored copy
+  // would bring back, and the runbook's "run the erasure again" list has to
+  // name her too. Ids only; no address is ever selected.
+  const [liveAccounts, restoredAccounts, liveUserIds, restoredUserIds, liveTombstoned] = await Promise.all([
     accountsFor(live, ids, true),
     accountsFor(restored, ids, false),
-    tombstonedIn(live, ids),
+    allUserIds(live),
+    allUserIds(restored),
+    tombstonedIn(live),
   ]);
 
   const { erased } = classifyAccounts({
-    restoredPresent: restoredAccounts.map((account) => account.userId),
-    livePresent: liveAccounts.map((account) => account.userId),
+    restoredPresent: restoredUserIds,
+    livePresent: liveUserIds,
     liveTombstoned,
     auditErased: decisions.flatMap((row) => (row.action === 'ACCOUNT_DELETE' && row.targetUserId ? [row.targetUserId] : [])),
   });

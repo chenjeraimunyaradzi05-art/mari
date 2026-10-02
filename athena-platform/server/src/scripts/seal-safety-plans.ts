@@ -29,6 +29,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
+import { configuredKeyProblem } from '../utils/encryption-key';
 import { readPlanPart, sealPlanLines, SAFETY_PLAN_FIELDS, type SafetyPlanField } from '../utils/safety-plan-seal';
 
 export interface SealSummary {
@@ -48,10 +49,17 @@ export interface SealSummary {
 
 const BATCH = 100;
 
+/**
+ * The key has to be one the production API would accept, whatever NODE_ENV this
+ * shell has: 64 hex characters, and not the all-zero or repeating placeholder
+ * an example file ships. Sealing every plan under a key the API refuses to
+ * start with would make every plan unreadable the moment it was deployed.
+ */
 function requireRealKey(): void {
-  if (!/^[0-9a-fA-F]{64}$/.test(process.env.DV_ENCRYPTION_KEY || '')) {
+  const problem = configuredKeyProblem('safety-plan');
+  if (problem) {
     throw new Error(
-      'DV_ENCRYPTION_KEY must be set to the 64-character hex key the server runs with before plans are sealed'
+      `DV_ENCRYPTION_KEY must be set to the 64-character hex key the server runs with before plans are sealed: ${problem}`
     );
   }
 }

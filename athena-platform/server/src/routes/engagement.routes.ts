@@ -201,10 +201,13 @@ router.get('/leaderboard', optionalAuth, async (req: Request, res: Response, nex
     // Add user's rank if authenticated
     let userRank = null;
     if ((req as AuthRequest).user) {
-      // Find user's position
+      // Find user's position. A streak row carries the member under `user` and
+      // an `id` that is the streak's own, so the nested member is read first:
+      // asking `id` alone never found anyone on that board, and every member
+      // was told she had no rank on it (see withoutBlockedMembers).
       const fullLeaderboard = await engagementService.getLeaderboard(type, period, 1000);
       const userIndex = fullLeaderboard.findIndex(
-        (entry: any) => entry.id === (req as AuthRequest).user!.id
+        (entry: any) => (entry.user?.id ?? entry.id) === (req as AuthRequest).user!.id
       );
       if (userIndex !== -1) {
         userRank = userIndex + 1;

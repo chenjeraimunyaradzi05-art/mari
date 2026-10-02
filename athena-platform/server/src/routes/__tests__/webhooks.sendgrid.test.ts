@@ -208,6 +208,10 @@ describe('POST /api/webhooks/sendgrid, what it records', () => {
       // Dropped for what the message says, or because she unsubscribed, says nothing about the address.
       { email: 'g@example.org', event: 'dropped', reason: 'Spam Content' },
       { email: 'h@example.org', event: 'dropped', reason: 'Unsubscribed Address' },
+      // A header we built wrongly is our fault, not the address's; only a bare
+      // "Invalid" is SendGrid saying the address itself is no good.
+      { email: 'i@example.org', event: 'dropped', reason: 'Invalid SMTPAPI header' },
+      { email: 'j@example.org', event: 'dropped', reason: 'Recipient List over Package Quota' },
     ]);
 
     expect(res.status).toBe(200);

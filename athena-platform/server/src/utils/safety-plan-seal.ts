@@ -117,7 +117,11 @@ export interface PresentedSafetyPlan {
   [key: string]: unknown;
   /** False while any part is still kept as readable lists. */
   encryptedAtRest: boolean;
-  /** Parts that are stored but that this host could not open. */
+  /**
+   * Parts that are stored but cannot be shown: sealed under a key this host
+   * does not have, or kept in a shape that is not a list of lines. Either way
+   * the page shows nothing for them and must not save a blank over them.
+   */
   unreadableParts: SafetyPlanField[];
 }
 
@@ -125,6 +129,13 @@ export interface PresentedSafetyPlan {
  * A stored plan as she should see it: every part opened into a list of lines
  * or null, plus two facts about how it is kept so the page never claims more
  * than is true of her own row.
+ *
+ * A part this file cannot read, for whatever reason, is named in
+ * unreadableParts. The page treats an empty box for a named part as "left
+ * alone", not "emptied", so what is stored survives a save she makes without
+ * ever having seen it. Left unnamed, an unsupported part would read as empty
+ * and her next save would clear it, which is throwing away a piece of her plan
+ * on the strength of a shape the page could not show.
  */
 export function presentSafetyPlan(row: PlanRow): PresentedSafetyPlan {
   const presented: PlanRow = { ...row };
@@ -135,7 +146,7 @@ export function presentSafetyPlan(row: PlanRow): PresentedSafetyPlan {
     const part = readPlanPart(row[field]);
     presented[field] = part.lines;
     if (part.state === 'plain' || part.state === 'unsupported') encryptedAtRest = false;
-    if (part.state === 'unreadable') unreadableParts.push(field);
+    if (part.state === 'unreadable' || part.state === 'unsupported') unreadableParts.push(field);
   }
 
   return { ...presented, encryptedAtRest, unreadableParts };

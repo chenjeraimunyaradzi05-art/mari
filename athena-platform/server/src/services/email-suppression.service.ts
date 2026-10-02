@@ -78,9 +78,12 @@ export function verifySendGridSignature(
  * The reasons SendGrid gives for dropping a message that are about the address
  * and so will be the same next time. Others (a spam-filter hit on the content,
  * an unsubscribed group) are about the message or the member's choice, and
- * suppressing the address for them would be wrong.
+ * suppressing the address for them would be wrong. "Invalid" on its own is the
+ * address; "Invalid SMTPAPI header" is a message we built wrongly, and matching
+ * it would have locked the member it was addressed to out of her own password
+ * reset for a fault that was ours.
  */
-const ADDRESS_LEVEL_DROP = /bounced address|spam reporting address|invalid/i;
+const ADDRESS_LEVEL_DROP = /bounced address|spam reporting address|^\s*invalid\s*$/i;
 
 /**
  * The events in one Event Webhook delivery that mean "do not write to this

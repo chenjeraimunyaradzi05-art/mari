@@ -36,6 +36,7 @@ import { bestEffort } from '../utils/best-effort';
 import { ApiError } from '../middleware/errorHandler';
 import { digitsOnly, formatAbn, isConfigured as abrConfigured, isValidAbn, lookupAbn } from './abr.service';
 import { CONFIDENTIAL_LISTING_TYPES, dvSafeNoteOf, withSafetyCheckRequest } from './housing-supply.service';
+import { safeNotificationFor } from './dv-safe.service';
 
 export const PROVIDER_RELATIONSHIPS = ['OWNER', 'AGENT', 'SERVICE'] as const;
 export type ProviderRelationship = (typeof PROVIDER_RELATIONSHIPS)[number];
@@ -440,21 +441,29 @@ export async function sweepProviderChecks(
     const shown = titles.slice(0, 3).map((t) => `"${t}"`).join(', ');
     const more = titles.length > 3 ? ` and ${titles.length - 3} more` : '';
     const subject = `${shown}${more} ${titles.length === 1 ? 'is' : 'are'} off the list and no longer show${titles.length === 1 ? 's' : ''} as checked`;
+    const title = neverChecked ? 'Your places need a provider check' : 'Your provider check has ended';
+    const message = neverChecked
+      ? `${subject}. ATHENA now checks the person offering a DV-safe, emergency or transitional place as well as the place, and there is no provider check on record for you yet. Ask for one under "Your provider check" and a member of staff will look at it.`
+      : `${subject}, because your provider check is no longer current. Ask for a new check under "Your provider check" and a member of staff will look at it.`;
     const told = await bestEffort(
       'notification.housing-provider-check-ended',
-      () =>
-        prisma.notification.create({
+      async () => {
+        // The row names her places, and this member may be keeping her
+        // notifications vague for whoever is holding her open phone. Every other
+        // housing notice is shaped by that setting on the way in (the routes'
+        // `note`), so this one is too; the words wait on the housing page.
+        const shaped = await safeNotificationFor(userId, title, message);
+        return prisma.notification.create({
           data: {
             userId,
             type: 'SYSTEM',
-            title: neverChecked ? 'Your places need a provider check' : 'Your provider check has ended',
-            message: neverChecked
-              ? `${subject}. ATHENA now checks the person offering a DV-safe, emergency or transitional place as well as the place, and there is no provider check on record for you yet. Ask for one under "Your provider check" and a member of staff will look at it.`
-              : `${subject}, because your provider check is no longer current. Ask for a new check under "Your provider check" and a member of staff will look at it.`,
+            title: shaped.title,
+            message: shaped.message,
             link: '/dashboard/housing#provider-check',
             data: { kind: neverChecked ? 'HOUSING_PROVIDER_CHECK_NEEDED' : 'HOUSING_PROVIDER_CHECK_ENDED', count: titles.length } as Prisma.InputJsonValue,
           },
-        }),
+        });
+      },
       null
     );
     if (told) result.membersTold += 1;

@@ -1,4 +1,5 @@
 import { logger } from './logger';
+import { senderAddressProblem } from './sender-address';
 
 interface EmailOptions {
   to: string;
@@ -506,8 +507,11 @@ export async function deliverEmail(options: EmailOptions, policy: DeliveryPolicy
   // venture does not own, which SendGrid refuses to send from: every email
   // looked sent by this code and none could leave. The environment check
   // refuses to boot in production without a usable address
-  // (utils/env.ts); this is the same refusal for a process that reached here
-  // some other way.
+  // (utils/env.ts); this is the same refusal, by the same rule
+  // (utils/sender-address.ts), for a process that reached here some other
+  // way: a value copied from a template (noreply@your-domain.com), a display
+  // name around the address, or the old athena.com default are all refused
+  // here rather than handed to SendGrid to refuse.
   const sender = (process.env.SENDGRID_FROM_EMAIL || '').trim();
 
   const refused = (reason: EmailFailureReason): EmailDelivery => ({
@@ -523,8 +527,9 @@ export async function deliverEmail(options: EmailOptions, policy: DeliveryPolicy
     return refused('not_configured');
   }
 
-  if (process.env.NODE_ENV === 'production' && !sender) {
-    logger.error('Email sending is not configured in production: SENDGRID_FROM_EMAIL is not set', logFacts(to, subject));
+  const senderProblem = process.env.NODE_ENV === 'production' ? senderAddressProblem(sender) : null;
+  if (senderProblem) {
+    logger.error(`Email sending is not configured in production: SENDGRID_FROM_EMAIL ${senderProblem}`, logFacts(to, subject));
     return refused('not_configured');
   }
 

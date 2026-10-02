@@ -894,6 +894,28 @@ describe('The check on the person offering a place', () => {
     expect(prisma.housingListing.update.mock.calls[0][0].data).toEqual({ safetyVerified: true, dvSafe: true, status: 'ACTIVE' });
   });
 
+  it('is not put on an ordinary listing, which goes through no provider check, however good the note', async () => {
+    prisma.housingListing.findUnique.mockResolvedValue({ ...rental, features: [] });
+    const res = await request(app)
+      .patch('/api/housing/admin/listings/l-rental')
+      .set(as('staff', 'ADMIN'))
+      .send({ safetyVerified: true, checkNote: 'Rang the owner and saw the room myself.' })
+      .expect(400);
+    expect(res.body.message).toContain('Only a DV-safe, emergency or transitional listing');
+    expect(prisma.housingListing.update).not.toHaveBeenCalled();
+  });
+
+  it('comes off a checked DV-safe listing that staff show as an ordinary one, as it does when the lister lowers the claim', async () => {
+    prisma.housingListing.findUnique.mockResolvedValue({ ...safeHouse, status: 'PENDING' });
+    await request(app).patch('/api/housing/admin/listings/l-safe').set(as('staff', 'ADMIN')).send({ dvSafe: false, status: 'ACTIVE' }).expect(200);
+    expect(prisma.housingListing.update.mock.calls[0][0].data).toEqual({ safetyVerified: false, dvSafe: false, status: 'ACTIVE' });
+    // No provider check is asked for: the listing is no longer confidential.
+    expect(prisma.housingProviderVerification.findUnique).not.toHaveBeenCalled();
+    const told = prisma.notification.create.mock.calls[0][0].data;
+    expect(told.userId).toBe('lister');
+    expect(told.message).toContain('ordinary listing');
+  });
+
   it('taking a listing down also ends its check, so its lister cannot put it back with the badge on', async () => {
     prisma.housingListing.findUnique.mockResolvedValue({ ...waiting, safetyVerified: true, status: 'ACTIVE' });
     await request(app).patch('/api/housing/admin/listings/l-wait').set(as('staff', 'ADMIN')).send({ status: 'WITHDRAWN' }).expect(200);

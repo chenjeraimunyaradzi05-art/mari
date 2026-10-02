@@ -1314,6 +1314,19 @@ router.patch(
         throw new ApiError(400, 'A DV-safe, emergency or transitional listing goes live only once it is marked as checked');
       }
 
+      // The badge is for confidential listings only, as the staff-entered route
+      // has always said: what it tells a woman (housing page) includes a check
+      // on the provider, which an ordinary listing never goes through. So an
+      // ordinary listing is not badged from here, and a listing that stops being
+      // confidential because staff lower its DV-safe claim loses the badge the
+      // claim earned, as it does when its lister lowers the claim.
+      if (!confidentialAfter && after.safetyVerified) {
+        if (safetyVerified === true) {
+          throw new ApiError(400, 'Only a DV-safe, emergency or transitional listing is marked as checked. Tick DV-safe, or leave the check off.');
+        }
+        after.safetyVerified = false;
+      }
+
       // Marking a place checked is the promise the badge makes, so the person
       // making it says what she checked, and that goes in the audit row. The
       // approval used to take an optional line for the lister and nothing else:
@@ -1344,10 +1357,13 @@ router.patch(
       const staffPutBack = Boolean(status) && after.status !== 'WITHDRAWN' && takenDownByStaff(listing.features);
       const features = staffTookDown ? withStaffTakedown(listing.features) : staffPutBack ? withoutStaffTakedown(listing.features) : null;
 
+      // Written when staff said so, and when the rules above changed it (a
+      // take-down, or a claim lowered) from what the row holds.
+      const badgeChanged = after.safetyVerified !== listing.safetyVerified;
       const updated = await prisma.housingListing.update({
         where: { id },
         data: {
-          ...((typeof safetyVerified === 'boolean' || takenDown) && { safetyVerified: after.safetyVerified }),
+          ...((typeof safetyVerified === 'boolean' || badgeChanged) && { safetyVerified: after.safetyVerified }),
           ...(typeof dvSafe === 'boolean' && { dvSafe }),
           ...(status && { status: status as any }),
           ...(features && { features }),

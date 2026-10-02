@@ -26,7 +26,10 @@ describe('A safety plan kept sealed', () => {
     const sealed = sealPlanLines(['Jo - 0400 000 000', 'Library on Adelaide St']);
 
     expect(isSealed(sealed)).toBe(true);
-    expect(sealed).not.toContain('Jo');
+    // The whole name and number, not a two-letter piece of it: the sealed
+    // string is base64 over random bytes, and a pair of letters such as "Jo"
+    // turns up in it by chance about one run in forty.
+    expect(sealed).not.toContain('Jo - 0400');
     expect(sealed).not.toContain('Adelaide');
     expect(readPlanPart(sealed)).toEqual({ lines: ['Jo - 0400 000 000', 'Library on Adelaide St'], state: 'sealed' });
   });
@@ -125,6 +128,23 @@ describe('A safety plan kept sealed', () => {
       expect(presented.unreadableParts).toEqual(['legalContacts']);
       expect(presented.financialPlan).toEqual(['Cash']);
       expect(JSON.stringify(presented)).not.toContain('enc:v1:');
+    });
+
+    it('names a part kept in a shape it cannot show, so the page does not save a blank over it', () => {
+      // A row from before the route validated its body. Nothing can be shown
+      // for it, but it is hers, and reading as empty would have her next save
+      // clear it without her ever seeing what was there.
+      const presented = presentSafetyPlan({
+        id: 'plan-1',
+        emergencyContacts: [{ name: 'Jo', phone: '0400 000 000' }],
+        safeLocations: sealPlanLines(['Library']),
+      });
+
+      expect(presented.emergencyContacts).toBeNull();
+      expect(presented.unreadableParts).toEqual(['emergencyContacts']);
+      expect(presented.encryptedAtRest).toBe(false);
+      expect(presented.safeLocations).toEqual(['Library']);
+      expect(JSON.stringify(presented)).not.toContain('0400');
     });
   });
 });

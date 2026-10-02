@@ -488,6 +488,15 @@ describe('The leaderboards name only members a stranger could find', () => {
     expect(quiet.body.userRank).toBeNull();
   });
 
+  it('tells her her rank on the streak board too, whose rows carry the streak’s own id and the member beneath it', async () => {
+    // Ada's post streak is the longest of the members who may be shown; the
+    // row's `id` is `s-ada`, not `ada`, and the rank lookup used to compare
+    // that id with hers and tell every member she was unranked.
+    const res = await request(app).get('/api/engagement/leaderboard').set(ada).query({ type: 'streak', period: 'alltime' }).expect(200);
+
+    expect(res.body.userRank).toBe(1);
+  });
+
   it('keys the cache on the size, so the rank lookup and a page do not answer each other', async () => {
     await request(app).get('/api/engagement/leaderboard').set(ada).query({ type: 'xp', period: 'weekly', limit: '5' }).expect(200);
 

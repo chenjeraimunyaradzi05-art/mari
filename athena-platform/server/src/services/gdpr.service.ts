@@ -2495,6 +2495,19 @@ export class GDPRService {
       async (tx) => {
         let rowsRemoved = 0;
 
+        // The address SendGrid told us it could not deliver to (EmailSuppression,
+        // written by the event webhook) is keyed by the address itself, not by
+        // the account, so the register walk below cannot find it. It is her
+        // address all the same, and once the account is gone there is nothing
+        // left here to mail, so the row goes with her. Read before the row that
+        // holds the address is deleted or tombstoned, in the same transaction.
+        const address = await tx.user.findUnique({ where: { id: userId }, select: { email: true } });
+        const email = typeof address?.email === 'string' ? address.email.trim().toLowerCase() : null;
+        if (email) {
+          const { count } = await tx.emailSuppression.deleteMany({ where: { email } });
+          rowsRemoved += count;
+        }
+
         // Event copies the host's name, title and avatar into plain columns
         // beside the link, so detaching hostUserId on its own would leave her
         // named on the listing. It runs first because the register walk below

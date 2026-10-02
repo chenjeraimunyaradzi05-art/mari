@@ -286,7 +286,9 @@ describeIntegration('account recovery', () => {
         .post('/api/auth/change-password')
         .set('Authorization', `Bearer ${accessToken}`)
         .send({ currentPassword: 'NotHerPassw0rd!26', newPassword: NEW_PASSWORD })
-        .expect(401);
+        // 403, not 401: a 401 makes both clients refresh the session and send
+        // the same wrong password again, counted twice against the lockout.
+        .expect(403);
 
       expect(response.body.message).toBe('Current password is incorrect');
 

@@ -50,13 +50,16 @@ function fakeDatabase(data: FakeData) {
     user: model('user', (args) => {
       const users = data.users ?? [];
       const or: Row[] | undefined = args.where?.OR;
+      const named = (user: Row) => !args.where?.id?.in || args.where.id.in.includes(user.id);
       // Who is closed.
       if (or?.some((clause) => 'isSuspended' in clause)) return users.filter((user) => user.isSuspended).map((user) => ({ id: user.id }));
-      // Which of these are tombstones (matched on the address, which is never selected).
+      // Which are tombstones (matched on the address, which is never selected).
       if (or?.some((clause) => 'email' in clause)) {
-        return users.filter((user) => args.where.id.in.includes(user.id) && (data.tombstoned ?? []).includes(user.id)).map((user) => ({ id: user.id }));
+        return users.filter((user) => named(user) && (data.tombstoned ?? []).includes(user.id)).map((user) => ({ id: user.id }));
       }
-      return users.filter((user) => args.where.id.in.includes(user.id));
+      // Every account, ids only.
+      if (!args.where) return users.map((user) => ({ id: user.id }));
+      return users.filter(named);
     }),
   };
 
@@ -153,6 +156,27 @@ describe('Comparing two databases', () => {
     expect(plan.findings.filter((finding) => finding.kind === 'erased-since').map((finding) => finding.userId)).toEqual(['erased']);
     expect(plan.statements).toBe(0);
     expect(renderPatchSql(plan)).not.toContain('erased');
+  });
+
+  it('lists a member erased since though she never had a safety row, so the erasure is run again for her too', async () => {
+    // She asked to be erased after the restore point and had never touched a
+    // safety setting. The restored copy holds her account; live has nothing of
+    // her. A list drawn only from members with safety rows would leave her off
+    // it, and the restored copy would serve with her account back in it.
+    const live = fakeDatabase({ users: [userRow('kept')] });
+    const restored = fakeDatabase({ users: [userRow('kept'), userRow('quiet'), userRow('tombstoned')] });
+    const liveWithTombstone = fakeDatabase({ users: [userRow('kept'), userRow('tombstoned', { isSuspended: true })], tombstoned: ['tombstoned'] });
+
+    const plan = await compareDatabases(live.reader, restored.reader, SINCE);
+    expect(plan.findings.filter((finding) => finding.kind === 'erased-since').map((finding) => finding.userId)).toEqual(['quiet', 'tombstoned']);
+
+    const withTombstone = await compareDatabases(liveWithTombstone.reader, restored.reader, SINCE);
+    expect(withTombstone.findings.filter((finding) => finding.kind === 'erased-since').map((finding) => finding.userId)).toEqual(['quiet', 'tombstoned']);
+    // The whole account table is read by id alone, never by address.
+    for (const call of [...live.calls, ...liveWithTombstone.calls, ...restored.calls].filter((entry) => entry.model === 'user')) {
+      expect(call.args.select).toEqual(expect.objectContaining({ id: true }));
+      expect(call.args.select.email).toBeUndefined();
+    }
   });
 
   it('closes again an account staff closed since, and records a ban the restored copy lacks', async () => {

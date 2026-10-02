@@ -20,7 +20,9 @@ import { readPlanPart, sealPlanLines } from '../../utils/safety-plan-seal';
 import { isSealed } from '../../utils/secret-box';
 
 const db: any = prisma;
-const KEY = 'a'.repeat(64);
+// A key that looks generated: the script refuses a run of one character or a
+// repeating pattern, as the production API does.
+const KEY = 'd41d8cd98f00b204e9800998ecf8427ea3f1c9e7b5d2048f6e1a7c3b9d5f0e24';
 const at = new Date('2026-09-30T00:00:00Z');
 
 const row = (id: string, parts: Record<string, unknown> = {}) => ({ id, userId: `user-${id}`, updatedAt: at, ...parts });
@@ -42,6 +44,19 @@ describe('Sealing the plans written before sealing existed', () => {
 
     process.env.DV_ENCRYPTION_KEY = 'not-hex';
     await expect(sealSafetyPlans()).rejects.toThrow(/64-character hex/);
+
+    expect(db.safetyPlan.findMany).not.toHaveBeenCalled();
+    expect(db.safetyPlan.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('refuses the placeholder key an example file ships, which the production API would refuse to start with', async () => {
+    // 64 valid hex characters, and a key anyone can read: sealing under it would
+    // leave every plan unreadable on a host that has a real key.
+    process.env.DV_ENCRYPTION_KEY = '0'.repeat(64);
+    await expect(sealSafetyPlans()).rejects.toThrow(/repeating pattern/);
+
+    process.env.DV_ENCRYPTION_KEY = 'abcdabcd'.repeat(8);
+    await expect(sealSafetyPlans()).rejects.toThrow(/DV_ENCRYPTION_KEY/);
 
     expect(db.safetyPlan.findMany).not.toHaveBeenCalled();
     expect(db.safetyPlan.updateMany).not.toHaveBeenCalled();

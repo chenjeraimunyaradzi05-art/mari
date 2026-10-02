@@ -110,6 +110,34 @@ describe('the sender address', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('is refused when it is set but unusable, by the same rule the boot check applies, before SendGrid is asked', async () => {
+    // The old default, the template placeholder, and a display name around the
+    // address: each boots nowhere in production (utils/env.ts), and a process
+    // that got here anyway must not hand them to SendGrid to refuse.
+    const unusable: Array<[string, RegExp]> = [
+      ['noreply@athena.com', /uses athena\.com/],
+      ['noreply@your-domain.com', /uses your-domain\.com/],
+      ['ATHENA <noreply@mail.ourdomain.org>', /not a single plain email address/],
+    ];
+    for (const [value, problem] of unusable) {
+      fetchMock.mockClear();
+      (logger.error as jest.Mock).mockClear();
+      process.env.SENDGRID_FROM_EMAIL = value;
+
+      const delivery = await deliverEmail(message);
+
+      expect(delivery).toMatchObject({ ok: false, reason: 'not_configured', attempts: 0 });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringMatching(problem),
+        expect.objectContaining({ recipientDomain: 'example.org' })
+      );
+      for (const [, fields] of (logger.error as jest.Mock).mock.calls) {
+        expect(JSON.stringify(fields)).not.toContain('her@example.org');
+      }
+    }
+  });
+
   it('never falls back to the athena.com address it used to invent', async () => {
     await sendEmail(message);
     process.env.SENDGRID_FROM_EMAIL = 'noreply@mail.ourdomain.org';

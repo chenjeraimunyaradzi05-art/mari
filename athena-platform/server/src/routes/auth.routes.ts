@@ -932,6 +932,8 @@ async function answerRegistrationForTakenAddress(
         googleId: null,
         facebookId: null,
         lastLoginAt: null,
+        isSuspended: false,
+        bannedAt: null,
         createdAt: { lte: new Date(Date.now() - UNCONFIRMED_ACCOUNT_GRACE_MS) },
       },
       data: {
@@ -2765,7 +2767,14 @@ router.post(
 
       const isCurrentPasswordValid = await comparePassword(currentPassword, user.passwordHash);
       if (!isCurrentPasswordValid) {
-        throw await failedCredentialCheck(user.id, new ApiError(401, 'Current password is incorrect'));
+        // A 403 and not a 401, like the two-factor routes and requireStepUp.
+        // Neither the web app nor the phone app lists this route among the
+        // ones a 401 means "wrong password" for, so a 401 here was read as an
+        // expired session: the client refreshed and sent the same wrong
+        // password again, which spent two of the five attempts the
+        // credential-check lockout allows for one slip of the fingers, and
+        // rotated her refresh token for nothing.
+        throw await failedCredentialCheck(user.id, new ApiError(403, 'Current password is incorrect'));
       }
       await clearCredentialChecks(user.id);
 

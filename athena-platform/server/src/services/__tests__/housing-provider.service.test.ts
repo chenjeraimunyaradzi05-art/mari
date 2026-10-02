@@ -33,6 +33,12 @@ jest.mock('../../utils/logger', () => ({
 
 jest.mock('../../utils/ops-metrics', () => ({ recordFailure: jest.fn() }));
 
+// The member's "keep notifications vague" setting, read when a notice is
+// written. Plain words unless a test says otherwise; the shaping itself is
+// dv-safe.service's to prove.
+const safeNotificationFor = jest.fn<(userId: string, title: string, message: string) => Promise<{ title: string; message: string }>>();
+jest.mock('../dv-safe.service', () => ({ safeNotificationFor: (...args: [string, string, string]) => safeNotificationFor(...args) }));
+
 import { prisma as prismaTyped } from '../../utils/prisma';
 import { recordFailure } from '../../utils/ops-metrics';
 import {
@@ -68,6 +74,7 @@ const row = (over: Record<string, unknown> = {}) => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  safeNotificationFor.mockImplementation(async (_userId, title, message) => ({ title, message }));
   prisma.housingProviderVerification.findUnique.mockResolvedValue(null);
   prisma.housingProviderVerification.findMany.mockResolvedValue([]);
   prisma.housingProviderVerification.updateMany.mockResolvedValue({ count: 0 });
@@ -287,6 +294,20 @@ describe('the sweep: no badge without a standing check', () => {
     expect(sent.message).toContain('"One", "Two", "Three" and 1 more');
     expect(sent.message).not.toContain('"Four"');
     expect(sent.link).toBe('/dashboard/housing#provider-check');
+  });
+
+  it('keeps the notice vague for a member who keeps her notifications vague, so her places are not named on a lock screen', async () => {
+    prisma.housingListing.findMany.mockResolvedValue([badged('l-1', 'lapsed', 'Quiet unit, secure entry')]);
+    standings([{ userId: 'lapsed', status: 'APPROVED', expiresAt: inDays(-2) }]);
+    safeNotificationFor.mockResolvedValue({ title: 'New Update', message: 'You have a new update. Open app to view.' });
+
+    const result = await sweepProviderChecks(NOW);
+
+    expect(result.membersTold).toBe(1);
+    expect(safeNotificationFor).toHaveBeenCalledWith('lapsed', 'Your provider check has ended', expect.stringContaining('"Quiet unit, secure entry"'));
+    const sent = prisma.notification.create.mock.calls[0][0].data;
+    expect(sent).toMatchObject({ userId: 'lapsed', title: 'New Update', message: 'You have a new update. Open app to view.' });
+    expect(JSON.stringify(sent)).not.toContain('Quiet unit');
   });
 
   it('does not say a check "ended" to a member who never had one: a place badged before provider checks existed', async () => {

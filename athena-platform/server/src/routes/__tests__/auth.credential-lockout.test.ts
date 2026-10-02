@@ -102,9 +102,12 @@ beforeEach(() => {
 });
 
 describe('change-password', () => {
-  it('answers a wrong current password 401 until the fifth wrong one, which locks it for fifteen minutes', async () => {
+  it('answers a wrong current password 403 until the fifth wrong one, which locks it for fifteen minutes', async () => {
+    // 403 and not 401: neither client lists this route among the ones a 401
+    // means "wrong password" for, so a 401 made them refresh the session and
+    // send the same wrong password again, spending two attempts for one slip.
     for (let attempt = 1; attempt <= 4; attempt += 1) {
-      const res = await wrongPassword().expect(401);
+      const res = await wrongPassword().expect(403);
       expect(res.body.message).toBe('Current password is incorrect');
     }
 
@@ -124,21 +127,21 @@ describe('change-password', () => {
   });
 
   it('forgets the failures when the right password is given', async () => {
-    for (let attempt = 1; attempt <= 4; attempt += 1) await wrongPassword().expect(401);
+    for (let attempt = 1; attempt <= 4; attempt += 1) await wrongPassword().expect(403);
 
     await rightPassword().expect(200);
 
-    // The count started again: four more wrong ones are still only 401s.
-    for (let attempt = 1; attempt <= 4; attempt += 1) await wrongPassword().expect(401);
+    // The count started again: four more wrong ones are still only 403s.
+    for (let attempt = 1; attempt <= 4; attempt += 1) await wrongPassword().expect(403);
   });
 });
 
 describe('the four routes share one budget per member', () => {
   it('locks change-password, both two-factor routes that take a code, and enable together', async () => {
-    await wrongPassword().expect(401);
-    // 403 and not 401 on the two-factor routes: a client answers a 401 by refreshing
-    // its session and sending the request again, which would count one mistyped
+    // 403 and not 401 on all four: a client answers a 401 by refreshing its
+    // session and sending the request again, which would count one mistyped
     // password twice against the five.
+    await wrongPassword().expect(403);
     await disable({ currentPassword: 'Wrong-Passw0rd!9' }).expect(403);
     await recoveryCodes({ currentPassword: 'Wrong-Passw0rd!9' }).expect(403);
     await disable({ currentPassword: PASSWORD, code: '123456' }).expect(400);
@@ -191,7 +194,7 @@ describe('the four routes share one budget per member', () => {
       .post('/api/auth/change-password')
       .set('x-test-user', 'user-2')
       .send({ currentPassword: 'Wrong-Passw0rd!9', newPassword: NEW_PASSWORD })
-      .expect(401);
+      .expect(403);
   });
 });
 

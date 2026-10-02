@@ -336,6 +336,10 @@ describe('registering over an unconfirmed account that has been waiting for more
       googleId: null,
       facebookId: null,
       lastLoginAt: null,
+      // A suspension or a ban placed between the read and the write is a
+      // reason not to hand the account over, the same as the read said.
+      isSuspended: false,
+      bannedAt: null,
     });
     expect(where.createdAt.lte).toBeInstanceOf(Date);
     expect(Date.now() - where.createdAt.lte.getTime()).toBeGreaterThanOrEqual(HOUR - 1000);
