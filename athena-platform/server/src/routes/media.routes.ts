@@ -771,8 +771,14 @@ router.post(
 
       // Looked inside before anything is rewritten, moderated or stored, and as
       // received: a video is scanned from its temporary file, ahead of the
-      // ffmpeg pass that would otherwise be the first thing to parse it.
-      await screenUpload(file.path ? { path: file.path } : { buffer: file.buffer }, { folder: config.folder, userId });
+      // ffmpeg pass that would otherwise be the first thing to parse it. The
+      // type goes with it: a PDF sent in a conversation is a document and is
+      // held to the document rule, although it lives under the chat folder.
+      await screenUpload(file.path ? { path: file.path } : { buffer: file.buffer }, {
+        folder: config.folder,
+        userId,
+        contentType: file.mimetype,
+      });
 
       // A video was received to a temporary file, and is streamed from there
       // to S3 (storeFile sends it with its length, so it never has to be read
@@ -1083,7 +1089,7 @@ router.post('/resume', authenticate, uploadLimiter, receiveUpload(() => FILE_CON
     // A résumé is stored exactly as it was sent and opened by hiring staff, so
     // it is the file that most needs looking inside. With no scanner to ask it
     // is refused in production (see services/malware-scan.service).
-    await screenUpload({ buffer: file.buffer }, { folder: config.folder, userId: req.user?.id });
+    await screenUpload({ buffer: file.buffer }, { folder: config.folder, userId: req.user?.id, contentType: file.mimetype });
 
     const fileExtension = getSafeExtensionForContentType(file.mimetype);
     const key = `${config.folder}/${req.user!.id}/${randomUUID()}${fileExtension}`;
@@ -1134,7 +1140,7 @@ router.post('/post-images', authenticate, uploadLimiter, receiveUpload(() => FIL
     for (const file of files) {
       if (!config.allowedTypes.includes(file.mimetype)) continue;
       await assertContentMatches(file);
-      await screenUpload({ buffer: file.buffer }, { folder: config.folder, userId: req.user?.id });
+      await screenUpload({ buffer: file.buffer }, { folder: config.folder, userId: req.user?.id, contentType: file.mimetype });
     }
 
     for (const file of files) {

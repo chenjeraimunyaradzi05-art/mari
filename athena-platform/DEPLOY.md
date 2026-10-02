@@ -120,7 +120,7 @@ What happens when a file cannot be scanned is `MALWARE_SCAN_REQUIRED`:
 
 | Value | Effect |
 |---|---|
-| unset (the default in production) | Résumés and documents are refused with a 503 until a scanner answers. Pictures are stored: they are rewritten on the way in, and so are videos and sounds, which removes what they can carry |
+| unset (the default in production) | Résumés and documents are refused with a 503 until a scanner answers, a PDF or Word file sent in a conversation among them. Pictures are stored: they are rewritten on the way in, and so are videos and sounds, which removes what they can carry |
 | `all` | Every upload is refused when it cannot be scanned |
 | `off` | Nothing is refused for want of a scanner. Only choose this on purpose; a scanner that is there is still used |
 
