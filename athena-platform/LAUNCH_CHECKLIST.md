@@ -118,7 +118,7 @@ Ensure `netlify.toml` or `vercel.json` includes:
 
 ### 4.1 DNS Configuration
 - [ ] **A/CNAME Records** pointing to hosting provider
-- [ ] **API Subdomain** (e.g., `api.athena.com`)
+- [ ] **API Subdomain** (e.g., `api.<your-domain>`; records in `docs/launch/DNS_SSL_CONFIGURATION.md`)
 - [ ] **TXT Records** for domain verification
 
 ### 4.2 SSL/TLS
@@ -148,9 +148,12 @@ Ensure `netlify.toml` or `vercel.json` includes:
 - [ ] **Card holds longer than a week**: a hold on a card lasts about a week and a marketplace package can take longer. The buyer is asked to renew it in the last two days (nothing is taken by renewing), and the provider is not asked to deliver against a hold that has ended. Decide with the owner what happens for a car sale whose hold ends during the buyer's inspection period (it is settled by a person today), and ask Stripe support (https://support.stripe.com) whether extended authorisation is available to this account before turning on `ESCROW_REQUEST_EXTENDED_AUTHORISATION`. Until the car rule is decided, consider keeping car purchases switched off for launch.
 
 ### 5.2 SendGrid (Email)
-- [ ] **Domain Verified** for sending
-- [x] **Templates Created** for transactional emails
-- [ ] **API Key** with send permissions
+- [ ] **Domain authenticated** for sending: the three CNAME records SendGrid prints, verified (`docs/launch/DNS_SSL_CONFIGURATION.md`, "Email records")
+- [ ] **DMARC** published at `_dmarc.<your-domain>`, starting at `p=none` with a report mailbox someone reads
+- [x] **Templates** for transactional emails are in the code (`server/src/utils/email.ts`)
+- [ ] **API Key** with Mail Send permission only, set as `SENDGRID_API_KEY`
+- [ ] **From address** on the authenticated domain, set as `SENDGRID_FROM_EMAIL`
+- [ ] **Proved end to end**: a throwaway registration's verification email arrives and passes SPF, DKIM and DMARC in its headers
 
 ### 5.3 OpenAI (AI Features)
 - [ ] **API Key** configured
@@ -170,7 +173,7 @@ Ensure `netlify.toml` or `vercel.json` includes:
 - [x] **Helmet.js** enabled (security headers)
 - [x] **CORS** configured with allowed origins
 - [x] **Rate Limiting** enabled
-- [x] **Input Validation**: zod schemas (`src/middleware/validate.ts`, `src/utils/schemas.ts`), express-validator chains that are read through `validationResult`, and hand-written checks each named on their route with a `// validated:` note saying where the checking is. `npm run check:route-validation` (in CI) fails on a route that reads a request body or a list size and checks neither, and its baseline (`scripts/route-validation-baseline.json`) is empty, so any new offender fails. It is a floor: it finds a route with no check, not a weak one. A JSON body is limited to 256kb, with larger limits only on the named import and article routes (`src/config/body-limits.ts`); every list clamps its page size
+- [x] **Input Validation**: zod schemas (`src/middleware/validate.ts`, `src/utils/schemas.ts`), express-validator chains that are read through `validationResult`, and hand-written checks each named on their route with a `// validated:` note saying where the checking is. `npm run check:route-validation` (in CI) fails on a route that reads a request body or a list size and checks neither, and its baseline (`scripts/route-validation-baseline.json`) is empty, so any new offender fails. It is a floor: it finds a route with no check, not a weak one. A JSON body is limited to 256kb, with larger limits only on the named import and article routes (`src/config/body-limits.ts`) and only for a caller whose request carries a signed access token; every list clamps its page size
 - [x] **SQL Injection Protection** via Prisma ORM
 - [x] **XSS Protection** via React escaping
 

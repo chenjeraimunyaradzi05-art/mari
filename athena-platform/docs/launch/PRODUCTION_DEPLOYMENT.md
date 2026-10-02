@@ -67,7 +67,7 @@ sudo certbot --nginx -d athena.com -d www.athena.com -d api.athena.com
 2. Copy your **Live** Secret Key (sk_live_...)
 3. Copy your **Live** Publishable Key (pk_live_...)
 4. Set up webhook: Developers → Webhooks → Add endpoint
-   - URL: `https://api.athena.com/api/webhooks/stripe`
+   - URL: `https://<your API host>/api/webhooks/stripe` (the API service's own host, not the web app's; ATHENA does not own athena.com)
    - Events: every one the server acts on, not only the subscription ones.
      Memberships: `checkout.session.completed`, `customer.subscription.updated`,
      `customer.subscription.deleted`, `customer.subscription.trial_will_end`

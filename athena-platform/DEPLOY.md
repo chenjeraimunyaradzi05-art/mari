@@ -64,6 +64,8 @@ Never run `db:migrate` or `db:push` against this database; see
 | `ALLOWED_ORIGINS` | CORS origins (comma-separated) | `https://athena-empress.netlify.app` |
 | `TRUST_PROXY` | Behind the host's load balancer | `true` |
 | `APP_URL` / `API_URL` | This service's public URL | `https://api.your-domain.com` |
+| `SENDGRID_API_KEY` | Transactional email; the API does not start in production without it | `SG....` (a key with Mail Send only) |
+| `SENDGRID_FROM_EMAIL` | The From address, on a domain you own and have authenticated in SendGrid. No default; `athena.com`, `example.com` and the template's `your-domain.com` are refused. Records and the end-to-end check: `docs/launch/DNS_SSL_CONFIGURATION.md` ("Email records") | `noreply@mail.<your-domain>` |
 
 > **Full template:** `server/.env.production.template` lists every variable with a description.
 
@@ -75,8 +77,7 @@ Never run `db:migrate` or `db:push` against this database; see
 | `STRIPE_SECRET_KEY` | Stripe | `sk_live_...` or `sk_test_...` |
 | `STRIPE_WEBHOOK_SECRET` | Stripe | `whsec_...` |
 | `OPENAI_API_KEY` | OpenAI | For AI features (career coach, resume optimizer) |
-| `SENDGRID_API_KEY` | SendGrid | For transactional email |
-| `SENDGRID_FROM_EMAIL` | SendGrid | e.g. `noreply@your-domain.com` |
+| `SENDGRID_WEBHOOK_PUBLIC_KEY` | SendGrid | Verification key of the Signed Event Webhook posting to `/api/webhooks/sendgrid`; without it bounces are not recorded and the webhook answers 503 |
 | `AWS_ACCESS_KEY_ID` | AWS S3 | For file uploads |
 | `AWS_SECRET_ACCESS_KEY` | AWS S3 | For file uploads |
 | `AWS_REGION` | AWS S3 | e.g. `ap-southeast-2` |
@@ -225,7 +226,7 @@ Netlify auto-deploys on every push to `main`. To redeploy without a commit:
 
 ### Optional Services
 - [ ] Stripe webhook: `https://api.your-domain.com/api/webhooks/stripe` (events: `checkout.session.completed`, `customer.subscription.*` including `customer.subscription.trial_will_end`, `invoice.*`, `payment_intent.*`, `charge.refunded`, `charge.dispute.*`, `transfer.*` and `identity.verification_session.*`; the full list is in DEPLOYMENT_GUIDE.md)
-- [ ] SendGrid sender verified
+- [ ] SendGrid domain authenticated (the three CNAMEs verified) and DMARC published at `p=none`; a throwaway registration's verification email arrives and passes SPF, DKIM and DMARC in its headers (`docs/launch/DNS_SSL_CONFIGURATION.md`, "Email records")
 - [ ] S3 bucket created + IAM credentials set
 - [ ] Sentry DSN set (both API host + Netlify)
 - [ ] `DV_ENCRYPTION_KEY` set (64 hex chars) and backed up in a password manager. Safety plans are sealed under it. After the first deploy with it set, run `npm run seal:safety-plans -- --dry-run` then `npm run seal:safety-plans` once from `athena-platform/server` (with `DATABASE_URL` set to the production database, the value the API host uses, because that is the connection the script opens, and `DV_ENCRYPTION_KEY` set to the same key) to seal plans saved before sealing existed; it prints counts only and is safe to run twice

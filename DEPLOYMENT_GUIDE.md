@@ -360,7 +360,8 @@ once `NODE_ENV=production`, so a deployment missing any of them answers 503 on
 that endpoint and is not launched.
 
 ```env
-SENDGRID_API_KEY=SG....          # verification and password-reset email
+SENDGRID_API_KEY=SG....          # verification and password-reset email; a key with Mail Send only
+SENDGRID_FROM_EMAIL=noreply@mail.<your-domain>  # on the domain authenticated in SendGrid; there is no default, see "Email" below
 STRIPE_SECRET_KEY=sk_live_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 STRIPE_CONNECT_WEBHOOK_SECRET=whsec_...  # the Connect endpoint's own secret; see below
@@ -400,6 +401,26 @@ A process with no `STRIPE_SECRET_KEY` starts and says so at every boot, and ever
 payment, payout and Connect action answers 503; nothing is simulated in its place.
 `ALLOW_STRIPE_SIMULATION=true` in production stops the process starting, and
 `scripts/check-env.js` fails a file that carries it.
+
+Email. Nothing in the product works for a new member until a verification email
+can leave, so the API refuses to start in production without `SENDGRID_API_KEY`
+and a usable `SENDGRID_FROM_EMAIL`. There is no default sender: the old one was
+`noreply@athena.com`, a domain the venture does not own, and SendGrid refuses a
+sender it has not authenticated, so every email looked sent and none arrived.
+The address has to be a single plain mailbox on a domain you own and have
+authenticated in SendGrid; `athena.com`, `athena.app`, `example.com` and the
+template's `your-domain.com` are refused by name
+(`athena-platform/server/src/utils/sender-address.ts`), and the same rule is
+applied again at each send. Authenticating the domain is three CNAME records
+that SendGrid prints (Settings > Sender Authentication > Authenticate Your
+Domain), plus a DMARC record you publish yourself, starting at `p=none`; the
+records, the order to do them in and the end-to-end check (register a throwaway
+account and read SPF, DKIM and DMARC off the email's headers) are in
+`athena-platform/docs/launch/DNS_SSL_CONFIGURATION.md` ("Email records").
+A variable cannot prove the domain is authenticated, so that check is the one
+that counts. `/health/launch-readiness` reports both variables, and a send
+that SendGrid refuses is logged as `Failed to send email` with its status and
+SendGrid's own words.
 
 Invoices and GST. Every paid membership period and every one-off payment gets an
 ATHENA invoice (a PDF, numbered INV-YYYYMM-NNNNN). Who is invoicing comes from
