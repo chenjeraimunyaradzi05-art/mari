@@ -68,6 +68,7 @@ export interface CreatorTier {
   name: string;
   minFollowers: number;
   revShare: number; // Percentage of gift value creator receives
+  /** What the tier gives, in words. Only the share: nothing else on the server reads a creator's tier. */
   benefits: string[];
 }
 
@@ -75,30 +76,44 @@ export interface CreatorTier {
 // CREATOR TIERS
 // ==========================================
 
+/**
+ * The one thing a tier changes is the share of each gift the creator keeps
+ * (CREATOR_REVENUE_SHARE_PERCENT in the price book, which the gift credit and
+ * the payout read). The benefits used to be a wish list: "Priority support",
+ * "Custom profile badge", "Featured placement", "Creator fund eligibility",
+ * "Dedicated account manager", "Brand partnerships". No code did any of it, and
+ * GET /api/creator/tiers served the list to anyone who asked. Each tier now says
+ * only what it does; a benefit is added here after the server does it, and
+ * config/__tests__/plan-claims.test.ts holds the list to that.
+ */
+function shareBenefit(revShare: number): string[] {
+  return [`Keeps ${revShare}% of the value of every gift received`];
+}
+
 export const CREATOR_TIERS: CreatorTier[] = [
   {
     name: 'Emerging',
     minFollowers: 0,
     revShare: CREATOR_REVENUE_SHARE_PERCENT.Emerging,
-    benefits: ['Basic analytics', 'Gift receiving'],
+    benefits: shareBenefit(CREATOR_REVENUE_SHARE_PERCENT.Emerging),
   },
   {
     name: 'Rising',
     minFollowers: 1000,
     revShare: CREATOR_REVENUE_SHARE_PERCENT.Rising,
-    benefits: ['Advanced analytics', 'Priority support', 'Custom profile badge'],
+    benefits: shareBenefit(CREATOR_REVENUE_SHARE_PERCENT.Rising),
   },
   {
     name: 'Established',
     minFollowers: 10000,
     revShare: CREATOR_REVENUE_SHARE_PERCENT.Established,
-    benefits: ['Creator fund eligibility', 'Featured placement', 'Early access features'],
+    benefits: shareBenefit(CREATOR_REVENUE_SHARE_PERCENT.Established),
   },
   {
     name: 'Partner',
     minFollowers: 50000,
     revShare: CREATOR_REVENUE_SHARE_PERCENT.Partner,
-    benefits: ['Dedicated account manager', 'Brand partnerships', 'Custom monetization'],
+    benefits: shareBenefit(CREATOR_REVENUE_SHARE_PERCENT.Partner),
   },
 ];
 

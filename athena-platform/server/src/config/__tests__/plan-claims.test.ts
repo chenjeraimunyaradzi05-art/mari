@@ -1,6 +1,8 @@
 import { describe, expect, it } from '@jest/globals';
 import * as fs from 'fs';
 import * as path from 'path';
+import { freeChatAllowance, paidChatAllowance } from '../../services/entitlements.service';
+import { CREATOR_TIERS } from '../../services/creator.service';
 
 /**
  * What the pricing page promises is what the server does.
@@ -17,11 +19,15 @@ import * as path from 'path';
  *
  * It reads the web app's page as text, because the web app cannot be imported
  * from this package, the same way price-book.test.ts reads the client's copy of
- * the figures.
+ * the figures. The phone's membership screen is read the same way: its cards
+ * each carried a sentence of their own ("priority applications", "mentoring
+ * credits", "a lower platform fee") that nothing on the server did. The creator
+ * tiers are this package's own and are imported.
  */
 
 const PRICING_PAGE = path.resolve(__dirname, '../../../../client/src/app/pricing/page.tsx');
 const BILLING_PAGE = path.resolve(__dirname, '../../../../client/src/app/dashboard/settings/billing/page.tsx');
+const MOBILE_UPGRADE_SCREEN = path.resolve(__dirname, '../../../../mobile/src/screens/UpgradeScreen.tsx');
 const AI_ROUTES = path.resolve(__dirname, '../../routes/ai.routes.ts');
 
 /** Each Pro tool, and the route that is refused to a member without Pro. */
@@ -57,7 +63,9 @@ function featuresOf(source: string, planId: 'free' | 'pro' | 'enterprise'): { na
   expect(start).toBeGreaterThan(-1);
   const next = source.indexOf(`id: '`, start + 10);
   const block = source.slice(start, next === -1 ? undefined : next);
-  return [...block.matchAll(/\{ name: '([^']+)', included: (true|false) \}/g)].map((m) => ({
+  // A chat row also says which allowance it prints (`chat: 'free' as const`);
+  // the figure itself comes from the server's table when the page renders.
+  return [...block.matchAll(/\{ name: '([^']+)', included: (true|false)(?:, chat: '(?:free|paid)' as const)? \}/g)].map((m) => ({
     name: m[1],
     included: m[2] === 'true',
   }));
@@ -81,11 +89,11 @@ describe('The tools the pricing page says Pro unlocks', () => {
   });
 
   it('gives Pro a larger chat allowance than Free, which is what the page says', () => {
-    const free = ai.match(/AI_CHAT_FREE_MAX_REQUESTS',\s*\{[^}]*maxRequests:\s*(\d+)/);
-    const premium = ai.match(/AI_CHAT_PREMIUM_MAX_REQUESTS',\s*\{[^}]*maxRequests:\s*(\d+)/);
-    expect(free).not.toBeNull();
-    expect(premium).not.toBeNull();
-    expect(Number(premium![1])).toBeGreaterThan(Number(free![1]));
+    // The allowances live in entitlements.service, the one table the pages print
+    // from; the router has to read its quota from there, not keep constants of
+    // its own, or the page and the gate could say two different numbers.
+    expect(ai).toMatch(/import \{[^}]*\bchatAllowanceFor\b[^}]*\} from '\.\.\/services\/entitlements\.service'/);
+    expect(paidChatAllowance().messages).toBeGreaterThan(freeChatAllowance().messages);
   });
 });
 
@@ -131,5 +139,41 @@ describe('What the billing page lists', () => {
   it('lists the same things as the pricing page, and nothing more', () => {
     expect(billingList(billing, 'FREE_FEATURES').sort()).toEqual([...FREE_BASICS.filter((f) => f !== 'Your profile'), CHAT_FREE].sort());
     expect(billingList(billing, 'PRO_FEATURES').sort()).toEqual([...Object.keys(PRO_TOOLS), CHAT_PRO].sort());
+  });
+});
+
+describe('What the phone’s membership screen lists', () => {
+  const screen = read(MOBILE_UPGRADE_SCREEN);
+
+  it('says a paid tier adds the six tools and the larger chat allowance, the same as the web', () => {
+    const match = screen.match(/const PAID_ADDS = \[([\s\S]*?)\];/);
+    expect(match).not.toBeNull();
+    const listed = [...match![1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+    expect(listed.sort()).toEqual([...Object.keys(PRO_TOOLS), CHAT_PRO].sort());
+  });
+
+  it('gives no tier a sentence of its own, because nothing on the server reads which paid tier a member is on', () => {
+    const match = screen.match(/const TIERS[^=]*= \[([\s\S]*?)\];/);
+    expect(match).not.toBeNull();
+    const rows = match![1]
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+    expect(rows.length).toBeGreaterThan(0);
+    // A key and a name, nothing else: a tier that one day adds something gets
+    // the thing built and gated first, then named in PAID_ADDS, not on a card.
+    for (const row of rows) expect(row).toMatch(/^\{ key: '[A-Z_]+', name: '[A-Za-z ]+' \},?$/);
+  });
+});
+
+describe('What the creator tiers promise', () => {
+  it('is the share of each gift, and nothing the server does not do', () => {
+    // GET /api/creator/tiers serves this list. It used to carry "Priority
+    // support", "Featured placement", "Dedicated account manager" and "Brand
+    // partnerships"; the share is the one thing the code reads from a tier.
+    expect(CREATOR_TIERS.length).toBeGreaterThan(0);
+    for (const tier of CREATOR_TIERS) {
+      expect(tier.benefits).toEqual([`Keeps ${tier.revShare}% of the value of every gift received`]);
+    }
   });
 });

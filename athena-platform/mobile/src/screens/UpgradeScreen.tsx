@@ -14,11 +14,30 @@ import { LoadingError } from '../components/ErrorBoundary';
 type Subscription = { tier?: string; status?: string; currentPeriodEnd?: string | null; cancelAtPeriodEnd?: boolean };
 type Pricing = { currency: string; subscriptionTiers: Record<string, number> };
 
-const TIERS: Array<{ key: string; name: string; blurb: string }> = [
-  { key: 'PREMIUM_CAREER', name: 'Career', blurb: 'AI job matching, resume tools and priority applications.' },
-  { key: 'PREMIUM_PROFESSIONAL', name: 'Professional', blurb: 'Everything in Career, with mentoring credits and analytics.' },
-  { key: 'PREMIUM_ENTREPRENEUR', name: 'Entrepreneur', blurb: 'Formation, finance and grant tools for a business.' },
-  { key: 'PREMIUM_CREATOR', name: 'Creator', blurb: 'Studio tools, monetisation and a lower platform fee.' },
+/**
+ * What a paid tier adds, and all it adds. Every paid tier opens the same six
+ * AI tools, which the server refuses to anyone without a live paid membership
+ * or trial (routes/ai.routes requireAiPremium), and a larger daily allowance for
+ * the ATHENA AI chat. Nothing else on the server reads which paid tier a member
+ * is on, so no card below has a sentence of its own: the ones they used to carry
+ * promised things that did not exist. The web pricing page lists the same six,
+ * and a server test (config/__tests__/plan-claims) holds both to this list.
+ */
+const PAID_ADDS = [
+  'AI Resume Optimizer',
+  'Interview Coach',
+  'Opportunity Radar AI',
+  'Career Path Planner',
+  'AI Content Generator',
+  'Business Idea Validator',
+  'A larger daily allowance for the ATHENA AI chat',
+];
+
+const TIERS: Array<{ key: string; name: string }> = [
+  { key: 'PREMIUM_CAREER', name: 'Career' },
+  { key: 'PREMIUM_PROFESSIONAL', name: 'Professional' },
+  { key: 'PREMIUM_ENTREPRENEUR', name: 'Entrepreneur' },
+  { key: 'PREMIUM_CREATOR', name: 'Creator' },
 ];
 
 const PRICING_REGION: Record<string, string> = { ANZ: 'AU', US: 'US', UK: 'UK', SEA: 'SG', EU: 'UK' };
@@ -97,13 +116,25 @@ export function UpgradeScreen() {
 
       {pricingError ? <Text style={styles.pricingError}>{pricingError}</Text> : null}
 
+      <View style={styles.adds}>
+        <Text style={styles.addsTitle}>What a paid tier adds</Text>
+        {PAID_ADDS.map((item) => (
+          <View key={item} style={styles.addsRow}>
+            <Ionicons name="checkmark-circle" size={18} color="#4338ca" />
+            <Text style={styles.addsText}>{item}</Text>
+          </View>
+        ))}
+        <Text style={styles.addsNote}>
+          Every paid tier adds the same things today, at the price on its card. Anything more is listed here only once it is real.
+        </Text>
+      </View>
+
       {TIERS.map((tier) => (
         <View key={tier.key} style={[styles.card, currentTier === tier.key && styles.cardCurrent]}>
           <View style={styles.cardHead}>
             <Text style={styles.cardName}>{tier.name}</Text>
             <Text style={styles.cardPrice}>{price(tier.key) ?? '—'}</Text>
           </View>
-          <Text style={styles.cardBlurb}>{tier.blurb}</Text>
           {currentTier === tier.key && <Text style={styles.badge}>Your plan</Text>}
         </View>
       ))}
@@ -136,7 +167,11 @@ const styles = StyleSheet.create({
   cardHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
   cardName: { fontSize: 17, fontWeight: '700', color: '#333' },
   cardPrice: { fontSize: 14, fontWeight: '600', color: '#4338ca' },
-  cardBlurb: { color: '#555', marginTop: 6, lineHeight: 19 },
+  adds: { backgroundColor: '#fff', borderRadius: 12, padding: 15, marginBottom: 12, borderWidth: 1, borderColor: '#e5e5e5' },
+  addsTitle: { fontSize: 15, fontWeight: '700', color: '#333', marginBottom: 8 },
+  addsRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
+  addsText: { flex: 1, color: '#333', lineHeight: 19 },
+  addsNote: { color: '#555', fontSize: 13, lineHeight: 18, marginTop: 10 },
   badge: { marginTop: 8, alignSelf: 'flex-start', backgroundColor: '#6366f1', color: '#fff', fontSize: 11, fontWeight: '600', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
   note: { backgroundColor: '#fff', borderRadius: 12, padding: 15, marginTop: 6 },
   noteText: { color: '#555', lineHeight: 20 },
