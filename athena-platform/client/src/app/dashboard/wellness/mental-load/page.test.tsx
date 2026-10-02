@@ -73,7 +73,7 @@ describe('The mental load page and crisis support', () => {
       data: {
         data: {
           id: 'ml1',
-          crisis: { flagged: true, message: 'It sounds like things are very hard right now. What you wrote is saved, and only you can read it; nobody has been told. These lines are staffed this minute.', lines: LINES },
+          crisis: { flagged: true, message: 'It sounds like things are very hard right now. What you wrote is saved and is shown to nobody but you; nobody has been told. These lines are staffed this minute.', lines: LINES },
         },
       },
     });
@@ -84,7 +84,7 @@ describe('The mental load page and crisis support', () => {
 
     await waitFor(() => expect(api.addLoad).toHaveBeenCalled());
     const notice = await screen.findByRole('status');
-    expect(notice).toHaveTextContent('only you can read it; nobody has been told');
+    expect(notice).toHaveTextContent('shown to nobody but you; nobody has been told');
     expect(notice).toHaveTextContent('1800RESPECT');
     // She can put it away, and what she wrote stays logged.
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));

@@ -280,7 +280,8 @@ To exercise these rights, visit our [Privacy Center](/privacy-center) or contact
 
 We implement appropriate technical and organizational measures to protect your personal information:
 
-- Encryption in transit (TLS 1.3) and at rest (AES-256)
+- Encryption in transit (TLS) between your device and our servers
+- The most private things you keep with us are encrypted by ATHENA before they are stored (AES-256-GCM): the text of your safe-chat messages, your health records (what you log, your medications, your health notes and the reason you give for a booking), your personal safety plan and the seed behind two-factor sign-in. This is encryption at rest, not a lock only you hold: our servers decrypt a record to show it to you, so it protects you from anyone who gets hold of a copy of our database, not from ATHENA. No moderator or admin screen shows these records. The rest of your personal information is stored as you entered it, behind access controls
 - Messages are encrypted in transit and at rest, but they are not locked so that only the people in the conversation can open them: our systems can read them. Message text may be checked automatically by a content-safety provider (see our [service providers page](/privacy/subprocessors)), and our staff read a message only when it is reported to us or the law requires it
 - A weekly automated check of the software we depend on for known security problems
 - Access controls and authentication
