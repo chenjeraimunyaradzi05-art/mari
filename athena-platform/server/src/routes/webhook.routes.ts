@@ -3,7 +3,7 @@ import express from 'express';
 import Stripe from 'stripe';
 import { Prisma, type MentorPaymentStatus } from '@prisma/client';
 import { z } from 'zod';
-import { getStripe } from '../utils/stripe';
+import { getStripe, STRIPE_API_VERSION } from '../utils/stripe';
 import { ApiError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
 import { confirmGiftPurchaseFromPaymentIntent } from '../services/creator.service';
@@ -53,6 +53,44 @@ const router = Router();
 function paymentIntentIdOf(value: string | { id: string } | null | undefined): string | null {
   if (!value) return null;
   return typeof value === 'string' ? value : value.id;
+}
+
+/**
+ * The object an event carries, in the shape this file reads.
+ *
+ * Every request the server makes goes out pinned to STRIPE_API_VERSION, but a
+ * webhook payload is shaped by the version of the endpoint that sent it, and an
+ * endpoint made in the Dashboard takes the account's own version, which for an
+ * account opened today is a later one. Later versions keep a subscription's
+ * period on each of its items rather than on the subscription, and an invoice's
+ * subscription under `parent` rather than on the invoice. Read straight off such
+ * a payload the period was null, so a failed renewal gave no grace and the
+ * billing page lost the day a trial ends, and a failed invoice for another
+ * subscription of the same customer could no longer be told from the
+ * membership's own. Rather than guess at where each field has moved, the object
+ * is read again through the pinned client, which answers in the shape every
+ * handler here expects. One extra call per event, and only from an endpoint that
+ * was not pinned (the launch checklist says to pin it); a payload that names no
+ * version is taken as it is. A read that fails is thrown, so Stripe sends the
+ * event again rather than having it applied from fields that are not there.
+ */
+let versionMismatchReported = false;
+
+async function asPinnedVersion<T extends { id: string }>(
+  event: Stripe.Event,
+  object: T,
+  readPinned: (id: string) => Promise<T>
+): Promise<T> {
+  const sent = event.api_version;
+  if (!sent || sent === STRIPE_API_VERSION) return object;
+  if (!versionMismatchReported) {
+    versionMismatchReported = true;
+    logger.warn(
+      'The Stripe webhook endpoint sends events on a different API version from the one this server reads, so each subscription and invoice event is read again from Stripe. Pin the endpoint to the server version to save the call',
+      { endpointApiVersion: sent, serverApiVersion: STRIPE_API_VERSION }
+    );
+  }
+  return readPinned(object.id);
 }
 
 // The Stripe client is asked for per request, never held from module load, the
@@ -1016,9 +1054,8 @@ router.post(
 
           case 'customer.subscription.updated':
           case 'customer.subscription.deleted': {
-            const subscription = event.data.object as Stripe.Subscription;
-            const customerId = typeof subscription.customer === 'string' ? subscription.customer : null;
-            const stripeSubscriptionId = subscription.id;
+            const sentSubscription = event.data.object as Stripe.Subscription;
+            const stripeSubscriptionId = sentSubscription.id;
 
             // An event that arrives after a newer one for the same subscription
             // has been applied describes a state that has since changed.
@@ -1031,6 +1068,11 @@ router.post(
               outcome = 'ignored';
               break;
             }
+
+            // In the shape this handler reads (the period is on the subscription
+            // itself at the server's API version); see asPinnedVersion.
+            const subscription = await asPinnedVersion(event, sentSubscription, (id) => getStripe().subscriptions.retrieve(id));
+            const customerId = typeof subscription.customer === 'string' ? subscription.customer : null;
 
             const priceId =
               subscription.items?.data?.[0]?.price?.id ||
@@ -1585,7 +1627,11 @@ router.post(
           // .completed writes the row) the error is thrown so Stripe retries
           // once the row exists, rather than the invoice being lost.
           case 'invoice.paid': {
-            const stripeInvoice = event.data.object as Stripe.Invoice;
+            // In the shape this handler reads (`subscription`, `charge` and the
+            // paid-at instant on the invoice itself); see asPinnedVersion.
+            const stripeInvoice = await asPinnedVersion(event, event.data.object as Stripe.Invoice, (id) =>
+              getStripe().invoices.retrieve(id)
+            );
             const stripeSubscriptionId = paymentIntentIdOf(stripeInvoice.subscription as any);
             if (!stripeSubscriptionId) break;
             const charge = paidChargeFromStripeInvoice(stripeInvoice);
@@ -1709,7 +1755,11 @@ router.post(
           }
 
           case 'invoice.payment_failed': {
-            const invoice = event.data.object as Stripe.Invoice;
+            // In the shape this handler reads (the invoice names its subscription
+            // on itself at the server's API version); see asPinnedVersion.
+            const invoice = await asPinnedVersion(event, event.data.object as Stripe.Invoice, (id) =>
+              getStripe().invoices.retrieve(id)
+            );
             const customerId = paymentIntentIdOf(invoice.customer as any);
             if (!customerId) {
               outcome = 'ignored';
