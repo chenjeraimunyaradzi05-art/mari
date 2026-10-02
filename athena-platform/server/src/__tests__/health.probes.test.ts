@@ -311,3 +311,101 @@ describe('GET /health/launch-readiness: the Stripe Connect webhook secret', () =
     expect(report.checks.find((check) => check.key === 'STRIPE_CONNECT_WEBHOOK_SECRET')?.ok).toBe(false);
   });
 });
+
+/**
+ * Who ATHENA is on an invoice. No invoice document is produced until the legal
+ * name, a checksum-valid ABN, the billing address and a billing mailbox on an
+ * owned domain are all set (services/invoice.service supplierReadiness), so a
+ * production deployment without them is not ready, and the operator is told
+ * which variable to set, by name, never by value. The GST registration date is
+ * optional: not being registered is a legitimate state the invoices then say.
+ */
+describe('GET /health/launch-readiness: who ATHENA is on an invoice', () => {
+  const invoicing = (body: ReadinessBody) => checkNamed(body, 'ATHENA_INVOICING');
+
+  it('is ready with the four identity variables set, and says the documents are invoices without GST while no registration date is set', async () => {
+    delete process.env.ATHENA_GST_REGISTERED_FROM;
+
+    const response = await readiness();
+
+    expect(response.status).toBe(200);
+    const check = invoicing(response.body);
+    expect(check).toMatchObject({ category: 'payments', required: true, ok: true });
+    expect(check?.message).toMatch(/no GST is charged/);
+    expect(check?.message).toMatch(/ATHENA_GST_REGISTERED_FROM/);
+  });
+
+  it('is not ready in production when the billing mailbox is on a domain ATHENA does not own, and names the variable, not the mailbox', async () => {
+    process.env.ATHENA_BILLING_EMAIL = 'billing@athena.app';
+
+    const response = await readiness();
+
+    expect(response.status).toBe(503);
+    expect(response.body.status).toBe('not_ready');
+    const check = invoicing(response.body);
+    expect(check).toMatchObject({ required: true, ok: false });
+    expect(check?.message).toMatch(/ATHENA_BILLING_EMAIL/);
+    expect(check?.message).toMatch(/not a domain ATHENA owns/);
+    expect(check?.message).not.toContain('billing@athena.app');
+    // The member-facing consequence, so an operator knows what is at stake.
+    expect(check?.message).toMatch(/invoice download answers 503/);
+  });
+
+  it('is not ready when the ABN does not pass its checksum, and says so without printing the digits', async () => {
+    process.env.ATHENA_ABN = '51824753557';
+
+    const response = await readiness();
+
+    expect(response.status).toBe(503);
+    const check = invoicing(response.body);
+    expect(check).toMatchObject({ required: true, ok: false });
+    expect(check?.message).toMatch(/ATHENA_ABN is not set, or does not pass its checksum/);
+    expect(check?.message).not.toContain('51824753557');
+  });
+
+  it('names every missing variable at once, so the operator sets them in one go', async () => {
+    delete process.env.ATHENA_LEGAL_NAME;
+    delete process.env.ATHENA_ABN;
+    delete process.env.ATHENA_BILLING_ADDRESS;
+    delete process.env.ATHENA_BILLING_EMAIL;
+
+    const response = await readiness();
+
+    const check = invoicing(response.body);
+    expect(check?.ok).toBe(false);
+    for (const name of ['ATHENA_LEGAL_NAME', 'ATHENA_ABN', 'ATHENA_BILLING_ADDRESS', 'ATHENA_BILLING_EMAIL']) {
+      expect(check?.message).toContain(name);
+    }
+  });
+
+  it('is only recommended outside production, so a developer machine still reports ready', async () => {
+    process.env.NODE_ENV = 'development';
+    delete process.env.ATHENA_LEGAL_NAME;
+
+    const response = await request(app).get('/health/launch-readiness');
+
+    expect(invoicing(response.body)).toMatchObject({ required: false, ok: false });
+  });
+
+  it('refuses a GST registration date that is not a date, rather than guessing when GST started', async () => {
+    process.env.ATHENA_GST_REGISTERED_FROM = 'soon';
+
+    const response = await readiness();
+
+    expect(response.status).toBe(503);
+    const check = invoicing(response.body);
+    expect(check).toMatchObject({ required: true, ok: false });
+    expect(check?.message).toMatch(/ATHENA_GST_REGISTERED_FROM is not a date/);
+  });
+
+  it('says the documents are tax invoices once a registration date is set', async () => {
+    process.env.ATHENA_GST_REGISTERED_FROM = '2026-07-01';
+
+    const response = await readiness();
+
+    expect(response.status).toBe(200);
+    const check = invoicing(response.body);
+    expect(check).toMatchObject({ required: true, ok: true });
+    expect(check?.message).toMatch(/tax invoices from the GST registration date/);
+  });
+});
