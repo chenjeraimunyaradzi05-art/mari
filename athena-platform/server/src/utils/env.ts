@@ -256,6 +256,37 @@ const ENV_VALIDATIONS: EnvValidation[] = [
     validator: (v) => /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(v.trim()),
     errorMessage: 'S3_BUCKET must name the bucket media is stored in (a valid S3 bucket name).',
   },
+  // Where a public file is served from: the CDN in front of the bucket's public
+  // folders (infrastructure/README.md, "Media bucket").
+  //
+  // Like API_URL, it is written into the row with every upload: an avatar or a
+  // post picture is stored as `${CDN_URL}/key`, so a wrong value is permanent for
+  // that file. Left unset, the address falls back to the bucket's own, which
+  // Block Public Access (on, by the runbook) answers with 403, and the bucket
+  // would then have to be opened to the internet to make avatars load, which
+  // opens every résumé and every chat file with them. So production does not
+  // start without it, and refuses the bucket's own address, since that is the
+  // fallback written out by hand.
+  {
+    name: 'CDN_URL',
+    required: true,
+    productionOnly: true,
+    validator: (v) => {
+      try {
+        const url = new URL(v.trim());
+        return url.protocol === 'https:' && !/(^|\.)amazonaws\.com$/i.test(url.hostname);
+      } catch {
+        return false;
+      }
+    },
+    errorMessage:
+      'CDN_URL must be the https address of the CDN in front of the media bucket, not the bucket’s own amazonaws.com ' +
+      'address: it is written into every upload’s stored URL, and the bucket keeps Block Public Access on.',
+    missingMessage:
+      'CDN_URL is required in production: public files (avatars, covers, post pictures, reels) are stored as ' +
+      '`${CDN_URL}/key`, and without a CDN the only alternative is a publicly readable bucket, which would expose ' +
+      'résumés and chat files too. Put CloudFront in front of the public folders (infrastructure/README.md, "Media bucket").',
+  },
   // Malware scanning (services/malware-scan.service.ts). None is required to
   // boot, for the reason Stripe and the AI key are not: a deployment without a
   // scanner should answer /livez and be looked at, not exit. What the missing

@@ -254,6 +254,16 @@ services:
         value: ap-southeast-2
       - key: S3_BUCKET
         sync: false
+      # The CDN in front of the bucket's public folders, as its https address
+      # (the CloudFront distribution's domain, or cdn.<your-domain> pointed at
+      # it). Required: an avatar or a post picture is stored as `${CDN_URL}/key`,
+      # the bucket keeps Block Public Access on so its own address answers 403,
+      # and the process refuses to start without it rather than let the bucket
+      # be opened to the internet to make pictures load, which would open every
+      # résumé and chat file with them. Setup and the bucket policy are in
+      # athena-platform/infrastructure/README.md ("Media bucket").
+      - key: CDN_URL
+        sync: false
 
       # Malware scanning. Every upload is looked inside by ClamAV before it is
       # kept, and a résumé or a document that cannot be scanned is refused

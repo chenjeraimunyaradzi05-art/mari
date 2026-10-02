@@ -51,6 +51,7 @@ function productionEnvironment(overrides: Record<string, string | undefined> = {
     AWS_ACCESS_KEY_ID: 'AKIAIOSFODNN7EXAMPLE',
     AWS_SECRET_ACCESS_KEY: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYzQ3Zb0mP7yTn1V',
     S3_BUCKET: 'athena-media-prod',
+    CDN_URL: 'https://cdn.ourdomain.org',
     SENDGRID_API_KEY: 'SG.not-a-real-key',
     SENDGRID_FROM_EMAIL: 'noreply@mail.ourdomain.org',
     ...overrides,
@@ -206,6 +207,48 @@ describe('validateEnvironment', () => {
     it('stops production starting on any of it', () => {
       process.env = productionEnvironment({ HEALTH_ENCRYPTION_KEY: ZEROS });
       expect(() => validateEnvironmentOrExit()).toThrow('Invalid environment configuration');
+    });
+  });
+
+  // The address a public upload is stored under, so a wrong one is permanent
+  // for that file, and the one setting whose absence tempts an operator to open
+  // the bucket to the internet to get avatars loading.
+  describe('CDN_URL', () => {
+    it('refuses to start production without it, and says why', () => {
+      const result = validate({ CDN_URL: undefined });
+      expect(result.valid).toBe(false);
+      expect(result.errors.join('\n')).toMatch(/CDN_URL is required in production/);
+      expect(result.errors.join('\n')).toMatch(/résumés and chat files/);
+    });
+
+    it('refuses the bucket’s own address, which is the fallback written out by hand', () => {
+      for (const own of [
+        'https://athena-media-prod.s3.amazonaws.com',
+        'https://athena-media-prod.s3.ap-southeast-2.amazonaws.com/',
+        'https://s3.ap-southeast-2.amazonaws.com/athena-media-prod',
+      ]) {
+        const result = validate({ CDN_URL: own });
+        expect(result.valid).toBe(false);
+        expect(result.errors.join('\n')).toMatch(/CDN_URL must be the https address of the CDN/);
+      }
+    });
+
+    it('refuses a plain http address and a value that is not an address', () => {
+      expect(validate({ CDN_URL: 'http://cdn.ourdomain.org' }).valid).toBe(false);
+      expect(validate({ CDN_URL: 'cdn.ourdomain.org' }).valid).toBe(false);
+    });
+
+    it('accepts a CloudFront domain or a domain of our own, with or without a trailing slash', () => {
+      for (const cdn of ['https://d1234abcd.cloudfront.net', 'https://cdn.ourdomain.org/', 'https://media.ourdomain.org']) {
+        expect(validate({ CDN_URL: cdn }).errors.join('\n')).not.toMatch(/CDN_URL/);
+      }
+    });
+
+    it('asks nothing of it outside production, where the bucket address or the local disk is the point', () => {
+      for (const nodeEnv of ['development', 'test']) {
+        const result = validate({ NODE_ENV: nodeEnv, CDN_URL: undefined });
+        expect(result.errors.join('\n')).not.toMatch(/CDN_URL/);
+      }
     });
   });
 
