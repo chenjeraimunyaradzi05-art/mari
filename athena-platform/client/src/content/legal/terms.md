@@ -42,6 +42,11 @@ We may suspend or terminate your account if you:
 - Pose a security risk to the Platform or other users
 - Fail to pay any applicable fees
 
+### 2.4 Who ATHENA Is For
+ATHENA is a platform for women. When you register you confirm that you are a woman. We take your word for it when you join, and we do not ask for a document to open an account.
+
+We may ask you to complete a check, and some parts of the Platform may be open only to members who have completed one. A person reviews each check. If we decide an account does not meet this requirement, we will tell you, parts of the Platform will close to that account, and you can appeal from your settings so that a person looks at the decision again. A confirmation that is untrue is a breach of these Terms.
+
 ---
 
 ## 3. User Conduct and Community Guidelines
@@ -112,18 +117,21 @@ To monetise content on the Platform, you must:
 
 ### 5.2 Revenue Share
 For paid subscriptions, tips, and digital gifts:
-- **Creators receive**: 70-80% of net revenue
-- **Platform fee**: 20-30% (varies by subscription tier)
+- **Creators receive**: {{price.creatorShareRange}} of net revenue (a higher share at each creator tier)
+- **Platform fee**: {{price.platformFeeRange}} (the rest, so it falls as your creator tier rises)
 - Additional payment processing fees may apply
 
 ### 5.3 Payouts
-- Minimum payout threshold: AU$50 (or equivalent)
-- Payout frequency: Monthly or upon reaching threshold
-- Payouts processed via Stripe Connect
+- **Minimum payout:** {{price.minimumPayout}}. Gift points are bought and paid out in Australian dollars only. There is no other threshold and no waiting period of ours: once your balance has reached the minimum, you can ask for it.
+- **When you are paid:** you ask for a payout from your creator dashboard once your balance has reached the minimum. Nothing is paid out automatically. A balance below the minimum carries over until it reaches it, and gifts that arrive while a payout is being made stay in your balance for the next one.
+- **Where it goes:** payouts are sent through Stripe Connect to your own Stripe account, and only once Stripe has verified it and switched on payouts for it. Stripe then pays your bank on the schedule it sets for the account.
+- **Fees at payout:** ATHENA takes no fee when you withdraw. Your share of each gift is worked out when the gift is sent (see section 5.2).
+- **A pause:** if a card payment connected to gifts you were sent is disputed or refunded, we may pause your withdrawals while we look into it. Your balance stays yours and keeps growing, and we write to you when withdrawals are open again.
+- **Mentors and sellers:** mentor sessions and marketplace orders are not part of the creator balance, and ATHENA sets no minimum on them. What you earn is sent to your Stripe account when a session or order is completed, and Stripe pays your bank on its own schedule and under its own rules.
 - Tax documentation required for compliance
 
 ### 5.4 Refunds
-Refund requests for creator subscriptions are handled according to our Refund Policy. Chargebacks may result in account review.
+Refunds are handled as set out in section 6.3, and your rights under the Australian Consumer Law (section 9.4) are not affected. Chargebacks may result in account review.
 
 ---
 
@@ -136,12 +144,15 @@ We offer various subscription tiers with different features and pricing. By subs
 - Subscriptions are billed in advance on a recurring basis
 - You authorise us to charge your payment method automatically
 - Prices may change with 30 days' notice
+- All prices are in Australian dollars (AUD). Our pricing page and your invoice say whether GST is included. We only call a document a "Tax invoice" once we are registered for GST
 
 ### 6.3 Cancellation
 You may cancel your subscription at any time. Cancellation takes effect at the end of your current billing period. Refunds for part of a billing period are not offered, except where the Australian Consumer Law or another law that applies to you requires a remedy, for example where a service has had a major failure (see section 9.4).
 
+If this is your first paid subscription, you may ask for your first payment back within {{price.refundDays}} days of it being charged, and we will refund it in full. Ask us through {{email.support}}. A person processes each refund, so allow a few working days for the money to reach your account. This is in addition to your rights under the Australian Consumer Law.
+
 ### 6.4 Free Trials
-Free trials convert to paid subscriptions automatically unless cancelled before the trial ends.
+A first-time subscriber may start a free trial of {{price.trialDays}} days. A card is needed to start it. Nothing is charged while the trial runs. On the day the trial ends, the card is charged the price shown when you started, and then again on each renewal, unless you cancel before that day. We email you a few days before the first charge with the date and the amount. You can cancel at any time from Settings, then Billing. If you cancel before the trial ends you pay nothing and you keep the free plan. A free trial is offered once for each person.
 
 ---
 
@@ -253,7 +264,7 @@ Our UK designated contact for regulatory matters:
 - Address: A UK regulatory postal contact will be published here before any public UK launch that requires one.
 
 ### 12.4 Children's Safety
-The Platform is not intended for users under {{platform.minimumAge}}. We implement age verification and do not knowingly collect data from children.
+The Platform is for adults and is not intended for anyone under {{platform.minimumAge}}. We ask every member for her date of birth when she joins, and we do not open an account for a date that makes her younger than that. The date is the one she gives us, so we do not describe it as verified. We do not knowingly collect personal information from children. If we learn that an account belongs to someone under {{platform.minimumAge}}, we close it and delete the personal information we hold about her promptly, as set out in section 11 of the Privacy Policy.
 
 ---
 

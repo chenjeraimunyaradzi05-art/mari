@@ -32,8 +32,10 @@ import { creatorApi, postApi, safetyApi } from '@/lib/api';
 import { videoApi } from '@/lib/api-extensions';
 import { formatDate, PERSONA_LABELS, cn } from '@/lib/utils';
 import { renderSocialText } from '@/lib/social-text';
+import { safeHref } from '@/lib/safe-href';
 import { ProfileSkeleton } from '@/components/ui/loading';
 import { Badge } from '@/components/ui/badge';
+import { VerifiedMark } from '@/components/ui/VerifiedMark';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -73,6 +75,8 @@ type ProfileUser = {
   country?: string | null;
   currentJobTitle?: string | null;
   currentCompany?: string | null;
+  // Set by the server only when an identity check has been approved.
+  isVerified?: boolean;
   createdAt: string;
   isFollowing?: boolean;
   // Members who approve their followers: the button asks instead of following.
@@ -80,6 +84,8 @@ type ProfileUser = {
   followRequested?: boolean;
   // A followers-only profile seen by a non-follower: name, picture, counts.
   isLimited?: boolean;
+  // Set with isLimited when the viewer has no account: the rest is behind sign-in.
+  signInRequired?: boolean;
   mutualFollowers?: { count: number; names: string[] };
   profile?: {
     aboutMe?: string | null;
@@ -307,9 +313,13 @@ export function PublicProfile({ userId, backHref = '/feed' }: { userId: string; 
   const experience = profile.experience ?? [];
   const education = profile.education ?? [];
   const followers = Math.max(0, (profile._count?.followers ?? 0) + followerDelta);
+  // The two addresses are text the member typed, shown to everyone who opens her
+  // profile. The server only stores a web address now, but rows saved before
+  // that rule can still hold `javascript:`, so the page keeps only an http(s)
+  // link and drops anything else rather than drawing it.
   const links = [
-    { href: profile.profile?.websiteUrl, label: 'Website' },
-    { href: profile.profile?.linkedinUrl, label: 'LinkedIn' },
+    { href: safeHref(profile.profile?.websiteUrl), label: 'Website' },
+    { href: safeHref(profile.profile?.linkedinUrl), label: 'LinkedIn' },
   ].filter((l): l is { href: string; label: string } => Boolean(l.href));
 
   // Blocking goes through the safety route, which also stops either side
@@ -366,7 +376,10 @@ export function PublicProfile({ userId, backHref = '/feed' }: { userId: string; 
           <div className="flex-1">
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
-                <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{name}</h1>
+                <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900 dark:text-white">
+                  {name}
+                  {profile.isVerified === true && <VerifiedMark />}
+                </h1>
                 <p className="text-slate-600 dark:text-slate-300">
                   {profile.headline ||
                     [profile.currentJobTitle, profile.currentCompany].filter(Boolean).join(' at ') ||
@@ -501,7 +514,35 @@ export function PublicProfile({ userId, backHref = '/feed' }: { userId: string; 
         </div>
       </section>
 
-      {profile.isLimited && (
+      {profile.isLimited && profile.signInRequired && (
+        <section className="card flex items-start gap-3">
+          <Lock className="mt-0.5 h-5 w-5 flex-shrink-0 text-slate-400" />
+          <div>
+            <h2 className="text-base font-semibold text-slate-900 dark:text-white">Sign in to see more of {name}</h2>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              {profile.approvesFollowers
+                ? `${name} shares more with the people who follow them. Sign in to ask to follow.`
+                : 'The rest of a profile is shown to members who are signed in. Sign in or join to see it.'}
+            </p>
+            <div className="mt-3 flex flex-wrap gap-3">
+              <Link
+                href={`/login?redirect=${encodeURIComponent(`/profile/${userId}`)}`}
+                className="btn-primary px-4 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2"
+              >
+                Sign in
+              </Link>
+              <Link
+                href="/register"
+                className="btn-outline px-4 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2"
+              >
+                Join ATHENA
+              </Link>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {profile.isLimited && !profile.signInRequired && (
         <section className="card flex items-start gap-3">
           <Lock className="mt-0.5 h-5 w-5 flex-shrink-0 text-slate-400" />
           <div>
@@ -632,7 +673,10 @@ export function PublicProfile({ userId, backHref = '/feed' }: { userId: string; 
               <p className="py-8 text-center text-slate-500 dark:text-slate-400">
                 {isOwnProfile
                   ? 'You have not posted yet.'
-                  : profile.isLimited
+                  : // A card shown to a visitor with no account is limited because the
+                    // viewer is signed out, not because the member approves followers,
+                    // so "shared with followers" is said only where it is true.
+                    profile.isLimited && profile.approvesFollowers
                     ? 'Posts are shared with followers.'
                     : `${name} has not posted yet.`}
               </p>

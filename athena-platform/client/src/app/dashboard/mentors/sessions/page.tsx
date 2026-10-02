@@ -67,7 +67,7 @@ const errorMessage = (error: unknown) =>
 // money on the mentee's card, which is not hers.
 const PAYMENT: Record<Role, Record<string, string>> = {
   mentee: {
-    PENDING: 'Payment not authorised yet',
+    PENDING: 'Payment not authorised yet. The request is cancelled if it is not paid for within a few hours.',
     AUTHORIZED: 'Payment held on your card',
     CAPTURED: 'Paid',
     REFUNDED: 'Refunded',
@@ -260,6 +260,21 @@ export default function MentorSessionsPage() {
         ? session.status === 'REQUESTED' || (session.status === 'CONFIRMED' && !ended)
         : session.status === 'CONFIRMED';
     const menteeCannotCancel = role === 'mentee' && session.status === 'CONFIRMED' && ended;
+    // The card step is still hers to finish: not yet attempted, or declined while
+    // the request is still a request. The server hands out the card form's secret
+    // for exactly these two (getSessionPaymentSecret).
+    const cardStepOpen =
+      session.paymentStatus === 'PENDING' || (session.paymentStatus === 'FAILED' && session.status === 'REQUESTED');
+    // The server will not let a mentor accept a paid request until the mentee's
+    // card is held, so the button says so instead of offering something that
+    // answers with an error. Free sessions have no card to wait for.
+    const awaitingPayment =
+      role === 'mentor' &&
+      session.status === 'REQUESTED' &&
+      amount !== null &&
+      amount > 0 &&
+      session.paymentStatus !== 'AUTHORIZED' &&
+      session.paymentStatus !== 'CAPTURED';
     const wasCharged = role === 'mentee' && session.status === 'COMPLETED' && session.paymentStatus === 'CAPTURED' && amount !== null && amount > 0;
 
     return (
@@ -298,7 +313,16 @@ export default function MentorSessionsPage() {
 
         {session.paymentStatus && amount !== null && amount > 0 && (
           <p className={cn('text-xs', session.paymentStatus === 'PENDING' && open ? 'text-amber-700 dark:text-amber-300' : 'text-slate-500')}>
-            {PAYMENT[role][session.paymentStatus] ?? session.paymentStatus}
+            {role === 'mentee' && session.paymentStatus === 'FAILED' && cardStepOpen
+              ? 'Payment failed. You can try another card; the request is cancelled if it is not paid for within a few hours.'
+              : (PAYMENT[role][session.paymentStatus] ?? session.paymentStatus)}
+          </p>
+        )}
+
+        {awaitingPayment && (
+          <p id={`awaiting-payment-${session.id}`} className="text-xs text-slate-500 dark:text-slate-400">
+            You can confirm this once the mentee has authorised payment, so you are sure to be paid. We will tell you when
+            she has.
           </p>
         )}
 
@@ -346,8 +370,9 @@ export default function MentorSessionsPage() {
                 <button
                   type="button"
                   onClick={() => changeStatus.mutate({ id: session.id, status: 'CONFIRMED' })}
-                  disabled={changeStatus.isPending}
-                  className="btn-primary inline-flex items-center gap-1 px-3 py-1.5 text-sm"
+                  disabled={changeStatus.isPending || awaitingPayment}
+                  aria-describedby={awaitingPayment ? `awaiting-payment-${session.id}` : undefined}
+                  className="btn-primary inline-flex items-center gap-1 px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Check className="h-4 w-4" /> Confirm
                 </button>
@@ -366,14 +391,14 @@ export default function MentorSessionsPage() {
                 {role === 'mentee' ? 'It went ahead' : 'Mark complete'}
               </button>
             )}
-            {role === 'mentee' && session.paymentStatus === 'PENDING' && amount !== null && amount > 0 && paying?.sessionId !== session.id && (
+            {role === 'mentee' && cardStepOpen && amount !== null && amount > 0 && paying?.sessionId !== session.id && (
               <button
                 type="button"
                 onClick={() => startPayment.mutate(session.id)}
                 disabled={startPayment.isPending}
                 className="btn-primary px-3 py-1.5 text-sm"
               >
-                Authorise payment
+                {session.paymentStatus === 'FAILED' ? 'Try another card' : 'Authorise payment'}
               </button>
             )}
             {canCancel && (

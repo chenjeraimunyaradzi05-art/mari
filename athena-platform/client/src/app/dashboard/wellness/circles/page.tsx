@@ -11,8 +11,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { Plus, Users } from 'lucide-react';
-import { localDay, wellnessApi, wellnessError, type Author } from '@/lib/wellness-api';
-import { Chip, Empty, ErrorBox, Loading, PageTitle, WellnessNav, fmtDay, useLoad } from '@/components/wellness/WellnessUi';
+import { localDay, wellnessApi, wellnessError, type Author, type CrisisAnswer } from '@/lib/wellness-api';
+import { Chip, CrisisNotice, Empty, ErrorBox, Loading, PageTitle, WellnessNav, crisisOf, fmtDay, useLoad } from '@/components/wellness/WellnessUi';
 import { Field, NumberInput, Panel, SelectInput, inputClass, num } from '@/components/strategy/StrategyUi';
 
 type Circle = { id: string; name: string; topic: string; description: string; capacity: number; weeks: number; startsOn: string; endsOn: string; meetingDay: number; meetingTime: string; format: string; status: string; facilitator: Author; memberCount: number; spotsLeft: number; isMember: boolean; isFacilitator: boolean; currentWeek: number | null };
@@ -27,12 +27,16 @@ export default function CirclesPage() {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ name: '', topic: 'burnout', description: '', capacity: '6', weeks: '8', startsOn: localDay(), meetingDay: '2', meetingTime: '19:00', format: 'VIDEO', meetingLink: '', location: '' });
   const [busy, setBusy] = useState(false);
+  // Set when the words she gave the circle sound like crisis: she is shown the lines first, and goes to the circle from here.
+  const [crisis, setCrisis] = useState<{ answer: CrisisAnswer; circleId: string } | null>(null);
 
   const create = async () => {
     setBusy(true);
     try {
       const res = await wellnessApi.createCircle({ ...form, capacity: num(form.capacity, 6), weeks: num(form.weeks, 8), meetingDay: num(form.meetingDay, 2), meetingLink: form.meetingLink || null, location: form.location || null });
       toast.success('Circle started');
+      const answer = crisisOf(res);
+      if (answer) { setCrisis({ answer, circleId: res.data?.data?.id }); return; }
       router.push(`/dashboard/wellness/circles/${res.data?.data?.id}`);
     } catch (err) { toast.error(wellnessError(err, 'That could not be started.')); } finally { setBusy(false); }
   };
@@ -42,6 +46,12 @@ export default function CirclesPage() {
     <div className="mx-auto max-w-5xl space-y-6 p-6">
       <PageTitle icon={Users} kicker="Wellness" title="Support circles" blurb="Four to six women, one topic, eight weeks. A weekly check-in, a strategy to try, and people who notice when you go quiet." action={<button type="button" onClick={() => setOpen((v) => !v)} className="btn-primary inline-flex items-center gap-2 text-sm"><Plus className="h-4 w-4" /> Start a circle</button>} />
       <WellnessNav current="/dashboard/wellness/circles" />
+      {crisis && (
+        <div className="space-y-2">
+          <CrisisNotice crisis={crisis.answer} />
+          <Link href={`/dashboard/wellness/circles/${crisis.circleId}`} className="btn-primary inline-flex min-h-[44px] items-center text-sm">Open your circle</Link>
+        </div>
+      )}
       <div className="flex gap-2"><button type="button" onClick={() => setMine(false)} className={`rounded-full px-3 py-1.5 text-xs font-medium ${!mine ? 'bg-rose-500 text-white' : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'}`}>Open now</button><button type="button" onClick={() => setMine(true)} className={`rounded-full px-3 py-1.5 text-xs font-medium ${mine ? 'bg-rose-500 text-white' : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'}`}>Mine</button></div>
 
       {open && (

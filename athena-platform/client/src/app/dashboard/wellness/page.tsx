@@ -70,7 +70,7 @@ export default function WellnessHome() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
-      <PageTitle icon={HeartPulse} kicker="Wellness" title="Today" blurb="A minute for yourself, and the rest of the picture. Everything here is encrypted and read only by you." action={<Link href="/dashboard/wellness/insights" className="btn-secondary text-sm">What the days are saying</Link>} />
+      <PageTitle icon={HeartPulse} kicker="Wellness" title="Today" blurb="A minute for yourself, and the rest of the picture. What you log, your medications and your health notes are encrypted before they are stored, and shown only to you unless you share them." action={<Link href="/dashboard/wellness/insights" className="btn-secondary text-sm">What the days are saying</Link>} />
       <WellnessNav current="/dashboard/wellness" />
       {today.loading && <Loading />}
       <ErrorBox error={today.error} />

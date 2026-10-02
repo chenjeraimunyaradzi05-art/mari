@@ -46,12 +46,21 @@ function ToggleRow({
 }
 
 export default function MessagesSettingsPage() {
-  // Every control maps to something the API persists: the first three to
-  // UserSafetySettings, the last two to the stored notification preferences.
+  // Every control maps to something the API persists and enforces: the first
+  // two to UserSafetySettings, the last two to the stored notification
+  // preferences. There was a third safety switch here, "Filter offensive
+  // content", which was stored and read back and did nothing: messages are
+  // screened the same way for everyone, whatever it said. It is gone rather
+  // than left promising something, and the section where it sat now says
+  // where the real tools are.
+  // What the server does for a member who has never chosen (the page below reads
+  // the real answer): anyone may write, and a thread from someone she does not
+  // follow arrives as a request. Starting from "connections only" here meant that
+  // when her settings could not be loaded, saving anything else on this page
+  // narrowed who could message her without her having picked it.
   const [settings, setSettings] = useState({
-    allowMessagesFrom: 'connections' as Audience,
+    allowMessagesFrom: 'everyone' as Audience,
     readReceipts: true,
-    filterOffensiveContent: true,
     pushMessages: true,
     emailMessages: true,
   });
@@ -73,9 +82,6 @@ export default function MessagesSettingsPage() {
             ? fromStored(safetyData.allowMessagesFrom)
             : current.allowMessagesFrom,
           readReceipts: safetyData ? !safetyData.hideReadReceipts : current.readReceipts,
-          filterOffensiveContent: safetyData
-            ? Boolean(safetyData.filterOffensiveContent)
-            : current.filterOffensiveContent,
           pushMessages: notificationData?.push?.messages ?? current.pushMessages,
           emailMessages: notificationData?.email?.messages ?? current.emailMessages,
         }));
@@ -96,7 +102,6 @@ export default function MessagesSettingsPage() {
         safetyApi.updateSettings({
           allowMessagesFrom: toStored(settings.allowMessagesFrom),
           hideReadReceipts: !settings.readReceipts,
-          filterOffensiveContent: settings.filterOffensiveContent,
         }),
         notificationApi.updatePreferences({
           push: { messages: settings.pushMessages },
@@ -214,22 +219,21 @@ export default function MessagesSettingsPage() {
           </div>
         </section>
 
-        {/* Spam Protection */}
+        {/* If someone is being unkind. The tools are on the conversation itself,
+            where she is when she needs them; this says where, and where to undo. */}
         <section className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-sm mb-6 border border-slate-200 dark:border-slate-700">
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-2 flex items-center gap-2">
             <Ban className="w-5 h-5" />
-            Spam Protection
+            If someone is bothering you
           </h2>
-          <div className="space-y-4">
-            <ToggleRow
-              label="Filter offensive content"
-              description="Automatically screen incoming messages for abusive language"
-              checked={settings.filterOffensiveContent}
-              onChange={(filterOffensiveContent) =>
-                setSettings({ ...settings, filterOffensiveContent })
-              }
-            />
-          </div>
+          <p className="text-sm text-slate-600 dark:text-slate-400">
+            Open the conversation and choose <strong>Report member</strong> or <strong>Block member</strong> from
+            its menu. A person you block cannot message you, and you can undo it any time in{' '}
+            <Link href="/dashboard/settings/privacy" className="underline text-primary-700 dark:text-primary-300">
+              Settings &gt; Privacy
+            </Link>
+            .
+          </p>
         </section>
 
         {/* Save Button */}

@@ -14,27 +14,39 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
 import OnlineSafetyNotice from '@/components/compliance/OnlineSafetyNotice';
+import { QuickExitButton } from '../dashboard/safety/QuickExit';
+import { EmergencyHelp } from '@/components/safety/EmergencyHelp';
+import { crisisLinesFor, telHref } from '@/lib/crisis-lines';
+import { ReportNextSteps } from '@/components/safety/ReportNextSteps';
+import {
+  REPORT_CONTENT_TYPES,
+  asReportContentType,
+  resolveReportTarget,
+  type ReportContentType,
+} from '@/lib/report-target';
 
 interface ReportFormData {
-  contentType: 'post' | 'message' | 'profile' | 'comment' | 'job' | 'other';
+  contentType: ReportContentType;
   contentId: string;
-  reason: 'illegal' | 'harmful' | 'harassment' | 'hate_speech' | 'spam' | 'misinformation' | 'csam' | 'terrorism' | 'fraud' | 'other';
+  reason: 'illegal' | 'harmful' | 'harassment' | 'hate_speech' | 'spam' | 'misinformation' | 'csam' | 'terrorism' | 'fraud' | 'intimate_image' | 'threat' | 'other';
   description: string;
   evidenceUrls: string[];
   contactEmail: string;
   isUrgent: boolean;
 }
 
-const CONTENT_TYPES = [
-  { value: 'post', label: 'Post or Article' },
-  { value: 'message', label: 'Direct Message' },
-  { value: 'profile', label: 'User Profile' },
-  { value: 'comment', label: 'Comment' },
-  { value: 'job', label: 'Job Listing' },
-  { value: 'other', label: 'Other Content' },
-];
+// The two numbers that matter on this form, from the one list the Emergency help
+// button reads, so the form and the button cannot disagree about them.
+const AU_LINES = crisisLinesFor('AU').lines;
+const EMERGENCY_LINE = AU_LINES.find((line) => line.key === 'emergency');
+const FAMILY_VIOLENCE_LINE = AU_LINES.find((line) => line.key === '1800respect');
 
 const REPORT_REASONS = [
+  // First, and by name: she used to have to guess which of "illegal", "harmful"
+  // and "harassment" an image of her shared without consent came under. These two
+  // are read first, hidden at once where they can be, and answered within 24 hours.
+  { value: 'intimate_image', label: 'Intimate Image Shared Without Consent', description: 'A nude or sexual picture or video of someone, shared without their agreement, or a threat to share one', priority: 'critical' },
+  { value: 'threat', label: 'A Threat to Hurt Someone', description: 'Someone has threatened violence or harm to a person', priority: 'critical' },
   { value: 'illegal', label: 'Illegal Content', description: 'Content that breaks the law', priority: 'high' },
   { value: 'csam', label: 'Child Sexual Abuse Material', description: 'Any content involving child exploitation', priority: 'critical' },
   { value: 'terrorism', label: 'Terrorism or Violent Extremism', description: 'Content promoting terrorism or extreme violence', priority: 'critical' },
@@ -70,9 +82,15 @@ function formatDeadline(iso: string): string {
 
 export default function ReportContentPage() {
   return (
-    <Suspense fallback={null}>
-      <ReportContent />
-    </Suspense>
+    <>
+      <Suspense fallback={null}>
+        <ReportContent />
+      </Suspense>
+      {/* Beside the form and the receipt both: someone reporting what is
+          happening to her may need to leave this page fast, or to ring someone. */}
+      <QuickExitButton variant="floating" className="print:hidden" />
+      <EmergencyHelp className="print:hidden" />
+    </>
   );
 }
 
@@ -82,7 +100,9 @@ function ReportContent() {
   const prefilledType = searchParams.get('type');
 
   const [formData, setFormData] = useState<ReportFormData>({
-    contentType: (prefilledType as ReportFormData['contentType']) || 'post',
+    // A link into this page can name a type, and a type the form does not file
+    // (an old link, a mistyped one) leaves the list on its first choice.
+    contentType: asReportContentType(prefilledType) ?? 'post',
     contentId: prefilledContentId || '',
     reason: 'harmful',
     description: '',
@@ -101,14 +121,37 @@ function ReportContent() {
   // number. A woman quoting the number on this screen was quoting one the
   // acknowledgment email had never mentioned, against a deadline nobody kept.
   const [receipt, setReceipt] = useState<ReportReceipt | null>(null);
+  // The reason she filed under, kept for the confirmation: some reasons have
+  // somewhere else to turn, and it says so.
+  const [filedReason, setFiledReason] = useState<ReportFormData['reason'] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [needsSignIn, setNeedsSignIn] = useState(false);
+
+  // When what she pasted is a link, the link says what it is to, and she is
+  // told so before she sends it, so a reel reported as a post is not a surprise.
+  const pasted = formData.contentId.trim()
+    ? resolveReportTarget(formData.contentId, formData.contentType)
+    : null;
+  const recognised =
+    pasted && pasted.ok && pasted.fromLink
+      ? REPORT_CONTENT_TYPES.find((type) => type.value === pasted.contentType)?.label ?? null
+      : null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
     setNeedsSignIn(false);
+
+    // What she pasted is a link more often than an ID. Worked out here, because
+    // the server looks the thing up by its ID alone and would answer a pasted
+    // address with "we could not find it".
+    const target = resolveReportTarget(formData.contentId, formData.contentType);
+    if (!target.ok) {
+      setError(target.message);
+      setSubmitting(false);
+      return;
+    }
 
     try {
       // Reporters are often signed out, and the shared client bounces an
@@ -117,8 +160,8 @@ function ReportContent() {
       const response = await api.post(
         '/compliance/report-content',
         {
-          contentType: formData.contentType,
-          contentId: formData.contentId.trim(),
+          contentType: target.contentType,
+          contentId: target.contentId,
           reason: formData.reason,
           details: formData.description.trim(),
           evidenceUrls: formData.evidenceUrls,
@@ -145,6 +188,7 @@ function ReportContent() {
         message: typeof response.data?.message === 'string' ? response.data.message : null,
         reviewDeadline: typeof report?.reviewDeadline === 'string' ? report.reviewDeadline : null,
       });
+      setFiledReason(formData.reason);
       setSubmitted(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to submit report');
@@ -214,6 +258,8 @@ function ReportContent() {
               </ul>
             </div>
 
+            <ReportNextSteps reason={filedReason} className="mb-8" />
+
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Link
                 href="/"
@@ -226,6 +272,7 @@ function ReportContent() {
                 onClick={() => {
                   setSubmitted(false);
                   setReceipt(null);
+                  setFiledReason(null);
                   setError(null);
                   setNeedsSignIn(false);
                   setFormData({
@@ -288,28 +335,34 @@ function ReportContent() {
               onChange={(e) => setFormData(prev => ({ ...prev, contentType: e.target.value as ReportFormData['contentType'] }))}
               className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
             >
-              {CONTENT_TYPES.map(type => (
+              {REPORT_CONTENT_TYPES.map(type => (
                 <option key={type.value} value={type.value}>{type.label}</option>
               ))}
             </select>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              Reporting a message? Open the conversation and choose Report on the message itself. That keeps a copy of what was said, which we need to act on it.
+            </p>
           </div>
 
-          {/* Content ID */}
+          {/* The link, or the ID */}
           <div>
             <label htmlFor="report-content-id" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-              Content ID or URL
+              Link to it, or its ID
             </label>
             <input
               id="report-content-id"
               type="text"
               value={formData.contentId}
               onChange={(e) => setFormData(prev => ({ ...prev, contentId: e.target.value }))}
-              placeholder="Paste the URL or ID of the content"
+              placeholder="Paste the link to the post, reel, profile or listing"
+              aria-describedby="report-content-id-help"
               className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               required
             />
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              You can find this in the browser address bar or by clicking &quot;Share&quot; on the content
+            <p id="report-content-id-help" aria-live="polite" className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              {recognised
+                ? `We read this link as a ${recognised.toLowerCase()}, and will report it as one.`
+                : 'Open it and copy the address from the top of your browser. If you only have its ID, choose what it is above and paste the ID.'}
             </p>
           </div>
 
@@ -427,20 +480,38 @@ function ReportContent() {
           </div>
 
           {/* Urgent Flag */}
-          <div className="flex items-start gap-3">
-            <input
-              type="checkbox"
-              id="urgent"
-              checked={formData.isUrgent}
-              onChange={(e) => setFormData(prev => ({ ...prev, isUrgent: e.target.checked }))}
-              className="mt-1"
-            />
-            <label htmlFor="urgent" className="text-sm">
-              <span className="font-medium text-slate-900 dark:text-white">Mark as urgent</span>
-              <p className="text-slate-600 dark:text-slate-400">
-                Check this if the content poses an immediate risk to safety
+          <div className="space-y-3">
+            {/* Said first, and in these words, because someone who ticks "urgent"
+                may be believing that doing so brings help to her. It does not:
+                it puts the report ahead in a queue that people read. */}
+            <div role="note" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900 dark:border-rose-900/50 dark:bg-rose-900/20 dark:text-rose-100">
+              <p>
+                <strong>In danger now?</strong> Call{' '}
+                <a href={telHref(EMERGENCY_LINE?.phone ?? '000')} className="font-semibold underline">
+                  {EMERGENCY_LINE?.phone ?? '000'}
+                </a>
+                . For help with family or sexual violence, {FAMILY_VIOLENCE_LINE?.name ?? '1800RESPECT'} is on{' '}
+                <a href={telHref(FAMILY_VIOLENCE_LINE?.phone ?? '1800 737 732')} className="font-semibold underline">
+                  {FAMILY_VIOLENCE_LINE?.phone ?? '1800 737 732'}
+                </a>
+                , any hour. Marking a report urgent puts it ahead in our queue; it does not send anyone to you.
               </p>
-            </label>
+            </div>
+            <div className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                id="urgent"
+                checked={formData.isUrgent}
+                onChange={(e) => setFormData(prev => ({ ...prev, isUrgent: e.target.checked }))}
+                className="mt-1 h-4 w-4"
+              />
+              <label htmlFor="urgent" className="text-sm">
+                <span className="font-medium text-slate-900 dark:text-white">Mark as urgent</span>
+                <p className="text-slate-600 dark:text-slate-400">
+                  Check this if what you are reporting puts someone at risk now
+                </p>
+              </label>
+            </div>
           </div>
 
           {/* Error Message */}

@@ -12,7 +12,13 @@ const ALLOWED_TAGS = [
   'ul', 'ol', 'li', 'a', 'blockquote', 'code', 'pre', 'span', 'div',
 ];
 
-const ALLOWED_ATTR = ['href', 'target', 'rel', 'class', 'id'];
+// No `class` and no `id`. This renders text an employer wrote, inside a page
+// whose stylesheet is Tailwind, so a class is not decoration, it is a way to
+// lay an element of the author's choosing over the whole page (`fixed inset-0
+// z-50` with a link in it is a phishing screen drawn by ATHENA itself), and an
+// id names a target for the page's own scripts to trip over. The tags above
+// carry all the structure a job description needs.
+const ALLOWED_ATTR = ['href', 'target', 'rel'];
 
 /**
  * Sanitize HTML content to prevent XSS attacks
@@ -33,28 +39,17 @@ export function sanitizeHtml(html: string): string {
     });
   }
   
-  // Server-side fallback: use regex-based sanitization
-  return html
-    // Remove script tags and their content
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-    // Remove on* event handlers
-    .replace(/\s*on\w+\s*=\s*["'][^"']*["']/gi, '')
-    .replace(/\s*on\w+\s*=\s*[^\s>]*/gi, '')
-    // Remove javascript: URLs
-    .replace(/javascript\s*:/gi, 'blocked:')
-    // Remove data: URLs (can be used for XSS)
-    .replace(/data\s*:/gi, 'blocked:')
-    // Remove vbscript: URLs
-    .replace(/vbscript\s*:/gi, 'blocked:')
-    // Remove dangerous tags
-    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
-    .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
-    .replace(/<iframe\b[^>]*\/?>/gi, '')
-    .replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '')
-    .replace(/<embed\b[^>]*\/?>/gi, '')
-    .replace(/<form\b[^<]*(?:(?!<\/form>)<[^<]*)*<\/form>/gi, '')
-    .replace(/<input\b[^>]*\/?>/gi, '')
-    .replace(/<button\b[^<]*(?:(?!<\/button>)<[^<]*)*<\/button>/gi, '');
+  // No document, so no DOMPurify (it needs one to parse into). What stood here
+  // was a list of regular expressions, and a pattern list is not a sanitiser:
+  // `jav&#x61;script:` has no `javascript:` in it for the pattern to find, and
+  // the browser decodes the entity to one. With nothing to parse the text
+  // safely, the safe answer is not to try: the markup is returned as plain text,
+  // every angle bracket and quote escaped, so nothing in it can become an
+  // element or a handler. The one caller is a client component that renders
+  // after its data arrives, so the server never has a description to show here;
+  // if one ever does, it appears as visible text for a moment and is sanitised
+  // properly as soon as the page is in a browser.
+  return escapeHtml(html);
 }
 
 /**

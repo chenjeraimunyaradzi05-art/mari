@@ -17,6 +17,14 @@ export type MaintenanceState = {
   updatedAt: string | null;
 };
 
+/** Whether new payments are paused, and the words members are shown while they are. */
+export type PaymentsPauseState = {
+  paused: boolean;
+  message: string;
+  startedAt: string | null;
+  updatedAt: string | null;
+};
+
 export type OpsSummary = {
   maintenance: MaintenanceState;
   breaches: { awaitingNotification: number; overdue: number; dueWithin24Hours: number; nextDeadlineAt: string | null };
@@ -78,4 +86,6 @@ export const adminOpsApi = {
   config: () => api.get<RuntimeConfig>('/admin/ops/config'),
   revenue: () => api.get<RevenueSummary>('/admin/ops/revenue'),
   featureFlags: () => api.get('/feature-flags'),
+  paymentsPause: () => api.get<PaymentsPauseState>('/admin/payments-pause'),
+  setPaymentsPause: (body: { enabled: boolean; message?: string }) => api.post<PaymentsPauseState>('/admin/payments-pause', body),
 };

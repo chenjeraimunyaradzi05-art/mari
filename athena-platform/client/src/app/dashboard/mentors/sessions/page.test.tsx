@@ -182,4 +182,81 @@ describe('Mentoring sessions', () => {
     expect(confirmSpy.mock.calls[0][0]).toContain('The mentee’s card is charged $37.50 now');
     await waitFor(() => expect(api.updateSessionStatus).toHaveBeenCalledWith('s2', 'COMPLETED'));
   });
+
+  // A declined card leaves the request open for another, and the server calls it
+  // off after a few hours, so the mentee has to be able to try again from here.
+  describe('a mentee whose card was declined', () => {
+    it('is offered another card while the request is still open', async () => {
+      api.getSessions.mockResolvedValue({
+        data: [session({ status: 'REQUESTED', paymentStatus: 'FAILED', scheduledAt: new Date(Date.now() + 48 * HOUR).toISOString() })],
+      });
+      api.paymentIntent.mockResolvedValue({ data: { data: { paymentStatus: 'FAILED', amount: 37.5, currency: 'AUD', clientSecret: 'cs_retry' } } });
+      renderPage();
+
+      expect(await screen.findByText(/You can try another card/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Try another card' }));
+
+      await waitFor(() => expect(api.paymentIntent).toHaveBeenCalledWith('s1'));
+      expect(await screen.findByTestId('authorise')).toBeInTheDocument();
+    });
+
+    it('is not offered a card for a finished session whose payment could not be collected', async () => {
+      api.getSessions.mockResolvedValue({ data: [session({ status: 'COMPLETED', paymentStatus: 'FAILED' })] });
+      renderPage();
+
+      expect(await screen.findByText('Payment failed')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Try another card' })).not.toBeInTheDocument();
+      expect(screen.queryByText(/You can try another card/)).not.toBeInTheDocument();
+    });
+  });
+
+  // The server will not let a mentor accept a paid request until the mentee's
+  // card is held, so the button says so instead of offering something that
+  // answers with an error.
+  describe('accepting a paid request', () => {
+    const mentorSide = (sessions: unknown[]) => {
+      searchParams = new URLSearchParams('session=r1');
+      api.getProfileByUser.mockResolvedValue({ data: { id: 'mp-me' } });
+      api.getSessions.mockImplementation(async (role: string) => (role === 'mentor' ? { data: sessions } : { data: [] }));
+    };
+    const request = (overrides: Record<string, unknown> = {}) =>
+      session({
+        id: 'r1',
+        status: 'REQUESTED',
+        scheduledAt: new Date(Date.now() + 48 * HOUR).toISOString(),
+        mentee: { id: 'mentee-1', displayName: 'Sina', avatar: null },
+        ...overrides,
+      });
+
+    it('keeps Confirm switched off, and says why, until the mentee has authorised payment', async () => {
+      mentorSide([request({ paymentStatus: 'PENDING' })]);
+      renderPage();
+
+      const confirm = await screen.findByRole('button', { name: /Confirm/ });
+      expect(confirm).toBeDisabled();
+      expect(confirm).toHaveAccessibleDescription(/once the mentee has authorised payment/);
+
+      fireEvent.click(confirm);
+      expect(api.updateSessionStatus).not.toHaveBeenCalled();
+    });
+
+    it('lets the mentor confirm once the card is held', async () => {
+      mentorSide([request({ paymentStatus: 'AUTHORIZED' })]);
+      renderPage();
+
+      const confirm = await screen.findByRole('button', { name: /Confirm/ });
+      expect(confirm).toBeEnabled();
+      expect(screen.queryByText(/once the mentee has authorised payment/)).not.toBeInTheDocument();
+
+      fireEvent.click(confirm);
+      await waitFor(() => expect(api.updateSessionStatus).toHaveBeenCalledWith('r1', 'CONFIRMED'));
+    });
+
+    it('does not make a mentor wait on a payment for a session that costs nothing', async () => {
+      mentorSide([request({ sessionAmount: 0, paymentStatus: 'CAPTURED' })]);
+      renderPage();
+
+      expect(await screen.findByRole('button', { name: /Confirm/ })).toBeEnabled();
+    });
+  });
 });

@@ -45,6 +45,11 @@ interface Order {
   service: { id: string; title: string; providerId: string };
   client: { id: string; displayName: string | null; avatar: string | null };
   escrow: { id: string; status: string; amount: number; currency: string; paymentIntentId: string | null; capturedAt: string | null; canceledAt: string | null } | null;
+  /**
+   * What the buyer can do about the hold on her card: when it runs out, whether
+   * she can renew it now, and whether it has already ended under a live order.
+   */
+  hold?: { lapsesAt: string | null; canRenew: boolean; lapsed: boolean };
 }
 
 const errorMessage = (error: unknown) =>
@@ -57,7 +62,7 @@ export default function OrderPage({ params }: { params: Promise<{ id: string }> 
   const [note, setNote] = useState('');
   const [rating, setRating] = useState(5);
   const [review, setReview] = useState('');
-  const [paying, setPaying] = useState<{ clientSecret: string; amount: number } | null>(null);
+  const [paying, setPaying] = useState<{ clientSecret: string; amount: number; renewing?: boolean } | null>(null);
 
   const order = useQuery({
     queryKey: ['marketplace-order', id],
@@ -118,6 +123,23 @@ export default function OrderPage({ params }: { params: Promise<{ id: string }> 
     }
   };
 
+  // A card hold lasts about a week and a job can take longer. This puts a fresh
+  // hold on her card for the same amount; nothing is taken, and the order moves
+  // onto it (and the old hold is released) once her bank has authorised it.
+  const renewHold = async () => {
+    try {
+      const res = await skillsMarketplaceApi.renewOrderPayment(id);
+      const data = res.data?.data as { clientSecret: string | null; amount: number } | undefined;
+      if (!data?.clientSecret) {
+        toast.error('We could not start the renewal. Please try again in a moment.');
+        return;
+      }
+      setPaying({ clientSecret: data.clientSecret, amount: data.amount, renewing: true });
+    } catch (error) {
+      toast.error(errorMessage(error) || 'Could not start the renewal');
+    }
+  };
+
   if (order.isLoading) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
@@ -144,6 +166,8 @@ export default function OrderPage({ params }: { params: Promise<{ id: string }> 
   const mockHeld = o.escrow?.status === 'PENDING' && Boolean(o.escrow.paymentIntentId?.startsWith('pi_mock_'));
   const held = o.escrow?.status === 'AUTHORIZED' || o.escrow?.status === 'CAPTURED' || mockHeld;
   const needsPayment = isBuyer && o.escrow?.status === 'PENDING' && !mockHeld && o.status === 'PENDING';
+  const hold = o.hold ?? { lapsesAt: null, canRenew: false, lapsed: false };
+  const lapsesOn = hold.lapsesAt ? format(new Date(hold.lapsesAt), 'EEEE d MMMM') : null;
   const busy = act.isPending;
 
   const timeline: Array<[string, string | null]> = [
@@ -277,9 +301,29 @@ export default function OrderPage({ params }: { params: Promise<{ id: string }> 
                       ? 'The provider cannot start until the hold is authorised.'
                       : 'The buyer has not yet authorised the hold.'}
             </p>
+            {/* The hold has a last day. Said to both people, so a long job is not a surprise. */}
+            {hold.lapsed && (
+              <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-400" role="status">
+                {isBuyer
+                  ? 'The hold on your card has ended, so nothing is held for this work right now. Renew it below; nothing is taken until you approve the finished work.'
+                  : 'The hold on the buyer’s card has ended. We have asked the buyer to renew it. Please wait for that before you hand the work over.'}
+              </p>
+            )}
+            {!hold.lapsed && lapsesOn && o.escrow?.status === 'AUTHORIZED' && (
+              <p className="mt-2 text-xs text-slate-500">
+                {isBuyer
+                  ? `The hold on your card runs out on ${lapsesOn}. ${hold.canRenew ? 'Renew it now so the provider is sure to be paid when the work is done.' : 'If the work is not finished by then, we will ask you to renew it.'}`
+                  : `The hold on the buyer’s card runs out on ${lapsesOn}. If the work is not finished by then the buyer will be asked to renew it.`}
+              </p>
+            )}
             {needsPayment && !paying && stripeConfigured && (
               <Button className="mt-3 w-full" onClick={() => void startPayment()}>
                 Authorise {formatAud(o.totalAmount)}
+              </Button>
+            )}
+            {isBuyer && hold.canRenew && !paying && stripeConfigured && (
+              <Button className="mt-3 w-full" variant={hold.lapsed ? 'default' : 'outline'} onClick={() => void renewHold()}>
+                {hold.lapsed ? 'Hold the payment again' : 'Renew the hold on my card'}
               </Button>
             )}
             {paying && (
@@ -288,9 +332,17 @@ export default function OrderPage({ params }: { params: Promise<{ id: string }> 
                   clientSecret={paying.clientSecret}
                   amountLabel={formatAud(paying.amount / 100)}
                   onAuthorised={() => {
+                    const renewing = paying.renewing;
                     setPaying(null);
-                    toast.success('Held. The provider has been told.');
+                    toast.success(
+                      renewing
+                        ? 'Renewed. Nothing has been charged, and the old hold is released.'
+                        : 'Held. The provider has been told.'
+                    );
                     refresh();
+                    // The order moves onto the new hold when Stripe tells us it
+                    // is authorised, a moment after she does, so ask once more.
+                    if (renewing) setTimeout(refresh, 4000);
                   }}
                   onSkip={() => setPaying(null)}
                   skipLabel="Not now"
@@ -315,9 +367,14 @@ export default function OrderPage({ params }: { params: Promise<{ id: string }> 
             {isProvider && (o.status === 'ACCEPTED' || o.status === 'REVISION_REQUESTED') && (
               <div className="space-y-2">
                 <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={4} maxLength={5000} placeholder="What you delivered, where to find it, anything the buyer should know" aria-label="Delivery message" className="input w-full text-sm" />
-                <Button className="w-full" disabled={busy} onClick={() => act.mutate({ action: 'deliver', payload: { message: note } })}>
+                <Button className="w-full" disabled={busy || !held} onClick={() => act.mutate({ action: 'deliver', payload: { message: note } })}>
                   Mark as delivered
                 </Button>
+                {!held && (
+                  <p className="text-xs text-slate-500">
+                    You can hand the work over once the buyer’s payment is held again. We have asked the buyer to renew it.
+                  </p>
+                )}
                 <CancelButton busy={busy} onCancel={(reason) => act.mutate({ action: 'cancel', payload: { reason } })} />
               </div>
             )}
@@ -337,13 +394,16 @@ export default function OrderPage({ params }: { params: Promise<{ id: string }> 
               <div className="space-y-3">
                 <Button
                   className="w-full"
-                  disabled={busy}
+                  disabled={busy || hold.lapsed}
                   onClick={() => {
                     if (window.confirm(`Approve the delivery and release ${formatAud(o.totalAmount)} to the provider?`)) act.mutate({ action: 'complete' });
                   }}
                 >
                   <CheckCircle2 className="mr-2 h-4 w-4" /> Approve and release payment
                 </Button>
+                {hold.lapsed && (
+                  <p className="text-xs text-slate-500">The hold on your card has ended. Renew it under Payment, then approve the delivery.</p>
+                )}
                 <div className="space-y-2">
                   <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} maxLength={2000} placeholder="What needs to change" aria-label="Revision reason" className="input w-full text-sm" />
                   <Button variant="outline" className="w-full" disabled={busy || !note.trim()} onClick={() => act.mutate({ action: 'revision', payload: { reason: note.trim() } })}>

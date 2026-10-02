@@ -9,12 +9,46 @@ const { withSentryConfig } = require('@sentry/nextjs');
 // the file to src/proxy.ts. Nothing caught it: check-doc-references.js only
 // reads tracked .md files, so a path cited in a JavaScript comment can rot
 // without CI noticing.
+// The host member media is served from, so next/image will optimise it.
+//
+// next/image refuses any remote host it has not been told about, and the
+// pictures on the feed and the job pages (avatars, company logos) come from
+// wherever the API's CDN_URL points, which is the owner's own CloudFront
+// domain or bucket and cannot be known here. Setting NEXT_PUBLIC_MEDIA_HOST
+// (a host name such as cdn.example.org, or a URL; several may be separated by
+// commas) at build time adds it, the same way NEXT_PUBLIC_API_URL is read.
+// Without it production would answer /_next/image with a refusal for every
+// avatar. Only https hosts, and only plain host names, are accepted.
+function mediaHostPatterns() {
+  return (process.env.NEXT_PUBLIC_MEDIA_HOST || '')
+    .split(',')
+    .map((entry) => entry.trim().replace(/^https?:\/\//i, '').replace(/[/?#].*$/, '').toLowerCase())
+    .filter((host) => /^(\*\.)?[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(host))
+    .map((hostname) => ({ protocol: 'https', hostname }));
+}
+
 const nextConfig = {
   // Enable standalone output for Docker deployments only.
   // Netlify's @netlify/plugin-nextjs manages output automatically.
   ...(process.env.NETLIFY ? {} : { output: 'standalone' }),
   turbopack: {
     root: __dirname,
+  },
+  // The developer section was withdrawn. Its pages described an API that does
+  // not exist (OAuth tokens, /v1 routes, client libraries, webhooks, request
+  // limits), and nothing here issues keys, documents terms or supports outside
+  // developers. Old links and bookmarks go to the partnership page, where a
+  // real conversation can start. Temporary on purpose: when a public API is
+  // built it is its own project, with its own hostname, authentication, docs,
+  // limits, support and terms, and these paths are free to return then.
+  async redirects() {
+    return [
+      {
+        source: '/developers/:path*',
+        destination: '/contact-sales?intent=partners',
+        permanent: false,
+      },
+    ];
   },
   // Security headers tracked in ATHENA_MEGA_IMPLEMENTATION_PLAN.md.
   async headers() {
@@ -73,6 +107,7 @@ const nextConfig = {
         hostname: 'localhost',
         port: '5000',
       },
+      ...mediaHostPatterns(),
     ],
   },
   async rewrites() {

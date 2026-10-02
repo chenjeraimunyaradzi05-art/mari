@@ -2,10 +2,14 @@
 
 import Link from 'next/link';
 import { Shield, AlertTriangle, Phone, ArrowRight } from 'lucide-react';
+import { QuickExitButton } from '../dashboard/safety/QuickExit';
 
 export default function SafetyPage() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
+      {/* A way off the page for someone reading this with somebody behind her. It
+          works signed out, and the Escape key pressed twice does the same. */}
+      <QuickExitButton variant="floating" className="print:hidden" />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="text-center mb-12">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-red-100 dark:bg-red-900/30 mb-4">

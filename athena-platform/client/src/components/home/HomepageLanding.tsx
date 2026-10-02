@@ -8,7 +8,6 @@ import {
   Briefcase,
   Building2,
   Calendar,
-  Command,
   Compass,
   DollarSign,
   Facebook,
@@ -116,7 +115,6 @@ const audienceRoutes = [
   { label: 'Job seekers', href: '/register', icon: Briefcase, gradient: 'from-rose-500 to-pink-500' },
   { label: 'Employers', href: '/employer', icon: Building2, gradient: 'from-indigo-500 to-purple-500' },
   { label: 'Mentors', href: '/dashboard/mentors/become-mentor', icon: Star, gradient: 'from-amber-500 to-orange-500' },
-  { label: 'Developers', href: '/developers', icon: Command, gradient: 'from-sky-500 to-cyan-500' },
 ];
 
 // The eight abilities that carry the product story. The previous sixteen made
@@ -521,7 +519,6 @@ export default function HomepageLanding() {
                 <li><Link href="/videos" className="hover:text-rose-600 dark:hover:text-rose-300">Videos</Link></li>
                 <li><Link href="/dashboard/mentors/become-mentor" className="hover:text-rose-600 dark:hover:text-rose-300">Become a mentor</Link></li>
                 <li><Link href="/employer" className="hover:text-rose-600 dark:hover:text-rose-300">For employers</Link></li>
-                <li><Link href="/developers" className="hover:text-rose-600 dark:hover:text-rose-300">For developers</Link></li>
               </ul>
             </div>
 

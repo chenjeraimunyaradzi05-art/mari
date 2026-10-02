@@ -57,7 +57,7 @@ export const WELLNESS_GROUPS: WellnessGroup[] = [
   {
     key: 'you',
     title: 'Your body and mind',
-    intro: 'A minute a day, encrypted and read only by you.',
+    intro: 'A minute a day, encrypted before it is stored and shown only to you.',
     tone: 'rose',
     items: [
       { href: '/dashboard/wellness', label: 'Today', blurb: 'The check-in, your cycle, the doses and habits due', icon: Sun, gated: true },

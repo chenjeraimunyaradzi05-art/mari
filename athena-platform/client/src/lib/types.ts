@@ -43,8 +43,8 @@ export interface User {
    * billing page that falls back to 'FREE' tells every subscriber she is on
    * the free plan. Ask the server instead, through usePremiumAccess() (from
    * app/dashboard/ai/PremiumGate) or useSubscription(). The field goes once
-   * its last three readers (dashboard/layout.tsx, settings/billing/page.tsx,
-   * components/subscription/PaywallGate.tsx) have moved off it.
+   * its last two readers (dashboard/layout.tsx, settings/billing/page.tsx)
+   * have moved off it.
    */
   subscriptionTier?: SubscriptionTier;
   profile?: UserProfile;

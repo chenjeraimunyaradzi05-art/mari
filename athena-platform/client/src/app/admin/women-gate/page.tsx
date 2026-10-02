@@ -83,6 +83,16 @@ function SubmissionCell({
             Age confirmed from the document on {new Date(ageVerifiedAt).toLocaleDateString()}
           </div>
         )}
+        {evidence.documentAgeFlag === 'BELOW_MINIMUM_AGE' && (
+          <div role="alert" className="rounded-md bg-red-50 p-2 text-xs font-medium text-red-800 dark:bg-red-950/30 dark:text-red-200">
+            The date of birth on this document is below the minimum age for ATHENA. It cannot be approved.
+          </div>
+        )}
+        {evidence.documentAgeFlag === 'IMPLAUSIBLE_DATE' && (
+          <div role="alert" className="rounded-md bg-amber-50 p-2 text-xs font-medium text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+            The date of birth read from this document is not a possible one, so the age was not recorded. Check it before deciding.
+          </div>
+        )}
       </div>
     );
   }
@@ -413,8 +423,18 @@ export default function AdminWomenGatePage() {
                                 // The server refuses an approval with nothing behind
                                 // it; the button says so rather than letting a
                                 // reviewer press it and read an error.
-                                disabled={!evidence || updateVerificationMutation.isPending}
-                                title={evidence ? undefined : 'Nothing has been submitted on this request yet'}
+                                disabled={
+                                  !evidence ||
+                                  evidence.documentAgeFlag === 'BELOW_MINIMUM_AGE' ||
+                                  updateVerificationMutation.isPending
+                                }
+                                title={
+                                  !evidence
+                                    ? 'Nothing has been submitted on this request yet'
+                                    : evidence.documentAgeFlag === 'BELOW_MINIMUM_AGE'
+                                      ? 'The document shows a date of birth below the minimum age'
+                                      : undefined
+                                }
                                 onClick={() => updateVerificationMutation.mutate({ userId: user.id, status: 'VERIFIED' })}
                               >
                                 <UserCheck className="h-4 w-4 mr-1" />

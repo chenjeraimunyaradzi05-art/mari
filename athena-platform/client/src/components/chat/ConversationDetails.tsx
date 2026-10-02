@@ -1,8 +1,9 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
-import { Info, Search, ShieldCheck, Timer, User } from 'lucide-react';
+import { Ban, Flag, Info, Search, ShieldCheck, Timer, User } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import { useChatStore } from '@/lib/stores/chat.store';
@@ -13,6 +14,8 @@ import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { safeHref } from '@/lib/safe-href';
+import { ReportDialog } from '@/components/safety/ReportDialog';
+import { blockMemberFromThread } from './member-safety';
 
 export default function ConversationDetails() {
   const { activeConversationId, conversations, messages, setDisappearingTtl } = useChatStore();
@@ -21,6 +24,9 @@ export default function ConversationDetails() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Array<{ id: string; senderId: string; content: string; createdAt: string }> | null>(null);
   const [searching, setSearching] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [blocking, setBlocking] = useState(false);
+  const router = useRouter();
 
   const conversation = conversations.find((c) => c.id === activeConversationId);
   const participant = conversation?.participants?.[0];
@@ -72,6 +78,17 @@ export default function ConversationDetails() {
   }
 
   const ttl = conversation.disappearingTtlSeconds ?? null;
+
+  const blockParticipant = async () => {
+    setBlocking(true);
+    try {
+      if (await blockMemberFromThread(participant.id, participant.name || 'This member')) {
+        router.push('/dashboard/messages');
+      }
+    } finally {
+      setBlocking(false);
+    }
+  };
 
   // Either side may set the timer. The server writes a system message into
   // the thread naming who changed it and pushes the new setting to both
@@ -137,6 +154,21 @@ export default function ConversationDetails() {
             >
               <User className="w-4 h-4 mr-2" /> View Profile
             </Link>
+            <button
+              type="button"
+              onClick={() => setReportOpen(true)}
+              className={cn(buttonVariants({ variant: 'outline' }), 'w-full justify-start')}
+            >
+              <Flag className="w-4 h-4 mr-2" /> Report member
+            </button>
+            <button
+              type="button"
+              onClick={() => void blockParticipant()}
+              disabled={blocking}
+              className={cn(buttonVariants({ variant: 'outline' }), 'w-full justify-start text-red-600 dark:text-red-400')}
+            >
+              <Ban className="w-4 h-4 mr-2" /> Block member
+            </button>
           </div>
         </div>
 
@@ -239,6 +271,14 @@ export default function ConversationDetails() {
           )}
         </div>
       </div>
+
+      <ReportDialog
+        open={reportOpen}
+        onClose={() => setReportOpen(false)}
+        targetType="user"
+        targetId={participant.id}
+        targetLabel={participant.name || 'this member'}
+      />
     </div>
   );
 }

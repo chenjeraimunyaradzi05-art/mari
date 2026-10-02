@@ -3,15 +3,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Database, Trash2, Download, ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useAuth, useExportMyData, useDeleteAccount } from '@/lib/hooks';
+import { useAuth, useExportMyData } from '@/lib/hooks';
 import { userApi } from '@/lib/api';
 import { getStoredPreference } from '@/lib/utils';
 import { BlockedMembers } from '@/components/safety/BlockedMembers';
+import { DeleteAccountDialog } from '@/components/account/DeleteAccountDialog';
 
 export default function PrivacySettingsPage() {
   const { user } = useAuth();
   const exportMyData = useExportMyData();
-  const deleteAccount = useDeleteAccount();
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [consentMarketing, setConsentMarketing] = useState(false);
@@ -88,18 +89,6 @@ export default function PrivacySettingsPage() {
     } finally {
       setIsDownloading(false);
     }
-  };
-
-  const handleDelete = async () => {
-    const first = confirm(
-      'Delete your account? This will remove personal profile data and revoke access.'
-    );
-    if (!first) return;
-
-    const second = confirm('This cannot be undone. Are you sure?');
-    if (!second) return;
-
-    await deleteAccount.mutateAsync();
   };
 
   const handleSaveConsents = async () => {
@@ -314,23 +303,24 @@ export default function PrivacySettingsPage() {
               Delete Account
             </h2>
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-              Deletes personal profile data and revokes access by anonymizing your account.
+              Erases your profile, posts, messages and the rest of your personal information straight away, ends any membership you pay for, and signs you out everywhere.
             </p>
 
             <div className="mt-4">
               <button
                 type="button"
-                onClick={handleDelete}
-                disabled={deleteAccount.isPending}
-                className="btn-outline px-4 py-2 inline-flex items-center gap-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                onClick={() => setDeleteOpen(true)}
+                className="btn-outline min-h-11 px-4 py-2 inline-flex items-center gap-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
               >
                 <Trash2 className="w-4 h-4" />
-                {deleteAccount.isPending ? 'Deleting…' : 'Delete my account'}
+                Delete my account
               </button>
             </div>
           </div>
         </div>
       </div>
+
+      <DeleteAccountDialog open={deleteOpen} onClose={() => setDeleteOpen(false)} />
     </div>
   );
 }

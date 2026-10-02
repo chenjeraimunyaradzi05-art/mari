@@ -4,11 +4,15 @@ import { useState, useEffect, useMemo } from 'react';
 import { useAuthStore } from '@/lib/store';
 import { Shield, Download, Trash2, Eye, Bell, Lock, Cookie, ChevronRight, AlertTriangle, Check, Loader2, FileText, ExternalLink } from 'lucide-react';
 import Link from 'next/link';
+import { api } from '@/lib/api';
 import complianceService from '@/lib/services/compliance.service';
 import type { LegalDocument, LegalAgreementRecord } from '@/lib/services/compliance.service';
 import { contactLink } from '@/lib/contact';
-import { safeHref } from '@/lib/safe-href';
+import { downloadBlob } from '@/lib/download';
+import { StepUpFields } from '@/components/account/StepUpFields';
 import { getStoredPreference } from '@/lib/utils';
+import { QuickExitButton } from '../dashboard/safety/QuickExit';
+import { EmergencyHelp } from '@/components/safety/EmergencyHelp';
 
 interface ConsentState {
   MARKETING_EMAIL: boolean;
@@ -20,13 +24,68 @@ interface ConsentState {
   THIRD_PARTY_SHARING: boolean;
 }
 
+/**
+ * A request as GET /api/gdpr/dsar returns it. The link to a finished export is
+ * `exportUrl`, with `exportExpiresAt` beside it; this page used to read a
+ * `downloadUrl` that the API has never sent, so no request in the history ever
+ * showed a way to fetch its file.
+ */
 interface DSARRequest {
   id: string;
-  type: 'EXPORT' | 'DELETION' | 'RECTIFICATION' | 'RESTRICTION';
+  type: 'EXPORT' | 'DELETION' | 'RECTIFICATION' | 'RESTRICTION' | 'PORTABILITY';
   status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'REJECTED';
   createdAt: string;
-  completedAt?: string;
-  downloadUrl?: string;
+  completedAt?: string | null;
+  exportUrl?: string | null;
+  exportExpiresAt?: string | null;
+}
+
+const REQUEST_TYPE_LABELS: Record<string, string> = {
+  EXPORT: 'Copy of your data',
+  DELETION: 'Account deletion',
+  RECTIFICATION: 'Correction',
+  RESTRICTION: 'Pause on how we use your data',
+  PORTABILITY: 'Data to take elsewhere',
+};
+
+const REQUEST_STATUS_LABELS: Record<string, string> = {
+  PENDING: 'Waiting',
+  IN_PROGRESS: 'In progress',
+  COMPLETED: 'Done',
+  REJECTED: 'Not carried out',
+};
+
+/**
+ * What the API said went wrong, in its own words, else ours. The routes answer
+ * `error` on a refusal and `message` from the shared handler, and axios
+ * throws on either.
+ */
+function serverMessage(error: unknown, fallback: string): string {
+  const data = (error as { response?: { data?: { error?: unknown; message?: unknown } } })?.response?.data;
+  if (typeof data?.error === 'string' && data.error) return data.error;
+  if (typeof data?.message === 'string' && data.message) return data.message;
+  return fallback;
+}
+
+/**
+ * The API path of an export link, or null when it is not one of ours. The link
+ * is a path on this site (`/api/gdpr/download/<token>`) and the route behind it
+ * wants the session header, which a link a member clicks cannot carry, so it is
+ * fetched through the shared client instead and handed over as a file.
+ */
+function exportPathOf(downloadUrl: string): string | null {
+  try {
+    const { pathname } = new URL(downloadUrl, 'https://athena.invalid');
+    return pathname.startsWith('/api/gdpr/download/') ? pathname.replace(/^\/api/, '') : null;
+  } catch {
+    return null;
+  }
+}
+
+function hasExpired(iso: string | null | undefined): boolean {
+  if (!iso) return false;
+  const when = new Date(iso).getTime();
+  return !Number.isNaN(when) && when < Date.now();
 }
 
 const CONSENT_DESCRIPTIONS: Record<keyof ConsentState, { title: string; description: string; required?: boolean }> = {
@@ -92,7 +151,15 @@ export default function PrivacyCenterPage() {
   const [region, setRegion] = useState('ANZ');
   const [exportReady, setExportReady] = useState<ExportReady | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [downloadingExport, setDownloadingExport] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  // Whether the member's saved choices were really read. Until they have been,
+  // the switches below are not a statement about her account, so they are not
+  // offered as one.
+  const [consentsLoaded, setConsentsLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [consentError, setConsentError] = useState<string | null>(null);
   const [consents, setConsents] = useState<ConsentState>({
     MARKETING_EMAIL: false,
     MARKETING_SMS: false,
@@ -108,6 +175,9 @@ export default function PrivacyCenterPage() {
   const [exportLoading, setExportLoading] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleteInput, setDeleteInput] = useState('');
+  // Asked for again, because erasure cannot be undone: see StepUpFields.
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteCode, setDeleteCode] = useState('');
   const [legalDocuments, setLegalDocuments] = useState<LegalDocument[]>([]);
   const [agreementHistory, setAgreementHistory] = useState<LegalAgreementRecord[]>([]);
   const [legalLoading, setLegalLoading] = useState(true);
@@ -162,29 +232,35 @@ export default function PrivacyCenterPage() {
   };
 
   const fetchPrivacyData = async () => {
-    try {
-      // Fetch consents
-      const consentsRes = await fetch('/api/gdpr/consents', {
-        credentials: 'include',
-      });
-      if (consentsRes.ok) {
-        const { data } = await consentsRes.json();
-        setConsents(prev => ({ ...prev, ...data }));
-      }
+    setLoadError(null);
+    // Through the shared client, which attaches her session. A bare fetch
+    // arrived as nobody, was answered 401, and the page showed the defaults as
+    // if they were her choices and an empty history as if she had made no
+    // requests.
+    const [consentsResult, historyResult] = await Promise.allSettled([api.get('/gdpr/consents'), api.get('/gdpr/dsar')]);
 
-      // Fetch DSAR history
-      const dsarRes = await fetch('/api/gdpr/dsar', {
-        credentials: 'include',
-      });
-      if (dsarRes.ok) {
-        const { data } = await dsarRes.json();
-        setDsarHistory(data || []);
-      }
-    } catch (error) {
-      console.error('Failed to fetch privacy data:', error);
-    } finally {
-      setLoading(false);
+    if (consentsResult.status === 'fulfilled') {
+      const saved = consentsResult.value.data?.data;
+      setConsents((prev) => ({ ...prev, ...(saved && typeof saved === 'object' ? saved : {}) }));
+      setConsentsLoaded(true);
+    } else {
+      console.error('Failed to fetch consents:', consentsResult.reason);
+      setConsentsLoaded(false);
     }
+
+    if (historyResult.status === 'fulfilled') {
+      const history = historyResult.value.data?.data;
+      setDsarHistory(Array.isArray(history) ? history : []);
+    } else {
+      console.error('Failed to fetch request history:', historyResult.reason);
+    }
+
+    if (consentsResult.status === 'rejected' || historyResult.status === 'rejected') {
+      setLoadError(
+        'We could not load your saved privacy choices just now. What is shown may not match what is saved, so please try again before you change anything.'
+      );
+    }
+    setLoading(false);
   };
 
   const isDocumentAcknowledged = (document: LegalDocument): boolean => {
@@ -193,10 +269,16 @@ export default function PrivacyCenterPage() {
       return true;
     }
 
-    // Backward compatibility for users who acknowledged via data-processing consent
-    // before document-level agreement history was introduced.
-    return Boolean(isAuthenticated && document.required && consents.DATA_PROCESSING);
+    return acknowledgedByConsent(document);
   };
+
+  // Backward compatibility for users who acknowledged via data-processing consent
+  // before document-level agreement history was introduced. Only where her saved
+  // consents were really read: the switch's starting value is on, and a page that
+  // could not reach the API would otherwise tell her she had acknowledged every
+  // required document on the strength of a default.
+  const acknowledgedByConsent = (document: LegalDocument): boolean =>
+    Boolean(isAuthenticated && consentsLoaded && document.required && consents.DATA_PROCESSING);
 
   const getAcknowledgedAt = (document: LegalDocument): string | null => {
     const match = agreementHistory.find(
@@ -209,7 +291,7 @@ export default function PrivacyCenterPage() {
       return formatDateLabel(match.acceptedAt);
     }
 
-    if (isAuthenticated && document.required && consents.DATA_PROCESSING) {
+    if (acknowledgedByConsent(document)) {
       return 'Previously acknowledged';
     }
 
@@ -257,19 +339,22 @@ export default function PrivacyCenterPage() {
   const updateConsent = async (key: keyof ConsentState, value: boolean) => {
     if (CONSENT_DESCRIPTIONS[key].required && !value) return;
 
+    setConsentError(null);
     setConsents(prev => ({ ...prev, [key]: value }));
     setSaving(true);
 
     try {
-      await fetch(`/api/gdpr/consents/${key}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ granted: value }),
-      });
+      await api.post(`/gdpr/consents/${key}`, { granted: value });
     } catch (error) {
+      // The switch is put back and she is told, in the server's words where it
+      // gave any (a choice paused under a request of hers says so). It used to
+      // stay where she had left it whatever the answer was, which made a
+      // refused choice look saved.
       console.error('Failed to update consent:', error);
       setConsents(prev => ({ ...prev, [key]: !value }));
+      setConsentError(
+        `${CONSENT_DESCRIPTIONS[key].title}: ${serverMessage(error, 'we could not save that choice, so it has been put back. Please try again.')}`
+      );
     } finally {
       setSaving(false);
     }
@@ -278,26 +363,55 @@ export default function PrivacyCenterPage() {
   const requestDataExport = async () => {
     setExportLoading(true);
     setExportError(null);
+    setDownloadError(null);
     try {
-      const res = await fetch('/api/gdpr/dsar/export', {
-        method: 'POST',
-        credentials: 'include',
-      });
-      const payload = await res.json();
-      const data = payload?.data;
-      if (res.ok && data?.downloadUrl) {
+      const res = await api.post('/gdpr/dsar/export');
+      const data = res.data?.data;
+      if (data?.downloadUrl) {
         // The export is built synchronously and the link comes back in this
         // response; nothing is emailed. It is shown here, where it was asked for.
         setExportReady({ downloadUrl: data.downloadUrl, expiresAt: data.expiresAt });
         fetchPrivacyData();
       } else {
-        setExportError(payload?.error || payload?.message || 'We could not prepare your export just now. Please try again.');
+        setExportError('We could not prepare your export just now. Please try again.');
       }
     } catch (error) {
       console.error('Failed to request export:', error);
-      setExportError('We could not prepare your export just now. Please try again.');
+      setExportError(serverMessage(error, 'We could not prepare your export just now. Please try again.'));
     } finally {
       setExportLoading(false);
+    }
+  };
+
+  /**
+   * Fetches a finished export with her session and hands it over as a file.
+   * The link itself cannot be followed by the browser: the route wants the
+   * session header, and a click does not send one.
+   */
+  const downloadExport = async (downloadUrl: string) => {
+    setDownloadError(null);
+    const path = exportPathOf(downloadUrl);
+    if (!path) {
+      setDownloadError('That link is not one we recognise. Please ask for a new copy of your data.');
+      return;
+    }
+
+    setDownloadingExport(true);
+    try {
+      const file = await api.get(path, { responseType: 'blob' });
+      downloadBlob(`athena-my-data-${new Date().toISOString().slice(0, 10)}.json`, file.data as Blob);
+    } catch (error) {
+      console.error('Failed to download export:', error);
+      const status = (error as { response?: { status?: number } })?.response?.status;
+      setDownloadError(
+        status === 410
+          ? 'That link has expired. Please ask for a new copy of your data.'
+          : status === 404
+            ? 'We could not find that copy any more. Please ask for a new one.'
+            : 'We could not download your data just now. Please try again.'
+      );
+    } finally {
+      setDownloadingExport(false);
     }
   };
 
@@ -306,29 +420,30 @@ export default function PrivacyCenterPage() {
     setDeleteError(null);
 
     try {
-      const res = await fetch('/api/gdpr/dsar/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ confirmation: 'DELETE_MY_ACCOUNT' }),
+      const res = await api.post('/gdpr/dsar/delete', {
+        confirmation: 'DELETE_MY_ACCOUNT',
+        ...(deletePassword ? { currentPassword: deletePassword } : {}),
+        ...(deleteCode.trim() ? { code: deleteCode.trim() } : {}),
       });
-      const payload = await res.json();
-      if (res.ok) {
-        // Erasure runs when the request is made, not within 30 days, so the
-        // server's own account of what happened is what the member sees, and
-        // there is no account left to stay signed in to.
-        alert(payload?.message || 'Your personal data has been erased.');
-        setDeleteConfirm(false);
-        setDeleteInput('');
-        logout();
-        window.location.href = '/';
-        return;
-      }
-      // A legal hold or an open dispute can stop erasure; the route says why.
-      setDeleteError(payload?.error || payload?.message || 'Deletion could not be carried out right now.');
+      // Erasure runs when the request is made, not within 30 days, so the
+      // server's own account of what happened is what the member sees, and
+      // there is no account left to stay signed in to.
+      alert(res.data?.message || 'Your personal data has been erased.');
+      setDeleteConfirm(false);
+      setDeleteInput('');
+      setDeletePassword('');
+      setDeleteCode('');
+      logout();
+      window.location.href = '/';
     } catch (error) {
       console.error('Failed to request deletion:', error);
-      setDeleteError('We could not reach the server. Please try again.');
+      // A legal hold or an open dispute can stop erasure; the route says why.
+      const reached = Boolean((error as { response?: unknown })?.response);
+      setDeleteError(
+        reached
+          ? serverMessage(error, 'Deletion could not be carried out right now.')
+          : 'We could not reach the server. Please try again.'
+      );
     }
   };
 
@@ -352,10 +467,73 @@ export default function PrivacyCenterPage() {
           <p className="text-purple-100 text-lg max-w-2xl">
             Control how your data is used and exercise your privacy rights. We are committed to transparency and giving you full control over your personal information.
           </p>
+
+          {/* Privacy is also who can find you and who can reach you. Those
+              settings live elsewhere, so the way to them is here. */}
+          <nav aria-label="Safety shortcuts" className="mt-6">
+            <p className="text-sm font-medium text-white">Looking for who can find or reach you?</p>
+            <ul className="mt-2 flex flex-wrap gap-3">
+              {isAuthenticated && (
+                <>
+                  <li>
+                    <Link
+                      href="/safety-center"
+                      className="inline-flex min-h-[44px] items-center rounded-full bg-white/15 px-4 py-2 text-sm font-medium text-white hover:bg-white/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-purple-800"
+                    >
+                      Blocked members and your reports
+                    </Link>
+                  </li>
+                  <li>
+                    <Link
+                      href="/dashboard/safety"
+                      className="inline-flex min-h-[44px] items-center rounded-full bg-white/15 px-4 py-2 text-sm font-medium text-white hover:bg-white/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-purple-800"
+                    >
+                      Safe Mode
+                    </Link>
+                  </li>
+                </>
+              )}
+              <li>
+                <Link
+                  href="/help/safety-center"
+                  className="inline-flex min-h-[44px] items-center rounded-full bg-white/15 px-4 py-2 text-sm font-medium text-white hover:bg-white/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-purple-800"
+                >
+                  Crisis lines and support
+                </Link>
+              </li>
+            </ul>
+            <p className="mt-3 text-sm text-purple-100">
+              If you are in danger now, call{' '}
+              <a href="tel:000" className="font-semibold text-white underline">
+                000
+              </a>
+              .
+            </p>
+          </nav>
         </div>
       </div>
 
+      {/* A way off this page, for anyone who has to leave it in a hurry. */}
+      <QuickExitButton variant="floating" className="print:hidden" />
+      <EmergencyHelp className="print:hidden" />
+
       <div className="max-w-4xl mx-auto px-4 py-8 space-y-8">
+        {loadError && (
+          <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
+            <p className="text-sm">{loadError}</p>
+            <button
+              type="button"
+              onClick={() => {
+                setLoading(true);
+                void fetchPrivacyData();
+              }}
+              className="mt-3 inline-flex min-h-[44px] items-center rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-600 focus-visible:ring-offset-2"
+            >
+              Try again
+            </button>
+          </div>
+        )}
+
         {/* Quick Actions */}
         {isAuthenticated && (
           <section id="data-rights" className="scroll-mt-8 bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
@@ -402,17 +580,22 @@ export default function PrivacyCenterPage() {
                   It is a JSON file of everything we hold about you.
                   {exportReady.expiresAt && ` The link works until ${formatDateLabel(exportReady.expiresAt)}.`}
                 </p>
-                <a
-                  href={safeHref(exportReady.downloadUrl)}
-                  className="mt-3 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                <button
+                  type="button"
+                  onClick={() => downloadExport(exportReady.downloadUrl)}
+                  disabled={downloadingExport}
+                  className="mt-3 inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:opacity-60"
                 >
-                  <Download className="h-4 w-4" /> Download my data
-                </a>
+                  {downloadingExport ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download my data
+                </button>
               </div>
             )}
 
             {exportError && (
-              <p className="mt-4 text-sm text-red-600 dark:text-red-400">{exportError}</p>
+              <p role="alert" className="mt-4 text-sm text-red-600 dark:text-red-400">{exportError}</p>
+            )}
+            {downloadError && (
+              <p role="alert" className="mt-4 text-sm text-red-600 dark:text-red-400">{downloadError}</p>
             )}
           </section>
         )}
@@ -456,6 +639,14 @@ export default function PrivacyCenterPage() {
               </span>
             )}
           </div>
+          {!isAuthenticated && (
+            <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">Sign in to see and change your choices.</p>
+          )}
+          {consentError && (
+            <p role="alert" className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300">
+              {consentError}
+            </p>
+          )}
           <div className="space-y-4">
             {(['MARKETING_EMAIL', 'MARKETING_SMS', 'MARKETING_PUSH'] as const).map((key) => (
               <div key={key} className="flex items-center justify-between py-3 border-b border-slate-100 dark:border-slate-700 last:border-0">
@@ -469,7 +660,8 @@ export default function PrivacyCenterPage() {
                     checked={consents[key]}
                     onChange={(e) => updateConsent(key, e.target.checked)}
                     className="sr-only peer"
-                    disabled={!isAuthenticated}
+                    aria-label={CONSENT_DESCRIPTIONS[key].title}
+                    disabled={!isAuthenticated || !consentsLoaded}
                   />
                   <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 dark:peer-focus:ring-purple-800 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-purple-600"></div>
                 </label>
@@ -502,7 +694,8 @@ export default function PrivacyCenterPage() {
                     checked={consents[key]}
                     onChange={(e) => updateConsent(key, e.target.checked)}
                     className="sr-only peer"
-                    disabled={!isAuthenticated || CONSENT_DESCRIPTIONS[key].required}
+                    aria-label={CONSENT_DESCRIPTIONS[key].title}
+                    disabled={!isAuthenticated || !consentsLoaded || CONSENT_DESCRIPTIONS[key].required}
                   />
                   <div className={`w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 dark:peer-focus:ring-purple-800 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-purple-600 ${CONSENT_DESCRIPTIONS[key].required ? 'opacity-60 cursor-not-allowed' : ''}`}></div>
                 </label>
@@ -536,8 +729,8 @@ export default function PrivacyCenterPage() {
               {dsarHistory.map((request) => (
                 <div key={request.id} className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-700 rounded-lg">
                   <div>
-                    <p className="font-medium text-slate-900 dark:text-white capitalize">
-                      {request.type.toLowerCase().replace('_', ' ')} Request
+                    <p className="font-medium text-slate-900 dark:text-white">
+                      {REQUEST_TYPE_LABELS[request.type] ?? 'Privacy request'}
                     </p>
                     <p className="text-sm text-slate-500 dark:text-slate-400">
                       Submitted {new Date(request.createdAt).toLocaleDateString()}
@@ -550,13 +743,21 @@ export default function PrivacyCenterPage() {
                       request.status === 'IN_PROGRESS' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
                       'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
                     }`}>
-                      {request.status}
+                      {REQUEST_STATUS_LABELS[request.status] ?? request.status}
                     </span>
-                    {request.downloadUrl && (
-                      <a href={safeHref(request.downloadUrl)} className="text-purple-600 hover:underline text-sm">
-                        Download
-                      </a>
-                    )}
+                    {request.exportUrl &&
+                      (hasExpired(request.exportExpiresAt) ? (
+                        <span className="text-sm text-slate-500 dark:text-slate-400">Link expired</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => downloadExport(request.exportUrl as string)}
+                          disabled={downloadingExport}
+                          className="min-h-[44px] rounded px-2 text-sm text-purple-600 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-600 disabled:opacity-60"
+                        >
+                          Download
+                        </button>
+                      ))}
                   </div>
                 </div>
               ))}
@@ -694,8 +895,19 @@ export default function PrivacyCenterPage() {
             </div>
             <p className="text-slate-600 dark:text-slate-400 mb-4">
               Your profile, posts, messages and other personal data are erased as soon as you confirm. Records the law
-              makes us keep, such as payment records, are held without anything that identifies you.
+              makes us keep, such as payment records, are held without anything that identifies you. If you pay for a
+              membership, it ends today and you are not charged again; if we cannot end it, nothing is deleted. Gift
+              points you have bought, and creator earnings you have not withdrawn, are not paid out or refunded:
+              withdraw your earnings first if you want them.
             </p>
+            <div className="mb-4">
+              <StepUpFields
+                password={deletePassword}
+                code={deleteCode}
+                onPasswordChange={setDeletePassword}
+                onCodeChange={setDeleteCode}
+              />
+            </div>
             <label htmlFor="delete-account-confirmation" className="block text-sm text-slate-600 dark:text-slate-400 mb-2">
               Type <strong>DELETE_MY_ACCOUNT</strong> to confirm:
             </label>
@@ -715,6 +927,8 @@ export default function PrivacyCenterPage() {
                 onClick={() => {
                   setDeleteConfirm(false);
                   setDeleteInput('');
+                  setDeletePassword('');
+                  setDeleteCode('');
                   setDeleteError(null);
                 }}
                 className="flex-1 px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"

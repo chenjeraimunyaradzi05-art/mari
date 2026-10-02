@@ -49,6 +49,17 @@ function wage(a: Apprenticeship): string | null {
   return null;
 }
 
+/**
+ * What ATHENA says about the host of a listing. The server says whether the host
+ * is verified and has an approved safety attestation (hostMayPlace); a listing
+ * whose host is not is shown, labelled, and takes no applications through ATHENA.
+ * The word is the host's own statement read by staff, never a guarantee, and not a
+ * police or background check. Absent (an older server) shows nothing.
+ */
+const HOST_NOT_CHECKED_NOTICE =
+  'ATHENA has not safety-checked this host yet. You can read about the apprenticeship, but applications through ATHENA are not open until the host has been verified and its safety attestation approved.';
+const hostNotChecked = (a: Apprenticeship) => a.hostMayPlace === false;
+
 interface ApprenticeshipCardProps {
   apprenticeship: Apprenticeship;
   onPress: () => void;
@@ -120,6 +131,7 @@ function ApprenticeshipCard({ apprenticeship, onPress, onToggleBookmark }: Appre
         <View style={styles.industryBadge}>
           <Text style={styles.industryText}>{apprenticeship.framework}</Text>
         </View>
+        {hostNotChecked(apprenticeship) ? <Text style={styles.hostNotChecked}>Not yet safety-checked</Text> : null}
         <Text style={styles.postedDate}>{formatDate(apprenticeship.publishedAt ?? apprenticeship.createdAt)}</Text>
       </View>
     </TouchableOpacity>
@@ -138,6 +150,7 @@ function ApplicationModal({ visible, apprenticeship, onClose, onSubmit, loading 
   const [coverLetter, setCoverLetter] = useState('');
 
   const handleSubmit = () => {
+    if (apprenticeship && hostNotChecked(apprenticeship)) return;
     if (!coverLetter.trim()) {
       Alert.alert('Almost there', 'Tell them a little about why this apprenticeship is for you.');
       return;
@@ -168,6 +181,8 @@ function ApplicationModal({ visible, apprenticeship, onClose, onSubmit, loading 
               ) : null}
             </View>
 
+            {hostNotChecked(apprenticeship) ? <Text style={styles.hostNoticeText}>{HOST_NOT_CHECKED_NOTICE}</Text> : null}
+
             <View style={styles.formGroup}>
               <Text style={styles.label} nativeID="coverLetterLabel">Cover Letter *</Text>
               <TextInput
@@ -193,9 +208,9 @@ function ApplicationModal({ visible, apprenticeship, onClose, onSubmit, loading 
               <Text style={styles.cancelButtonText}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.submitButton, loading && styles.submitButtonDisabled]}
+              style={[styles.submitButton, (loading || hostNotChecked(apprenticeship)) && styles.submitButtonDisabled]}
               onPress={handleSubmit}
-              disabled={loading}
+              disabled={loading || hostNotChecked(apprenticeship)}
               accessibilityRole="button"
             >
               {loading ? (
@@ -579,6 +594,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6366f1',
     fontWeight: '500',
+  },
+  hostNotChecked: {
+    fontSize: 11,
+    color: '#6b7280',
+    backgroundColor: '#f3f4f6',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+    marginLeft: 8,
+    overflow: 'hidden',
+  },
+  hostNoticeText: {
+    fontSize: 13,
+    color: '#78350f',
+    backgroundColor: '#fffbeb',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+    lineHeight: 19,
   },
   postedDate: {
     fontSize: 12,

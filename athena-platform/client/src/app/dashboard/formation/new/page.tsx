@@ -3,10 +3,26 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useCreateFormation } from '@/lib/hooks';
+import { FormationFeeTerms, formationFeeLabel, useFormationFees } from '@/components/business/FormationFeeTerms';
+
+/**
+ * The four structures, each with what it is and what the registration costs.
+ * The price comes from the server (GET /api/formation/fees, the table the
+ * payment step charges from), so a card cannot promise a figure the card form
+ * does not ask for. While it has not arrived, or if it cannot be loaded, the card
+ * says the fee is shown before payment rather than guessing one.
+ */
+const STRUCTURES = [
+  { type: 'SOLE_TRADER', name: 'Sole Trader', blurb: 'Simplest structure. You trade as an individual.' },
+  { type: 'COMPANY', name: 'Company (Pty Ltd)', blurb: 'Separate legal entity. Limited liability protection.' },
+  { type: 'PARTNERSHIP', name: 'Partnership', blurb: 'Two or more people running a business together.' },
+  { type: 'TRUST', name: 'Trust', blurb: 'Entity holds property/income for others.' },
+] as const;
 
 export default function NewFormationPage() {
   const router = useRouter();
   const createFormation = useCreateFormation();
+  const fees = useFormationFees();
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState({
     type: '',
@@ -40,41 +56,35 @@ export default function NewFormationPage() {
         <div className="space-y-4">
           <h2 className="text-xl font-semibold">Select Business Structure</h2>
           <div className="grid gap-4 md:grid-cols-2">
-            <button
-              onClick={() => handleTypeSelect('SOLE_TRADER')}
-              className="p-6 border rounded-lg text-left hover:border-primary hover:bg-slate-50 transition-colors"
-            >
-              <h3 className="font-bold">Sole Trader</h3>
-              <p className="text-sm text-slate-500 mt-2">Simplest structure. You trade as an individual.</p>
-            </button>
-            <button
-              onClick={() => handleTypeSelect('COMPANY')}
-              className="p-6 border rounded-lg text-left hover:border-primary hover:bg-slate-50 transition-colors"
-            >
-              <h3 className="font-bold">Company (Pty Ltd)</h3>
-              <p className="text-sm text-slate-500 mt-2">Separate legal entity. Limited liability protection.</p>
-            </button>
-            <button
-              onClick={() => handleTypeSelect('PARTNERSHIP')}
-              className="p-6 border rounded-lg text-left hover:border-primary hover:bg-slate-50 transition-colors"
-            >
-              <h3 className="font-bold">Partnership</h3>
-              <p className="text-sm text-slate-500 mt-2">Two or more people running a business together.</p>
-            </button>
-            <button
-              onClick={() => handleTypeSelect('TRUST')}
-              className="p-6 border rounded-lg text-left hover:border-primary hover:bg-slate-50 transition-colors"
-            >
-              <h3 className="font-bold">Trust</h3>
-              <p className="text-sm text-slate-500 mt-2">Entity holds property/income for others.</p>
-            </button>
+            {STRUCTURES.map((structure) => {
+              const price = formationFeeLabel(fees.data, structure.type);
+              return (
+                <button
+                  key={structure.type}
+                  onClick={() => handleTypeSelect(structure.type)}
+                  className="min-h-[44px] p-6 border rounded-lg text-left hover:border-primary hover:bg-slate-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  <h3 className="font-bold">{structure.name}</h3>
+                  <p className="text-sm text-slate-500 mt-2">{structure.blurb}</p>
+                  <p className="mt-3 text-sm font-semibold">
+                    {price ? `Fee: ${price}` : 'The fee is shown before you pay.'}
+                  </p>
+                </button>
+              );
+            })}
           </div>
+          <FormationFeeTerms />
         </div>
       )}
 
       {step === 2 && (
         <form onSubmit={handleSubmit} className="space-y-4">
           <h2 className="text-xl font-semibold">Choose a Business Name</h2>
+          {formationFeeLabel(fees.data, formData.type) && (
+            <p className="text-sm text-slate-600">
+              The fee for this structure is {formationFeeLabel(fees.data, formData.type)}. You pay it after you have filled in your details, when you submit them, not before.
+            </p>
+          )}
           <div className="space-y-2">
             <label className="text-sm font-medium">Business Name</label>
             <input

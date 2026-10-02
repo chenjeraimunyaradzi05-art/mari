@@ -22,11 +22,14 @@ import Link from 'next/link';
 import {
   AlertCircle,
   ArrowLeft,
+  Ban,
   Check,
   CheckCheck,
   Clock,
   FileText,
+  Flag,
   Mic,
+  MoreHorizontal,
   Paperclip,
   Pencil,
   Reply,
@@ -43,7 +46,16 @@ import { VoiceRecorder } from './VoiceRecorder';
 import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { ReportDialog } from '@/components/safety/ReportDialog';
 import { safeHref } from '@/lib/safe-href';
+import { blockMemberFromThread } from './member-safety';
 
 interface ChatWindowProps {
   conversationId: string;
@@ -96,6 +108,9 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
   const [newMessage, setNewMessage] = useState('');
   const [attachments, setAttachments] = useState<File[]>([]);
   const [recording, setRecording] = useState(false);
+  // What the report dialog is open on: one message, or the member herself.
+  const [reporting, setReporting] = useState<{ type: 'message' | 'user'; id: string; label: string } | null>(null);
+  const [blocking, setBlocking] = useState(false);
 
   // A story reply arrives as ?text=: the quoted line lands in the composer so
   // the sender can add to it before sending.
@@ -157,6 +172,20 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
     } catch (error) {
       const message = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
       toast.error(message || 'Could not update the request');
+    }
+  };
+
+  // Blocking from inside the thread: once it is done there is nothing left to
+  // say in it, so she goes back to her list.
+  const blockCounterpart = async () => {
+    if (!counterpart) return;
+    setBlocking(true);
+    try {
+      if (await blockMemberFromThread(counterpart.id, counterpart.name || 'This member')) {
+        router.push('/dashboard/messages');
+      }
+    } finally {
+      setBlocking(false);
     }
   };
 
@@ -411,6 +440,35 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
         ) : (
           <span className="font-semibold text-slate-900 dark:text-white">Conversation</span>
         )}
+        {/* Report or block, in the thread itself and at every width: the details
+            pane that also offers these only exists from xl up. */}
+        {counterpart && (
+          <DropdownMenu as="div" className="relative ml-auto">
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="p-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-200"
+                aria-label={`More options for ${counterpart.name || 'this member'}`}
+                disabled={blocking}
+              >
+                <MoreHorizontal className="w-5 h-5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuItem
+                onClick={() => setReporting({ type: 'user', id: counterpart.id, label: counterpart.name || 'this member' })}
+              >
+                <Flag className="mr-2 h-4 w-4" />
+                Report member
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => void blockCounterpart()} className="text-red-600 dark:text-red-400">
+                <Ban className="mr-2 h-4 w-4" />
+                Block member
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
 
       {conversation?.isRequest && counterpart ? (
@@ -460,7 +518,7 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
                 {/* Per-message actions, revealed on hover/focus. A message that
                     was unsent has nothing left to reply to or react to. */}
                 {!message.deletedAt && (
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
                   <button
                     type="button"
                     onClick={() => setReplyTo(message)}
@@ -477,6 +535,19 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
                       aria-label="Edit message"
                     >
                       <Pencil className="w-4 h-4" />
+                    </button>
+                  )}
+                  {/* Reporting what someone else said. The report keeps a copy of
+                      the message and the few before it, so unsending it afterwards
+                      does not take the evidence with it. */}
+                  {!isMe && (
+                    <button
+                      type="button"
+                      onClick={() => setReporting({ type: 'message', id: message.id, label: 'this message' })}
+                      className="p-1.5 text-slate-400 hover:text-red-600"
+                      aria-label="Report this message"
+                    >
+                      <Flag className="w-4 h-4" />
                     </button>
                   )}
                   {isMe && (
@@ -749,6 +820,16 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
           )}
         </form>
       </div>
+
+      {reporting && (
+        <ReportDialog
+          open
+          onClose={() => setReporting(null)}
+          targetType={reporting.type}
+          targetId={reporting.id}
+          targetLabel={reporting.label}
+        />
+      )}
     </div>
   );
 }

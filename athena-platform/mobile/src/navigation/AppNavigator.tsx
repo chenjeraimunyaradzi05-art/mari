@@ -30,6 +30,7 @@ import { ChatDetailScreen } from '../screens/ChatDetailScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { ProfileEditScreen } from '../screens/ProfileEditScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
+import { SecurityScreen } from '../screens/SecurityScreen';
 import { NotificationsScreen } from '../screens/NotificationsScreen';
 import { ApplicationsScreen } from '../screens/ApplicationsScreen';
 import { SavedJobsScreen } from '../screens/SavedJobsScreen';
@@ -75,7 +76,8 @@ import { FinanceScreen } from '../screens/money/FinanceScreen';
 import { SavingsGoalScreen } from '../screens/money/SavingsGoalScreen';
 import { FormationScreen } from '../screens/money/FormationScreen';
 import { FormationDetailScreen } from '../screens/money/FormationDetailScreen';
-import { QuickExitButton } from '../components/pillar/QuickExit';
+import { EmergencyHelpButton } from '../components/pillar/EmergencyHelp';
+import { HelpAndExitHeaderRight } from '../components/pillar/HelpAndExitHeader';
 import type { StrategyArea } from '../services/money';
 
 export type { StrategyArea };
@@ -86,7 +88,7 @@ export type RootStackParamList = {
   Main: NavigatorScreenParams<MainTabParamList> | undefined;
   JobDetail: { jobId: string };
   Messages: undefined;
-  ChatDetail: { conversationId: string; participantName?: string };
+  ChatDetail: { conversationId: string; participantName?: string; participantId?: string; isRequest?: boolean };
   VideoComments: { videoId: string; title?: string };
   Notifications: undefined;
   Apprenticeships: undefined;
@@ -94,6 +96,7 @@ export type RootStackParamList = {
   ServiceDetail: { serviceId: string; title?: string };
   MyOrders: undefined;
   Settings: undefined;
+  Security: undefined;
   ProfileEdit: undefined;
   Applications: undefined;
   SavedJobs: undefined;
@@ -146,6 +149,14 @@ const MainTab = createBottomTabNavigator<MainTabParamList>();
 
 /** Titles for the four money plans, for the Strategy header. */
 const STRATEGY_TITLES: Record<StrategyArea, string> = { HOUSING: 'Housing', BUSINESS: 'Business', TAX: 'Tax', INVESTMENT: 'Investing' };
+
+// What she can reach from every screen once she is signed in: the Help button, the
+// numbers to ring and a way off the screen, is in every header. The screens a
+// woman is most likely to be reading with somebody behind her (the wellness
+// screens, and Safety, Help & Support and her sign-in and devices) carry the quick
+// exit beside it, as HelpAndExitHeaderRight. Screens with no header of their own
+// (the reels, the chat thread, the marketplace) mount the button in the row they
+// draw instead.
 
 // Auth Stack Navigator
 function AuthNavigator() {
@@ -201,6 +212,12 @@ function MainNavigator() {
         headerTitleStyle: {
           fontWeight: 'bold',
         },
+        // Every tab that draws a header carries Emergency help in it.
+        headerRight: () => (
+          <View style={styles.headerRow}>
+            <EmergencyHelpButton />
+          </View>
+        ),
       })}
     >
       <MainTab.Screen
@@ -211,17 +228,20 @@ function MainNavigator() {
           // Messages live in the root stack, so the tab's navigation prop
           // hands the tap to its parent.
           headerRight: () => (
-            <TouchableOpacity
-              style={styles.headerButton}
-              // getParent() is untyped on the options callback's navigation
-              // prop, so the parent is named by a cast rather than a type
-              // argument.
-              onPress={() => (navigation.getParent() as NativeStackNavigationProp<RootStackParamList> | undefined)?.navigate('Messages')}
-              accessibilityRole="button"
-              accessibilityLabel="Messages"
-            >
-              <Ionicons name="chatbubble-ellipses-outline" size={24} color="#fff" />
-            </TouchableOpacity>
+            <View style={styles.headerRow}>
+              <EmergencyHelpButton />
+              <TouchableOpacity
+                style={styles.headerButton}
+                // getParent() is untyped on the options callback's navigation
+                // prop, so the parent is named by a cast rather than a type
+                // argument.
+                onPress={() => (navigation.getParent() as NativeStackNavigationProp<RootStackParamList> | undefined)?.navigate('Messages')}
+                accessibilityRole="button"
+                accessibilityLabel="Messages"
+              >
+                <Ionicons name="chatbubble-ellipses-outline" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
           ),
         })}
       />
@@ -247,7 +267,7 @@ export function AppNavigator() {
   }
 
   return (
-    <RootStack.Navigator screenOptions={{ headerShown: false }}>
+    <RootStack.Navigator screenOptions={{ headerShown: false, headerRight: () => <EmergencyHelpButton /> }}>
       {isAuthenticated ? (
         <>
           <RootStack.Screen name="Main" component={MainNavigator} />
@@ -302,6 +322,11 @@ export function AppNavigator() {
             options={{ headerShown: true, title: 'Settings' }}
           />
           <RootStack.Screen
+            name="Security"
+            component={SecurityScreen}
+            options={{ headerShown: true, title: 'Sign-in and devices', headerRight: () => <HelpAndExitHeaderRight /> }}
+          />
+          <RootStack.Screen
             name="ProfileEdit"
             component={ProfileEditScreen}
             options={{ headerShown: true, title: 'Edit Profile' }}
@@ -319,21 +344,22 @@ export function AppNavigator() {
           <RootStack.Screen
             name="HelpSupport"
             component={HelpSupportScreen}
-            options={{ headerShown: true, title: 'Help & Support' }}
+            options={{ headerShown: true, title: 'Help & Support', headerRight: () => <HelpAndExitHeaderRight /> }}
           />
           <RootStack.Screen name="PostComments" component={PostCommentsScreen} options={{ headerShown: true, title: 'Comments' }} />
           <RootStack.Screen name="Groups" component={GroupsScreen} options={{ headerShown: true, title: 'Groups' }} />
           <RootStack.Screen name="GroupDetail" component={GroupDetailScreen} options={{ headerShown: true, title: 'Group' }} />
-          <RootStack.Screen name="Safety" component={SafetyScreen} options={{ headerShown: true, title: 'Safety' }} />
+          {/* The screen with the panic button, and the one a woman opens when somebody is behind her: it carries the quick exit. */}
+          <RootStack.Screen name="Safety" component={SafetyScreen} options={{ headerShown: true, title: 'Safety', headerRight: () => <HelpAndExitHeaderRight /> }} />
           <RootStack.Screen name="Mentors" component={MentorsScreen} options={{ headerShown: true, title: 'Mentors' }} />
           <RootStack.Screen name="Learn" component={LearnScreen} options={{ headerShown: true, title: 'Learn' }} />
           <RootStack.Screen name="Course" component={CourseScreen} options={({ route }) => ({ headerShown: true, title: route.params?.title ?? 'Course' })} />
           <RootStack.Screen name="Upgrade" component={UpgradeScreen} options={{ headerShown: true, title: 'Membership' }} />
 
           {/* Pillars. The wellness screens carry the quick exit the web's wellness pages do. */}
-          <RootStack.Screen name="Wellness" component={WellnessScreen} options={{ headerShown: true, title: 'Wellness', headerRight: () => <QuickExitButton /> }} />
-          <RootStack.Screen name="WellnessCheckIn" component={WellnessCheckInScreen} options={{ headerShown: true, title: 'Check in', headerRight: () => <QuickExitButton /> }} />
-          <RootStack.Screen name="WellnessK10" component={WellnessK10Screen} options={{ headerShown: true, title: 'The last four weeks', headerRight: () => <QuickExitButton /> }} />
+          <RootStack.Screen name="Wellness" component={WellnessScreen} options={{ headerShown: true, title: 'Wellness', headerRight: () => <HelpAndExitHeaderRight /> }} />
+          <RootStack.Screen name="WellnessCheckIn" component={WellnessCheckInScreen} options={{ headerShown: true, title: 'Check in', headerRight: () => <HelpAndExitHeaderRight /> }} />
+          <RootStack.Screen name="WellnessK10" component={WellnessK10Screen} options={{ headerShown: true, title: 'The last four weeks', headerRight: () => <HelpAndExitHeaderRight /> }} />
           <RootStack.Screen name="Cars" component={CarsScreen} options={{ headerShown: true, title: 'Cars' }} />
           <RootStack.Screen name="CarCatalogue" component={CarCatalogueScreen} options={{ headerShown: true, title: 'New cars' }} />
           <RootStack.Screen name="CarDetail" component={CarDetailScreen} options={({ route }) => ({ headerShown: true, title: route.params?.title ?? 'Car' })} />
@@ -364,5 +390,11 @@ const styles = StyleSheet.create({
   headerButton: {
     paddingHorizontal: 12,
     paddingVertical: 6,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginRight: 8,
   },
 });

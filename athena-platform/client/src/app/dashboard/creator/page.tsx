@@ -27,16 +27,23 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/hooks';
+import { CREATOR_SHARE_RANGE_PERCENT, GIFT_POINT_VALUE_AUD, MINIMUM_PAYOUT_AUD } from '@/lib/pricing';
 
 // The server refuses a payout below this; the button says so instead of
-// letting someone press it and read the refusal in a toast.
-const MIN_PAYOUT_AUD = 50;
+// letting someone press it and read the refusal in a toast. It is the price
+// book's figure, the same one the server and the Terms read.
+const MIN_PAYOUT_AUD = MINIMUM_PAYOUT_AUD;
 
 interface CreatorStats {
   totalEarnings: number;
   periodEarnings: number;
   pendingEarnings: number;
   availableForPayout: number;
+  /** ATHENA is looking into a card payment connected to her gifts; withdrawals are paused. */
+  payoutHold: boolean;
+  /** What she keeps of each gift at her creator tier, in per cent; null when the server did not say. */
+  giftSharePercent: number | null;
+  tierName: string | null;
   totalViews: number;
   periodViews: number;
   totalLikes: number;
@@ -99,8 +106,6 @@ interface AnalyticsResponse {
   topPosts?: Array<any>;
 }
 
-const GIFT_POINT_VALUE_AUD = 0.01;
-
 function pointsToCurrency(points: number | null | undefined): number {
   return (points || 0) * GIFT_POINT_VALUE_AUD;
 }
@@ -161,7 +166,9 @@ export default function CreatorDashboardPage() {
     try {
       const response = await api.post('/creator/payouts/request');
       const paid = Number(response.data?.data?.amount) || 0;
-      toast.success('Payout requested. It reaches your account in 3 to 5 business days.');
+      // Not a number of days: the money goes to her Stripe account now, and Stripe
+      // pays her bank on a schedule of its own, which this page cannot know.
+      toast.success('Payout requested. It is on its way to your Stripe account, and Stripe then pays your bank on its own schedule.');
       // Subtracted, not zeroed. The server now pays out exactly the balance it
       // claimed and leaves anything credited since — a gift that landed while
       // the request was in flight is still hers — so showing zero here would
@@ -214,6 +221,9 @@ export default function CreatorDashboardPage() {
           periodEarnings,
           pendingEarnings,
           availableForPayout: pendingEarnings,
+          payoutHold: Boolean(creatorProfile.payoutHold),
+          giftSharePercent: typeof creatorProfile.tier?.revShare === 'number' ? creatorProfile.tier.revShare : null,
+          tierName: typeof creatorProfile.tier?.name === 'string' ? creatorProfile.tier.name : null,
           totalViews: summary.totalViews || 0,
           periodViews: summary.totalViews || 0,
           totalLikes: summary.totalLikes || 0,
@@ -527,7 +537,7 @@ export default function CreatorDashboardPage() {
                 <Button
                   className="w-full"
                   onClick={requestPayout}
-                  disabled={requestingPayout || (stats?.availableForPayout ?? 0) < MIN_PAYOUT_AUD}
+                  disabled={requestingPayout || Boolean(stats?.payoutHold) || (stats?.availableForPayout ?? 0) < MIN_PAYOUT_AUD}
                 >
                   {requestingPayout ? (
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -537,9 +547,19 @@ export default function CreatorDashboardPage() {
                   Request payout
                 </Button>
                 <p className="text-xs text-slate-500 text-center">
-                  {(stats?.availableForPayout ?? 0) < MIN_PAYOUT_AUD
-                    ? `Payouts open at $${MIN_PAYOUT_AUD} AUD. Processing time: 3-5 business days.`
-                    : 'Processing time: 3-5 business days.'}
+                  {stats?.payoutHold
+                    ? 'Withdrawals are paused while ATHENA looks into a card payment connected to some of the gifts you were sent. Your balance is safe and keeps growing, and we will write to you when withdrawals are open again.'
+                    : (stats?.availableForPayout ?? 0) < MIN_PAYOUT_AUD
+                      ? `You can ask for a payout once your balance reaches A$${MIN_PAYOUT_AUD}. Until then it carries over.`
+                      : 'Stripe pays it into your bank on its own schedule.'}
+                </p>
+                {/* The exact share and the rules, beside the button that moves the money. */}
+                <p className="text-xs text-slate-500 text-center">
+                  {stats?.giftSharePercent != null
+                    ? `You keep ${stats.giftSharePercent}% of each gift${stats.tierName ? ` at ${stats.tierName} tier` : ''}.`
+                    : `You keep ${CREATOR_SHARE_RANGE_PERCENT.min}% to ${CREATOR_SHARE_RANGE_PERCENT.max}% of each gift, by creator tier.`}{' '}
+                  ATHENA takes no fee when you withdraw. Payouts are in Australian dollars, go to your own verified
+                  Stripe account, and are only made when you ask. There is no other minimum or waiting period.
                 </p>
               </CardContent>
             </Card>

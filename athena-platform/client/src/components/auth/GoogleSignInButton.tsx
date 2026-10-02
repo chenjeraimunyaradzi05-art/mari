@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { authApi } from '@/lib/api';
 import { useAuthStore } from '@/lib/store';
+import { SecondFactorPrompt, asksForSecondFactor } from './SecondFactorPrompt';
 
 let googleScriptPromise: Promise<void> | null = null;
 
@@ -132,6 +133,11 @@ export function GoogleSignInButton({
   const login = useAuthStore((state) => state.login);
   const [isReady, setIsReady] = useState(false);
   const [scriptError, setScriptError] = useState<string | null>(null);
+  // Set when the account Google found has two-factor on: the credential Google
+  // gave, held until she has typed her code so both can be sent together. It is
+  // not stored anywhere else and Cancel drops it.
+  const [awaitingCode, setAwaitingCode] = useState<string | null>(null);
+  const [codeError, setCodeError] = useState<string | null>(null);
 
   const googleMutation = useMutation({
     mutationFn: authApi.google,
@@ -147,7 +153,7 @@ export function GoogleSignInButton({
   );
 
   const handleCredential = useCallback(
-    async (credential: string) => {
+    async (credential: string, twoFactorCode?: string) => {
       try {
         const response = await googleMutation.mutateAsync({
           credential,
@@ -156,19 +162,35 @@ export function GoogleSignInButton({
           ...(typeof womanSelfAttested === 'boolean' ? { womanSelfAttested } : {}),
           ...(dateOfBirth ? { dateOfBirth } : {}),
           ...(inviteCode ? { inviteCode } : {}),
+          ...(twoFactorCode ? { twoFactorCode } : {}),
         });
 
         const { user, accessToken } = response.data.data;
+        setAwaitingCode(null);
+        setCodeError(null);
         login(user, accessToken, '');
         queryClient.invalidateQueries();
         toast.success(mode === 'register' ? 'Welcome to ATHENA!' : 'Welcome back!');
         onSuccess?.();
       } catch (error) {
+        const failure = (error as { response?: { status?: number; data?: { message?: string } } })?.response;
         const message =
-          (error as { response?: { data?: { message?: string } } })?.response?.data?.message ||
+          failure?.data?.message ||
           (mode === 'register'
             ? 'Google sign-up failed. Please try again.'
             : 'Google sign-in failed. Please try again.');
+
+        // The account has two-factor on: ask for the code, here, and send it with
+        // the same credential. A wrong code keeps the question on screen with
+        // the server's sentence beside it.
+        if (asksForSecondFactor(failure?.status, failure?.data?.message)) {
+          setAwaitingCode(credential);
+          setCodeError(twoFactorCode ? message : null);
+          return;
+        }
+
+        setAwaitingCode(null);
+        setCodeError(null);
         handleError(message);
       }
     },
@@ -232,6 +254,21 @@ export function GoogleSignInButton({
       active = false;
     };
   }, [clientId, disabled, handleCredential, handleError, mode]);
+
+  if (awaitingCode) {
+    return (
+      <SecondFactorPrompt
+        provider="Google"
+        pending={googleMutation.isPending}
+        error={codeError}
+        onSubmit={(code) => void handleCredential(awaitingCode, code)}
+        onCancel={() => {
+          setAwaitingCode(null);
+          setCodeError(null);
+        }}
+      />
+    );
+  }
 
   if (googleMutation.isPending) {
     return (

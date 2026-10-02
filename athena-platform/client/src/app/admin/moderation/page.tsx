@@ -37,6 +37,8 @@ import { api } from '@/lib/api';
 import { useAuthStore } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
 import { MemberSafetyScore, SafetyIncidentsPanel } from './SafetyIncidents';
+import { LiveStreamsPanel } from './LiveStreams';
+import { ReportContext, type ReportContextData } from './ReportContext';
 
 type Person = {
   id: string;
@@ -66,6 +68,8 @@ type Report = {
   overdue: boolean;
   reporter: Person;
   reportedUser: Person;
+  /** What the report kept of the message, chat line, stream or group, copied when it was filed. */
+  context?: ReportContextData | null;
 };
 
 /** A report filed without an account. There is no reporter to show and no claim step. */
@@ -156,6 +160,35 @@ const ACTIONS: Array<{ value: string; label: string; tone: string; help: string;
   },
 ];
 
+/**
+ * What "remove" means for each kind of thing a report can be about. It used to
+ * say "Take the content down" for all of them, which for a message was not what
+ * happened (the message row was deleted) and for a stream or a group was not
+ * possible at all. The words are the last a moderator reads before enforcing.
+ */
+const REMOVE_BY_TYPE: Record<string, { label: string; help: string; confirm: boolean }> = {
+  MESSAGE: {
+    label: 'Delete message',
+    help: 'Delete the message from the conversation, for both people. This report keeps a copy of it and of the lines before it.',
+    confirm: true,
+  },
+  LIVE_MESSAGE: {
+    label: 'Delete chat message',
+    help: 'Take the message out of the live chat. This report keeps a copy of it.',
+    confirm: false,
+  },
+  LIVESTREAM: {
+    label: 'End stream',
+    help: 'End the stream for everyone and for good: it cannot be restarted or listed, and its key stops working. The host is told our team ended it. It can be put back if the decision is reversed on appeal.',
+    confirm: true,
+  },
+  GROUP: {
+    label: 'Hide group',
+    help: 'Hide the group from everyone but its administrators; its members and posts stay. An appeal can bring it back.',
+    confirm: true,
+  },
+};
+
 const PRIORITY_TONE: Record<ReportPriority, string> = {
   URGENT: 'bg-rose-600 text-white',
   HIGH: 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-200',
@@ -198,10 +231,20 @@ function DeadlineBadge({ deadline, overdue, status }: { deadline: string | null;
   );
 }
 
-function DecisionButtons({ pending, onDecide }: { pending: boolean; onDecide: (action: string) => void }) {
+function DecisionButtons({
+  pending,
+  onDecide,
+  contentType,
+}: {
+  pending: boolean;
+  onDecide: (action: string) => void;
+  contentType?: string;
+}) {
+  const remove = contentType ? REMOVE_BY_TYPE[contentType.toUpperCase()] : undefined;
+  const actions = remove ? ACTIONS.map((a) => (a.value === 'remove' ? { ...a, ...remove } : a)) : ACTIONS;
   return (
     <div className="grid grid-cols-2 gap-2">
-      {ACTIONS.map((a) => (
+      {actions.map((a) => (
         <button
           key={a.value}
           type="button"
@@ -560,6 +603,8 @@ export default function ModerationQueuePage() {
 
       <SafetyIncidentsPanel onShowScore={setScoreUserId} />
 
+      <LiveStreamsPanel />
+
       <div className="mb-4 flex flex-wrap gap-2" role="tablist" aria-label="Which reports">
         <button
           type="button"
@@ -688,8 +733,11 @@ export default function ModerationQueuePage() {
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{current.contentType} report</p>
                     <h2 className="text-lg font-semibold text-slate-900 dark:text-white">{current.reason}</h2>
                     {current.description && <p className="mt-1 whitespace-pre-wrap text-sm text-slate-600 dark:text-slate-300">{current.description}</p>}
+                    <div className="mt-3">
+                      <ReportContext context={current.context} />
+                    </div>
                     {current.contentId && (
-                      <p className="mt-1 text-xs text-slate-500">
+                      <p className="mt-2 text-xs text-slate-500">
                         Content: <code>{current.contentId}</code>
                         {current.contentType === 'POST' && (
                           <>
@@ -766,7 +814,11 @@ export default function ModerationQueuePage() {
                         aria-label="Decision notes"
                         className="input w-full text-sm"
                       />
-                      <DecisionButtons pending={decide.isPending} onDecide={(action) => decide.mutate({ id: current.id, action, anonymous: false })} />
+                      <DecisionButtons
+                        pending={decide.isPending}
+                        contentType={current.contentType}
+                        onDecide={(action) => decide.mutate({ id: current.id, action, anonymous: false })}
+                      />
                       <button type="button" onClick={() => claim.mutate({ id: current.id, release: true })} disabled={claim.isPending} className="w-full text-center text-xs text-slate-500 hover:underline">
                         Release this report
                       </button>

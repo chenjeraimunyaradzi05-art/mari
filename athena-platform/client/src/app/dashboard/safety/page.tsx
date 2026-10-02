@@ -325,7 +325,7 @@ export default function SafetyPage() {
             <ShieldCheck className="h-6 w-6 text-rose-600" /> Safety
           </h1>
           <p className="mt-1 max-w-xl text-slate-500 dark:text-slate-400">
-            Tools for staying safe while you use ATHENA. Everything here is yours alone; nobody else can see it.
+            Tools for staying safe while you use ATHENA. Everything here is private to you. Your emergency contacts hear from us only if you press the safety alert.
           </p>
         </div>
         <QuickExitButton />
@@ -347,7 +347,10 @@ export default function SafetyPage() {
                   <ShieldAlert className="h-5 w-5" /> Safe Mode
                 </h2>
                 <p className="text-sm text-slate-500 dark:text-slate-400">
-                  One switch: hides you from search, closes your messages, keeps notifications vague, and turns on quick exit and the safety alert.
+                  One switch: hides you from search, suggestions and the leaderboards, closes your messages, keeps notifications vague, and turns on quick exit and the safety alert.
+                </p>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  Your profile, posts and reels are then shown only to you and to people who follow you and have also verified they are women. Anyone else, including a follower who has not verified, cannot open your profile or see your posts and reels. People who already follow you stay on that list until you block them, and anyone who asks to follow you from now on needs your approval first. You are still seen where you choose to take part, such as in a group you have joined.
                 </p>
               </div>
               {s.isSafeMode ? (
@@ -363,9 +366,19 @@ export default function SafetyPage() {
             <div className="divide-y divide-slate-100 dark:divide-slate-800">
               <Toggle on={s.hideFromSearch} onChange={(v) => update.mutate({ hideFromSearch: v })} label="Hide me from search" description="Your profile does not come up when people search." disabled={update.isPending} />
               <Toggle on={!s.allowMessages} onChange={(v) => update.mutate({ allowMessages: !v })} label="Close my messages" description="Nobody can message you — not a new conversation, and not one you already have. Your threads are still there to read." disabled={update.isPending} />
-              <Toggle on={s.notificationsSafe} onChange={(v) => update.mutate({ notificationsSafe: v })} label="Keep notifications vague" description='Your phone shows "New update" instead of who wrote and what.' disabled={update.isPending} />
+              <Toggle
+                on={s.notificationsSafe}
+                onChange={(v) => update.mutate({ notificationsSafe: v })}
+                label="Keep notifications vague"
+                description={
+                  s.isSafeMode
+                    ? 'Always on while Safe Mode is on. Your phone and your email say "New update" instead of who wrote and what. Once you are signed in to ATHENA the full message is there for you.'
+                    : 'Your phone and your email say "New update" instead of who wrote and what. Once you are signed in to ATHENA the full message is there for you.'
+                }
+                disabled={update.isPending || s.isSafeMode}
+              />
               <Toggle on={s.panicButtonEnabled} onChange={(v) => update.mutate({ panicButtonEnabled: v })} label="Safety alert button" description="Lets you tell your emergency contacts with one tap." disabled={update.isPending} />
-              <Toggle on={s.safeExitEnabled} onChange={(v) => update.mutate({ safeExitEnabled: v })} label="Quick exit with the Escape key" description="Pressing Escape anywhere on ATHENA leaves for the address below. The Quick exit button is on every safety and housing page whether or not this is on." disabled={update.isPending} />
+              <Toggle on={s.safeExitEnabled} onChange={(v) => update.mutate({ safeExitEnabled: v })} label="Quick exit with the Escape key" description="Pressing Escape on any page inside your dashboard leaves for the address below. The Quick exit button sits in the corner of those pages whether or not this is on, and pressing Escape twice quickly does the same on every page that has the button, even when you are signed out. It replaces the page you are on, so Back does not bring you here. It cannot erase pages you visited earlier: clear your browser history, or use a private window." disabled={update.isPending} />
             </div>
             <Link
               href="/dashboard/housing?dvSafe=true"
@@ -622,7 +635,7 @@ export default function SafetyPage() {
                 <Lock className="h-5 w-5" /> Safe chats
               </h2>
               <p className="text-sm text-slate-500 dark:text-slate-400">
-                Private notes only you can open. They are encrypted, listed under a harmless name, and can be locked with a PIN. Messages can delete themselves.
+                Private notes for you alone, encrypted before they are stored, listed under a harmless name, and lockable with a PIN. ATHENA&apos;s servers decrypt them to show them to you, and the people who look after our servers hold the key. Messages can delete themselves.
               </p>
             </div>
 

@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ApplicationModal, ApplicationData } from '@/components/apprenticeships';
+import { ApplicationModal, ApplicationData, HostCheckBadge, HostCheckNotice, hostChecked } from '@/components/apprenticeships';
 import {
   Apprenticeship,
   daysUntil,
@@ -201,6 +201,9 @@ export default function ApprenticeshipDetailPage() {
   const noOneToReceive =
     (apprenticeship as Apprenticeship & { acceptsApplications?: boolean }).acceptsApplications === false;
   const competencies = readCompetencies(apprenticeship.competencies);
+  // The host has not been verified and safety-checked by ATHENA. The listing is
+  // still shown, labelled; applications through ATHENA wait until it has been.
+  const hostNotChecked = hostChecked(apprenticeship) === false;
 
   return (
     <div className="min-h-screen bg-white text-slate-950 dark:bg-slate-950 dark:text-white">
@@ -373,18 +376,22 @@ export default function ApprenticeshipDetailPage() {
               </div>
 
               <div className="mt-6 space-y-2">
+                <HostCheckBadge apprenticeship={apprenticeship} />
+                <HostCheckNotice apprenticeship={apprenticeship} />
                 <Button
                   className="w-full"
-                  disabled={closed || left === 0 || noOneToReceive}
+                  disabled={closed || left === 0 || noOneToReceive || hostNotChecked}
                   onClick={() => setShowApply(true)}
                 >
                   {closed
                     ? 'Applications closed'
                     : left === 0
                       ? 'All places filled'
-                      : noOneToReceive
-                        ? 'Apply through the provider'
-                        : 'Apply now'}
+                      : hostNotChecked
+                        ? 'Applications not open yet'
+                        : noOneToReceive
+                          ? 'Apply through the provider'
+                          : 'Apply now'}
                 </Button>
                 {noOneToReceive && !closed && left !== 0 && (
                   <p className="text-sm text-slate-600 dark:text-slate-300">

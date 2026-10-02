@@ -3,6 +3,11 @@
  * it (the old PUT was a 404, so nothing ever saved). The route ignores
  * `avatar`, so the photo is not offered here as though it could be changed;
  * that is done on the web.
+ *
+ * The public name is the name other members see. It can be a pseudonym: the
+ * server keeps the legal first and last name off every social surface. It is
+ * sent only when she has changed it, so a name she chose long ago that would not
+ * pass today's checks cannot stop her saving her headline.
  */
 import React, { useState } from 'react';
 import {
@@ -24,6 +29,7 @@ export function ProfileEditScreen() {
   const { user, refreshUser } = useAuth();
   const [firstName, setFirstName] = useState(user?.firstName || '');
   const [lastName, setLastName] = useState(user?.lastName || '');
+  const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [headline, setHeadline] = useState(user?.headline || '');
   const [bio, setBio] = useState(user?.bio || '');
   const [isSaving, setIsSaving] = useState(false);
@@ -35,9 +41,11 @@ export function ProfileEditScreen() {
     }
     setIsSaving(true);
     try {
+      const changedName = displayName.trim() !== (user?.displayName ?? '').trim();
       await userApi.updateProfile({
         firstName: firstName.trim(),
         lastName: lastName.trim(),
+        ...(changedName ? { displayName: displayName.trim() } : {}),
         headline: headline.trim(),
         bio: bio.trim(),
       });
@@ -81,6 +89,30 @@ export function ProfileEditScreen() {
       <View style={styles.fieldGroup}>
         <Text style={styles.label} nativeID="lastNameLabel">Last Name</Text>
         <TextInput value={lastName} onChangeText={setLastName} style={styles.input} accessibilityLabelledBy="lastNameLabel" maxLength={80} />
+      </View>
+
+      <View style={styles.fieldGroup}>
+        <Text style={styles.label} nativeID="displayNameLabel">Public name</Text>
+        <TextInput
+          value={displayName}
+          onChangeText={setDisplayName}
+          style={styles.input}
+          accessibilityLabelledBy="displayNameLabel"
+          accessibilityHint="The name other members see. It can be different from your real name."
+          maxLength={60}
+          placeholder="The name other members see"
+          placeholderTextColor="#9ca3af"
+          autoCapitalize="words"
+        />
+        <Text style={styles.hint}>
+          This is the name other members see on your posts, comments and messages. It can be different from your real name, and you
+          can change it any time. Your real name is not shown on them: ATHENA uses it only where something you take part in needs
+          it: a payment, an identity check you choose to do, an application or booking you make, or the law. Leave it empty and
+          members see your first name only. Please leave out email addresses, phone numbers and web addresses.
+        </Text>
+        <Text style={styles.hintStrong} accessibilityLiveRegion="polite">
+          {`Other members will see you as: ${displayName.trim() || firstName.trim() || 'Member'}`}
+        </Text>
       </View>
 
       <View style={styles.fieldGroup}>
@@ -139,6 +171,8 @@ const styles = StyleSheet.create({
     color: '#111827',
   },
   textarea: { height: 90, textAlignVertical: 'top' },
+  hint: { fontSize: 12, color: '#6b7280', lineHeight: 17, marginTop: 6 },
+  hintStrong: { fontSize: 12, color: '#374151', fontWeight: '600', marginTop: 6 },
   saveButton: {
     backgroundColor: '#6366f1',
     padding: 14,

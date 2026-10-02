@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Shield, Loader2, Phone, Lock, AlertTriangle, Home } from 'lucide-react';
+import { Shield, Loader2, Phone, Lock, AlertTriangle, Home, Trash2 } from 'lucide-react';
 import { impactApi } from '@/lib/api';
 import { SafeModeBanner } from '@/components/safety/SafeModeBanner';
 import { safeHref } from '@/lib/safe-href';
@@ -18,6 +18,14 @@ type SafetyPlan = {
   financialPlan?: unknown;
   legalContacts?: unknown;
   lastReviewedAt?: string;
+  /**
+   * How her own row is kept, from the server. False while any part is still
+   * stored as readable lists from before plans were encrypted; saving the plan
+   * encrypts it.
+   */
+  encryptedAtRest?: boolean;
+  /** Parts that are stored but that ATHENA could not open just now. */
+  unreadableParts?: string[];
 };
 
 /**
@@ -105,12 +113,17 @@ function planLines(value: unknown): string[] {
  * undefined in an update as "leave this alone" — so a safe address the abuser
  * had since found out about stayed in the record forever while the form
  * showed her an empty box. An empty list is a value, and it overwrites.
+ *
+ * The one exception is a part ATHENA could not open: its box is empty because
+ * it could not be read, not because she emptied it, so it is left out unless
+ * she has written something new there.
  */
-function planPayload(draft: PlanDraft): Record<PlanFieldKey, string[]> {
-  return PLAN_FIELDS.reduce(
-    (payload, field) => ({ ...payload, [field.key]: planLines(draft[field.key]) }),
-    {} as Record<PlanFieldKey, string[]>
-  );
+function planPayload(draft: PlanDraft, unreadable: readonly string[] = []): Partial<Record<PlanFieldKey, string[]>> {
+  return PLAN_FIELDS.reduce((payload, field) => {
+    const lines = planLines(draft[field.key]);
+    if (lines.length === 0 && unreadable.includes(field.key)) return payload;
+    return { ...payload, [field.key]: lines };
+  }, {} as Partial<Record<PlanFieldKey, string[]>>);
 }
 
 type DVService = {
@@ -221,6 +234,10 @@ export default function SafetyPage() {
   const [showPlanForm, setShowPlanForm] = useState(false);
   const [serviceType, setServiceType] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Deleting the whole plan asks once more, in the page, so a stray tap on a
+  // phone she is holding in a hurry cannot take it away.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // What is in the boxes right now. Filled from the saved plan every time it
   // loads, because "Update plan" used to open three empty boxes over a plan
@@ -267,7 +284,7 @@ export default function SafetyPage() {
     setSaving(true);
     setError(null);
     try {
-      await impactApi.saveSafetyPlan(planPayload(draft));
+      await impactApi.saveSafetyPlan(planPayload(draft, safetyPlan?.unreadableParts));
       setShowPlanForm(false);
       await loadData();
     } catch (err: unknown) {
@@ -275,6 +292,22 @@ export default function SafetyPage() {
       setError(error?.response?.data?.error || 'Failed to save safety plan');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDeletePlan = async () => {
+    setDeleting(true);
+    setError(null);
+    try {
+      await impactApi.deleteSafetyPlan();
+      setConfirmingDelete(false);
+      setShowPlanForm(false);
+      await loadData();
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      setError(error?.response?.data?.error || 'Could not delete your safety plan. Please try again.');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -362,17 +395,40 @@ export default function SafetyPage() {
             </div>
 
             {/*
-              This said "private and encrypted". Nothing encrypts it — the
-              columns are plain Json and the schema comment saying otherwise
-              was aspirational. Telling a woman her safe addresses are
-              encrypted when they are not is the kind of claim she would make
-              a decision on, so it says what is actually true: nobody else
-              reaches it through ATHENA, and it lives in our database.
+              This used to say "private and encrypted" when nothing encrypted
+              it, then dropped the word. Each part is now sealed before it is
+              stored, but a plan saved before that stays readable in the
+              database until she saves it again or the one-off sealing script
+              has run, so the wording follows the server's account of her own
+              row rather than a promise made for everyone. Telling a woman her
+              safe addresses are encrypted when they are not is the kind of
+              claim she would make a decision on.
+
+              No ATHENA screen can open a plan, staff or otherwise. The people
+              who run the servers hold the key, and the copy says so instead
+              of claiming nobody could.
             */}
             <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3 mb-4 text-sm text-yellow-800 dark:text-yellow-200">
               <Lock className="w-4 h-4 inline mr-2" />
-              Your safety plan is yours alone. No one else on ATHENA can open it — not other members, not staff. It is stored on ATHENA&rsquo;s servers, so put in it only what you would be comfortable having there, and clear anything that stops being safe to keep.
+              {safetyPlan && safetyPlan.encryptedAtRest === false ? (
+                <>
+                  Your safety plan is yours alone. No other member, and no ATHENA moderator or admin screen, can open it. It is stored on ATHENA&rsquo;s servers and is not encrypted yet: pressing Update and then Save plan encrypts it. Put in it only what you would be comfortable having there, and clear anything that stops being safe to keep.
+                </>
+              ) : (
+                <>
+                  Your safety plan is yours alone. It is encrypted on ATHENA&rsquo;s servers, and no other member, and no ATHENA moderator or admin screen, can open it. The people who look after our servers hold the key, so put in it only what you would be comfortable having there, and clear anything that stops being safe to keep.
+                </>
+              )}
             </div>
+
+            {safetyPlan && safetyPlan.unreadableParts && safetyPlan.unreadableParts.length > 0 && (
+              <div
+                role="status"
+                className="bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-lg p-3 mb-4 text-sm text-rose-800 dark:text-rose-200"
+              >
+                {safetyPlan.unreadableParts.length === 1 ? 'One part' : 'Some parts'} of your plan could not be opened just now, so {safetyPlan.unreadableParts.length === 1 ? 'it is' : 'they are'} not shown. Nothing has been changed. If you write {safetyPlan.unreadableParts.length === 1 ? 'it' : 'them'} again here and save, the new words replace what is stored.
+              </div>
+            )}
 
             {showPlanForm && (
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 mb-4 space-y-4">
@@ -416,6 +472,49 @@ export default function SafetyPage() {
             )}
 
             {/*
+              Emptying every box leaves a row behind that says she once made a
+              plan. This takes the row away. It is offered to anyone who has a
+              plan, in or out of the edit form.
+            */}
+            {safetyPlan && (
+              <div className="mb-4 flex flex-wrap items-center gap-3">
+                {confirmingDelete ? (
+                  <>
+                    <p className="text-sm text-slate-700 dark:text-slate-300">
+                      Delete your whole safety plan? This cannot be undone.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleDeletePlan}
+                      disabled={deleting}
+                      className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 disabled:opacity-60"
+                    >
+                      <Trash2 className="h-4 w-4" aria-hidden="true" />
+                      {deleting ? 'Deleting...' : 'Yes, delete it'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingDelete(false)}
+                      disabled={deleting}
+                      className="btn-secondary min-h-[44px]"
+                    >
+                      Keep it
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmingDelete(true)}
+                    className="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-900/20"
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    Delete my whole plan
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/*
               Her plan, read back to her. This used to render three cards
               saying "Configured" whether or not the field held anything, and
               the contents were never shown anywhere — so a plan she wrote
@@ -444,6 +543,11 @@ export default function SafetyPage() {
                       </div>
                     );
                   })
+                ) : safetyPlan.unreadableParts && safetyPlan.unreadableParts.length > 0 ? (
+                  // Not "empty": the parts are stored, they just could not be opened.
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                    Nothing can be shown here just now. What you saved has not been changed.
+                  </p>
                 ) : (
                   <p className="text-sm text-slate-500 dark:text-slate-400">
                     Your plan is empty. Press Update to write one — or leave it empty, which is also a decision.

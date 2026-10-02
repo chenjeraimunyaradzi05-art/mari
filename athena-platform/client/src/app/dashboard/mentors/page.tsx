@@ -20,6 +20,7 @@ import { api } from '@/lib/api';
 import { useAuthStore } from '@/lib/store';
 import { formatCurrency, cn } from '@/lib/utils';
 import { CardSkeleton } from '@/components/ui/loading';
+import { VerifiedMark } from '@/components/ui/VerifiedMark';
 
 const specializations = [
   'All Specializations',
@@ -310,8 +311,9 @@ export default function MentorsPage() {
                       </div>
                     )}
                     <div className="min-w-0">
-                      <h3 className="truncate font-semibold text-slate-900 dark:text-white">
-                        {displayName}
+                      <h3 className="flex items-center gap-1.5 font-semibold text-slate-900 dark:text-white">
+                        <span className="truncate">{displayName}</span>
+                        {mentor.user?.isVerified === true && <VerifiedMark className="[&>svg]:h-4 [&>svg]:w-4" />}
                       </h3>
                       <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                         {headline}

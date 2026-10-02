@@ -1,3 +1,6 @@
+import * as Sentry from '@sentry/nextjs';
+import { scrubReport } from './src/lib/sentry-scrub';
+
 /**
  * The shortest PROXY_SHARED_SECRET this host will run with. The API holds its
  * copy to the same length (server/src/utils/env.ts); a shorter value is one a
@@ -34,11 +37,21 @@ function assertProxySecretConfigured(): void {
   );
 }
 
+/**
+ * Errors thrown on the server while handling a request: a server component, a
+ * route handler, the proxy. error.tsx and global-error.tsx only ever see what
+ * a page throws in the browser, and the server-side errors that Next.js
+ * renders as its own error page never reach them, so without this hook the web
+ * host's server errors were counted by nobody. Next.js calls it with the error
+ * and the request it came from, and Sentry attaches that request's headers, so
+ * both inits below strip the credentials from them, and the query strings and
+ * personal text, before anything is sent (src/lib/sentry-scrub.ts).
+ */
+export const onRequestError = Sentry.captureRequestError;
+
 export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
     assertProxySecretConfigured();
-
-    const Sentry = await import('@sentry/nextjs');
 
     Sentry.init({
       dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
@@ -49,16 +62,18 @@ export async function register() {
         'Failed to fetch',
         'Load failed',
       ],
+      beforeSend: scrubReport,
+      beforeSendTransaction: scrubReport,
     });
   }
 
   if (process.env.NEXT_RUNTIME === 'edge') {
-    const Sentry = await import('@sentry/nextjs');
-
     Sentry.init({
       dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
       enabled: process.env.NODE_ENV === 'production',
       tracesSampleRate: 0.1,
+      beforeSend: scrubReport,
+      beforeSendTransaction: scrubReport,
     });
   }
 }

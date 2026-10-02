@@ -4,6 +4,8 @@
  * Authority referrals. A report of child abuse material or violent extremism
  * queues a referral here the moment it is filed, and a person has to take it
  * from here to the Australian Federal Police: nothing is sent automatically.
+ * An intimate image reported as shared without consent is queued here too, for
+ * the eSafety Commissioner; each row says who it is to be referred to.
  *
  * The queue existed only as an API. The operations screen showed how many
  * referrals were waiting and linked to the report queue, which does not list
@@ -145,7 +147,8 @@ export default function AuthorityReferralsPage() {
           <FileWarning className="h-7 w-7 text-red-600" /> Authority referrals
         </h1>
         <p className="mt-1 max-w-3xl text-slate-600 dark:text-slate-400">
-          Reports of child abuse material and violent extremism wait here to be referred to the Australian Federal Police.
+          Reports of child abuse material and violent extremism wait here to be referred to the Australian Federal Police, and
+          reports of an intimate image shared without consent to the eSafety Commissioner; each row says which.
           Nothing is sent to them automatically: file each one through the authority&apos;s own reporting channel, then record the
           reference they give you so the referral can be followed to its end.
         </p>

@@ -12,7 +12,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ScrollView, Text, StyleSheet, Alert } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { unwrapApiData } from '../../services/api';
-import { HEALTH_DISCLAIMER, SCALE_WORDS, trackerOn, wellnessApi, type Streak, type WellnessToday } from '../../services/wellness';
+import { HEALTH_DISCLAIMER, SCALE_WORDS, trackerOn, wellnessApi, type CrisisLine, type Streak, type WellnessToday } from '../../services/wellness';
 import { apiMessage, loadFailure } from '../../utils/apiErrors';
 import { toNumber } from '../../utils/format';
 import { CrisisLines } from '../../components/pillar/CrisisLines';
@@ -37,7 +37,8 @@ export function WellnessCheckInScreen() {
   const [sleepHours, setSleepHours] = useState('');
   const [sleepQuality, setSleepQuality] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState<{ streak: Streak | null; sleepFailed: string | null } | null>(null);
+  // `crisis` is what the server said about the line she wrote: the lines to put in front of her, and a sentence saying nobody has been told (the note is hers alone).
+  const [saved, setSaved] = useState<{ streak: Streak | null; sleepFailed: string | null; crisis: { message: string; lines: CrisisLine[] } | null } | null>(null);
 
   const load = useCallback(async () => {
     setState('loading');
@@ -83,7 +84,9 @@ export function WellnessCheckInScreen() {
         kind: 'CHECKIN',
         payload: { mood: scales.mood, stress: scales.stress, anxiety: scales.anxiety, energy: scales.energy, ...(note.trim() ? { note: note.trim() } : {}) },
       });
-      const streak = unwrapApiData<{ streak: Streak | null }>(response.data)?.streak ?? null;
+      const answer = unwrapApiData<{ streak: Streak | null; crisis?: { flagged?: boolean; message?: string; lines?: CrisisLine[] } }>(response.data);
+      const streak = answer?.streak ?? null;
+      const crisis = answer?.crisis?.flagged ? { message: answer.crisis.message ?? '', lines: answer.crisis.lines ?? [] } : null;
       // Sleep is its own row. If it fails the check-in has still been saved,
       // and she is told which of the two did not go through.
       let sleepFailed: string | null = null;
@@ -94,7 +97,7 @@ export function WellnessCheckInScreen() {
           sleepFailed = apiMessage(error, 'Your sleep could not be saved. Check your connection and try again.');
         }
       }
-      setSaved({ streak, sleepFailed });
+      setSaved({ streak, sleepFailed, crisis });
     } catch (error) {
       Alert.alert('Not saved', apiMessage(error, 'Your check-in could not be saved. Check your connection and try again.'));
     } finally {
@@ -129,12 +132,17 @@ export function WellnessCheckInScreen() {
       <ScrollView style={pillarStyles.screen} contentContainerStyle={pillarStyles.content}>
         <Card tone="rose" title="Checked in">
           <Text style={styles.body}>
-            {streak > 1 ? `That is ${streak} days in a row.` : 'Thank you for taking a minute for yourself.'} Only you can read what you wrote.
+            {streak > 1 ? `That is ${streak} days in a row.` : 'Thank you for taking a minute for yourself.'} It is encrypted before it is stored, and shown only to you unless you share it.
           </Text>
           {saved.sleepFailed ? <Text style={styles.warn}>{saved.sleepFailed}</Text> : null}
           <PrimaryButton label="Done" tone="rose" onPress={() => navigation.goBack()} />
         </Card>
-        {(scales.mood !== null && scales.mood <= 2) || (scales.anxiety !== null && scales.anxiety >= 4) ? (
+        {saved.crisis ? (
+          <>
+            {saved.crisis.message ? <Text style={styles.body}>{saved.crisis.message}</Text> : null}
+            <CrisisLines lines={saved.crisis.lines} title="Someone to talk to, now" fallbackNote={false} />
+          </>
+        ) : (scales.mood !== null && scales.mood <= 2) || (scales.anxiety !== null && scales.anxiety >= 4) ? (
           <CrisisLines lines={null} title="If you want to talk to someone now" fallbackNote={false} />
         ) : null}
       </ScrollView>
@@ -158,7 +166,7 @@ export function WellnessCheckInScreen() {
         <ScaleInput label="Stress" words={SCALE_WORDS.stress} value={scales.stress} onChange={(v) => setScales((s) => ({ ...s, stress: v }))} />
         <ScaleInput label="Anxiety" words={SCALE_WORDS.anxiety} value={scales.anxiety} onChange={(v) => setScales((s) => ({ ...s, anxiety: v }))} />
         <ScaleInput label="Energy" words={SCALE_WORDS.energy} value={scales.energy} onChange={(v) => setScales((s) => ({ ...s, energy: v }))} />
-        <TextField label="A line about the day" hint="Optional. Only you read it." value={note} onChangeText={setNote} placeholder="What was going on" maxLength={500} multiline />
+        <TextField label="A line about the day" hint="Optional. Encrypted before it is stored, and shown only to you unless you share it." value={note} onChangeText={setNote} placeholder="What was going on" maxLength={500} multiline />
       </Card>
 
       {trackerOn(day.settings, 'sleep') && (

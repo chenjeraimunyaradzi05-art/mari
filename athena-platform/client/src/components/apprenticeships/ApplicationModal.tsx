@@ -27,6 +27,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Modal } from '@/components/ui/modal';
 import { ResumeAttachment, type ResumeAttachmentValue } from '@/app/jobs/ResumeAttachment';
+import { HostCheckBadge, HostCheckNotice, hostChecked } from './HostCheck';
 import { Apprenticeship, primaryOrg } from './types';
 import { cn } from '@/lib/utils';
 
@@ -117,7 +118,13 @@ export function ApplicationModal({
     setStep(step - 1);
   };
 
+  // The server refuses an application to a host ATHENA has not checked (409),
+  // and this keeps the form from asking for a cover letter first. It is the
+  // same sentence a visitor reads on the page.
+  const hostNotChecked = hostChecked(apprenticeship) === false;
+
   const handleSubmit = async () => {
+    if (hostNotChecked) return;
     if (!validate()) return;
 
     setIsSubmitting(true);
@@ -180,6 +187,13 @@ export function ApplicationModal({
   return (
     <Modal isOpen={isOpen} onClose={handleClose} title={`Apply for ${apprenticeship.title}`} size="lg">
       <div className="p-6">
+        {/* Who is hosting, and whether ATHENA has checked them. An applicant sees
+            this before a cover letter is written, not after. */}
+        <div className="mb-4 space-y-2">
+          <HostCheckBadge apprenticeship={apprenticeship} />
+          <HostCheckNotice apprenticeship={apprenticeship} />
+        </div>
+
         {/* Progress bar */}
         <div className="mb-6">
           <div className="flex items-center justify-between text-sm text-slate-500 mb-2">
@@ -340,7 +354,7 @@ I am excited to apply for this apprenticeship opportunity because..."
           {step < totalSteps ? (
             <Button onClick={handleNext}>Continue</Button>
           ) : (
-            <Button onClick={handleSubmit} disabled={isSubmitting}>
+            <Button onClick={handleSubmit} disabled={isSubmitting || hostNotChecked}>
               {isSubmitting ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />

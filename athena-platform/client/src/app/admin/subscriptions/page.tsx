@@ -28,8 +28,9 @@ interface Subscription {
   tier: string;
   status: string;
   stripeSubscriptionId: string | null;
-  periodStart: string;
-  periodEnd: string;
+  cancelAtPeriodEnd?: boolean;
+  currentPeriodStart?: string | null;
+  currentPeriodEnd?: string | null;
   createdAt: string;
   user: {
     id: string;
@@ -81,6 +82,55 @@ export default function AdminSubscriptionsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-subscriptions'] });
     },
+  });
+
+  // Ending a membership, and giving a payment back, are done at Stripe, with a
+  // reason that goes in the audit log. Editing ATHENA's own row ended nothing
+  // for a membership Stripe is billing: she went on being charged and the next
+  // update from Stripe wrote her plan back.
+  type MembershipAction = { kind: 'cancel' | 'refund' | 'end'; sub: Subscription };
+  const [action, setAction] = useState<MembershipAction | null>(null);
+  const [cancelMode, setCancelMode] = useState<'period_end' | 'now'>('period_end');
+  const [reason, setReason] = useState('');
+
+  const closeAction = () => {
+    setAction(null);
+    setCancelMode('period_end');
+    setReason('');
+  };
+
+  const membershipActionMutation = useMutation({
+    mutationFn: async ({ kind, sub }: MembershipAction) => {
+      if (kind === 'cancel') {
+        return api.post(`/admin/subscriptions/${sub.id}/cancel`, { mode: cancelMode, reason: reason.trim() || undefined });
+      }
+      if (kind === 'refund') {
+        return api.post(`/admin/subscriptions/${sub.id}/refund`, { reason: reason.trim() });
+      }
+      // A membership staff granted has no Stripe subscription: ending it is an edit.
+      return api.patch(`/admin/subscriptions/${sub.id}`, { status: 'CANCELED' });
+    },
+    onSuccess: (response, { kind, sub }) => {
+      queryClient.invalidateQueries({ queryKey: ['admin-subscriptions'] });
+      const data = response?.data?.data;
+      if (kind === 'refund') {
+        toast.success(
+          data?.status === 'already_refunded'
+            ? `That payment was already refunded; ${sub.user.email}'s records are now in line.`
+            : `Refunded ${data?.currency ?? ''} ${data?.amount ?? ''} to ${sub.user.email}.`
+        );
+      } else if (kind === 'cancel') {
+        toast.success(
+          cancelMode === 'now'
+            ? `${sub.user.email}'s membership has ended.`
+            : `${sub.user.email}'s membership will end at the end of the period they have paid for.`
+        );
+      } else {
+        toast.success(`${sub.user.email}'s membership has ended.`);
+      }
+      closeAction();
+    },
+    onError: (error) => toast.error(errorMessage(error) || 'That did not go through. Nothing was changed.'),
   });
 
   const grantSubscriptionMutation = useMutation({
@@ -274,22 +324,19 @@ export default function AdminSubscriptionsPage() {
                       </select>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <select
-                        value={sub.status}
-                        onChange={(e) => updateSubscriptionMutation.mutate({ 
-                          subId: sub.id, 
-                          updates: { status: e.target.value } 
-                        })}
-                        className={`text-sm px-2 py-1 rounded border-0 ${getStatusColor(sub.status)}`}
-                      >
-                        {statuses.map((status) => (
-                          <option key={status} value={status}>{status}</option>
-                        ))}
-                      </select>
+                      {/* Read-only. A status changed here changed ATHENA's row and
+                          not Stripe's, so it never stopped any billing; ending a
+                          membership is the button on the right. */}
+                      <span className={`text-sm px-2 py-1 rounded ${getStatusColor(sub.status)}`}>{sub.status}</span>
+                      {sub.cancelAtPeriodEnd && sub.currentPeriodEnd && (
+                        <p className="mt-1 text-xs text-slate-500">
+                          Ends {new Date(sub.currentPeriodEnd).toLocaleDateString('en-AU')}
+                        </p>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                      <div>{new Date(sub.periodStart).toLocaleDateString()} -</div>
-                      <div>{new Date(sub.periodEnd).toLocaleDateString()}</div>
+                      <div>{sub.currentPeriodStart ? new Date(sub.currentPeriodStart).toLocaleDateString('en-AU') : '-'} -</div>
+                      <div>{sub.currentPeriodEnd ? new Date(sub.currentPeriodEnd).toLocaleDateString('en-AU') : '-'}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right">
                       <div className="inline-flex items-center gap-2">
@@ -307,7 +354,7 @@ export default function AdminSubscriptionsPage() {
                           variant="outline"
                           size="sm"
                           onClick={() => {
-                            const newEnd = new Date(sub.periodEnd);
+                            const newEnd = new Date(sub.currentPeriodEnd ?? Date.now());
                             newEnd.setDate(newEnd.getDate() + 30);
                             updateSubscriptionMutation.mutate({
                               subId: sub.id,
@@ -318,6 +365,24 @@ export default function AdminSubscriptionsPage() {
                           <Plus className="h-4 w-4 mr-1" />
                           +30 days
                         </Button>
+                        {sub.stripeSubscriptionId ? (
+                          <>
+                            {sub.status !== 'CANCELED' && (
+                              <Button variant="outline" size="sm" onClick={() => setAction({ kind: 'cancel', sub })}>
+                                Cancel at Stripe
+                              </Button>
+                            )}
+                            <Button variant="outline" size="sm" onClick={() => setAction({ kind: 'refund', sub })}>
+                              Refund latest payment
+                            </Button>
+                          </>
+                        ) : (
+                          sub.status !== 'CANCELED' && (
+                            <Button variant="outline" size="sm" onClick={() => setAction({ kind: 'end', sub })}>
+                              End membership
+                            </Button>
+                          )
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -385,6 +450,88 @@ export default function AdminSubscriptionsPage() {
           )}
         </div>
       </main>
+
+      {action && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="membership-action-title"
+            className="bg-white dark:bg-slate-800 rounded-lg shadow-xl p-6 w-full max-w-md"
+          >
+            <h2 id="membership-action-title" className="text-xl font-bold text-slate-900 dark:text-white mb-1">
+              {action.kind === 'cancel' ? 'Cancel at Stripe' : action.kind === 'refund' ? 'Refund the latest payment' : 'End membership'}
+            </h2>
+            <p className="text-sm text-slate-500 mb-4">{action.sub.user.email}</p>
+
+            {action.kind === 'cancel' && (
+              <fieldset className="mb-4 space-y-2">
+                <legend className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">When it ends</legend>
+                <label className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-300">
+                  <input type="radio" name="cancel-mode" checked={cancelMode === 'period_end'} onChange={() => setCancelMode('period_end')} className="mt-1" />
+                  <span>At the end of the period the member has paid for. They keep it until then and are not charged again.</span>
+                </label>
+                <label className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-300">
+                  <input type="radio" name="cancel-mode" checked={cancelMode === 'now'} onChange={() => setCancelMode('now')} className="mt-1" />
+                  <span>Now. She loses it straight away, with no credit for the unused time. A refund is separate.</span>
+                </label>
+              </fieldset>
+            )}
+
+            {action.kind === 'refund' && (
+              <p className="mb-4 text-sm text-slate-600 dark:text-slate-300">
+                This gives back the whole of the most recent payment, through Stripe, and cancels the ATHENA invoice for it. It does not end the membership; cancel it separately if the member is leaving.
+              </p>
+            )}
+
+            {action.kind === 'end' && (
+              <p className="mb-4 text-sm text-slate-600 dark:text-slate-300">
+                Staff granted this membership, so there is no Stripe billing to stop. It ends here.
+              </p>
+            )}
+
+            {action.kind !== 'end' && (
+              <div className="mb-4">
+                <label htmlFor="membership-action-reason" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Reason {action.kind === 'cancel' && cancelMode === 'period_end' ? '(optional)' : '(kept in the audit log)'}
+                </label>
+                <textarea
+                  id="membership-action-reason"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  rows={3}
+                  maxLength={500}
+                  className="w-full px-3 py-2 border rounded-md bg-white dark:bg-slate-700 text-sm"
+                />
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3">
+              <Button variant="outline" onClick={closeAction} disabled={membershipActionMutation.isPending}>
+                Keep it as it is
+              </Button>
+              <Button
+                disabled={
+                  membershipActionMutation.isPending ||
+                  (action.kind === 'refund' && reason.trim().length < 3) ||
+                  (action.kind === 'cancel' && cancelMode === 'now' && !reason.trim())
+                }
+                onClick={() => membershipActionMutation.mutate(action)}
+              >
+                {membershipActionMutation.isPending
+                  ? 'Working…'
+                  : action.kind === 'refund'
+                    ? 'Refund the payment'
+                    : action.kind === 'cancel'
+                      ? cancelMode === 'now'
+                        ? 'End it now'
+                        : 'Cancel at period end'
+                      : 'End membership'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Grant Subscription Modal */}
       {showGrantModal && (

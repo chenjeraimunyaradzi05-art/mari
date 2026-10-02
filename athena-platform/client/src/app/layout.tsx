@@ -17,6 +17,7 @@ const fraunces = Fraunces({
 import { Providers } from './providers';
 import { Toaster } from 'react-hot-toast';
 import { SiteFooter } from '@/components/layout/SiteFooter';
+import { SignedInEmergencyHelp } from '@/components/safety/EmergencyHelp';
 import { ToastAnnouncer } from '@/components/ui/ToastAnnouncer';
 
 const siteUrl =
@@ -82,6 +83,9 @@ export default async function RootLayout({
         <Providers>
           {children}
           <SiteFooter />
+          {/* The numbers to ring and a way off the screen, on every page a
+              signed-in member can be on, not only those under the dashboard. */}
+          <SignedInEmergencyHelp />
           <ToastAnnouncer />
           <Toaster
             position="top-right"

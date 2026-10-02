@@ -31,6 +31,16 @@
   #     without it in production (instrumentation.ts): without it every member
   #     shares one login budget, the lockout keys on this host, and new-device
   #     alerts never fire.
+  # MEDIA (set once the API has a CDN_URL):
+  #   NEXT_PUBLIC_MEDIA_HOST = the host of the API's CDN_URL, so next/image
+  #     loads avatars and logos from it. Baked in at build time.
+  # ERROR TRACKING (optional, but without it production errors are invisible):
+  #   NEXT_PUBLIC_SENTRY_DSN = the web project's DSN. Baked in at build time,
+  #     so deploy again after setting it.
+  #   SENTRY_ORG, SENTRY_PROJECT, SENTRY_AUTH_TOKEN = lets the build upload
+  #     source maps. The token is a Sentry organisation token and a secret
+  #     (Builds scope). With the DSN and no token, errors arrive but point at
+  #     minified code, and scripts/check-web-env.js warns in the build log.
   # SET TOGETHER WITH THE API'S TURNSTILE_SECRET_KEY:
   #   NEXT_PUBLIC_TURNSTILE_SITE_KEY = the site key of the same Turnstile
   #     widget. Shows the human check on the sign-up form. The secret on the API

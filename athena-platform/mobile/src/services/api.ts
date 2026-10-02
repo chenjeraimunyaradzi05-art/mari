@@ -4,6 +4,7 @@
  */
 import axios, { AxiosInstance } from 'axios';
 import Constants from 'expo-constants';
+import { ageGateRefusalOf, type AgeGateRefusal } from '../utils/ageGate';
 
 // app.config.js sets extra.apiUrl from the build profile's API_URL with /api
 // already appended (every server mount is under /api). The localhost fallback
@@ -14,11 +15,25 @@ export function unwrapApiData<T>(payload: any): T {
   return (payload?.data ?? payload) as T;
 }
 
+/**
+ * Tells the server this is the phone app and not a browser.
+ *
+ * A browser keeps its refresh token in an HttpOnly cookie, which this app has no
+ * jar for, so the server never put one in a sign-in response and this app could
+ * not refresh: every expired access token ended in a sign-out. A client that
+ * says it is native is handed the refresh token in the response body and sends
+ * it back in the body of /auth/refresh (server/src/routes/auth.routes.ts,
+ * NATIVE_CLIENT_HEADER). It has to be on the refresh call as well as on sign-in,
+ * and that call is made with plain axios, so the headers are shared.
+ */
+export const NATIVE_CLIENT_HEADERS = { 'X-Athena-Client': 'mobile' } as const;
+
 export const api: AxiosInstance = axios.create({
   baseURL: API_URL,
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
+    ...NATIVE_CLIENT_HEADERS,
   },
 });
 
@@ -88,6 +103,94 @@ export const onSessionExpired = (listener: SessionExpiredListener): (() => void)
   };
 };
 
+/**
+ * Listeners for a write the server refused on the minimum age.
+ *
+ * An account with no date of birth is refused every write
+ * (DATE_OF_BIRTH_REQUIRED), and one whose date is under the minimum is refused
+ * the same way (MINIMUM_AGE_NOT_MET). The phone had no handling for either, so
+ * the member saw whichever button she pressed fail and nothing about why. The
+ * interceptor announces the refusal here and the prompt mounted at the root
+ * (components/AgeGatePrompt.tsx) asks for the date, or says there is nothing
+ * she can do and where to write. The request still fails for its caller.
+ */
+type AgeGateRefusalListener = (refusal: AgeGateRefusal) => void;
+const ageGateRefusalListeners = new Set<AgeGateRefusalListener>();
+
+export const onAgeGateRefusal = (listener: AgeGateRefusalListener): (() => void) => {
+  ageGateRefusalListeners.add(listener);
+  return () => {
+    ageGateRefusalListeners.delete(listener);
+  };
+};
+
+const notifyAgeGateRefusal = (refusal: AgeGateRefusal) => {
+  for (const listener of Array.from(ageGateRefusalListeners)) {
+    try {
+      listener(refusal);
+    } catch (error) {
+      console.warn('[API] An age-gate listener threw:', error instanceof Error ? error.message : error);
+    }
+  }
+};
+
+/**
+ * Listeners for a refresh that rotated the tokens.
+ *
+ * The server retires a refresh token the moment it is used, so the copy this
+ * app keeps in SecureStore is dead the instant a refresh succeeds. Only the
+ * copies in memory were being replaced, and the next cold start restored the
+ * retired token from SecureStore: the server read that as a replay of a stolen
+ * token and revoked every session the member had, on every device. AuthContext
+ * subscribes here and writes the new pair; the interceptor waits for the write
+ * before it replays the failed request, so the stored token is never behind the
+ * one in use.
+ */
+export interface RefreshedTokens {
+  accessToken: string;
+  refreshToken: string | null;
+}
+type TokensRefreshedListener = (tokens: RefreshedTokens) => void | Promise<void>;
+const tokensRefreshedListeners = new Set<TokensRefreshedListener>();
+
+export const onTokensRefreshed = (listener: TokensRefreshedListener): (() => void) => {
+  tokensRefreshedListeners.add(listener);
+  return () => {
+    tokensRefreshedListeners.delete(listener);
+  };
+};
+
+const notifyTokensRefreshed = async (tokens: RefreshedTokens): Promise<void> => {
+  const outcomes = await Promise.allSettled(
+    Array.from(tokensRefreshedListeners).map(async (listener) => listener(tokens))
+  );
+  for (const outcome of outcomes) {
+    if (outcome.status === 'rejected') {
+      // The tokens in memory are good; only the saved copy is behind. The next
+      // refresh saves again, and checkAuth drops a stale copy on launch.
+      console.warn(
+        '[API] Saving the refreshed tokens failed:',
+        outcome.reason instanceof Error ? outcome.reason.message : outcome.reason
+      );
+    }
+  }
+};
+
+/**
+ * Whether a failed refresh means the session is over. Only an answer from the
+ * server does: a refusal (400, 401, 403) or a 409, which here means the token
+ * was rotated by a request whose answer never reached this phone, so the new
+ * one is lost and retrying the old one would only burn every session. A phone
+ * that is offline, a request that timed out, a 429 and a 5xx say nothing about
+ * the session, and signing her out for a dropped signal in a lift would be a
+ * sign-out for nothing; the call fails and her tokens stay.
+ */
+const refreshEndedTheSession = (error: unknown): boolean => {
+  if (!axios.isAxiosError(error)) return true; // 'No refresh token', 'Refresh failed': nothing left to try
+  const status = error.response?.status;
+  return status === 400 || status === 401 || status === 403 || status === 409;
+};
+
 const notifySessionExpired = () => {
   // A copy, so a listener that unsubscribes itself while being called does
   // not mutate the set mid-iteration.
@@ -130,7 +233,7 @@ api.interceptors.response.use(
 
         if (!refreshPromise) {
           refreshPromise = axios
-            .post(`${API_URL}/auth/refresh`, { refreshToken })
+            .post(`${API_URL}/auth/refresh`, { refreshToken }, { headers: NATIVE_CLIENT_HEADERS, timeout: 10000 })
             .then((response) =>
               unwrapApiData<{ accessToken: string; refreshToken?: string; expiresIn?: number }>(
                 response.data
@@ -150,9 +253,15 @@ api.interceptors.response.use(
         }
 
         setAuthTokens(newAccessToken, newRefreshToken || refreshToken);
+        // The old refresh token is dead on the server now; save the new pair
+        // before anything else can ask for another refresh.
+        await notifyTokensRefreshed({ accessToken: newAccessToken, refreshToken: newRefreshToken || null });
         originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
         return api(originalRequest);
       } catch (refreshError) {
+        if (!refreshEndedTheSession(refreshError)) {
+          return Promise.reject(refreshError);
+        }
         // The refresh is the last thing standing between her and a signed-out
         // app, so when it fails the session really is over. Announce it before
         // rejecting: the subscriber in AuthContext is what clears SecureStore,
@@ -163,6 +272,9 @@ api.interceptors.response.use(
         return Promise.reject(refreshError);
       }
     }
+
+    const ageRefusal = ageGateRefusalOf(error);
+    if (ageRefusal) notifyAgeGateRefusal(ageRefusal);
 
     if (error.response) {
       console.error(`[API Error] ${error.response.status}: ${error.response.data?.message || 'Unknown error'}`);
@@ -211,6 +323,12 @@ export const authApi = {
   // decide, and issues no session.
   suspensionAppeal: (email: string, password: string, reason: string) =>
     api.post('/auth/suspension-appeal', { email, password, reason }),
+  // Registration opens no session, so an email that never came, or a link that
+  // expired, leaves a new member unable to sign in. Both of these answer the
+  // same for every address and say nothing about whether there is an account.
+  resendVerification: (email: string) => api.post('/auth/resend-verification', { email }),
+  // The way back for a member who locked her own account and lost the email.
+  requestUnlock: (email: string) => api.post('/auth/request-unlock', { email }),
 };
 
 // Jobs
@@ -319,6 +437,20 @@ export const messagesApi = {
     api.post(`/messages/conversations/${conversationId}/messages`, { content }),
   startConversation: (userId: string) =>
     api.post('/messages/conversations', { userId }),
+  // Only the person who was asked decides a message request. Accepting opens the
+  // thread; declining closes it to the other person for good.
+  acceptRequest: (conversationId: string) => api.post(`/messages/conversations/${conversationId}/request/accept`),
+  declineRequest: (conversationId: string) => api.post(`/messages/conversations/${conversationId}/request/decline`),
+};
+
+// Reporting and blocking another member from inside a thread. These are the
+// member-facing safety routes, not the domestic-violence settings in safetyApi.
+// A report of a message keeps a copy of it on the server, so unsending it
+// afterwards does not take the evidence with it.
+export const memberSafetyApi = {
+  report: (data: { targetType: 'message' | 'user'; targetId: string; reason: string; details?: string }) =>
+    api.post('/safety/reports', data),
+  block: (blockedUserId: string) => api.post('/safety/blocks', { blockedUserId }),
 };
 
 /** The web app, for links that open a page rather than call the API. */
@@ -447,6 +579,20 @@ export type FeedbackCategory = 'BUG' | 'IDEA' | 'PRAISE' | 'OTHER';
 
 export const feedbackApi = {
   send: (data: { message: string; category: FeedbackCategory; page?: string }) => api.post('/feedback', data),
+};
+
+// Sign-in and devices: the sessions behind her account, and the password that
+// opens them. Changing the password ends every other session on the server.
+export const sessionsApi = {
+  list: () => api.get('/auth/sessions'),
+  revoke: (sessionId: string) => api.delete(`/auth/sessions/${sessionId}`),
+  signOutEverywhere: () => api.post('/auth/logout-all'),
+  // Beyond signing out everywhere: every session ends and nobody can sign in,
+  // with the password or Google or Facebook, until she unlocks the account
+  // from the link the server emails her.
+  lockAccount: () => api.post('/auth/lock'),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    api.post('/auth/change-password', { currentPassword, newPassword }),
 };
 
 export const billingApi = {

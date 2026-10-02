@@ -12,7 +12,7 @@
  */
 
 type ErrorShape = {
-  response?: { status?: number; data?: { message?: unknown; error?: unknown } };
+  response?: { status?: number; data?: { message?: unknown; error?: unknown; code?: unknown } };
   message?: unknown;
 };
 
@@ -42,9 +42,32 @@ export function isNotFound(error: unknown): boolean {
 export function apiMessage(error: unknown, fallback: string): string {
   const data = shape(error).response?.data;
   for (const candidate of [data?.message, data?.error]) {
-    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+    if (typeof candidate === 'string' && candidate.trim()) {
+      const sentence = candidate.trim();
+      // A member turned away because she has not completed the women-only check
+      // is told where it is finished: the check is done on the website, and the
+      // refusal's own pointer is a page of the website, which a phone cannot
+      // open from an error line. A refused member's sentence already says to
+      // appeal from Settings, so it is left as it is.
+      return womanGateCode(error) === 'WOMAN_VERIFICATION_REQUIRED' && !/website/i.test(sentence)
+        ? `${sentence} You can finish the check from Settings on the ATHENA website.`
+        : sentence;
+    }
   }
   return fallback;
+}
+
+/**
+ * The code the server sends when it turns a member away on the women-only
+ * check (middleware/account-gates.ts): WOMAN_VERIFICATION_REQUIRED, which she
+ * can fix, or WOMAN_VERIFICATION_REJECTED, which is a reviewer's decision and
+ * is appealed. Null for any other refusal, and for a status that is not 403.
+ */
+export function womanGateCode(error: unknown): 'WOMAN_VERIFICATION_REQUIRED' | 'WOMAN_VERIFICATION_REJECTED' | null {
+  const response = shape(error).response;
+  if (response?.status !== 403) return null;
+  const code = response?.data?.code;
+  return code === 'WOMAN_VERIFICATION_REQUIRED' || code === 'WOMAN_VERIFICATION_REJECTED' ? code : null;
 }
 
 /**

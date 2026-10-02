@@ -40,6 +40,9 @@ interface Conversation {
   isPinned?: boolean;
   isMuted?: boolean;
   isArchived?: boolean;
+  // Someone she does not follow has written to her. It waits in Requests until
+  // she accepts it, and the badge on the Messages tab leaves it out.
+  isRequest?: boolean;
   updatedAt?: string;
 }
 
@@ -71,6 +74,9 @@ const hasMorePages = (payload: unknown): boolean =>
 export function MessagesScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  // Messages from people she has not said yes to are kept apart, so a stranger
+  // cannot put a message in front of her just by sending it.
+  const [tab, setTab] = useState<'messages' | 'requests'>('messages');
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   // A failed fetch used to leave the list empty behind the friendly "No
@@ -179,6 +185,8 @@ export function MessagesScreen() {
         navigation.navigate('ChatDetail', {
           conversationId: item.id,
           participantName: participantName(item),
+          participantId: item.participant.id,
+          isRequest: Boolean(item.isRequest),
         })
       }
       accessibilityRole="button"
@@ -222,10 +230,36 @@ export function MessagesScreen() {
     );
   }
 
+  const requests = conversations.filter((c) => c.isRequest);
+  const inbox = conversations.filter((c) => !c.isRequest);
+  const shown = tab === 'requests' ? requests : inbox;
+
   return (
     <View style={styles.container}>
+      <View style={styles.tabs} accessibilityRole="tablist">
+        <TouchableOpacity
+          style={[styles.tab, tab === 'messages' && styles.tabActive]}
+          onPress={() => setTab('messages')}
+          accessibilityRole="tab"
+          accessibilityState={{ selected: tab === 'messages' }}
+          accessibilityLabel="Messages"
+        >
+          <Text style={[styles.tabText, tab === 'messages' && styles.tabTextActive]}>Messages</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tab, tab === 'requests' && styles.tabActive]}
+          onPress={() => setTab('requests')}
+          accessibilityRole="tab"
+          accessibilityState={{ selected: tab === 'requests' }}
+          accessibilityLabel={requests.length > 0 ? `Requests, ${requests.length} waiting` : 'Requests'}
+        >
+          <Text style={[styles.tabText, tab === 'requests' && styles.tabTextActive]}>
+            Requests{requests.length > 0 ? ` (${requests.length})` : ''}
+          </Text>
+        </TouchableOpacity>
+      </View>
       <FlatList
-        data={conversations}
+        data={shown}
         renderItem={renderConversation}
         keyExtractor={(item) => item.id}
         refreshControl={
@@ -239,7 +273,7 @@ export function MessagesScreen() {
         }}
         onEndReachedThreshold={0.5}
         ListFooterComponent={
-          conversations.length === 0 ? null : loadMoreError ? (
+          shown.length === 0 ? null : loadMoreError ? (
             <TouchableOpacity
               style={styles.footer}
               onPress={loadMore}
@@ -258,6 +292,14 @@ export function MessagesScreen() {
         ListEmptyComponent={
           loadError ? (
             <LoadingError message={loadError} onRetry={onRefresh} />
+          ) : tab === 'requests' ? (
+            <View style={styles.centered}>
+              <Ionicons name="mail-open-outline" size={64} color="#ccc" />
+              <Text style={styles.emptyText}>No requests</Text>
+              <Text style={styles.emptySubtext}>
+                When someone you do not follow writes to you, it waits here until you accept it.
+              </Text>
+            </View>
           ) : (
             <View style={styles.centered}>
               <Ionicons name="chatbubbles-outline" size={64} color="#ccc" />
@@ -287,6 +329,16 @@ const styles = StyleSheet.create({
   listContent: {
     flexGrow: 1,
   },
+  tabs: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  tab: { flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  tabActive: { borderBottomColor: '#6366f1' },
+  tabText: { fontSize: 15, color: '#6b7280', fontWeight: '500' },
+  tabTextActive: { color: '#6366f1', fontWeight: '700' },
   conversationCard: {
     flexDirection: 'row',
     backgroundColor: '#fff',

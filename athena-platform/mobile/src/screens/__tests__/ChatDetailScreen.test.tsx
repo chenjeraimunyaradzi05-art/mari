@@ -116,6 +116,15 @@ describe('ChatDetailScreen', () => {
     expect(sides).toEqual(['flex-start', 'flex-end']);
   });
 
+  // This thread draws its own header, so the Emergency help button the navigator
+  // gives the screens that use its header has to be mounted here by hand. The
+  // thread is where a woman may be when someone is writing to her unkindly.
+  it('carries Emergency help in its own header, with or without anyone to report', async () => {
+    const screen = await renderScreen(<ChatDetailScreen route={route} navigation={navigation} />);
+
+    expect(byLabel(screen, 'Emergency help')).not.toBeNull();
+  });
+
   it('draws nothing as her own when the signed-in member is not known yet', async () => {
     mockUseAuth.mockReturnValue({ user: null });
 

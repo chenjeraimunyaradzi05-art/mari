@@ -4,7 +4,7 @@
  */
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import { api, onSessionExpired, setAuthTokens, unwrapApiData } from '../services/api';
+import { api, onSessionExpired, onTokensRefreshed, setAuthTokens, unwrapApiData } from '../services/api';
 import { resolvePreferences, setLocalPreferences } from '../utils/preferences';
 import { syncPushToken, unsyncPushToken } from '../services/pushNotifications';
 import { socketService } from '../services/socket';
@@ -54,6 +54,17 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const ACCESS_TOKEN_KEY = 'athena_access_token';
 const REFRESH_TOKEN_KEY = 'athena_refresh_token';
 
+/**
+ * Whether the server itself answered that the stored session is not good: a
+ * refusal (400, 401, 403) or the 409 the API layer treats as a lost rotation.
+ * An error with no answer in it (offline, timed out), a 429 and a 5xx are the
+ * phone or the service failing, not the session.
+ */
+function serverRefusedSession(error: unknown): boolean {
+  const status = (error as { response?: { status?: number } } | null)?.response?.status;
+  return status === 400 || status === 401 || status === 403 || status === 409;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -93,6 +104,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  /**
+   * The server retires a refresh token the moment it is used, so after every
+   * refresh the copy saved here is dead. Without this the new pair lived in
+   * memory only, and the next cold start restored the retired token; the server
+   * took that for a replay of a stolen token and revoked every session the
+   * member had. The API layer waits for this write before it replays the
+   * request that failed, so the saved token is never behind the one in use.
+   */
+  useEffect(() => {
+    return onTokensRefreshed(async ({ accessToken, refreshToken }) => {
+      await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, accessToken);
+      if (refreshToken) {
+        await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refreshToken);
+      }
+    });
+  }, []);
+
   const checkAuth = async () => {
     try {
       const accessToken = await SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
@@ -121,8 +149,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } catch (error) {
       console.log('Auth check failed:', error);
-      await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
-      await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+      // Only the server turning the stored session away ends it. A phone that
+      // is offline when the app opens, a request that timed out, a 429 or a 5xx
+      // says nothing about the session, and the refresh token saved here is the
+      // only copy there is: deleting it for a dropped signal in a lift would
+      // make the member type the password again for nothing. The sign-in screen
+      // shows for now and the next launch tries again.
+      if (serverRefusedSession(error)) {
+        await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
+        await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+      }
     } finally {
       setIsLoading(false);
     }

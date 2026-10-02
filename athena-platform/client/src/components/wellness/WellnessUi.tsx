@@ -12,18 +12,19 @@
  * pages send nothing to analytics.
  */
 
-import { ReactNode, useCallback, useEffect, useState } from 'react';
+import { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { AxiosResponse } from 'axios';
 import { ChevronDown, Loader2, Phone, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { wellnessError, type Author, type Badge, type CrisisLine } from '@/lib/wellness-api';
+import { wellnessError, type Author, type Badge, type CrisisAnswer, type CrisisLine } from '@/lib/wellness-api';
 import { WELLNESS_PILLS } from '@/lib/wellness-nav';
 import { safeHref } from '@/lib/safe-href';
 
 export const DEFAULT_CRISIS: CrisisLine[] = [
   { key: 'emergency', name: 'Emergency', phone: '000', url: 'https://www.triplezero.gov.au', when: '24/7', who: 'Immediate danger' },
   { key: 'lifeline', name: 'Lifeline', phone: '13 11 14', url: 'https://www.lifeline.org.au', when: '24/7', who: 'Crisis support' },
+  { key: '1800respect', name: '1800RESPECT', phone: '1800 737 732', url: 'https://www.1800respect.org.au', when: '24/7', who: 'Domestic, family and sexual violence' },
   { key: 'beyond-blue', name: 'Beyond Blue', phone: '1300 22 4636', url: 'https://www.beyondblue.org.au', when: '24/7', who: 'Anxiety and depression' },
   { key: '13yarn', name: '13YARN', phone: '13 92 76', url: 'https://www.13yarn.org.au', when: '24/7', who: 'Aboriginal and Torres Strait Islander support' },
 ];
@@ -41,6 +42,40 @@ export function CrisisStrip({ lines, compact = false, title = 'If today is hard'
         ))}
       </div>
       {!compact && <p className="mt-2 text-xs text-slate-600 dark:text-slate-400">Free, confidential, and staffed now. If someone is in immediate danger, call 000.</p>}
+    </div>
+  );
+}
+
+/**
+ * What the server says about a woman's own words when it screened them: nothing
+ * when calm, and when not, the lines and a sentence that says who else has been
+ * told (a moderator, for what others can read; nobody, for what is private to
+ * her). It is read off an API response so that each page asks the same question.
+ */
+export function crisisOf(response: unknown): CrisisAnswer | null {
+  const crisis = (response as { data?: { data?: { crisis?: CrisisAnswer } } } | null | undefined)?.data?.data?.crisis;
+  return crisis && crisis.flagged ? crisis : null;
+}
+
+/**
+ * The answer to words that sounded like crisis: the sentence, then the lines, one tap
+ * from a call. It sits where she is looking, never in a toast she could miss, and it
+ * does not block anything: what she wrote is already saved.
+ */
+export function CrisisNotice({ crisis, onClose }: { crisis: CrisisAnswer | null | undefined; onClose?: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const shown = Boolean(crisis && crisis.flagged);
+  // The notice sits at the top of a long page and the form she just wrote in is further down it,
+  // so it is brought into view: "where she is looking" has to be true of a page she has scrolled.
+  useEffect(() => {
+    if (shown) ref.current?.scrollIntoView?.({ block: 'center' });
+  }, [crisis, shown]);
+  if (!crisis || !crisis.flagged) return null;
+  return (
+    <div ref={ref} role="status" aria-live="polite" className="rounded-2xl border border-rose-300 bg-rose-50 p-4 dark:border-rose-800 dark:bg-rose-900/20">
+      <p className="text-sm font-semibold text-rose-800 dark:text-rose-200">{crisis.message || 'It sounds like things are very hard right now. These lines are staffed this minute.'}</p>
+      <div className="mt-3"><CrisisStrip lines={crisis.lines} /></div>
+      {onClose && <button type="button" onClick={onClose} className="mt-2 inline-flex min-h-[44px] items-center px-2 text-sm text-slate-600 underline underline-offset-2 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 dark:text-slate-300">Close</button>}
     </div>
   );
 }

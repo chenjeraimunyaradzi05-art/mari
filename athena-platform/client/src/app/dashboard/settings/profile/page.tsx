@@ -28,6 +28,8 @@ import { fetchIdentityGates, saveDateOfBirth, womanGateApi } from '@/lib/woman-g
 type ProfileFormData = {
   firstName: string;
   lastName: string;
+  /** The name other members see. Empty means "my first name only". */
+  displayName: string;
   headline: string;
   bio: string;
   location: string;
@@ -281,8 +283,10 @@ function IdentityGatesCard() {
                     </p>
                     <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                       The quickest way. You photograph an identity document and your face on
-                      our payment provider&apos;s secure page; ATHENA never sees the images,
-                      only the result.
+                      the secure page of Stripe, our identity provider; ATHENA never sees the
+                      images, only the result. Stripe is asked to erase them once a person has
+                      decided. Starting the check is your consent to that. Our{' '}
+                      <a href="/privacy" className="underline">Privacy Policy</a> has the detail.
                     </p>
                     <button
                       type="button"
@@ -353,10 +357,12 @@ export default function ProfileSettingsPage() {
     handleSubmit,
     formState: { errors, isDirty },
     reset,
+    watch,
   } = useForm<ProfileFormData>({
     defaultValues: {
       firstName: user?.firstName || '',
       lastName: user?.lastName || '',
+      displayName: user?.displayName || '',
       headline: user?.headline || '',
       bio: user?.bio || '',
       location: user?.city || '',
@@ -369,12 +375,22 @@ export default function ProfileSettingsPage() {
   });
 
   const onSubmit = (data: ProfileFormData) => {
-    updateProfile.mutate(data, {
+    // The public name is sent only when she has changed it. The server checks a public
+    // name as a name (no email address, phone number or web address, nothing that
+    // claims to be staff), and a name she chose years ago that would not pass today
+    // must not stop her saving her headline.
+    const { displayName, ...rest } = data;
+    const changedName = displayName.trim() !== (user?.displayName ?? '').trim();
+    updateProfile.mutate(changedName ? { ...rest, displayName } : rest, {
       onSuccess: () => {
         setIsEditing(false);
       },
     });
   };
+
+  // What other members will see, as she types it: her public name, else her first name alone.
+  const typedPublicName = watch('displayName');
+  const seenAs = typedPublicName?.trim() || watch('firstName')?.trim() || 'Member';
 
   const handleCancel = () => {
     reset();
@@ -535,6 +551,37 @@ export default function ProfileSettingsPage() {
               {errors.lastName && (
                 <p className="text-sm text-red-500 mt-1">{errors.lastName.message}</p>
               )}
+            </div>
+            <div className="md:col-span-2">
+              <label
+                htmlFor="displayName"
+                className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1"
+              >
+                Public name
+              </label>
+              <div className="relative">
+                <User className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
+                <input
+                  id="displayName"
+                  {...register('displayName')}
+                  disabled={!isEditing}
+                  maxLength={60}
+                  autoComplete="nickname"
+                  aria-describedby="displayName-help"
+                  placeholder="The name other members see"
+                  className="input pl-10 w-full disabled:bg-slate-50 dark:disabled:bg-slate-800"
+                />
+              </div>
+              <p id="displayName-help" className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                This is the name other members see on your posts, comments and messages. It can be different from your real name,
+                and you can change it any time. Your real name is not shown on them: ATHENA uses it only where something you take
+                part in needs it: a payment, an identity check you choose to do, an application or booking you make, or the law.
+                Leave it empty and members see your first name only. Please leave out email addresses, phone numbers and web
+                addresses.
+              </p>
+              <p className="mt-1 text-xs font-medium text-slate-600 dark:text-slate-300" aria-live="polite">
+                Other members will see you as: {seenAs}
+              </p>
             </div>
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">

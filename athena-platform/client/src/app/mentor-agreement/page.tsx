@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { MENTOR_PLATFORM_FEE_PERCENT, MINIMUM_PAYOUT_AUD } from '@/lib/pricing';
 
 /**
  * What a mentor agrees to when she ticks the box on the become-a-mentor form.
@@ -55,13 +56,21 @@ export default function MentorAgreementPage() {
               before anyone can book you.
             </li>
             <li>
-              ATHENA keeps 20% of each paid session. The rest goes to your Stripe account, on the payout schedule Stripe
+              ATHENA keeps {MENTOR_PLATFORM_FEE_PERCENT}% of each paid session. The rest goes to your Stripe account, on the payout schedule Stripe
               sets for it.
             </li>
             <li>
+              ATHENA sets no minimum on what you can withdraw from your Stripe balance, and takes no fee when you do. The
+              A${MINIMUM_PAYOUT_AUD} minimum in the Terms is for creator gifts only. Stripe pays your bank on the schedule
+              it sets for your account, and its own rules apply.
+            </li>
+            <li>
               A mentee&apos;s card is held when she books and is charged when the session is marked complete, which can
-              happen once its booked time has passed. A card hold lasts about seven days, so for a session booked
-              further ahead than that the charge can fail at completion. If it does, you are told.
+              happen once its booked time has passed. A card hold lasts about seven days, so a paid session can only be
+              booked up to six days ahead, and you can mark it complete for a day after the hour. You see a paid request,
+              and are told about it, once the mentee has authorised the payment, so you can be sure there is money behind
+              it before you accept. A request that is not paid for within a few hours is cancelled, and nothing is
+              charged.
             </li>
             <li>
               Either of you can cancel a confirmed session until it is due to end, and the hold is released. After

@@ -4,6 +4,8 @@
  * Phase 4: UK/EU Market Launch
  */
 
+import { api } from '@/lib/api';
+
 const API_BASE = '';
 
 type ApiEnvelope<T> = {
@@ -26,6 +28,38 @@ async function parseApiResponse<T>(response: Response, fallbackMessage: string):
     throw new Error(payload?.error || payload?.message || fallbackMessage);
   }
 
+  return payload.data;
+}
+
+/**
+ * The calls below that need a signed-in member go through the shared axios
+ * client, not a bare fetch. The API reads a member's identity from a Bearer
+ * header and nothing else: the access token lives in memory and is attached by
+ * the client's request interceptor, and the only cookie the browser holds is a
+ * refresh token the API does not read as proof of who is asking. A bare fetch
+ * with `credentials: 'include'` therefore arrived as nobody and was answered
+ * 401 on every one of these routes, which left the Privacy Centre showing
+ * default consents and an empty request history to a member who had neither.
+ * The public calls (regions, pricing, rights, legal documents) need no identity
+ * and stay as they were.
+ */
+function apiMessage(error: unknown, fallback: string): string {
+  const data = (error as { response?: { data?: { error?: unknown; message?: unknown } } })?.response?.data;
+  if (typeof data?.error === 'string' && data.error) return data.error;
+  if (typeof data?.message === 'string' && data.message) return data.message;
+  return fallback;
+}
+
+async function signedInData<T>(request: Promise<{ data: ApiEnvelope<T> | null | undefined }>, fallbackMessage: string): Promise<T> {
+  let payload: ApiEnvelope<T> | null | undefined;
+  try {
+    payload = (await request).data;
+  } catch (error) {
+    throw new Error(apiMessage(error, fallbackMessage));
+  }
+  if (!payload || payload.success === false) {
+    throw new Error(payload?.error || payload?.message || fallbackMessage);
+  }
   return payload.data;
 }
 
@@ -87,7 +121,7 @@ export interface LegalAgreementRecord {
 export interface ContentReportRequest {
   contentType: 'post' | 'message' | 'profile' | 'comment' | 'other';
   contentId: string;
-  reason: 'illegal' | 'harmful' | 'harassment' | 'hate_speech' | 'spam' | 'misinformation' | 'other';
+  reason: 'illegal' | 'harmful' | 'harassment' | 'hate_speech' | 'spam' | 'misinformation' | 'intimate_image' | 'threat' | 'other';
   description?: string;
 }
 
@@ -343,27 +377,14 @@ export async function reportContent(report: ContentReportRequest): Promise<{
   status: string;
   expectedResponse: string;
 }> {
-  const response = await fetch(`${API_BASE}/api/compliance/report-content`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    credentials: 'include',
-    body: JSON.stringify(report),
-  });
-
-  return parseApiResponse(response, 'Failed to submit content report');
+  return signedInData(api.post('/compliance/report-content', report), 'Failed to submit content report');
 }
 
 /**
  * Get authenticated compliance status for current user
  */
 export async function getComplianceStatus(): Promise<ComplianceStatusResponse> {
-  const response = await fetch(`${API_BASE}/api/compliance/status`, {
-    credentials: 'include',
-  });
-
-  return parseApiResponse(response, 'Failed to fetch compliance status');
+  return signedInData(api.get('/compliance/status'), 'Failed to fetch compliance status');
 }
 
 /**
@@ -382,11 +403,7 @@ export async function getLegalDocuments(region?: string): Promise<LegalDocument[
  * Get current user's legal agreement acknowledgements
  */
 export async function getAgreementHistory(): Promise<LegalAgreementRecord[]> {
-  const response = await fetch(`${API_BASE}/api/compliance/agreements`, {
-    credentials: 'include',
-  });
-
-  return parseApiResponse(response, 'Failed to fetch agreement history');
+  return signedInData(api.get('/compliance/agreements'), 'Failed to fetch agreement history');
 }
 
 /**
@@ -397,19 +414,7 @@ export async function recordAgreement(documentType: string, documentVersion: str
   documentType: string;
   documentVersion: string;
 }> {
-  const response = await fetch(`${API_BASE}/api/compliance/agreements`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    credentials: 'include',
-    body: JSON.stringify({
-      documentType,
-      documentVersion,
-    }),
-  });
-
-  return parseApiResponse(response, 'Failed to record agreement');
+  return signedInData(api.post('/compliance/agreements', { documentType, documentVersion }), 'Failed to record agreement');
 }
 
 /**

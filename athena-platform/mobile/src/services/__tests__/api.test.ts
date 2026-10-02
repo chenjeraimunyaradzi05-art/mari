@@ -19,6 +19,7 @@ import {
   webUrl,
   unwrapApiData,
   authApi,
+  sessionsApi,
   jobsApi,
   userApi,
   notificationsApi,
@@ -78,6 +79,17 @@ describe('mobile API client', () => {
       password: 'pw',
       reason: 'It was a mistake, please look again.',
     });
+  });
+
+  it('sign-in and devices call the routes that exist, and DELETE a session by id', async () => {
+    await sessionsApi.list();
+    expect(get).toHaveBeenCalledWith('/auth/sessions');
+    await sessionsApi.revoke('s1');
+    expect(del).toHaveBeenCalledWith('/auth/sessions/s1');
+    await sessionsApi.signOutEverywhere();
+    expect(post).toHaveBeenCalledWith('/auth/logout-all');
+    await sessionsApi.changePassword('old', 'new');
+    expect(post).toHaveBeenCalledWith('/auth/change-password', { currentPassword: 'old', newPassword: 'new' });
   });
 
   it('jobs: the list, a job, applying, saving, and the member’s lists under /jobs/me', async () => {

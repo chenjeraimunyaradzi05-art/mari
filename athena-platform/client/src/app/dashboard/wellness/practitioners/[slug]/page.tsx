@@ -89,7 +89,7 @@ export default function PractitionerPage() {
                       {slot && (
                         <>
                           <Field label="How"><SelectInput value={mode} onChange={setMode} options={[...(p.telehealth ? [{ value: 'TELEHEALTH', label: 'Video or phone' }] : []), ...(p.inPerson ? [{ value: 'IN_PERSON', label: 'In person' }] : [])]} /></Field>
-                          <Field label="What it is about" hint="Encrypted; read by you and this practitioner only."><textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} maxLength={1000} className={inputClass} /></Field>
+                          <Field label="What it is about" hint="Encrypted before it is stored. You and this practitioner can read it."><textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} maxLength={1000} className={inputClass} /></Field>
                           <div><span className="text-xs font-medium uppercase tracking-wide text-slate-500">Share ahead of the visit</span><p className="text-xs text-slate-500">A link to your summary that expires a week after the appointment.</p><div className="mt-2 space-y-1.5">{(ref.data?.shareScopes ?? []).map((s) => <Check key={s.key} label={s.label} checked={share.includes(s.key)} onChange={(v) => setShare((x) => (v ? [...x, s.key] : x.filter((k) => k !== s.key)))} />)}</div></div>
                           <button type="button" onClick={book} disabled={busy} className="btn-primary w-full text-sm disabled:opacity-50">Request this appointment</button>
                         </>

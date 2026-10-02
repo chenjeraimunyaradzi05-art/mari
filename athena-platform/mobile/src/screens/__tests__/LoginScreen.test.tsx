@@ -22,14 +22,23 @@ jest.mock('../../context/AuthContext', () => ({
 }));
 
 const mockSuspensionAppeal = jest.fn<(...args: any[]) => any>();
+const mockResendVerification = jest.fn<(...args: any[]) => any>();
+const mockRequestUnlock = jest.fn<(...args: any[]) => any>();
 jest.mock('../../services/api', () => ({
-  authApi: { suspensionAppeal: (...args: unknown[]) => mockSuspensionAppeal(...args) },
+  authApi: {
+    suspensionAppeal: (...args: unknown[]) => mockSuspensionAppeal(...args),
+    resendVerification: (...args: unknown[]) => mockResendVerification(...args),
+    requestUnlock: (...args: unknown[]) => mockRequestUnlock(...args),
+  },
 }));
 
 const SUSPENDED =
   'This account has been suspended. If you believe this is a mistake, you can appeal from the sign-in page.';
+const UNCONFIRMED = 'Please verify your email before signing in.';
+const LOCKED =
+  'This account is locked. You locked it to keep it safe, and the email we sent you has the link to unlock it. If you cannot find it, ask for a new one from the sign-in page.';
 
-import { LoginScreen } from '../auth/LoginScreen';
+import { LoginScreen, isLockedRefusal, isUnverifiedRefusal } from '../auth/LoginScreen';
 import { press, pressableWithText, renderScreen, shows, unmountScreens } from './renderScreen';
 import type { ReactTestRenderer } from 'react-test-renderer';
 
@@ -194,5 +203,108 @@ describe('LoginScreen', () => {
 
     expect(shows(screen, 'already with a reviewer')).toBe(true);
     expect(has(screen, 'Why the suspension should be lifted')).toBe(true);
+  });
+
+  // Registration opens no session, so this is the first thing a new member can
+  // meet when the email did not arrive, and the phone had no way to ask again.
+  it('offers a new confirmation link, for the address she typed, when the address has not been confirmed', async () => {
+    mockLogin.mockRejectedValueOnce({ response: { status: 403, data: { message: UNCONFIRMED } } });
+    mockResendVerification.mockResolvedValueOnce({ data: { success: true } });
+
+    const screen = await renderScreen(<LoginScreen navigation={navigation} />);
+    type(screen, 'Email', 'mara@example.com');
+    type(screen, 'Password', 'correct horse battery');
+    await press(pressableWithText(screen, 'Sign In')!);
+
+    // An alert and nothing else is what it used to be.
+    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(shows(screen, 'Confirm your email first')).toBe(true);
+    expect(shows(screen, UNCONFIRMED)).toBe(true);
+    expect(shows(screen, 'Your account is suspended')).toBe(false);
+
+    await press(pressableWithText(screen, 'Send me a new link')!);
+
+    expect(mockResendVerification).toHaveBeenCalledWith('mara@example.com');
+    // Not "we have sent": the route does not say whether the address has an account.
+    expect(shows(screen, 'a new link is on its way')).toBe(true);
+    expect(shows(screen, 'if that address has an account waiting to be confirmed')).toBe(true);
+  });
+
+  it('says so when the new link could not be requested, rather than claiming one is on its way', async () => {
+    mockLogin.mockRejectedValueOnce({ response: { status: 403, data: { message: UNCONFIRMED } } });
+    mockResendVerification.mockRejectedValueOnce(new Error('network'));
+
+    const screen = await renderScreen(<LoginScreen navigation={navigation} />);
+    type(screen, 'Email', 'mara@example.com');
+    type(screen, 'Password', 'correct horse battery');
+    await press(pressableWithText(screen, 'Sign In')!);
+    await press(pressableWithText(screen, 'Send me a new link')!);
+
+    expect(shows(screen, 'could not send another just now')).toBe(true);
+    expect(shows(screen, 'is on its way')).toBe(false);
+  });
+
+  it('offers a new unlock email, and not the appeal, when she locked the account herself', async () => {
+    mockLogin.mockRejectedValueOnce({ response: { status: 403, data: { message: LOCKED } } });
+    mockRequestUnlock.mockResolvedValueOnce({ data: { success: true } });
+
+    const screen = await renderScreen(<LoginScreen navigation={navigation} />);
+    type(screen, 'Email', 'mara@example.com');
+    type(screen, 'Password', 'correct horse battery');
+    await press(pressableWithText(screen, 'Sign In')!);
+
+    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(shows(screen, 'Your account is locked')).toBe(true);
+    expect(has(screen, 'Why the suspension should be lifted')).toBe(false);
+    expect(pressableWithText(screen, 'Send me a new link')).toBeNull();
+
+    await press(pressableWithText(screen, 'Email me a new unlock link')!);
+
+    expect(mockRequestUnlock).toHaveBeenCalledWith('mara@example.com');
+    expect(shows(screen, 'if that account is locked, a link to unlock it is on its way')).toBe(true);
+  });
+
+  it('forgets the panel when she changes the address, because it was for the account that was refused', async () => {
+    mockLogin.mockRejectedValueOnce({ response: { status: 403, data: { message: UNCONFIRMED } } });
+
+    const screen = await renderScreen(<LoginScreen navigation={navigation} />);
+    type(screen, 'Email', 'mara@example.com');
+    type(screen, 'Password', 'correct horse battery');
+    await press(pressableWithText(screen, 'Sign In')!);
+    expect(shows(screen, 'Confirm your email first')).toBe(true);
+
+    type(screen, 'Email', 'someone.else@example.com');
+
+    expect(shows(screen, 'Confirm your email first')).toBe(false);
+  });
+
+  it('shows neither panel for a wrong password', async () => {
+    mockLogin.mockRejectedValueOnce({ response: { status: 401, data: { message: 'Invalid email or password' } } });
+
+    const screen = await renderScreen(<LoginScreen navigation={navigation} />);
+    type(screen, 'Email', 'mara@example.com');
+    type(screen, 'Password', 'wrong');
+    await press(pressableWithText(screen, 'Sign In')!);
+
+    expect(Alert.alert).toHaveBeenCalledWith('Login Failed', 'Invalid email or password');
+    expect(pressableWithText(screen, 'Send me a new link')).toBeNull();
+    expect(pressableWithText(screen, 'Email me a new unlock link')).toBeNull();
+  });
+});
+
+describe('the sign-in refusal matchers', () => {
+  it('match the sentences the server sends and keep the three apart', () => {
+    expect(isUnverifiedRefusal(UNCONFIRMED, 403)).toBe(true);
+    expect(isUnverifiedRefusal(LOCKED, 403)).toBe(false);
+    expect(isUnverifiedRefusal(SUSPENDED, 403)).toBe(false);
+    expect(isLockedRefusal(LOCKED, 403)).toBe(true);
+    expect(isLockedRefusal(UNCONFIRMED, 403)).toBe(false);
+    expect(isLockedRefusal(SUSPENDED, 403)).toBe(false);
+    // The brute-force lockout is a different thing and has no unlock link.
+    expect(isLockedRefusal('Too many failed login attempts. Try again in 15 minutes.', 429)).toBe(false);
+    // The status is checked when it is known.
+    expect(isUnverifiedRefusal(UNCONFIRMED, 401)).toBe(false);
+    expect(isLockedRefusal(LOCKED, 500)).toBe(false);
+    expect(isUnverifiedRefusal(undefined)).toBe(false);
   });
 });

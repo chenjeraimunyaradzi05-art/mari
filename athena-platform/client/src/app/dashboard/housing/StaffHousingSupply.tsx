@@ -80,6 +80,7 @@ function OnePlace({ onListed }: { onListed?: () => void }) {
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
 
   const set = <K extends keyof typeof emptyPlace>(key: K, value: (typeof emptyPlace)[K]) => setPlace((p) => ({ ...p, [key]: value }));
+  const confidential = place.dvSafe || place.type === 'EMERGENCY' || place.type === 'TRANSITIONAL';
 
   const submit = async () => {
     setSaving(true);
@@ -108,7 +109,7 @@ function OnePlace({ onListed }: { onListed?: () => void }) {
         flexibleLease: place.flexibleLease,
         dvSafe: place.dvSafe,
         ...(place.dvSafe ? { dvSafeNote: place.dvSafeNote } : {}),
-        ...(place.dvSafe && place.safetyVerified ? { safetyVerified: true, safetyCheckNote: place.safetyCheckNote } : {}),
+        ...(confidential && place.safetyVerified ? { safetyVerified: true, safetyCheckNote: place.safetyCheckNote } : {}),
         ...(listerEmail.trim() ? { listerEmail: listerEmail.trim() } : {}),
       });
       setResult({ ok: true, text: res.data?.message || 'Listed.' });
@@ -204,15 +205,21 @@ function OnePlace({ onListed }: { onListed?: () => void }) {
         <label className="flex items-center gap-2"><input type="checkbox" checked={place.dvSafe} onChange={(e) => set('dvSafe', e.target.checked)} /> DV-safe</label>
       </div>
 
-      {place.dvSafe && (
+      {/* A DV-safe claim, and every emergency or transitional place, is held for the same check. */}
+      {confidential && (
         <div className="space-y-3 rounded-lg border border-rose-200 bg-rose-50/60 p-4 dark:border-rose-900/50 dark:bg-rose-900/10">
-          <div>
-            <label htmlFor="supply-dv-note" className={labelClass}>Why this place is safe for a woman leaving violence</label>
-            <textarea id="supply-dv-note" value={place.dvSafeNote} onChange={(e) => set('dvSafeNote', e.target.value)} rows={2} className={cn('mt-1', inputClass)} />
-          </div>
+          {place.dvSafe && (
+            <div>
+              <label htmlFor="supply-dv-note" className={labelClass}>Why this place is safe for a woman leaving violence</label>
+              <textarea id="supply-dv-note" value={place.dvSafeNote} onChange={(e) => set('dvSafeNote', e.target.value)} rows={2} className={cn('mt-1', inputClass)} />
+            </div>
+          )}
           <label className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-300">
             <input type="checkbox" checked={place.safetyVerified} onChange={(e) => set('safetyVerified', e.target.checked)} className="mt-1" />
-            <span>I have checked this place and the partner myself. Leave this off and another member of staff checks it from the queue.</span>
+            <span>
+              I have checked this place and the partner myself. The member account it is listed under also needs a current provider check
+              (approved under Provider checks). Leave this off and another member of staff checks it from the queue.
+            </span>
           </label>
           {place.safetyVerified && (
             <div>
@@ -344,7 +351,7 @@ function FromSpreadsheet({ onListed }: { onListed?: () => void }) {
         <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-900/20 dark:text-emerald-100">
           <p className="flex items-center gap-2 font-medium"><CheckCircle2 className="h-4 w-4" /> {checked.rows} row{checked.rows === 1 ? '' : 's'} ready.</p>
           <p className="mt-1">
-            {checked.heldForCheck > 0 ? `${checked.heldForCheck} claim${checked.heldForCheck === 1 ? 's' : ''} to be DV-safe and will wait for a safety check. ` : ''}
+            {checked.heldForCheck > 0 ? `${checked.heldForCheck} DV-safe, emergency or transitional place${checked.heldForCheck === 1 ? '' : 's'} will wait for a safety check. ` : ''}
             {checked.listerIsStaff ? 'Inquiries will come to you.' : 'Inquiries will go to the partner account.'}
           </p>
         </div>

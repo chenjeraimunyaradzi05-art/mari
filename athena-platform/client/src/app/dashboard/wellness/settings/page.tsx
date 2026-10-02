@@ -50,7 +50,7 @@ export default function WellnessSettingsPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-6">
-      <PageTitle icon={Lock} kicker="Wellness" title="Privacy and what is collected" blurb="Only what you switch on is collected. It is encrypted before it is stored, read only by you, never sold or shared with anyone but a practitioner you hand a link to, and deleted the moment you say." />
+      <PageTitle icon={Lock} kicker="Wellness" title="Privacy and what is collected" blurb="Only what you switch on is collected. What you log, your medications and your health notes are encrypted before they are stored, shown only to you, never sold or shared with anyone but a practitioner you hand a link to, and removed from ATHENA the moment you say." />
       <WellnessNav current="/dashboard/wellness/settings" />
       {settings.loading && <Loading />}
       <ErrorBox error={settings.error} />
@@ -79,11 +79,13 @@ export default function WellnessSettingsPage() {
           <div className="rounded-xl bg-slate-50 p-4 text-xs leading-5 text-slate-600 dark:bg-slate-800/60 dark:text-slate-400">
             <p className="font-semibold text-slate-800 dark:text-slate-200">How your health data is handled</p>
             <ul className="mt-1 list-disc space-y-1 pl-5">
-              <li>Each record is encrypted with AES-256-GCM before it reaches the database. The database can see what day and what kind of record it is, and nothing else.</li>
+              <li>Each tracker entry, medication, health note and appointment reason is encrypted with AES-256-GCM before it reaches the database. The database can see which day and what kind of entry it is, and the schedule of a medication, and nothing else you wrote in them.</li>
+              <li>Habits, goals and the mental load log are not encrypted that way. They are stored as you typed them, behind your sign-in, and the delete button above removes them along with the rest.</li>
+              <li>ATHENA&apos;s servers decrypt a record to show it to you, so this protects it from anyone who gets hold of a copy of our database, not from ATHENA. The people who look after our servers hold the key, and no moderator or admin screen shows your records.</li>
               <li>Nothing on these pages is sent to analytics, an advertiser or a data broker. There is no such integration to switch off.</li>
               <li>The insights are worked out from your records by rules, on the server, when you open the page. Nothing is kept from that.</li>
               <li>A share link shows a summary to whoever has the link until it expires or you withdraw it. Forum posts, circles and bookings are separate from this data and are not covered by the delete button above.</li>
-              <li>Deleting removes the records themselves, not a copy; there is no copy.</li>
+              <li>Deleting removes the records from ATHENA straight away. We keep backups of the whole database for a limited time. Your records are encrypted in them too, and a record you delete leaves them as the oldest backups are removed.</li>
             </ul>
           </div>
         </>

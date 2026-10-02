@@ -131,6 +131,29 @@ export default function ServiceDetailPage() {
     };
   };
 
+  // A booking comes back with the hold to authorise, like an order; the modal
+  // runs the card step and then hands the buyer to the bookings page.
+  const handleBook = async (data: { scheduledAt: string; durationMinutes: number; clientNotes?: string }) => {
+    if (!service) return;
+    const res = await skillsMarketplaceApi.bookService(service.id, data);
+    const booking = res.data?.data;
+    return {
+      bookingId: String(booking?.id ?? ''),
+      clientSecret: (booking?.payment?.clientSecret as string | null | undefined) ?? null,
+      amount: Number(booking?.payment?.amount ?? 0),
+    };
+  };
+
+  // Opens a thread with the provider that already says which listing it is
+  // about, so neither of them has to work out what "your service" means. The
+  // line lands in the composer for the buyer to read, change and send.
+  const messageAboutListing = () => {
+    if (!service) return;
+    const link = `${window.location.origin}/skills-marketplace/${service.id}`;
+    const opener = `Hi, I have a question about "${service.title}" (${link}).`;
+    router.push(`/dashboard/messages?user=${service.provider?.id ?? ''}&text=${encodeURIComponent(opener)}`);
+  };
+
   if (loading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
@@ -360,11 +383,16 @@ export default function ServiceDetailPage() {
                 )}
 
                 {packages.length === 0 && !(service.hourlyRate > 0) && (
-                  <Button
-                    className="w-full"
-                    onClick={() => router.push(`/dashboard/messages?user=${service.provider?.id ?? ''}`)}
-                  >
+                  <Button className="w-full" onClick={messageAboutListing}>
                     Message about availability
+                  </Button>
+                )}
+
+                {/* A question before paying anything. The thread opens with this
+                    listing named in it, so the answer is about the right thing. */}
+                {(packages.length > 0 || service.hourlyRate > 0) && (
+                  <Button variant="ghost" className="w-full" onClick={messageAboutListing}>
+                    Ask {name} a question first
                   </Button>
                 )}
 
@@ -400,11 +428,8 @@ export default function ServiceDetailPage() {
           isOpen={showBooking}
           onClose={() => setShowBooking(false)}
           service={service}
-          onBook={async (data) => {
-            await skillsMarketplaceApi.bookService(service.id, data);
-            setShowBooking(false);
-            router.push('/skills-marketplace/bookings');
-          }}
+          onBook={handleBook}
+          onPaid={() => router.push('/skills-marketplace/bookings')}
         />
       )}
 

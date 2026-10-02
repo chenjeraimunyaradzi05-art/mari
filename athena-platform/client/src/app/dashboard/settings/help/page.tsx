@@ -80,7 +80,7 @@ const faqCategories = [
       },
       {
         question: 'Is there a free trial?',
-        answer: `Yes. Pro comes with a ${TRIAL_DAYS}-day free trial. You enter card details to start it, nothing is charged during the trial, and if you cancel before it ends you pay nothing.`,
+        answer: `Yes. Pro comes with a ${TRIAL_DAYS}-day free trial. You enter card details to start it, nothing is charged during the trial, and if you cancel before it ends you pay nothing. If you do not cancel, your card is charged the Pro price on the day the trial ends, and we email you a few days before.`,
       },
       {
         question: 'How do I cancel my subscription?',
@@ -103,7 +103,7 @@ const faqCategories = [
       },
       {
         question: 'How do you protect my data?',
-        answer: 'We use industry-standard encryption (AES-256) for all data at rest and in transit. Your personal information is never sold to third parties.',
+        answer: 'Your connection to ATHENA is encrypted. The most private things you keep here (safe-chat messages, health records, your safety plan and the secret behind your two-factor sign-in) are also encrypted by ATHENA before they are stored. ATHENA’s servers decrypt them to show them to you, so this protects them from anyone who gets hold of a copy of our database, not from ATHENA. Your personal information is never sold to third parties.',
       },
       {
         question: 'How do I report inappropriate content?',

@@ -1,4 +1,6 @@
+import { execFileSync } from 'child_process';
 import { randomBytes } from 'crypto';
+import path from 'path';
 import { test, expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
 
 /**
@@ -113,7 +115,7 @@ test.describe('Critical path: registration to a requested mentor session', () =>
     await context.close();
   });
 
-  test('a new member registers and lands on her dashboards', async () => {
+  test('a new member registers, is asked to check her email, and signs in once it is confirmed', async () => {
     await page.goto('/register');
     await expect(page.getByRole('heading', { name: /create an account/i })).toBeVisible();
     await rejectOptionalCookies(page);
@@ -127,21 +129,45 @@ test.describe('Critical path: registration to a requested mentor session', () =>
     await page.getByLabel(/i confirm that i am a woman/i).check();
     await page.getByRole('button', { name: /create account/i }).click();
 
-    // A refusal, from the form's own checks or from the server, is shown in
-    // the form. Waiting on the URL alone would time out without saying why,
-    // so the poll reports the refusal's text if one appears first.
+    // Registration opens no session: the server answers every address the same
+    // way and the link that finishes it is in an email. A refusal, from the
+    // form's own checks or from the server, is shown in the form. Waiting on
+    // the panel alone would time out without saying why, so the poll reports
+    // the refusal's text if one appears first.
+    const checkEmail = page.getByRole('heading', { name: 'Check your email' });
     const refusal = page.locator('form p.text-red-600, form p.text-red-700');
     await expect
       .poll(
         async () => {
-          if (new URL(page.url()).pathname === '/dashboard/persona') return 'registered';
+          if (await checkEmail.count()) return 'asked to check her email';
           if (await refusal.count()) return `refused: ${(await refusal.first().textContent())?.trim()}`;
           return 'waiting';
         },
         { timeout: 20_000 }
       )
-      .toBe('registered');
-    await expect(page.getByRole('heading', { name: 'Persona Dashboards' })).toBeVisible();
+      .toBe('asked to check her email');
+    await expect(page.getByText(email)).toBeVisible();
+
+    // Before she confirms, she is not signed in, whatever the page said.
+    await page.goto('/dashboard/mentors');
+    await expect(page).toHaveURL(/\/login(\?|$)/);
+
+    // The mailed link cannot be followed from here: in development the API
+    // only logs that a mail would be sent, and the tokens are stored hashed.
+    // This marks the address confirmed on the disposable database, the one
+    // change the link makes. That the link itself works is covered by
+    // server/tests/integration/auth-recovery.test.ts.
+    execFileSync('node', ['scripts/verify-e2e-member.js', email], {
+      cwd: path.resolve(process.cwd(), '..', 'server'),
+      env: process.env,
+      stdio: 'inherit',
+    });
+
+    await page.goto('/login');
+    await page.getByLabel('Email', { exact: true }).fill(email);
+    await page.getByLabel('Password', { exact: true }).fill(password);
+    await page.getByRole('button', { name: /^sign in$/i }).click();
+    await expect(page).toHaveURL(/\/dashboard(\/|\?|$)/, { timeout: 20_000 });
   });
 
   test('she finds the fixture mentor in the directory', async () => {

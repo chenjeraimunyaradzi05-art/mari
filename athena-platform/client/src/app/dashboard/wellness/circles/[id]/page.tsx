@@ -10,8 +10,8 @@ import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { CalendarPlus, Users, Video } from 'lucide-react';
-import { wellnessApi, wellnessError, type Author } from '@/lib/wellness-api';
-import { Chip, ErrorBox, Loading, PageTitle, Scale, WellnessNav, fmtDay, useLoad } from '@/components/wellness/WellnessUi';
+import { wellnessApi, wellnessError, type Author, type CrisisAnswer } from '@/lib/wellness-api';
+import { Chip, CrisisNotice, ErrorBox, Loading, PageTitle, Scale, WellnessNav, crisisOf, fmtDay, useLoad } from '@/components/wellness/WellnessUi';
 import { Field, Panel, inputClass } from '@/components/strategy/StrategyUi';
 import { downloadText } from '@/lib/download';
 import { cn } from '@/lib/utils';
@@ -28,11 +28,15 @@ export default function CirclePage() {
   const [form, setForm] = useState({ mood: null as number | null, wins: '', blockers: '', nextStep: '' });
   const [busy, setBusy] = useState(false);
   const [linkEdit, setLinkEdit] = useState<string | null>(null);
+  // What the server said about her check-in's words: the lines, and who has been told.
+  const [crisis, setCrisis] = useState<CrisisAnswer | null>(null);
   const c = data.data;
   const mine = c?.currentWeek ? c.myCheckIns.find((x) => x.week === c.currentWeek) : undefined;
 
   const act = async (fn: () => Promise<unknown>, done?: string) => { setBusy(true); try { await fn(); if (done) toast.success(done); data.reload(); } catch (err) { toast.error(wellnessError(err, 'That did not work.')); } finally { setBusy(false); } };
-  const checkIn = () => act(() => wellnessApi.circleCheckIn(params.id, { mood: form.mood, wins: form.wins, blockers: form.blockers, nextStep: form.nextStep }), 'Checked in');
+  // The check-in is saved either way. If what she wrote sounds like crisis the answer carries the lines, and they
+  // are put where she is looking rather than in a toast that goes in a few seconds.
+  const checkIn = () => act(async () => { const res = await wellnessApi.circleCheckIn(params.id, { mood: form.mood, wins: form.wins, blockers: form.blockers, nextStep: form.nextStep }); setCrisis(crisisOf(res)); }, 'Checked in');
   const leave = () => { if (window.confirm('Leave this circle?')) act(async () => { await wellnessApi.leaveCircle(params.id); router.push('/dashboard/wellness/circles'); }); };
   const addToCalendar = async () => {
     if (!c) return;
@@ -42,6 +46,7 @@ export default function CirclePage() {
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-6">
       <WellnessNav current="/dashboard/wellness/circles" />
+      <CrisisNotice crisis={crisis} onClose={() => setCrisis(null)} />
       {data.loading && <Loading />}
       <ErrorBox error={data.error} />
       {c && (

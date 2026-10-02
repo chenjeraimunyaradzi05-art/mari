@@ -22,6 +22,12 @@
  * Functions, this build cannot see it and says so, which is the one false
  * alarm it can raise. Widen the scope, or add Builds, and redeploy.
  *
+ * It also says, without failing the build, when the error tracker is connected
+ * but cannot read the code: a NEXT_PUBLIC_SENTRY_DSN with no SENTRY_AUTH_TOKEN
+ * (or no SENTRY_ORG and SENTRY_PROJECT) means errors will arrive, but pointing
+ * at minified lines, because the build has no credential to upload source maps.
+ * That is a degraded state rather than a broken deploy, so it is a warning.
+ *
  * Values are never printed.
  *
  * Usage: node scripts/check-web-env.js   # exits 1 on a Netlify build without the secret
@@ -29,11 +35,35 @@
 
 const MIN_PROXY_SECRET_LENGTH = 32;
 
+/**
+ * Lines to print when Sentry is switched on but source maps cannot be
+ * uploaded; empty when all is well or when Sentry is not in use at all.
+ */
+function sourceMapWarning(env) {
+  const present = (name) => (env[name] || '').trim().length > 0;
+  if (!present('NEXT_PUBLIC_SENTRY_DSN')) return [];
+
+  const missing = ['SENTRY_AUTH_TOKEN', 'SENTRY_ORG', 'SENTRY_PROJECT'].filter((name) => !present(name));
+  if (missing.length === 0) return [];
+
+  return [
+    '',
+    `  check-web-env: warning: NEXT_PUBLIC_SENTRY_DSN is set but ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not visible to this build.`,
+    '  Errors will still be reported, but they will point at minified code, because the build cannot upload',
+    '  source maps without them. Add the missing variable(s) in Netlify (Environment variables, Builds scope;',
+    '  SENTRY_AUTH_TOKEN is a Sentry organisation token and is a secret), then deploy again.',
+    '',
+  ];
+}
+
 function main() {
   if (process.env.NETLIFY !== 'true') {
     console.log('check-web-env: not a Netlify build; nothing to check.');
     return;
   }
+
+  const warning = sourceMapWarning(process.env);
+  if (warning.length > 0) console.warn(warning.join('\n'));
 
   const secret = (process.env.PROXY_SHARED_SECRET || '').trim();
   if (secret.length >= MIN_PROXY_SECRET_LENGTH) {
@@ -60,4 +90,6 @@ function main() {
   process.exitCode = 1;
 }
 
-main();
+if (require.main === module) main();
+
+module.exports = { sourceMapWarning };

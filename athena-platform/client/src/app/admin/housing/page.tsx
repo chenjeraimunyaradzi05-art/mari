@@ -1,11 +1,16 @@
 'use client';
 
 /**
- * The safety check on housing. A member who asks for her listing to be shown
- * as DV-safe has it held here until a person has looked at it. Approving it
- * marks it "Checked by ATHENA staff" and puts it live as DV-safe; the other
- * two outcomes let it show as an ordinary listing, or take it down. The
- * lister is told in the app whichever way it goes.
+ * The safety check on housing. A listing that asks to be shown as DV-safe, and
+ * every emergency or transitional listing, is held here until a person has
+ * looked at it. Approving it marks it "Checked by ATHENA staff" and puts it live;
+ * a DV-safe claim can instead be shown as an ordinary listing, and any of them
+ * can be taken down. The lister is told in the app whichever way it goes.
+ *
+ * Approving takes two things, and the server refuses without either: a note of
+ * what you checked, which goes into the audit record with your name, and a
+ * provider check on whoever listed the place that is approved and has not run
+ * out (the Provider checks list below). The note is not shown to the lister.
  */
 
 import { useState } from 'react';
@@ -16,6 +21,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { ArrowLeft, Loader2, ShieldCheck, X } from 'lucide-react';
 import { housingApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { ProviderChecks } from './ProviderChecks';
 
 type Lister = {
   id: string;
@@ -33,6 +39,8 @@ type Listing = {
   description: string;
   type: string;
   status: string;
+  /** The lister's claim. An emergency or transitional place may not make it. */
+  dvSafe: boolean;
   address: string | null;
   suburb: string | null;
   city: string | null;
@@ -46,7 +54,20 @@ type Listing = {
   images: unknown;
   createdAt: string;
   lister: Lister | null;
+  /** Whether whoever listed the place holds a provider check that is approved and has not run out. */
+  providerCheck?: { standing: 'NONE' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED'; expiresAt: string | null };
 };
+
+const PROVIDER_STANDING_TEXT: Record<string, string> = {
+  APPROVED: 'Provider check approved',
+  PENDING: 'Provider check waiting for a decision',
+  REJECTED: 'Provider check was refused',
+  EXPIRED: 'Provider check has ended',
+  NONE: 'No provider check yet',
+};
+
+/** An emergency or transitional place is confidential whether or not it claims to be DV-safe. */
+const confidentialByType = (l: Pick<Listing, 'type'>) => l.type === 'EMERGENCY' || l.type === 'TRANSITIONAL';
 
 const errorMessage = (e: unknown) => (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
 const nameOf = (u: Lister | null) => (u ? u.displayName?.trim() || [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email : 'Unknown member');
@@ -65,6 +86,8 @@ export default function AdminHousingPage() {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [note, setNote] = useState('');
+  // What the member of staff checked. Needed to approve; kept in the audit record.
+  const [checkNote, setCheckNote] = useState('');
 
   const list = useQuery({
     queryKey: ['admin-housing-pending'],
@@ -73,13 +96,22 @@ export default function AdminHousingPage() {
   });
 
   const decide = useMutation({
-    mutationFn: ({ id, outcome }: { id: string; outcome: Outcome }) => {
+    mutationFn: ({ id, outcome, confidentialType, dvSafeClaim }: { id: string; outcome: Outcome; confidentialType: boolean; dvSafeClaim: boolean }) => {
       const chosen = OUTCOMES.find((o) => o.value === outcome)!;
-      return housingApi.adminUpdateListing(id, { ...chosen.body, ...(note.trim() ? { note: note.trim() } : {}) });
+      // An emergency or transitional place that does not claim DV-safe is
+      // approved as itself: it is not told it is DV-safe, and the claim is not
+      // added to it.
+      const body = outcome === 'APPROVE' && confidentialType && !dvSafeClaim ? { safetyVerified: true, status: 'ACTIVE' } : chosen.body;
+      return housingApi.adminUpdateListing(id, {
+        ...body,
+        ...(outcome === 'APPROVE' ? { checkNote: checkNote.trim() } : {}),
+        ...(note.trim() ? { note: note.trim() } : {}),
+      });
     },
     onSuccess: (_r, { outcome }) => {
       queryClient.invalidateQueries({ queryKey: ['admin-housing-pending'] });
       setNote('');
+      setCheckNote('');
       setSelectedId(null);
       toast.success(OUTCOMES.find((o) => o.value === outcome)!.toast);
     },
@@ -87,6 +119,9 @@ export default function AdminHousingPage() {
   });
 
   const current = list.data?.find((l) => l.id === selectedId) ?? null;
+  const providerStanding = current?.providerCheck?.standing ?? 'NONE';
+  const checkNoteReady = checkNote.trim().length >= 10;
+  const canApprove = checkNoteReady && providerStanding === 'APPROVED';
 
   return (
     <div className="mx-auto max-w-6xl p-6">
@@ -98,7 +133,7 @@ export default function AdminHousingPage() {
           <ShieldCheck className="h-7 w-7 text-primary-600" /> Safe housing checks
         </h1>
         <p className="mt-1 text-slate-600 dark:text-slate-400">
-          Listings that ask to be shown as DV-safe wait here, off the list, until a person has looked. A woman leaving violence trusts the badge, so speak to the lister before you approve.
+          Listings that ask to be shown as DV-safe, and every emergency or transitional listing, wait here, off the list, until a person has looked. A woman leaving violence trusts the badge, so speak to the lister before you approve, and write down what you checked.
         </p>
       </div>
 
@@ -146,6 +181,21 @@ export default function AdminHousingPage() {
               <p className="text-xs font-semibold uppercase tracking-wide text-purple-800 dark:text-purple-200">Why the lister says it is safe</p>
               <p className="mt-1 whitespace-pre-wrap text-purple-900 dark:text-purple-100">{current.dvSafeNote || 'No note was given.'}</p>
             </div>
+
+            <p
+              className={cn(
+                'rounded-lg p-3 text-sm',
+                providerStanding === 'APPROVED' ? 'bg-emerald-50 text-emerald-900 dark:bg-emerald-900/20 dark:text-emerald-100' : 'bg-amber-50 text-amber-900 dark:bg-amber-900/20 dark:text-amber-100'
+              )}
+            >
+              {PROVIDER_STANDING_TEXT[providerStanding]}
+              {providerStanding === 'APPROVED' && current.providerCheck?.expiresAt ? `, until ${new Date(current.providerCheck.expiresAt).toLocaleDateString('en-AU', { dateStyle: 'long' })}` : ''}.
+              {providerStanding !== 'APPROVED' && (
+                <>
+                  {' '}A place cannot be marked checked until this is approved. <a href="#provider-checks" className="font-semibold underline">Go to Provider checks</a>.
+                </>
+              )}
+            </p>
 
             <dl className="space-y-1 text-sm">
               <div>
@@ -198,30 +248,59 @@ export default function AdminHousingPage() {
             </div>
 
             <div className="space-y-2">
+              <label htmlFor="housing-check-basis" className="block text-xs font-medium text-slate-600 dark:text-slate-300">What you checked (needed to approve)</label>
+              <textarea
+                id="housing-check-basis"
+                value={checkNote}
+                onChange={(e) => setCheckNote(e.target.value)}
+                rows={3}
+                maxLength={1000}
+                placeholder="Who you spoke to, and how you know the place is safe"
+                aria-describedby="housing-check-basis-help"
+                className="input w-full text-sm"
+              />
+              <p id="housing-check-basis-help" className="text-xs text-slate-500">Kept in the audit record with your name. It is not shown to the lister.</p>
               <label htmlFor="housing-check-note" className="block text-xs font-medium text-slate-600 dark:text-slate-300">A line for the lister (optional)</label>
-              <textarea id="housing-check-note" value={note} onChange={(e) => setNote(e.target.value)} rows={3} maxLength={500} placeholder="What you checked, or what was missing" className="input w-full text-sm" />
+              <textarea id="housing-check-note" value={note} onChange={(e) => setNote(e.target.value)} rows={2} maxLength={500} placeholder="What they should know about the outcome" className="input w-full text-sm" />
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={() => decide.mutate({ id: current.id, outcome: 'APPROVE' })} disabled={decide.isPending} className="btn-primary text-sm">
-                  Approve as DV-safe
+                <button
+                  type="button"
+                  onClick={() => decide.mutate({ id: current.id, outcome: 'APPROVE', confidentialType: confidentialByType(current), dvSafeClaim: current.dvSafe })}
+                  disabled={decide.isPending || !canApprove}
+                  className="btn-primary min-h-[44px] text-sm"
+                >
+                  {current.dvSafe ? 'Approve as DV-safe' : 'Approve as checked'}
                 </button>
-                <button type="button" onClick={() => decide.mutate({ id: current.id, outcome: 'ORDINARY' })} disabled={decide.isPending} className="btn-secondary text-sm">
-                  Show as ordinary listing
-                </button>
+                {/* An emergency or transitional place has no ordinary version of itself. */}
+                {!confidentialByType(current) && (
+                  <button type="button" onClick={() => decide.mutate({ id: current.id, outcome: 'ORDINARY', confidentialType: false, dvSafeClaim: true })} disabled={decide.isPending} className="btn-secondary min-h-[44px] text-sm">
+                    Show as ordinary listing
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
-                    if (window.confirm('Take this listing down? The lister is told.')) decide.mutate({ id: current.id, outcome: 'TAKE_DOWN' });
+                    if (window.confirm('Take this listing down? The lister is told.')) decide.mutate({ id: current.id, outcome: 'TAKE_DOWN', confidentialType: confidentialByType(current), dvSafeClaim: true });
                   }}
                   disabled={decide.isPending}
-                  className="text-sm font-medium text-red-600 hover:text-red-700"
+                  className="min-h-[44px] px-3 text-sm font-medium text-red-600 hover:text-red-700"
                 >
                   Take it down
                 </button>
               </div>
+              {!canApprove && (
+                <p className="text-xs text-slate-500">
+                  To approve: {providerStanding !== 'APPROVED' ? 'the lister needs an approved provider check' : ''}
+                  {providerStanding !== 'APPROVED' && !checkNoteReady ? ', and ' : ''}
+                  {!checkNoteReady ? 'say what you checked (at least a sentence)' : ''}.
+                </p>
+              )}
             </div>
           </aside>
         )}
       </div>
+
+      <ProviderChecks />
     </div>
   );
 }

@@ -21,6 +21,8 @@ import {
 } from 'lucide-react';
 import Image from 'next/image';
 import { useAuth } from '@/lib/hooks';
+import { CheckYourEmail } from '@/components/auth/CheckYourEmail';
+import { isVerificationEmailFailure } from '@/lib/verification-email';
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton';
 import { FacebookSignInButton } from '@/components/auth/FacebookSignInButton';
 import { HUMAN_CHECK_SITE_KEY, HumanCheck } from '@/components/auth/HumanCheck';
@@ -129,10 +131,19 @@ export default function RegisterPage() {
 function RegisterContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { register: registerUser, isRegisterPending, isAuthenticated, isLoading } = useAuth();
+  const {
+    register: registerUser,
+    registeredEmail,
+    resetRegistration,
+    isRegisterPending,
+    isAuthenticated,
+    isLoading,
+  } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  // The address of a sign-up that was saved but whose email could not be sent.
+  const [unsentEmail, setUnsentEmail] = useState<string | null>(null);
   const [humanCheckToken, setHumanCheckToken] = useState<string | null>(null);
   const [humanCheckReset, setHumanCheckReset] = useState(0);
 
@@ -194,15 +205,18 @@ function RegisterContent() {
         ...(humanCheckToken ? { humanCheckToken } : {}),
       },
       {
-        onSuccess: () => {
-          const redirect = safeRedirect(searchParams?.get('redirect'));
-          if (redirect) {
-            router.push(redirect);
+        // No onSuccess: registration opens no session, so there is nowhere to
+        // send her yet. `registeredEmail` turns the page into "check your
+        // email", and the link in that email is what lets her sign in.
+        onError: (error: unknown) => {
+          // Only the email failed: her account is saved, so she is given the
+          // resend button rather than an error above a form she would have to
+          // fill in again (and be told her address is taken).
+          if (isVerificationEmailFailure(error)) {
+            setUnsentEmail(data.email);
+            if (HUMAN_CHECK_SITE_KEY) setHumanCheckReset((n) => n + 1);
             return;
           }
-          router.push('/dashboard/persona');
-        },
-        onError: (error: unknown) => {
           setServerError(getApiErrorMessage(error, 'Registration failed. Please review your details and try again.'));
           // A token is spent by the attempt that carried it, whatever the
           // answer was, so a second try needs a fresh one.
@@ -211,6 +225,24 @@ function RegisterContent() {
       }
     );
   };
+
+  if (registeredEmail || unsentEmail) {
+    const redirect = safeRedirect(searchParams?.get('redirect'));
+    return (
+      <CheckYourEmail
+        email={(registeredEmail ?? unsentEmail) as string}
+        sendFailed={!registeredEmail}
+        signInHref={redirect ? `/login?redirect=${encodeURIComponent(redirect)}` : '/login'}
+        onStartAgain={() => {
+          // The first attempt spent its human-check token.
+          setHumanCheckToken(null);
+          if (HUMAN_CHECK_SITE_KEY) setHumanCheckReset((n) => n + 1);
+          setUnsentEmail(null);
+          resetRegistration();
+        }}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 lg:grid lg:grid-cols-2">
@@ -284,6 +316,10 @@ function RegisterContent() {
                 )}
               </div>
             </div>
+            <p className="-mt-2 text-xs text-slate-500 dark:text-slate-400">
+              Other members see this name until you choose a different public name. You can do that any time in Settings, under
+              Profile, and your real name then stays private.
+            </p>
 
             <div>
               <label htmlFor="email" className="label">

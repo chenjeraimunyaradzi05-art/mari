@@ -195,6 +195,10 @@ export interface LiveStream {
   endedAt: string | null;
   createdAt: string;
   isHost: boolean;
+  // The fewest seconds between one viewer's chat lines; null is off.
+  slowModeSeconds?: number | null;
+  // Ended by ATHENA's team. Only the host can still open such a stream.
+  suspended?: boolean;
   // Host only.
   streamKey?: string;
   ingestUrl?: string | null;
@@ -244,6 +248,14 @@ export const livestreamApi = {
   removeMessage: (id: string, messageId: string) =>
     api.delete(`/livestream/${id}/messages/${messageId}`),
   removeViewer: (id: string, userId: string) => api.delete(`/livestream/${id}/viewers/${userId}`),
+
+  // The lighter answers: a viewer who is a nuisance rather than abusive can be
+  // silenced for a while without being put out of the room, and slow mode slows
+  // everybody down at once. Both end by themselves or are switched off here.
+  muteViewer: (id: string, userId: string, minutes: number) =>
+    api.post(`/livestream/${id}/viewers/${userId}/mute`, { minutes }),
+  unmuteViewer: (id: string, userId: string) => api.delete(`/livestream/${id}/viewers/${userId}/mute`),
+  setSlowMode: (id: string, seconds: number) => api.put(`/livestream/${id}/slow-mode`, { seconds }),
 };
 
 // ============================================
@@ -548,6 +560,9 @@ export const skillsMarketplaceApi = {
   getOrder: (id: string) => api.get(`/skills-marketplace/orders/${id}`),
   // The hold's state, and the client secret while it still needs authorising.
   getOrderPayment: (id: string) => api.get(`/skills-marketplace/orders/${id}/payment`),
+  // A fresh hold for an order whose hold on the card has run out or is about to.
+  // Nothing is taken; the order moves onto it once it is authorised.
+  renewOrderPayment: (id: string) => api.post(`/skills-marketplace/orders/${id}/payment/renew`),
 
   // Accept order (seller)
   acceptOrder: (id: string) => api.post(`/skills-marketplace/orders/${id}/accept`),
@@ -578,16 +593,29 @@ export const skillsMarketplaceApi = {
     api.get(`/skills-marketplace/services/${serviceId}/reviews`, { params }),
 
   // An hour of someone's time, rather than a fixed-price package. The server
-  // prices it at the hourly rate and never below the listing's minimum.
+  // prices it at the hourly rate and never below the listing's minimum, and
+  // holds that price on the buyer's card: the response carries `payment` with the
+  // client secret for the card step, as placing an order does.
   bookService: (serviceId: string, data: { scheduledAt: string; durationMinutes: number; clientNotes?: string }) =>
     api.post(`/skills-marketplace/services/${serviceId}/book`, data),
 
-  // Bookings from whichever side you are on.
+  // Bookings from whichever side you are on. Each carries `escrow`, whether the
+  // buyer's money is held.
   getMyBookings: (role?: 'client' | 'provider') =>
     api.get('/skills-marketplace/bookings/me', { params: role ? { role } : undefined }),
 
-  updateBooking: (bookingId: string, status: 'PENDING' | 'CONFIRMED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'DISPUTED') =>
-    api.patch(`/skills-marketplace/bookings/${bookingId}`, { status }),
+  // The buyer's way back into a card step she left: the client secret while the
+  // hold still needs authorising, or just its state once it is past that.
+  getBookingPayment: (bookingId: string) => api.get(`/skills-marketplace/bookings/${bookingId}/payment`),
+
+  // Moves a booking. The server decides who may make which move: the provider
+  // confirms (once the money is held) and starts, the buyer says it was given
+  // (which takes the money) or disputes it, either cancels before it starts.
+  updateBooking: (
+    bookingId: string,
+    status: 'CONFIRMED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'DISPUTED',
+    reason?: string
+  ) => api.patch(`/skills-marketplace/bookings/${bookingId}`, { status, ...(reason ? { reason } : {}) }),
 
   // A review against a completed booking. The server refuses one from anybody
   // who has not completed a booking or an order with that seller.
@@ -631,9 +659,24 @@ export const skillsMarketplaceApi = {
     deliveryDays: number;
   }) => api.post(`/skills-marketplace/requests/${requestId}/proposal`, data),
 
-  // Buyer picks a winner: the rest are declined and the brief stops taking pitches.
+  // Buyer picks a winner: the rest are declined and the brief stops taking
+  // pitches. The proposal's price is held on her card; the response carries
+  // `payment` with the client secret for the card step.
   acceptProposal: (requestId: string, proposalId: string) =>
     api.post(`/skills-marketplace/requests/${requestId}/proposals/${proposalId}/accept`),
+
+  // The buyer's way back into the card step, as for an order.
+  getProposalPayment: (requestId: string, proposalId: string) =>
+    api.get(`/skills-marketplace/requests/${requestId}/proposals/${proposalId}/payment`),
+
+  // The buyer says the work was done, which takes her money and pays the provider.
+  releaseProposal: (requestId: string, proposalId: string) =>
+    api.post(`/skills-marketplace/requests/${requestId}/proposals/${proposalId}/release`),
+
+  // Either side backs out before the money is released; the hold goes back to the
+  // buyer's card and the brief is open again.
+  cancelProposal: (requestId: string, proposalId: string) =>
+    api.post(`/skills-marketplace/requests/${requestId}/proposals/${proposalId}/cancel`),
 
   closeRequest: (requestId: string) =>
     api.post(`/skills-marketplace/requests/${requestId}/close`),

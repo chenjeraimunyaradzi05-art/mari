@@ -225,7 +225,7 @@ export default function CommunityGuidelinesPage() {
               </div>
             </div>
             <p className="text-sm text-slate-600 dark:text-slate-400 mt-4">
-              Certain violations (such as CSAM, terrorism, or credible threats of violence) result in immediate permanent bans and may be reported to relevant authorities.
+              The most serious reports (an intimate image shared without consent, a threat to hurt someone, child sexual abuse material, terrorism) are read first. When a signed-in member makes one, we hide the post, comment or reel straight away while a person looks at it. If it breaks these guidelines, a permanent ban can follow, and we may report it to the authorities. A ban is always a decision a person makes, so that one false report cannot close someone&apos;s account. You can also report to the eSafety Commissioner or the police yourself.
             </p>
           </div>
         </section>

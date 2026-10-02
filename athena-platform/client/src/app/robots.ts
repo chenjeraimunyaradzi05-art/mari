@@ -10,7 +10,7 @@ const siteUrl = (process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE
 
 export default function robots(): MetadataRoute.Robots {
   return {
-    rules: [{ userAgent: '*', allow: '/', disallow: ['/admin', '/dashboard', '/api/', '/settings', '/messages', '/onboarding', '/login', '/register', '/reset-password', '/forgot-password'] }],
+    rules: [{ userAgent: '*', allow: '/', disallow: ['/admin', '/dashboard', '/api/', '/settings', '/messages', '/onboarding', '/login', '/register', '/reset-password', '/forgot-password', '/lock-account', '/unlock-account'] }],
     sitemap: `${siteUrl}/sitemap.xml`,
   };
 }

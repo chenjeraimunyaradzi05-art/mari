@@ -12,8 +12,12 @@ import { formatRelativeTime } from '@/lib/utils';
 import { FormationDocuments } from '@/components/strategy/FormationDocuments';
 import { RegisterCheck } from '@/components/business/RegisterCheck';
 import { FormationFee } from '@/components/business/FormationFee';
+import { FormationFeeTerms } from '@/components/business/FormationFeeTerms';
 
 type FormationPayment = { paymentIntentId: string; clientSecret: string | null; amountCents: number; currency: string };
+
+/** The statuses a registration is in once its fee has been taken: there is an invoice to point to. */
+const AFTER_FEE = ['PAYMENT_COMPLETE', 'PAID', 'SUBMITTED', 'UNDER_REVIEW', 'ADDITIONAL_INFO_REQUIRED', 'APPROVED', 'REJECTED', 'COMPLETED'];
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
@@ -653,12 +657,29 @@ export default function FormationDetailPage() {
         </div>
       )}
 
+      {/* What the fee is for, before it is asked for, and where its invoice is
+          once it has been taken. Both are the server's wording and the server's
+          record: nothing here is a promise of its own. */}
+      {!AFTER_FEE.includes(String(formation.status ?? '')) && <FormationFeeTerms />}
+
       <FormationFee
         registrationId={id}
         status={String(formation.status ?? '')}
         payment={payment}
         onPaid={() => setPayment(null)}
       />
+
+      {AFTER_FEE.includes(String(formation.status ?? '')) && (
+        <p className="text-sm text-muted-foreground">
+          Your invoice for this fee is kept with your other invoices.{' '}
+          <Link
+            href="/dashboard/finance/invoices"
+            className="font-medium text-primary underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            Open your invoices
+          </Link>
+        </p>
+      )}
 
       <RegisterCheck defaultKind={formation.type === 'COMPANY' ? 'acn' : 'name'} defaultValue={formation.businessName ?? ''} />
 

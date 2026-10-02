@@ -16,6 +16,8 @@ import { useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/lib/hooks';
 import OnlineSafetyNotice from '@/components/compliance/OnlineSafetyNotice';
+import { QuickExitButton } from '../../dashboard/safety/QuickExit';
+import { EmergencyHelp } from '@/components/safety/EmergencyHelp';
 
 type AppealFormType =
   | 'content_removal'
@@ -77,9 +79,17 @@ const REASON_MAX_LENGTH = 5000;
 
 export default function AppealPage() {
   return (
-    <Suspense fallback={null}>
-      <AppealForm />
-    </Suspense>
+    <>
+      <Suspense fallback={null}>
+        <AppealForm />
+      </Suspense>
+      {/* Like the report form, this can be open on a screen someone else can
+          see, so it carries the same way off the page. */}
+      <QuickExitButton variant="floating" className="print:hidden" />
+      {/* A member whose account is closed cannot sign in, so this page is where
+          she may be when she needs a number to ring: it is shown to anyone. */}
+      <EmergencyHelp className="print:hidden" />
+    </>
   );
 }
 
@@ -281,11 +291,11 @@ function AppealForm() {
                     <Link href="/login?redirect=%2Fhelp%2Fappeal" className="underline font-medium">
                       Sign in and return here
                     </Link>
-                    . If you cannot get into your account at all, use the{' '}
-                    <Link href="/report?type=other" className="underline font-medium">
-                      report form
-                    </Link>{' '}
-                    to reach Trust &amp; Safety with your email address.
+                    . If you cannot get into your account at all, write to us from the{' '}
+                    <Link href="/contact" className="underline font-medium">
+                      contact page
+                    </Link>
+                    , from the email address on your account, and say you are locked out.
                   </p>
                 )}
               </div>

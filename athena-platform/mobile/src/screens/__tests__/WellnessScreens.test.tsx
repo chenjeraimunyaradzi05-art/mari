@@ -194,6 +194,43 @@ describe('WellnessCheckInScreen', () => {
     expect(shows(screen, 'That is 3 days in a row')).toBe(true);
   });
 
+  // The line about the day is hers alone, so the server shows her the lines and
+  // says nobody has been told. The phone puts both in front of her where she is
+  // looking, instead of the streak sentence being the last thing she reads.
+  it('shows the lines the server chose, and says nobody has been told, when the line she wrote sounds like crisis', async () => {
+    mockToday.mockReturnValue(answered(day()));
+    mockAddEntry.mockReturnValue(
+      answered({
+        entry: {},
+        streak: { current: 1, longest: 1, doneToday: true, lastDone: '2026-09-26', totalDone: 1 },
+        crisis: {
+          flagged: true,
+          message: 'It sounds like things are very hard right now. What you wrote is saved, and only you can read it; nobody has been told. These lines are staffed this minute.',
+          lines: [
+            { key: 'emergency', name: 'Emergency', phone: '000', url: 'https://www.triplezero.gov.au', when: '24/7', who: 'Immediate danger' },
+            { key: 'lifeline', name: 'Lifeline', phone: '13 11 14', url: 'https://www.lifeline.org.au', when: '24/7', who: 'Crisis support' },
+            { key: '1800respect', name: '1800RESPECT', phone: '1800 737 732', url: 'https://www.1800respect.org.au', when: '24/7', who: 'Domestic, family and sexual violence' },
+          ],
+        },
+      })
+    );
+
+    const screen = await renderScreen(<WellnessCheckInScreen />);
+    for (const label of ['Mood: Okay', 'Stress: A little', 'Anxiety: Calm', 'Energy: Good']) {
+      await press(byLabel(screen, label)!);
+    }
+    await act(async () => {
+      byLabel(screen, 'A line about the day')?.props.onChangeText('I cannot go on');
+    });
+    await press(pressableWithText(screen, 'Save check-in')!);
+    await settle();
+
+    expect(mockAddEntry).toHaveBeenCalledWith({ kind: 'CHECKIN', payload: { mood: 3, stress: 2, anxiety: 1, energy: 4, note: 'I cannot go on' } });
+    expect(shows(screen, 'nobody has been told')).toBe(true);
+    expect(shows(screen, 'Someone to talk to, now')).toBe(true);
+    expect(visibleText(screen)).toContain('1800 737 732');
+  });
+
   it('will not save until every scale has an answer', async () => {
     mockToday.mockReturnValue(answered(day()));
 
@@ -236,6 +273,34 @@ describe('WellnessK10Screen', () => {
     expect(text).toContain('Someone to talk to, now');
     expect(text).toContain('1300 22 4636');
     expect(text).toContain('Nothing you answered was stored');
+  });
+
+  it('shows whichever lines the server chose, 1800RESPECT among them, for a high score', async () => {
+    mockReference.mockReturnValue(answered(REFERENCE));
+    mockK10.mockReturnValue(
+      answered({
+        score: 24,
+        band: 'moderate',
+        label: 'High distress',
+        meaning: 'A high level of distress, where support makes a real difference.',
+        nextStep: 'Book a GP.',
+        crisisLines: [
+          { key: 'emergency', name: 'Emergency', phone: '000', url: 'https://www.triplezero.gov.au', when: '24/7', who: 'Immediate danger' },
+          { key: 'lifeline', name: 'Lifeline', phone: '13 11 14', url: 'https://www.lifeline.org.au', when: '24/7', who: 'Crisis support' },
+          { key: '1800respect', name: '1800RESPECT', phone: '1800 737 732', url: 'https://www.1800respect.org.au', when: '24/7', who: 'Domestic, family and sexual violence' },
+        ],
+      })
+    );
+
+    const screen = await renderScreen(<WellnessK10Screen />);
+    for (let q = 1; q <= 10; q += 1) await press(byLabel(screen, `Question ${q}: Some of the time`)!);
+    await press(pressableWithText(screen, 'See my score')!);
+    await settle();
+
+    const text = visibleText(screen);
+    expect(text).toContain('Someone to talk to, now');
+    expect(text).toContain('1800 737 732');
+    expect(text).toContain('13 11 14');
   });
 
   it('keeps her answers on screen when scoring fails', async () => {
