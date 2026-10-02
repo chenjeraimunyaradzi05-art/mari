@@ -15,8 +15,9 @@
  *   Other members, or staff, can read it. The answer carries the lines, and a
  *   HIGH safety concern is raised for staff (raiseWellnessCrisisFlag).
  * - Private: a mental load task, a daily check-in's note. The wellness pages
- *   tell her these are shown to nobody but her (no other member, no moderator
- *   or admin screen), so the answer carries the lines and nothing is raised. A
+ *   tell her these are shown to nobody but her unless she shares them (no other
+ *   member, no moderator or admin screen; a practitioner only through a share
+ *   link she made), so the answer carries the lines and nothing is raised. A
  *   flag from a private record would break the promise on the page, and she
  *   would stop writing in it, which is the opposite of help.
  *
@@ -79,12 +80,18 @@ export function sharedCrisisAnswer(check: CrisisCheck, saved: string, told: bool
  * she can read, and docs/runbooks/ENCRYPTION.md bans the phrase for that
  * reason. What is true, and what she needs to hear, is that it is hers alone on
  * ATHENA: not shown to any other member or to staff, and nothing was raised.
+ *
+ * "Unless you share it" is not a hedge. A practitioner share link whose scope
+ * includes the mental load (GET /api/wellness/share/:token) lists the tasks she
+ * logged, this one among them if the link is open when she logs it, so a
+ * sentence without the qualifier would be untrue for the very record this
+ * answer is about. It is the same sentence every wellness page uses.
  */
 export function privateCrisisAnswer(check: CrisisCheck): CrisisAnswer {
   if (!check.flagged) return { flagged: false };
   return {
     flagged: true,
-    message: `${HARD} What you wrote is saved and is shown to nobody but you; nobody has been told. ${LINES_NOW}`,
+    message: `${HARD} What you wrote is saved and is shown to nobody but you unless you share it; nobody has been told. ${LINES_NOW}`,
     lines: distressLines(),
   };
 }

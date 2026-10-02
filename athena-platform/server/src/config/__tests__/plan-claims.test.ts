@@ -65,7 +65,14 @@ function featuresOf(source: string, planId: 'free' | 'pro' | 'enterprise'): { na
   const block = source.slice(start, next === -1 ? undefined : next);
   // A chat row also says which allowance it prints (`chat: 'free' as const`);
   // the figure itself comes from the server's table when the page renders.
-  return [...block.matchAll(/\{ name: '([^']+)', included: (true|false)(?:, chat: '(?:free|paid)' as const)? \}/g)].map((m) => ({
+  const rows = [...block.matchAll(/\{ name: '([^']+)', included: (true|false)(?:, chat: '(?:free|paid)' as const)? \}/g)];
+  // Fail closed. A row written another way (double quotes, a property this
+  // pattern does not know) would otherwise be invisible to every assertion
+  // below, and an unenforced promise could be added to a card without this
+  // test noticing. Every feature row in the block has to be one it can read.
+  const declared = block.match(/\{\s*name:/g)?.length ?? 0;
+  expect(rows.length).toBe(declared);
+  return rows.map((m) => ({
     name: m[1],
     included: m[2] === 'true',
   }));

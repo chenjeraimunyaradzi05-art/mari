@@ -188,6 +188,22 @@ describe('Starting a fresh hold', () => {
     expect(result).toMatchObject({ escrowId: 'esc-new', clientSecret: 'pi_new_secret', resumed: true });
   });
 
+  it('does not put a third hold beside a renewal her bank has authorised while the order is still being moved onto it', async () => {
+    db.serviceOrder.findUnique.mockResolvedValue(order({}, { createdAt: daysAgo(6) }));
+    // The webhook that moves the order onto esc-new has not landed yet, so the
+    // order still points at esc-old and the page still offers the button.
+    db.escrowPayment.findMany.mockResolvedValue([
+      { id: 'esc-new', status: 'AUTHORIZED', paymentIntentId: 'pi_new', amount: 25000, platformFee: 2500, currency: 'AUD' },
+    ]);
+
+    await expect(startOrderReauthorisation('order-1', 'buyer-1', NOW)).rejects.toMatchObject({
+      statusCode: 409,
+      message: expect.stringMatching(/being applied/),
+    });
+    expect(createMock).not.toHaveBeenCalled();
+    expect(stripeClient.paymentIntents.retrieve).not.toHaveBeenCalled();
+  });
+
   it('starts a new one when the renewal she began was cancelled, under a new key', async () => {
     db.serviceOrder.findUnique.mockResolvedValue(order({}, { createdAt: daysAgo(6) }));
     db.escrowPayment.findMany.mockResolvedValue([

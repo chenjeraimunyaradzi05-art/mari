@@ -205,7 +205,7 @@ describe('WellnessCheckInScreen', () => {
         streak: { current: 1, longest: 1, doneToday: true, lastDone: '2026-09-26', totalDone: 1 },
         crisis: {
           flagged: true,
-          message: 'It sounds like things are very hard right now. What you wrote is saved and is shown to nobody but you; nobody has been told. These lines are staffed this minute.',
+          message: 'It sounds like things are very hard right now. What you wrote is saved and is shown to nobody but you unless you share it; nobody has been told. These lines are staffed this minute.',
           lines: [
             { key: 'emergency', name: 'Emergency', phone: '000', url: 'https://www.triplezero.gov.au', when: '24/7', who: 'Immediate danger' },
             { key: 'lifeline', name: 'Lifeline', phone: '13 11 14', url: 'https://www.lifeline.org.au', when: '24/7', who: 'Crisis support' },

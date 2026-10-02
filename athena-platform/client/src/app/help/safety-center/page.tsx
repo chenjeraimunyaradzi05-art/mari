@@ -372,7 +372,7 @@ export default function SafetyCenterPage() {
           <div className="rounded-xl border border-rose-200 bg-rose-50 p-6 dark:border-rose-800 dark:bg-rose-900/20">
             <h2 className="text-xl font-bold text-slate-900 dark:text-white">Looking after yourself, here</h2>
             <p className="mt-2 text-slate-700 dark:text-slate-300">
-              The wellness area has moderated forums for anxiety, low mood, burnout, trauma, motherhood and grief, small support circles, a directory of women&apos;s health practitioners with telehealth marked, and trackers that are encrypted before they are stored and shown only to you.
+              The wellness area has moderated forums for anxiety, low mood, burnout, trauma, motherhood and grief, small support circles, a directory of women&apos;s health practitioners with telehealth marked, and trackers that are encrypted before they are stored and shown only to you unless you share them.
             </p>
             <Link href="/wellness" className="mt-4 inline-flex items-center px-6 py-3 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors">Open wellness</Link>
           </div>

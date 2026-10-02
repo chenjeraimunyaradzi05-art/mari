@@ -214,6 +214,18 @@ export async function startOrderReauthorisation(orderId: string, actorId: string
     }
   }
 
+  // A renewal her bank has already authorised, which the order has not been
+  // moved onto yet: that move is made by the webhook (settleOrderRenewal), a
+  // moment after she finishes the card step, and until it lands the order page
+  // still offers the button. A third hold now would sit on her card beside the
+  // second for the same money, so she is asked to wait for the one she has.
+  if (earlier.some((row) => row.status === 'AUTHORIZED')) {
+    throw new ApiError(
+      409,
+      'Your renewed hold is being applied to the order, which takes a moment. Please refresh the page shortly rather than renewing again; nothing more needs paying.'
+    );
+  }
+
   const original = (escrow.metadata && typeof escrow.metadata === 'object' && !Array.isArray(escrow.metadata)
     ? escrow.metadata
     : {}) as Record<string, unknown>;

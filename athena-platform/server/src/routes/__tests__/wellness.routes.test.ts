@@ -528,7 +528,9 @@ describe('The wellness routes', () => {
         const res = await request(app).post('/api/wellness/mental-load').set(as('member')).query({ today: TODAY }).send({ category: 'PLANNING', task: 'Planning my own funeral so nobody else has to, I cannot go on', minutes: 30 }).expect(201);
 
         expectLines(res.body.data.crisis);
-        expect(res.body.data.crisis.message).toContain('shown to nobody but you');
+        // The qualifier is load-bearing: a practitioner share link with the
+        // mental-load scope lists the tasks she logged, this one included.
+        expect(res.body.data.crisis.message).toContain('shown to nobody but you unless you share it');
         expect(res.body.data.crisis.message).toContain('nobody has been told');
         // A task is stored as she typed it, and a note is opened by the server
         // to show it to her, so "only you can read it" is a promise neither keeps.
