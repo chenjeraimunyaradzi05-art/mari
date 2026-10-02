@@ -474,8 +474,13 @@ function ReportContent() {
               placeholder="you@example.com"
               className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
             />
+            {/* What the server does with the address (content-report.service
+                runReportIntakeConsequences, sendReportOutcome): a confirmation
+                with the reference at once, and the outcome when it is decided.
+                This used to say we would write only if we needed more, under a
+                confirmation screen promising to write with the outcome. */}
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              We&apos;ll only contact you if we need additional information
+              Optional. If you give one, we&apos;ll email you a confirmation with your reference number, and write again with the outcome. We don&apos;t share it with anyone you report.
             </p>
           </div>
 

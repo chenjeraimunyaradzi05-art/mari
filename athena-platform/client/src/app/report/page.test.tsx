@@ -108,6 +108,21 @@ describe('what the form sends', () => {
 
     expect(await screen.findByText('RPT-20261001-ABCDE')).toBeInTheDocument();
   });
+
+  // The server emails the address a confirmation at intake and the outcome at
+  // decision (content-report.service). The field used to say we would write
+  // only if we needed more, under a confirmation promising to write with the
+  // outcome; it says what happens.
+  it('says what her email address is for: a confirmation now, the outcome later, and nobody she reports', () => {
+    renderForm();
+
+    const help = screen.getByLabelText(/your email/i).parentElement?.textContent ?? '';
+
+    expect(help).toMatch(/confirmation with your reference number/i);
+    expect(help).toMatch(/write again with the outcome/i);
+    expect(help).toMatch(/don't share it with anyone you report/i);
+    expect(help).not.toMatch(/only contact you if we need/i);
+  });
 });
 
 /**
