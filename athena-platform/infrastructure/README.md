@@ -53,7 +53,18 @@ which is decided by the top-level folder, and the list is
 | Folders | What they hold | Who can read them | How a row refers to them |
 | --- | --- | --- | --- |
 | `avatars/`, `covers/`, `posts/`, `videos/`, `thumbnails/`, `captions/`, `sounds/` | Public by design: they are shown to other members | Anyone, through the CDN | `CDN_URL/key` |
-| `resumes/`, `documents/` | One member's own file | The owner, and hiring staff on an application the file was attached to, through the API (`POST /api/media/download-url` gives a one-hour signed link) | `https://<bucket>.s3.ap-southeast-2.amazonaws.com/key`, which is a name and not a link anyone can open |
+| `resumes/`, `documents/` | One member's own file | The owner, and hiring staff on an application the file was attached to, through the API (`POST /api/media/download-url` gives a signed link that lives five minutes) | `https://<bucket>.s3.ap-southeast-2.amazonaws.com/key`, which is a name and not a link anyone can open |
+| `chat/<conversation or group id>/` | A picture, voice note, clip or PDF sent in a direct message or a group chat | The people in that conversation now, through the same API call and the same five-minute link; nobody on either side of a block with the sender ([`server/src/services/chat-attachment.service.ts`](../server/src/services/chat-attachment.service.ts)) | The message carries the key only, never a link |
+
+Files under `chat/` are removed when the message they were sent in expires, is
+unsent, or belongs to a member whose account is erased, except behind a message
+somebody has reported, which moderators need to see
+([`server/src/services/chat-attachment-cleanup.service.ts`](../server/src/services/chat-attachment-cleanup.service.ts)).
+A file sent in a conversation before chat files were private (before October
+2026) was uploaded as a post picture, a reel or a sound, into a public folder,
+and is left as it is: it is still a public link, and it is not deleted with its
+message. Operating the bucket day to day, and checking it from outside, is in
+[`docs/runbooks/MEDIA-BUCKET.md`](../docs/runbooks/MEDIA-BUCKET.md).
 
 The code only chooses which address to hand out. Whether a file can be read is
 decided by the bucket policy and by what the CDN may fetch, so those have to
@@ -98,15 +109,20 @@ agree with the table. Set it up once, in this order:
    }
    ```
 
-   Because the distribution is not allowed to read `resumes/` or `documents/`, a
-   request for one through the CDN is refused even if somebody learns the key.
+   Because the distribution is not allowed to read `resumes/`, `documents/` or
+   `chat/`, a request for one through the CDN is refused even if somebody learns
+   the key.
 4. **Tell the API and the web app where the CDN is.** `CDN_URL=https://<the
    distribution's domain, or your own>` on the API host. On Netlify,
    `NEXT_PUBLIC_MEDIA_HOST=<the same host name>` (read at build time, so deploy
-   again), which is what lets `next/image` load avatars from it. Leaving
-   `CDN_URL` empty serves public files from the bucket's own address, which only
-   works if a bucket policy makes those seven folders publicly readable, which
-   Block Public Access forbids; use the CDN.
+   again), which is what lets `next/image` load avatars from it. In production
+   the API does not start without `CDN_URL`, and refuses the bucket's own
+   `amazonaws.com` address ([`server/src/utils/env.ts`](../server/src/utils/env.ts)):
+   a public file is stored on its row as `${CDN_URL}/key`, so a missing value is
+   permanent for every file uploaded while it was missing, and the bucket's own
+   address answers 403 with Block Public Access on. The only way to make
+   pictures load without a CDN would be to open the bucket, which would open
+   every résumé and chat file with them.
 5. **Prove it.** With the diagnostics token, call
    `GET $API_URL/health/launch-readiness?probe=media` and read the
    `MEDIA_EXPOSURE` check. It passes when a public probe could be read and a
@@ -118,7 +134,9 @@ agree with the table. Set it up once, in this order:
    could not tell, and never counts silence as safe). The check writes and deletes two small objects, so it only runs when
    asked with `?probe=media`. The daily job in
    [`uptime.yml`](../../.github/workflows/uptime.yml) repeats the check when the
-   repository has the `HEALTH_DIAGNOSTICS_TOKEN` secret.
+   repository has the `HEALTH_DIAGNOSTICS_TOKEN` secret. The same thing by hand,
+   from any machine and with no credentials, is four `curl` requests, listed in
+   [`docs/runbooks/MEDIA-BUCKET.md`](../docs/runbooks/MEDIA-BUCKET.md).
 
 A member's file never reaches the container's disk in production: the API
 refuses to start without S3 and answers a failed write with a 503. The `uploads/`

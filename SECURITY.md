@@ -42,6 +42,9 @@ and `src/routes/auth.routes.ts`), not a separate service.
 - Rate limiting with counters shared across instances (athena-platform/server/src/utils/rate-limit-store.ts), keyed on the visitor's real address, which the web proxy forwards under a shared secret (middleware/trustedProxy.ts)
 - Outbound fetches of member-supplied links restricted to public hosts, every redirect checked (athena-platform/server/src/utils/outbound-url.ts)
 - Uploads content-sniffed, read under per-kind size ceilings, and served sandboxed
+- Every uploaded image re-encoded with sharp so EXIF, GPS and other metadata are dropped and orientation is kept; video and audio copied by ffmpeg without tags, chapters or data tracks (athena-platform/server/src/routes/media.routes.ts, services/video-pipeline.service.ts)
+- Résumés, documents and files sent in conversations kept in private bucket folders with Block Public Access on, addressed by key only, and opened through five-minute signed links minted for the owner, the hiring staff of an application, or the people in the conversation; chat files deleted with their message or member (athena-platform/server/src/utils/media-storage.ts, services/chat-attachment.service.ts)
+- Images screened by the moderation provider on a copy it can read (at most 5 MiB, JPEG or PNG) whatever size was uploaded, with the outage policy in the operator's hands (athena-platform/server/src/services/moderation.service.ts)
 - Stripe webhook signature verification
 - Nonce-based CSP on the web app (athena-platform/client/src/proxy.ts), security headers on both tiers, secrets masked in logs
 

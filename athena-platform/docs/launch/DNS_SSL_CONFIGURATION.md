@@ -267,9 +267,12 @@ no way to tell the block from an outage.
 The bucket layout, the public and private folders and the bucket policy are
 in `athena-platform/infrastructure/README.md` ("Media bucket"). The
 distribution reads the **public folders only**, through Origin Access Control;
-résumés and documents are private and are served by the API after it has
-checked who is asking (`athena-platform/server/src/utils/media-storage.ts`),
-never by the CDN, so there are no CloudFront signed URLs or cookies.
+résumés, documents and files sent in a conversation (`resumes/`, `documents/`
+and `chat/`) are private and are served by the API after it has checked who is
+asking (`athena-platform/server/src/utils/media-storage.ts`), as a signed S3
+link that lives five minutes, never by the CDN, so there are no CloudFront
+signed URLs or cookies. `CDN_URL` is required of the API in production and must
+be this distribution's address, not the bucket's own.
 
 ```yaml
 distribution:
