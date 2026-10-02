@@ -309,8 +309,9 @@ app, it is a build-time value), and call
 
 ## 6. Security Headers
 
-The web app's security headers are set in `athena-platform/client/netlify.toml`
-(the Content-Security-Policy among them) and `athena-platform/client/next.config.js`;
+The web app's security headers are set in three places that have to agree:
+`athena-platform/client/netlify.toml` (the Content-Security-Policy among them),
+`athena-platform/client/public/_headers` and `athena-platform/client/next.config.js`;
 the API's are set by Helmet in `athena-platform/server/src/index.ts`. The CSP
 allows connections, images and media from any `https:` or `wss:` origin, so
 moving to a custom domain changes nothing in it. What does change is the
@@ -319,6 +320,18 @@ variables that name the hosts: `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_APP_URL` and
 lets `next/image` load from), and `CLIENT_URL`, `FRONTEND_URL`, `ALLOWED_ORIGINS`,
 `API_URL` and `CDN_URL` on the API. They are build-time values on Netlify, so the
 web app is redeployed after they change.
+
+The `Permissions-Policy` is the same string in all three files, and it has to
+stay that way: a browser that receives several policies enforces every one of
+them, so a feature one layer refuses is refused everywhere. That is how
+`microphone=()` quietly broke voice notes in chat and the interview coach's
+recorder while the buttons stayed on screen. The policy now lets the site
+itself use the microphone (`microphone=(self)`), keeps the camera, location,
+screen capture and the sensor APIs off because nothing in the client asks for
+them, and delegates `payment` to Stripe's frame on js.stripe.com so the wallet
+buttons inside its payment form can work. A jest test in the client
+(`permissions-policy.test.ts` under `src/__tests__/`) fails if the three files
+drift apart or the policy stops matching what the client code uses.
 
 Verify at securityheaders.com after the first deploy on the new domain.
 

@@ -77,7 +77,20 @@ const nextConfig = {
           // leaked page content where it survived; 0 is what OWASP advises.
           { key: 'X-XSS-Protection', value: '0' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(self), interest-cohort=()' },
+          // One string, the same in public/_headers and the sibling
+          // netlify.toml. A browser given several Permissions-Policy headers
+          // enforces every one of them, so the strictest layer wins and a
+          // feature any layer refuses is refused everywhere. microphone=()
+          // here and in the other two was what made every voice note
+          // (components/chat/VoiceRecorder.tsx) and every interview-coach
+          // recording fail with a permission error while the buttons stayed
+          // on screen. Only this origin may use the microphone. Nothing under
+          // src/ asks for the camera, location or screen capture, so those
+          // stay off; payment is delegated to Stripe's frame so the wallet
+          // buttons inside its PaymentElement can use the Payment Request
+          // API. src/__tests__/permissions-policy.test.ts fails if the three
+          // layers drift apart or the policy stops matching what src/ uses.
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(self), geolocation=(), payment=(self "https://js.stripe.com"), usb=(), magnetometer=(), gyroscope=(), accelerometer=(), display-capture=()' },
           { key: 'Cross-Origin-Opener-Policy', value: 'same-origin-allow-popups' },
           { key: 'X-Permitted-Cross-Domain-Policies', value: 'none' },
         ],
