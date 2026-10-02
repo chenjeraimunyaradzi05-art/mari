@@ -15,6 +15,7 @@
  */
 
 import request from 'supertest';
+import jwt from 'jsonwebtoken';
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 
 jest.mock('../../utils/prisma', () => ({
@@ -80,6 +81,7 @@ jest.mock('../../utils/logger', () => ({
 }));
 
 import { app } from '../../index';
+import { generateAccessToken, generateRefreshToken } from '../../utils/jwt';
 import { prisma as prismaTyped } from '../../utils/prisma';
 import { getCreatorAnalytics } from '../../services/creator.service';
 import { getRecommendedJobs } from '../../services/search.service';
@@ -286,11 +288,17 @@ describe('request size', () => {
   // A string of this many characters in a JSON body is about this many bytes.
   const body = (kilobytes: number) => ({ padding: 'x'.repeat(kilobytes * 1024) });
 
+  // The larger limits are read ahead of any route's authenticate (which this
+  // suite replaces), so the parser decides on the token alone: a real signed
+  // access token, as the web app and the phone app send.
+  const claims = { userId: 'ada', email: 'ada@athena.com', role: 'USER', persona: 'GENERAL' };
+  const signedIn = () => ({ Authorization: `Bearer ${generateAccessToken(claims)}` });
+
   it('answers 413 for a body over 256kb on a route with no larger limit, sign-in included', async () => {
     const login = await request(app).post('/api/auth/login').send(body(300));
     expect(login.status).toBe(413);
 
-    const other = await request(app).post('/api/formation').send(body(300));
+    const other = await request(app).post('/api/formation').set(signedIn()).send(body(300));
     expect(other.status).toBe(413);
     expect(other.body.message).toMatch(/too large/i);
   });
@@ -302,17 +310,41 @@ describe('request size', () => {
     expect(res.status).toBe(400);
   });
 
-  it('lets the routes that take a spreadsheet or an article take it', async () => {
+  it('lets the routes that take a spreadsheet or an article take it from a signed-in caller', async () => {
     // Refused by the handler for what it holds (a 400), not by the parser for its size.
-    const wellness = await request(app).post('/api/wellness/entries/import').send(body(300));
+    const wellness = await request(app).post('/api/wellness/entries/import').set(signedIn()).send(body(300));
     expect(wellness.status).not.toBe(413);
 
-    const blog = await request(app).post('/api/admin/blog').set('x-test-role', 'ADMIN').send(body(300));
+    const blog = await request(app).post('/api/admin/blog').set(signedIn()).set('x-test-role', 'ADMIN').send(body(300));
     expect(blog.status).not.toBe(413);
   });
 
+  it('holds a caller with no token to the default on those routes, so a stranger cannot make the API buffer megabytes', async () => {
+    const res = await request(app).post('/api/admin/breaches').set('x-test-role', 'ADMIN').send(body(300));
+
+    expect(res.status).toBe(413);
+  });
+
+  it('treats a forged, expired or refresh token as no token', async () => {
+    const forged = await request(app)
+      .post('/api/wellness/entries/import')
+      .set('Authorization', 'Bearer eyJhbGciOiJIUzI1NiJ9.e30.not-a-signature')
+      .send(body(300));
+    expect(forged.status).toBe(413);
+
+    const refresh = await request(app)
+      .post('/api/wellness/entries/import')
+      .set('Authorization', `Bearer ${generateRefreshToken(claims)}`)
+      .send(body(300));
+    expect(refresh.status).toBe(413);
+
+    const expired = jwt.sign({ ...claims, typ: 'access' }, 'dev-only-secret-not-for-production', { algorithm: 'HS256', expiresIn: -60 });
+    const stale = await request(app).post('/api/wellness/entries/import').set('Authorization', `Bearer ${expired}`).send(body(300));
+    expect(stale.status).toBe(413);
+  });
+
   it('still refuses a body past even the larger limit', async () => {
-    const res = await request(app).post('/api/wellness/entries/import').send(body(1200));
+    const res = await request(app).post('/api/wellness/entries/import').set(signedIn()).send(body(1200));
 
     expect(res.status).toBe(413);
   });

@@ -18,13 +18,23 @@
  * request whose body an earlier parser has read, so a route in this list is
  * read once, at its own limit, and never meets the default.
  *
+ * A larger limit is only for a caller who has signed in. The parsers run before
+ * any route's `authenticate`, so without this a stranger could post five
+ * megabytes at /api/admin/breaches and have the API buffer and parse all of it
+ * before being told to sign in. The check here is the signature on the bearer
+ * token, which costs one HMAC and no database read: a request that carries no
+ * token, a forged one, an expired one or a refresh token is read by the default
+ * parser below, and at 256kb it is answered 413 like any other over-long body.
+ * The route's own `authenticate` still decides whether the session is live.
+ *
  * Not listed, because they never meet this parser: the Stripe and SendGrid
  * webhooks, which take the raw body (mounted before this in index.ts), and file
  * uploads, which are multipart and read by multer against their own per-kind
  * size limits.
  */
 
-import express, { Application } from 'express';
+import express, { Application, Request, RequestHandler } from 'express';
+import { verifyToken } from '../utils/jwt';
 
 export const DEFAULT_JSON_LIMIT = '256kb';
 
@@ -79,10 +89,35 @@ export const LARGER_JSON_BODIES: readonly LargerJsonBody[] = [
   },
 ];
 
-/** Mounts the JSON and form body parsers: each larger route at its own limit, then everything else at the default. */
+/**
+ * Whether the request carries an access token this server signed and that has
+ * not expired. Says nothing about the session behind it, which is for
+ * `authenticate` to check once the body is read.
+ */
+export function carriesSignedAccessToken(req: Request): boolean {
+  const header = req.headers.authorization;
+  if (typeof header !== 'string' || !header.startsWith('Bearer ')) {
+    return false;
+  }
+  const token = header.slice('Bearer '.length).trim();
+  if (!token) {
+    return false;
+  }
+  try {
+    verifyToken(token, 'access');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Mounts the JSON and form body parsers: each larger route at its own limit for a signed-in caller, then everything else at the default. */
 export function mountJsonBodyParsers(app: Application): void {
   for (const { path, limit } of LARGER_JSON_BODIES) {
-    app.use(path, express.json({ limit }));
+    const parser = express.json({ limit });
+    const forSignedInCallers: RequestHandler = (req, res, next) =>
+      carriesSignedAccessToken(req) ? parser(req, res, next) : next();
+    app.use(path, forSignedInCallers);
   }
   app.use(express.json({ limit: DEFAULT_JSON_LIMIT }));
   app.use(express.urlencoded({ extended: true }));

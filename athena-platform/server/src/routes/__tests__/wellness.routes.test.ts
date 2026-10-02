@@ -528,8 +528,11 @@ describe('The wellness routes', () => {
         const res = await request(app).post('/api/wellness/mental-load').set(as('member')).query({ today: TODAY }).send({ category: 'PLANNING', task: 'Planning my own funeral so nobody else has to, I cannot go on', minutes: 30 }).expect(201);
 
         expectLines(res.body.data.crisis);
-        expect(res.body.data.crisis.message).toContain('only you can read it');
+        expect(res.body.data.crisis.message).toContain('shown to nobody but you');
         expect(res.body.data.crisis.message).toContain('nobody has been told');
+        // A task is stored as she typed it, and a note is opened by the server
+        // to show it to her, so "only you can read it" is a promise neither keeps.
+        expect(res.body.data.crisis.message).not.toMatch(/only you can read/i);
         expect(prisma.adminFlag.create).not.toHaveBeenCalled();
         expect(prisma.notification.createMany).not.toHaveBeenCalled();
         // The row is stored as she wrote it.

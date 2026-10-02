@@ -15,9 +15,10 @@
  *   Other members, or staff, can read it. The answer carries the lines, and a
  *   HIGH safety concern is raised for staff (raiseWellnessCrisisFlag).
  * - Private: a mental load task, a daily check-in's note. The wellness pages
- *   tell her these are read only by her, so the answer carries the lines and
- *   nothing is raised. A flag from a private record would break the promise on
- *   the page, and she would stop writing in it, which is the opposite of help.
+ *   tell her these are shown to nobody but her (no other member, no moderator
+ *   or admin screen), so the answer carries the lines and nothing is raised. A
+ *   flag from a private record would break the promise on the page, and she
+ *   would stop writing in it, which is the opposite of help.
  *
  * It is a phrase screen. It reaches for the lines; it never blocks, rewrites or
  * refuses what she wrote (see detectCrisisLanguage).
@@ -71,12 +72,19 @@ export function sharedCrisisAnswer(check: CrisisCheck, saved: string, told: bool
  * The answer for a private record. Nobody else has been told and the answer
  * says so, because that is the promise the page makes and the reason she wrote
  * it there.
+ *
+ * It used to say "only you can read it". A check-in note is encrypted before it
+ * is stored, but ATHENA's servers hold the key and open it to show it to her,
+ * and a mental load task is stored as she typed it; neither is something only
+ * she can read, and docs/runbooks/ENCRYPTION.md bans the phrase for that
+ * reason. What is true, and what she needs to hear, is that it is hers alone on
+ * ATHENA: not shown to any other member or to staff, and nothing was raised.
  */
 export function privateCrisisAnswer(check: CrisisCheck): CrisisAnswer {
   if (!check.flagged) return { flagged: false };
   return {
     flagged: true,
-    message: `${HARD} What you wrote is saved, and only you can read it; nobody has been told. ${LINES_NOW}`,
+    message: `${HARD} What you wrote is saved and is shown to nobody but you; nobody has been told. ${LINES_NOW}`,
     lines: distressLines(),
   };
 }

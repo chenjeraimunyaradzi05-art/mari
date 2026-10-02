@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals
 
 const prismaMock: any = {
   user: { findUnique: jest.fn() },
+  creatorProfile: { findUnique: jest.fn() },
   group: { findUnique: jest.fn() },
   groupMember: { findUnique: jest.fn(), upsert: jest.fn() },
   groupJoinRequest: { findUnique: jest.fn(), upsert: jest.fn(), update: jest.fn() },
@@ -56,15 +57,24 @@ import {
 import { ADMISSION_REFUSED_MESSAGE, requireWomanVerifiedFor, womanVerifiedRefusal } from '../woman-gate-surfaces';
 import { WOMAN_GATE_REJECTED_MESSAGE, WOMAN_GATE_UNVERIFIED_MESSAGE } from '../account-gates';
 import { accountStandingRefusal } from '../account-standing';
+import { CREATOR_TERMS_VERSION } from '../../config/creator-terms';
 import creatorRoutes from '../../routes/creator.routes';
 import groupRoutes from '../../routes/group.routes';
 import { errorHandler } from '../errorHandler';
 
 const original = process.env;
 
+// An adult's date of birth. The one user mock answers every read of her row,
+// whatever was selected, and the payout route runs the age gate before the
+// women-only surface (requireAdultAccount, then requireCreatorTerms, then
+// requireWomanVerifiedFor), so a row with no date of birth would be refused
+// as DATE_OF_BIRTH_REQUIRED before this file's gate was ever asked.
+const ADULT_DATE_OF_BIRTH = new Date('1990-05-12');
+
 function standing(status: string) {
   prismaMock.user.findUnique.mockResolvedValue({
     womanVerificationStatus: status,
+    dateOfBirth: ADULT_DATE_OF_BIRTH,
     dvSafetyProfile: null,
     profile: null,
   });
@@ -255,6 +265,13 @@ describe('requireWomanVerifiedFor as route middleware', () => {
 describe('POST /api/creator/payouts/request', () => {
   const asked = () => request(appWith('/api/creator', creatorRoutes)).post('/api/creator/payouts/request');
 
+  beforeEach(() => {
+    // A creator who has accepted the current Creator Terms Addendum, so the
+    // terms gate in front of the women-only surface lets her through and
+    // what is being tested is this file's gate alone.
+    prismaMock.creatorProfile.findUnique.mockResolvedValue({ creatorTermsVersion: CREATOR_TERMS_VERSION });
+  });
+
   it('pays out an unreviewed creator while the founder has not switched the surface on', async () => {
     await asked().expect(200);
     expect(requestPayout).toHaveBeenCalledWith('her');
@@ -340,6 +357,7 @@ describe('POST /api/groups/:id/join-requests/:requestId/approve', () => {
   function newcomerIs(status: string) {
     prismaMock.user.findUnique.mockImplementation(async ({ where }: any) => ({
       womanVerificationStatus: where.id === 'newcomer' ? status : 'VERIFIED',
+      dateOfBirth: ADULT_DATE_OF_BIRTH,
       dvSafetyProfile: null,
       profile: null,
     }));
