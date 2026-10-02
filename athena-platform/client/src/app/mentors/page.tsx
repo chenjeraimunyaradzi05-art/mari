@@ -33,6 +33,7 @@ import {
   TileSkeleton,
 } from '@/components/layout/PageShell';
 import { mentorApi } from '@/lib/api';
+import { MENTOR_PLATFORM_FEE_PERCENT, SESSION_CONFIRMATION_HOURS } from '@/lib/pricing';
 
 /* ----------------------------------------------------------------- types */
 
@@ -327,7 +328,7 @@ export default function MentorsPage() {
                 },
                 {
                   title: 'You meet, then you pay',
-                  body: 'Payment is taken once the session is marked complete. ATHENA keeps 20% of each session and the rest goes to the mentor.',
+                  body: `Your card is charged once the session has happened: when you confirm it, or ${SESSION_CONFIRMATION_HOURS} hours after your mentor marks it complete unless you tell us it did not take place. ATHENA keeps ${MENTOR_PLATFORM_FEE_PERCENT}% of each session and the rest goes to the mentor.`,
                 },
               ].map((step, index) => (
                 <li key={step.title} className="tile-soft flex gap-3 p-4">
@@ -412,8 +413,12 @@ export default function MentorsPage() {
             <p className="text-sm leading-6 text-slate-600 dark:text-slate-400">
               You add your specialisations, your hourly rate and whether you are currently taking
               bookings. Requests arrive with a note about what the person wants help with, and you
-              can decline any of them. ATHENA keeps 20% of each completed session and the remaining
-              80% is paid out to you.
+              can decline any of them. ATHENA keeps {MENTOR_PLATFORM_FEE_PERCENT}% of each completed session and the remaining{' '}
+              {100 - MENTOR_PLATFORM_FEE_PERCENT}% is paid out to you. Every fee ATHENA takes is on the{' '}
+              <Link href="/fees" className="font-medium text-rose-600 hover:underline dark:text-rose-400">
+                fees page
+              </Link>
+              .
             </p>
           </Section>
         </div>

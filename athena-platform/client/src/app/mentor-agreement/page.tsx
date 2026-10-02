@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { MENTOR_PLATFORM_FEE_PERCENT, MINIMUM_PAYOUT_AUD } from '@/lib/pricing';
+import { DISPUTE_WINDOW_DAYS, MENTOR_PLATFORM_FEE_PERCENT, MINIMUM_PAYOUT_AUD, SESSION_CONFIRMATION_HOURS } from '@/lib/pricing';
 
 /**
  * What a mentor agrees to when she ticks the box on the become-a-mentor form.
@@ -57,7 +57,11 @@ export default function MentorAgreementPage() {
             </li>
             <li>
               ATHENA keeps {MENTOR_PLATFORM_FEE_PERCENT}% of each paid session. The rest goes to your Stripe account, on the payout schedule Stripe
-              sets for it.
+              sets for it. Card processing is covered by ATHENA’s share, and every fee ATHENA takes is on the{' '}
+              <Link href="/fees" className="text-primary-600 hover:underline dark:text-primary-400">
+                fees page
+              </Link>
+              .
             </li>
             <li>
               ATHENA sets no minimum on what you can withdraw from your Stripe balance, and takes no fee when you do. The
@@ -65,12 +69,13 @@ export default function MentorAgreementPage() {
               it sets for your account, and its own rules apply.
             </li>
             <li>
-              A mentee&apos;s card is held when she books and is charged when the session is marked complete, which can
-              happen once its booked time has passed. A card hold lasts about seven days, so a paid session can only be
-              booked up to six days ahead, and you can mark it complete for a day after the hour. You see a paid request,
-              and are told about it, once the mentee has authorised the payment, so you can be sure there is money behind
-              it before you accept. A request that is not paid for within a few hours is cancelled, and nothing is
-              charged.
+              A mentee&apos;s card is held when she books and is charged once the session has happened: at once if she
+              confirms it herself, or {SESSION_CONFIRMATION_HOURS} hours after you mark it complete unless she tells ATHENA
+              it did not take place. Either of you can mark it complete once its booked time has passed. A card hold lasts
+              about seven days, so a paid session can only be booked up to six days ahead, and you can mark it complete for
+              a day after the hour. You see a paid request, and are told about it, once the mentee has authorised the
+              payment, so you can be sure there is money behind it before you accept. A request that is not paid for within
+              a few hours is cancelled, and nothing is charged.
             </li>
             <li>
               Either of you can cancel a confirmed session until it is due to end, and the hold is released. After
@@ -80,8 +85,11 @@ export default function MentorAgreementPage() {
         </section>
       </div>
       <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300">
-        A mentee who says a session did not take place can raise it with ATHENA support. An account suspended under
-        the Terms of Service is taken out of the mentor directory and cannot be booked.
+        A mentee who says a session did not take place can say so from her sessions page, while the payment is held and
+        for {DISPUTE_WINDOW_DAYS} days after it was charged. The payment then stays held, neither of you can change the
+        session, and you can give your side once; a member of ATHENA&apos;s team releases the payment to you or gives it
+        back to her, and both of you are told. An account suspended under the Terms of Service is taken out of the mentor
+        directory and cannot be booked.
       </div>
       <div className="mt-8">
         <Link

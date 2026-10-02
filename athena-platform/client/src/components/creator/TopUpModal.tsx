@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import { PaymentIntentForm } from '@/components/payments/PaymentIntentForm';
 import { creatorApi } from '@/lib/api';
 import { apiMessage } from '@/lib/strategy-api';
+import { CREATOR_SHARE_RANGE_PERCENT } from '@/lib/pricing';
 import { cn, formatCurrency } from '@/lib/utils';
 
 type Started = { paymentIntentId: string; clientSecret: string | null; amount: number; giftPoints: number; currency: string };
@@ -63,7 +64,9 @@ export function TopUpModal({ isOpen, onClose, onTopped }: { isOpen: boolean; onC
         {!started ? (
           <>
             <p className="text-sm text-slate-600 dark:text-slate-300">
-              Points are what gifts are sent with. One point costs one cent, and points are bought in Australian dollars. Creators keep most of what a gift is worth; the rest is the platform fee.
+              Points are what gifts are sent with. One point costs one cent, and points are bought in Australian dollars. Creators keep{' '}
+              {CREATOR_SHARE_RANGE_PERCENT.min}% to {CREATOR_SHARE_RANGE_PERCENT.max}% of what a gift is worth, by creator tier; the rest is
+              ATHENA’s fee.
             </p>
             <fieldset>
               <legend className="mb-2 block text-xs font-medium uppercase tracking-wide text-slate-500">How much</legend>

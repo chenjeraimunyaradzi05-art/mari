@@ -508,6 +508,7 @@ export default function HomepageLanding() {
                 <li><Link href="/events" className="hover:text-rose-600 dark:hover:text-rose-300">Events</Link></li>
                 <li><Link href="/dashboard/ai" className="hover:text-rose-600 dark:hover:text-rose-300">AI tools</Link></li>
                 <li><Link href="/pricing" className="hover:text-rose-600 dark:hover:text-rose-300">Pricing</Link></li>
+                <li><Link href="/fees" className="hover:text-rose-600 dark:hover:text-rose-300">Fees</Link></li>
               </ul>
             </div>
 
