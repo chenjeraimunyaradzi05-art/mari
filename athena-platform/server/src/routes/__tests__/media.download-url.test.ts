@@ -13,9 +13,10 @@ jest.mock('../../utils/prisma', () => ({
     groupMember: { findUnique: jest.fn() },
     userSafetySettings: { findMany: jest.fn() },
     dvSafetyProfile: { findFirst: jest.fn() },
-    // The file behind a reported message is kept, and opened by staff through
-    // the report's copy of the message; a file a message carries is not deleted
-    // by its key.
+    // The people in the conversation open a file only while a message on the
+    // thread carries it. The file behind a reported message is kept, and opened
+    // by staff through the report's copy of the message. Nothing under the chat
+    // folder is deleted by its key.
     contentReport: { findFirst: jest.fn() },
     message: { findFirst: jest.fn() },
   },
@@ -164,7 +165,8 @@ describe('POST /api/media/download-url for a résumé', () => {
  * A file sent in a conversation. The key names the conversation and the sender
  * (utils/chat-attachments), so who may open it is answered from the key and the
  * tables that already say who is in the thread: the people in it now, unless a
- * block stands between the reader and the sender. Every refusal is "not found".
+ * block stands between the reader and the sender, and only while a message on
+ * the thread carries the file. Every refusal is "not found".
  */
 describe('POST /api/media/download-url for a file sent in a conversation', () => {
   const CHAT_KEY = 'chat/conv-1/sender-1_0b0a1c2e-3f4a-4b5c-8d6e-7f8091a2b3c4.webp';
@@ -177,9 +179,44 @@ describe('POST /api/media/download-url for a file sent in a conversation', () =>
     prisma.groupMember.findUnique.mockResolvedValue(null);
     prisma.userSafetySettings.findMany.mockResolvedValue([]);
     prisma.dvSafetyProfile.findFirst.mockResolvedValue(null);
+    // The message that carries the file is still on the thread.
+    prisma.message.findFirst.mockResolvedValue({ id: 'msg-1' });
+    prisma.contentReport.findFirst.mockResolvedValue(null);
   });
 
   const inConversation = () => prisma.conversationParticipant.findUnique.mockResolvedValue({ id: 'p-1' });
+
+  it('asks that a message still on the thread carries the file: this conversation, this sender, not unsent, not expired', async () => {
+    currentUser = { id: 'reader-1', role: 'USER', email: 'reader@example.com' };
+    inConversation();
+
+    await request(app).post('/api/media/download-url').send({ key: CHAT_KEY }).expect(200);
+
+    const where = prisma.message.findFirst.mock.calls[0][0].where;
+    expect(where.AND[0]).toEqual({
+      conversationId: 'conv-1',
+      senderId: 'sender-1',
+      deletedAt: null,
+      metadata: { path: ['attachments'], array_contains: [{ key: CHAT_KEY }] },
+    });
+    expect(JSON.stringify(where.AND[1])).toContain('expiresAt');
+  });
+
+  it('a file whose message is gone is not found, for the sender too, and the reports are never consulted', async () => {
+    // Unsent, swept or erased: the file went with the message, unless somebody
+    // reported it, in which case it is kept for staff. The sender must get the
+    // same answer either way, or asking would tell her she had been reported.
+    currentUser = { id: 'sender-1', role: 'USER', email: 'sender@example.com' };
+    inConversation();
+    prisma.message.findFirst.mockResolvedValue(null);
+    prisma.contentReport.findFirst.mockResolvedValue({ id: 'rep-1' });
+
+    const res = await request(app).post('/api/media/download-url').send({ key: CHAT_KEY }).expect(404);
+
+    expect(res.body.message).toBe('File not found');
+    expect(prisma.contentReport.findFirst).not.toHaveBeenCalled();
+    expect(getSignedUrl).not.toHaveBeenCalled();
+  });
 
   it('the other person in the conversation gets a link that lives five minutes', async () => {
     currentUser = { id: 'reader-1', role: 'USER', email: 'reader@example.com' };
@@ -300,6 +337,8 @@ describe('POST /api/media/download-url for the file behind a reported message', 
     prisma.userSafetySettings.findMany.mockResolvedValue([]);
     prisma.dvSafetyProfile.findFirst.mockResolvedValue(null);
     prisma.contentReport.findFirst.mockResolvedValue(null);
+    // The reported message is usually gone by the time staff look.
+    prisma.message.findFirst.mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -307,7 +346,7 @@ describe('POST /api/media/download-url for the file behind a reported message', 
     else process.env.STAFF_TWO_FACTOR_REQUIRED = twoFactorSetting;
   });
 
-  it('a moderator with a second factor opens a file a report names, though she is not in the conversation', async () => {
+  it('a moderator with a second factor opens a file a report names, though she is not in the conversation and the message is gone', async () => {
     currentUser = { ...moderator };
     prisma.contentReport.findFirst.mockResolvedValue({ id: 'rep-1' });
 
@@ -360,8 +399,10 @@ describe('POST /api/media/download-url for the file behind a reported message', 
 /**
  * A file sent in a conversation goes with its message: unsending it, the
  * disappearing sweep and an erasure remove the file, and all of them keep the
- * file behind a reported message. Deleting by key would go round that, so the
- * sender may delete by key only an upload no message ever carried.
+ * file behind a reported message. Nothing under the chat folder is deleted by
+ * its key, and the answer is the same whatever has become of the message: one
+ * that differed once the message was gone, by whether the file was still kept,
+ * would tell the sender she had been reported.
  */
 describe('DELETE /api/media/delete for a file sent in a conversation', () => {
   const CHAT_KEY = 'chat/conv-1/sender-1_0b0a1c2e-3f4a-4b5c-8d6e-7f8091a2b3c4.webp';
@@ -378,37 +419,20 @@ describe('DELETE /api/media/delete for a file sent in a conversation', () => {
     send.mockRestore();
   });
 
-  it('the sender removes an upload that no message ever carried', async () => {
+  it('never removes a chat file by its key, with or without a message carrying it: the file goes with the message', async () => {
     currentUser = { id: 'sender-1', role: 'USER', email: 'sender@example.com' };
 
-    await request(app).delete('/api/media/delete').send({ key: CHAT_KEY }).expect(200);
+    for (const carried of [{ id: 'msg-1' }, null]) {
+      prisma.message.findFirst.mockResolvedValue(carried);
 
-    expect(send).toHaveBeenCalledTimes(1);
-    expect((send.mock.calls[0][0] as DeleteObjectCommand).input).toMatchObject({ Key: CHAT_KEY });
-    // Asked of this conversation and this sender, not of every message there is.
-    expect(prisma.message.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          conversationId: 'conv-1',
-          senderId: 'sender-1',
-          deletedAt: null,
-          metadata: { path: ['attachments'], array_contains: [{ key: CHAT_KEY }] },
-        }),
-      })
-    );
+      const res = await request(app).delete('/api/media/delete').send({ key: CHAT_KEY }).expect(409);
+
+      expect(res.body.message).toMatch(/removed with its message/);
+      expect(send).not.toHaveBeenCalled();
+    }
   });
 
-  it('a file a message carries is removed with the message, not by its key', async () => {
-    currentUser = { id: 'sender-1', role: 'USER', email: 'sender@example.com' };
-    prisma.message.findFirst.mockResolvedValue({ id: 'msg-1' });
-
-    const res = await request(app).delete('/api/media/delete').send({ key: CHAT_KEY }).expect(409);
-
-    expect(res.body.message).toMatch(/removed with its message/);
-    expect(send).not.toHaveBeenCalled();
-  });
-
-  it('a file a report names stays after the message was unsent, and the answer does not say why', async () => {
+  it('answers the same when a report names the file, and reads neither the reports nor the messages to say so', async () => {
     currentUser = { id: 'sender-1', role: 'USER', email: 'sender@example.com' };
     prisma.contentReport.findFirst.mockResolvedValue({ id: 'rep-1' });
 
@@ -416,16 +440,27 @@ describe('DELETE /api/media/delete for a file sent in a conversation', () => {
 
     expect(res.body.message).toMatch(/removed with its message/);
     expect(res.body.message).not.toMatch(/report/i);
+    expect(prisma.contentReport.findFirst).not.toHaveBeenCalled();
+    expect(prisma.message.findFirst).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
   });
 
-  it('nobody but the sender may delete it, whatever the state of the message', async () => {
+  it('nobody but the sender is even told that much', async () => {
     currentUser = { id: 'reader-1', role: 'USER', email: 'reader@example.com' };
 
     await request(app).delete('/api/media/delete').send({ key: CHAT_KEY }).expect(403);
 
     expect(prisma.message.findFirst).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('a file in a member’s own folder is still hers to delete by its key', async () => {
+    currentUser = { id: 'owner-1', role: 'USER', email: 'owner@example.com' };
+
+    await request(app).delete('/api/media/delete').send({ key: RESUME_KEY }).expect(200);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect((send.mock.calls[0][0] as DeleteObjectCommand).input).toMatchObject({ Key: RESUME_KEY });
   });
 });
 

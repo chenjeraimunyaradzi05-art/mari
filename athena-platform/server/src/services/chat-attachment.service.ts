@@ -13,10 +13,15 @@
  * held to being in the thread now, not having been: a member who has left a group
  * or been removed from it reads nothing more from it, and a file sent by someone
  * on either side of a block with her is not hers to open, as the thread no longer
- * shows her that person's messages.
+ * shows her that person's messages. And it is held to the message still being on
+ * the thread (isCarriedByLiveMessage): a file goes with its message, except
+ * behind a message somebody reported, which is kept for the people deciding the
+ * report (services/chat-attachment-cleanup), and a member who could still open a
+ * key after unsending its message would learn from whether the file was there
+ * that it had been reported, which in a thread of two says by whom.
  *
  * Every refusal to read is the same "not found", so a key is not a way to learn
- * which conversations exist or who is in them.
+ * which conversations exist, who is in them, or what has been reported.
  */
 
 import { prisma } from '../utils/prisma';
@@ -25,6 +30,7 @@ import { isStaffRole, staffTwoFactorRefusal } from '../middleware/roles';
 import { isBlockedEitherWay } from './audience.service';
 import { assertCanSendInConversation } from './direct-message.service';
 import { groupChatService } from './group-chat.service';
+import { unexpiredMessageWhere } from './message-expiry.service';
 import { isChatSegment, parseChatKey } from '../utils/chat-attachments';
 
 /** One value out of a query string, which may arrive as text, a list, or not at all. */
@@ -82,7 +88,38 @@ export async function isInChat(scopeId: string, userId: string): Promise<boolean
 }
 
 /**
- * Whether this member may open the file under this key right now.
+ * Whether a message still on the thread carries this file: sent by the member
+ * the key names, in the conversation it names, not unsent, and not past a
+ * disappearing timer the sweep has yet to reach. Unsending takes the files off
+ * the row (routes/message.routes, services/chat-storage) and the sweep deletes
+ * the row, so a key no live message carries is a file that is gone, or one that
+ * is kept behind a report and is nobody's to open but the staff deciding it.
+ */
+export async function isCarriedByLiveMessage(key: string, now: Date = new Date()): Promise<boolean> {
+  const parsed = parseChatKey(key);
+  if (!parsed) return false;
+  const carried = await prisma.message.findFirst({
+    where: {
+      AND: [
+        {
+          conversationId: parsed.scopeId,
+          senderId: parsed.senderId,
+          deletedAt: null,
+          metadata: { path: ['attachments'], array_contains: [{ key }] },
+        },
+        unexpiredMessageWhere(now),
+      ],
+    },
+    select: { id: true },
+  });
+  return Boolean(carried);
+}
+
+/**
+ * Whether this member may open the file under this key right now: she is in the
+ * thread, no block stands between her and the sender, and a message on the
+ * thread still carries the file (the sender included: her own unsent file is not
+ * hers to probe for, see the note at the top).
  *
  * A failure to read the block lists is an error, not "allowed": a file is
  * opened or it is not, and guessing wrong is a photograph in the wrong hands.
@@ -92,7 +129,7 @@ export async function mayReadChatAttachment(key: string, userId: string): Promis
   if (!parsed) return false;
   if (!(await isInChat(parsed.scopeId, userId))) return false;
   if (parsed.senderId !== userId && (await isBlockedEitherWay(userId, parsed.senderId))) return false;
-  return true;
+  return isCarriedByLiveMessage(key);
 }
 
 /** Where a report's copy of the reported message lists its files (services/report-context). */
@@ -133,33 +170,4 @@ export type Reader = { id: string; role?: string; twoFactorEnabled?: boolean };
 export async function mayStaffReadChatAttachment(reader: Reader, key: string): Promise<boolean> {
   if (!isStaffRole(reader.role) || staffTwoFactorRefusal(reader) !== null) return false;
   return isReportedChatAttachment(key);
-}
-
-/**
- * Why a chat file is not the sender's to delete by its key on its own, or null
- * when it is.
- *
- * A file goes with its message: unsending the message removes it, and the
- * sweep and an erasure do the same, all through services/chat-attachment-cleanup,
- * which keeps the file behind a reported message. A delete by key would go
- * round that, so a key a live message carries ('sent'), or a report's copy
- * names ('reported'), stays. What is left to delete by key is an upload no
- * message ever carried: a send that failed after the file went up.
- */
-export async function whyChatFileStays(key: string): Promise<'sent' | 'reported' | null> {
-  const parsed = parseChatKey(key);
-  if (!parsed) return null;
-
-  const carried = await prisma.message.findFirst({
-    where: {
-      conversationId: parsed.scopeId,
-      senderId: parsed.senderId,
-      deletedAt: null,
-      metadata: { path: ['attachments'], array_contains: [{ key }] },
-    },
-    select: { id: true },
-  });
-  if (carried) return 'sent';
-
-  return (await isReportedChatAttachment(key)) ? 'reported' : null;
 }

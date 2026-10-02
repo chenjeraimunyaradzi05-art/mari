@@ -94,10 +94,13 @@ wrong; those rows have to be rewritten by hand.
   The one exception is the file behind a message somebody has reported, which
   the people deciding the report need to see; it is kept, the report's copy of
   the message carries its key, and a member of staff with a second factor opens
-  it from the report through the same `POST /api/media/download-url`. The sender
-  cannot delete it by its key either: a file a message carries, or a report
-  names, is answered with 409 by `DELETE /api/media/delete`.
-- A member deletes her own upload with `DELETE /api/media/delete` and its key.
+  it from the report through the same `POST /api/media/download-url`. The people
+  in the conversation open a file only while a message on the thread carries it,
+  and nothing under `chat/` is deleted by its key (`DELETE /api/media/delete`
+  answers 409 for the folder, whatever has become of the message): neither door
+  tells a sender whether what she unsent had been reported.
+- A member deletes her own upload with `DELETE /api/media/delete` and its key
+  (a file under her own folder; a chat file goes with its message, above).
 
 A file that could not be removed from the bucket is counted, not swallowed:
 `media-storage.delete` and `story-expiry.media-delete` on `/health/detailed`

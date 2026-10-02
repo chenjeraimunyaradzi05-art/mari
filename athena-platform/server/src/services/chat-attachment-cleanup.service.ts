@@ -20,8 +20,10 @@
  * go. It is kept for the people deciding the report: a member of staff with a
  * second factor may ask POST /api/media/download-url for a key the report's copy
  * names, and for no other key under the chat folder (services/chat-attachment
- * mayStaffReadChatAttachment). The sender cannot delete it by its key either
- * (DELETE /api/media/delete asks whyChatFileStays first).
+ * mayStaffReadChatAttachment). Nobody else can open it once the message is gone,
+ * the sender included, and nothing under the chat folder is deleted by its key
+ * (DELETE /api/media/delete answers 409 for the folder), so neither door tells a
+ * sender whether what she unsent had been reported.
  *
  * Every call is best effort and none throws: this runs after the row is gone, in
  * a sweep, in the middle of an erasure, or behind a member pressing unsend, and a

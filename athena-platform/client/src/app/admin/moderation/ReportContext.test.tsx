@@ -6,11 +6,12 @@ jest.mock('@/lib/api', () => ({
   mediaApi: { downloadUrl: jest.fn() },
 }));
 
-import { mediaApi } from '@/lib/api';
+import { api, mediaApi } from '@/lib/api';
 import { resetChatAttachmentLinks } from '@/lib/chat-attachments';
 import { ReportContext } from './ReportContext';
 
 const mint = mediaApi.downloadUrl as unknown as jest.Mock;
+const fetchBytes = api.get as unknown as jest.Mock;
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -129,6 +130,31 @@ describe('a reported message', () => {
     // The lines before it are context; their files go with their own messages and are not asked for.
     expect(screen.getByText('earlier.webp')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'earlier.webp' })).not.toBeInTheDocument();
+  });
+
+  it('opens the kept file where the API serves the bytes itself, as it does on a developer machine', async () => {
+    const KEPT = 'chat/c1/m3_0b0a1c2e-3f4a-4b5c-8d6e-7f8091a2b3c4.webp';
+    mint.mockResolvedValue({ data: { data: { downloadUrl: `http://localhost:5000/api/media/local/${KEPT}`, expiresIn: 300 } } });
+    fetchBytes.mockResolvedValue({ data: new Blob(['kitchen']) });
+    const objectUrls = { createObjectURL: (URL as unknown as { createObjectURL?: unknown }).createObjectURL };
+    Object.defineProperty(URL, 'createObjectURL', { value: jest.fn(() => 'blob:http://localhost/kept'), configurable: true });
+
+    try {
+      render(
+        <ReportContext
+          context={{
+            messageContext: { ...messageContext, reported: { ...messageContext.reported, attachments: [{ name: 'kitchen.webp', key: KEPT }] } },
+          }}
+        />
+      );
+
+      expect(await screen.findByRole('link', { name: 'kitchen.webp' })).toHaveAttribute('href', 'blob:http://localhost/kept');
+      expect(fetchBytes).toHaveBeenCalledWith(`/media/local/${KEPT}`, { responseType: 'blob' });
+      expect(screen.queryByText('(the file could not be opened)')).not.toBeInTheDocument();
+    } finally {
+      if (objectUrls.createObjectURL === undefined) delete (URL as unknown as { createObjectURL?: unknown }).createObjectURL;
+      else Object.defineProperty(URL, 'createObjectURL', { value: objectUrls.createObjectURL, configurable: true });
+    }
   });
 
   it('says so when the kept file cannot be opened, rather than offering a dead link', async () => {

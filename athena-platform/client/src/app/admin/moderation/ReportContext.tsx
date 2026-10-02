@@ -137,7 +137,13 @@ function Line({
 function KeptFileLink({ fileKey, name }: { fileKey: string; name?: string }) {
   const link = useChatAttachmentUrl(fileKey);
   const label = name || 'Attachment';
-  const href = link.status === 'ready' ? safeHref(link.url) : undefined;
+  // The link was minted by the API for this member of staff and handed over by
+  // lib/chat-attachments: a signed address, or, where the API serves the bytes
+  // itself (a developer's machine), an object URL for what it fetched. It is not
+  // something a member typed, so it is used as it came; safeHref is for links
+  // members write, and would drop the object URL and call a file that had just
+  // been fetched one that could not be opened.
+  const href = link.status === 'ready' ? link.url : undefined;
 
   if (href) {
     return (
