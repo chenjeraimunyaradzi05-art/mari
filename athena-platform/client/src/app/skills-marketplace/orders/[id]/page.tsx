@@ -5,6 +5,12 @@
  * left; the money and what each person can do next on the right. Buyers
  * approve a delivery to release the hold, send it back for revision, or
  * cancel; providers accept once the money is held, deliver, or cancel.
+ *
+ * A buyer who thinks a delivery was not what was agreed, or who was delivered
+ * nothing by the due date, can say so here: the hold stays on her card, every
+ * other button closes, the provider can answer once, and ATHENA's team releases
+ * the payment or gives it back. Until this a buyer could only ask for a revision
+ * or let the hold lapse.
  */
 
 import { use, useState } from 'react';
@@ -40,6 +46,13 @@ interface Order {
   deliveryMessage: string | null;
   revisionReason: string | null;
   cancellationReason: string | null;
+  disputedAt: string | null;
+  disputeReason: string | null;
+  disputeResponse: string | null;
+  disputeRespondedAt: string | null;
+  disputeResolution: 'RELEASED' | 'REFUNDED' | null;
+  /** The buyer's bank has disputed the payment, which is separate from the buyer telling ATHENA. */
+  cardDisputeOpen?: boolean;
   createdAt: string;
   viewerRole: 'client' | 'provider' | null;
   service: { id: string; title: string; providerId: string };
@@ -76,7 +89,13 @@ export default function OrderPage({ params }: { params: Promise<{ id: string }> 
   };
 
   const act = useMutation({
-    mutationFn: ({ action, payload }: { action: 'accept' | 'deliver' | 'revision' | 'complete' | 'cancel' | 'review'; payload?: Record<string, unknown> }) => {
+    mutationFn: ({
+      action,
+      payload,
+    }: {
+      action: 'accept' | 'deliver' | 'revision' | 'complete' | 'cancel' | 'review' | 'dispute' | 'respond';
+      payload?: Record<string, unknown>;
+    }) => {
       switch (action) {
         case 'accept':
           return skillsMarketplaceApi.acceptOrder(id);
@@ -90,6 +109,10 @@ export default function OrderPage({ params }: { params: Promise<{ id: string }> 
           return skillsMarketplaceApi.cancelOrder(id, String(payload?.reason ?? ''));
         case 'review':
           return skillsMarketplaceApi.leaveReview(id, { rating: Number(payload?.rating), review: String(payload?.review ?? '') });
+        case 'dispute':
+          return skillsMarketplaceApi.disputeOrder(id, String(payload?.reason ?? ''));
+        case 'respond':
+          return skillsMarketplaceApi.respondToOrderDispute(id, String(payload?.response ?? ''));
       }
     },
     onSuccess: (_res, { action }) => {
@@ -102,6 +125,8 @@ export default function OrderPage({ params }: { params: Promise<{ id: string }> 
         complete: 'Approved. The payment has been released to the provider.',
         cancel: 'Order cancelled. The hold is released.',
         review: 'Thanks for the review.',
+        dispute: 'Sent to ATHENA’s team. The hold stays on your card while they look at it.',
+        respond: 'Your answer has been recorded for the team.',
       };
       toast.success(said[action]);
     },
@@ -169,11 +194,16 @@ export default function OrderPage({ params }: { params: Promise<{ id: string }> 
   const hold = o.hold ?? { lapsesAt: null, canRenew: false, lapsed: false };
   const lapsesOn = hold.lapsesAt ? format(new Date(hold.lapsesAt), 'EEEE d MMMM') : null;
   const busy = act.isPending;
+  const inDispute = o.status === 'DISPUTED';
+  // The buyer can say nothing came once the due date has passed; before it, the
+  // provider still has time, and cancelling is the way out.
+  const overdue = Boolean(o.dueAt) && new Date(o.dueAt as string).getTime() <= Date.now();
 
   const timeline: Array<[string, string | null]> = [
     ['Placed', o.createdAt],
     ['Due', o.status === 'CANCELLED' ? null : o.dueAt],
     ['Delivered', o.deliveredAt],
+    ['In dispute since', o.disputedAt],
     ['Completed', o.completedAt],
     ['Cancelled', o.cancelledAt],
   ];
@@ -222,7 +252,7 @@ export default function OrderPage({ params }: { params: Promise<{ id: string }> 
             )}
           </section>
 
-          {(o.deliveryMessage || o.revisionReason || o.cancellationReason) && (
+          {(o.deliveryMessage || o.revisionReason || o.cancellationReason || o.disputeReason || o.disputeResponse) && (
             <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
               <h2 className="mb-2 font-semibold text-slate-900 dark:text-white">The handover</h2>
               <dl className="space-y-3 text-sm">
@@ -236,6 +266,18 @@ export default function OrderPage({ params }: { params: Promise<{ id: string }> 
                   <div>
                     <dt className="text-xs uppercase tracking-wide text-slate-500">Buyer, asking for a revision</dt>
                     <dd className="whitespace-pre-wrap text-slate-700 dark:text-slate-300">{o.revisionReason}</dd>
+                  </div>
+                )}
+                {o.disputeReason && (
+                  <div>
+                    <dt className="text-xs uppercase tracking-wide text-slate-500">Buyer, on what went wrong</dt>
+                    <dd className="whitespace-pre-wrap text-slate-700 dark:text-slate-300">{o.disputeReason}</dd>
+                  </div>
+                )}
+                {o.disputeResponse && (
+                  <div>
+                    <dt className="text-xs uppercase tracking-wide text-slate-500">Provider, in answer</dt>
+                    <dd className="whitespace-pre-wrap text-slate-700 dark:text-slate-300">{o.disputeResponse}</dd>
                   </div>
                 )}
                 {o.cancellationReason && (
@@ -291,8 +333,12 @@ export default function OrderPage({ params }: { params: Promise<{ id: string }> 
             </dl>
             <p className={cn('mt-3 text-sm font-medium', payment.tone)}>{payment.label}</p>
             <p className="mt-1 text-xs text-slate-500">
-              {o.escrow?.status === 'CAPTURED'
-                ? 'Released when the buyer approved the delivery.'
+              {inDispute
+                ? 'Held while ATHENA’s team decides. Nothing is released or given back until they do.'
+                : o.escrow?.status === 'CAPTURED'
+                  ? o.disputeResolution === 'RELEASED'
+                    ? 'Released to the provider by ATHENA’s team.'
+                    : 'Released when the buyer approved the delivery.'
                 : held
                   ? 'Held on the buyer’s card and released only when they approve the work.'
                   : o.escrow?.status === 'CANCELED' || o.escrow?.status === 'REFUNDED'
@@ -301,6 +347,13 @@ export default function OrderPage({ params }: { params: Promise<{ id: string }> 
                       ? 'The provider cannot start until the hold is authorised.'
                       : 'The buyer has not yet authorised the hold.'}
             </p>
+            {o.cardDisputeOpen && (
+              <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-400" role="status">
+                {isBuyer
+                  ? 'Your bank has opened a dispute on this payment. Nothing is paid on while that is open.'
+                  : 'The buyer’s bank has opened a dispute on this payment. Nothing is paid on while that is open.'}
+              </p>
+            )}
             {/* The hold has a last day. Said to both people, so a long job is not a surprise. */}
             {hold.lapsed && (
               <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-400" role="status">
@@ -384,9 +437,20 @@ export default function OrderPage({ params }: { params: Promise<{ id: string }> 
             {isBuyer && (o.status === 'PENDING' || o.status === 'ACCEPTED' || o.status === 'REVISION_REQUESTED') && (
               <div className="space-y-2">
                 <p className="text-sm text-slate-500">
-                  {o.status === 'PENDING' ? 'Waiting for the provider to accept.' : 'The provider is working on it.'}
+                  {o.status === 'PENDING'
+                    ? 'Waiting for the provider to accept.'
+                    : overdue
+                      ? 'The due date has passed and nothing has been delivered.'
+                      : 'The provider is working on it.'}
                 </p>
                 <CancelButton busy={busy} onCancel={(reason) => act.mutate({ action: 'cancel', payload: { reason } })} />
+                {o.status !== 'PENDING' && overdue && (
+                  <DisputeButton
+                    busy={busy}
+                    label="Nothing was delivered by the due date"
+                    onDispute={(reason) => act.mutate({ action: 'dispute', payload: { reason } })}
+                  />
+                )}
               </div>
             )}
 
@@ -410,6 +474,47 @@ export default function OrderPage({ params }: { params: Promise<{ id: string }> 
                     Request a revision
                   </Button>
                 </div>
+                <DisputeButton
+                  busy={busy}
+                  label="This was not delivered as agreed"
+                  onDispute={(reason) => act.mutate({ action: 'dispute', payload: { reason } })}
+                />
+              </div>
+            )}
+
+            {inDispute && isBuyer && (
+              <p className="text-sm text-slate-700 dark:text-slate-300">
+                You told us this order was not delivered as agreed. ATHENA’s team is looking at it. The hold stays on your card and
+                nothing is released or given back until they decide; you will be told either way.
+                {!o.disputeResponse && ' The provider has not answered yet.'}
+              </p>
+            )}
+
+            {inDispute && isProvider && (
+              <div className="space-y-2">
+                <p className="text-sm text-slate-700 dark:text-slate-300">
+                  The buyer says this order was not delivered as agreed. ATHENA’s team is looking at it: the payment stays held, and
+                  neither of you can move the order until they decide.
+                </p>
+                {o.disputeResponse ? (
+                  <p className="text-sm text-slate-500">Your answer has been recorded for the team.</p>
+                ) : (
+                  <>
+                    <textarea
+                      value={note}
+                      onChange={(e) => setNote(e.target.value)}
+                      rows={4}
+                      maxLength={2000}
+                      placeholder="Your side of it: what you delivered and when"
+                      aria-label="Your answer to the dispute"
+                      className="input w-full text-sm"
+                    />
+                    <Button className="w-full" disabled={busy || !note.trim()} onClick={() => act.mutate({ action: 'respond', payload: { response: note.trim() } })}>
+                      Send your answer to the team
+                    </Button>
+                    <p className="text-xs text-slate-500">You can answer once.</p>
+                  </>
+                )}
               </div>
             )}
 
@@ -430,10 +535,60 @@ export default function OrderPage({ params }: { params: Promise<{ id: string }> 
               </div>
             )}
 
-            {o.status === 'CANCELLED' && <p className="text-sm text-slate-500">This order was cancelled.</p>}
-            {isProvider && o.status === 'COMPLETED' && <p className="text-sm text-slate-500">Done. The payment has been released to you.</p>}
+            {o.status === 'CANCELLED' && (
+              <p className="text-sm text-slate-500">
+                {o.disputeResolution === 'REFUNDED'
+                  ? 'ATHENA’s team decided this order was not delivered as agreed. The payment was given back to the buyer.'
+                  : 'This order was cancelled.'}
+              </p>
+            )}
+            {isProvider && o.status === 'COMPLETED' && (
+              <p className="text-sm text-slate-500">
+                {o.disputeResolution === 'RELEASED'
+                  ? 'ATHENA’s team looked at the dispute and released the payment to you.'
+                  : 'Done. The payment has been released to you.'}
+              </p>
+            )}
           </section>
         </aside>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The buyer says it was not delivered as agreed. A reason is asked for, because
+ * the team and the provider read it, and the server refuses an empty one.
+ */
+function DisputeButton({ busy, onDispute, label }: { busy: boolean; onDispute: (reason: string) => void; label: string }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  if (!open) {
+    return (
+      <button type="button" disabled={busy} onClick={() => setOpen(true)} className="w-full text-center text-sm text-slate-600 hover:text-slate-900 dark:text-slate-300">
+        {label}
+      </button>
+    );
+  }
+  return (
+    <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60">
+      <textarea
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        rows={3}
+        maxLength={2000}
+        placeholder="What went wrong (the provider and ATHENA’s team see this)"
+        aria-label="What went wrong"
+        className="input w-full text-sm"
+      />
+      <p className="text-xs text-slate-500">The hold stays on your card, and nothing is taken, while ATHENA’s team looks at it.</p>
+      <div className="flex gap-2">
+        <Button size="sm" disabled={busy || !reason.trim()} onClick={() => onDispute(reason.trim())}>
+          Send to ATHENA’s team
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
+          Keep it
+        </Button>
       </div>
     </div>
   );

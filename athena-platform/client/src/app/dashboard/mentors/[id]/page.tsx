@@ -25,6 +25,7 @@ import { ArrowLeft, Award, CalendarDays, Clock, Loader2, Users } from 'lucide-re
 import { useAuthStore, useBookMentor, useMentor } from '@/lib/hooks';
 import { mentorApi } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
+import { SESSION_CONFIRMATION_HOURS } from '@/lib/pricing';
 import { Avatar } from '@/components/ui/avatar';
 import { VerifiedMark } from '@/components/ui/VerifiedMark';
 import { PaymentIntentForm } from '@/components/payments/PaymentIntentForm';
@@ -211,21 +212,24 @@ export default function MentorProfilePage() {
         <aside className="card space-y-4 self-start">
           <div className="flex items-baseline justify-between">
             <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Book a session</h2>
+            {/* The rate is typed and charged in Australian dollars, whatever currency
+                the viewer prefers, so it is shown as AUD and not relabelled. */}
             <span className="text-sm font-semibold text-slate-900 dark:text-white">
-              {hourlyRate ? `${formatCurrency(hourlyRate)}/hour` : 'Rate on request'}
+              {hourlyRate ? `${formatCurrency(hourlyRate, 'AUD')}/hour` : 'Rate on request'}
             </span>
           </div>
 
           {payment ? (
             <div className="space-y-3">
               <p className="text-sm text-slate-700 dark:text-slate-200">
-                Session requested. Authorise the payment now so the mentor can confirm; it is only charged once the session is
-                completed. The mentor sees your request once the payment is authorised, and a request that is not paid for
-                within a few hours is cancelled.
+                Session requested. Authorise the payment now so the mentor can confirm; it is only charged once the session
+                has happened: when you confirm it, or {SESSION_CONFIRMATION_HOURS} hours after your mentor marks it complete
+                unless you say it did not take place. The mentor sees your request once the payment is authorised, and a
+                request that is not paid for within a few hours is cancelled.
               </p>
               <PaymentIntentForm
                 clientSecret={payment.clientSecret}
-                amountLabel={formatCurrency(payment.amount)}
+                amountLabel={formatCurrency(payment.amount, 'AUD')}
                 onAuthorised={() => router.push('/dashboard/mentors/sessions?paid=1')}
                 onSkip={() => router.push('/dashboard/mentors/sessions')}
               />
@@ -345,8 +349,8 @@ export default function MentorProfilePage() {
 
               {estimate !== null && (
                 <p className="text-sm text-slate-600 dark:text-slate-300">
-                  Estimated cost <span className="font-semibold text-slate-900 dark:text-white">{formatCurrency(estimate)}</span>. You
-                  are charged only after the session is completed.
+                  Estimated cost <span className="font-semibold text-slate-900 dark:text-white">{formatCurrency(estimate, 'AUD')}</span>.
+                  Your card is held now and charged only once the session has happened.
                 </p>
               )}
               {inPast && <p className="text-xs text-red-600">That time has just passed. Pick another.</p>}

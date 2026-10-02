@@ -52,6 +52,33 @@ export type DisputedBooking = {
   hold: { status: string; lapsesAt: string | null } | null;
 };
 
+/**
+ * A mentoring session or a marketplace order the buyer says was not delivered,
+ * waiting on the team. `amount` is in the currency's major units: whole dollars
+ * for an order, dollars and cents for a session.
+ */
+export type AdminServiceDispute = {
+  kind: 'session' | 'order';
+  id: string;
+  title: string;
+  buyer: { id: string; name: string };
+  provider: { id: string; name: string };
+  amount: number;
+  currency: string;
+  /** What the provider is paid if the team releases it. */
+  providerPayout: number;
+  /** When a session was booked for. Null for an order. */
+  scheduledAt: string | null;
+  disputedAt: string | null;
+  reason: string | null;
+  response: string | null;
+  respondedAt: string | null;
+  /** Whether there is still money to move, and until when. Null when nothing was ever held. */
+  hold: { status: string; lapsesAt: string | null } | null;
+  /** The buyer's bank has also disputed the payment: it cannot be refunded here while that is open. */
+  cardDispute: { stripeDisputeId: string; evidenceDueBy: string | null } | null;
+};
+
 export const adminPaymentsApi = {
   disputes: (params?: { outcome?: DisputeOutcome; cursor?: string; limit?: number }) =>
     api.get<{ success: boolean; data: DisputePage }>('/payments/admin/disputes', { params }),
@@ -67,4 +94,12 @@ export const adminPaymentsApi = {
   /** Ends the pause on withdrawals a decided dispute put on creators. */
   releaseDisputeHolds: (disputeId: string) =>
     api.post<{ success: boolean; data: { released: number } }>(`/payments/admin/disputes/${disputeId}/release-holds`),
+
+  /** Sessions and orders a buyer says were not delivered, oldest first. */
+  serviceDisputes: () =>
+    api.get<{ success: boolean; data: { disputes: AdminServiceDispute[] } }>('/payments/admin/service-disputes'),
+
+  /** Releases the payment to the provider, or gives it back to the buyer. Both people are told. */
+  resolveServiceDispute: (kind: 'session' | 'order', id: string, outcome: 'release' | 'refund', note?: string) =>
+    api.post(`/payments/admin/service-disputes/${kind}/${id}/resolve`, { outcome, ...(note ? { note } : {}) }),
 };

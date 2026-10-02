@@ -38,6 +38,22 @@ export const REFUND_DAYS = 30;
 /** The share of a mentoring session that ATHENA keeps, in per cent. */
 export const MENTOR_PLATFORM_FEE_PERCENT = 20;
 
+/** The share of a marketplace order or hourly booking that ATHENA keeps, in per cent. */
+export const MARKETPLACE_PLATFORM_FEE_PERCENT = 15;
+
+/**
+ * Hours a mentee has, after her mentor marks a session complete, to say it did
+ * not happen before her card is charged. A session she confirms herself is
+ * charged at once.
+ */
+export const SESSION_CONFIRMATION_HOURS = 24;
+
+/**
+ * Days after a paid session was charged in which the mentee can still tell ATHENA
+ * it was not given from her sessions page. After that she writes to support.
+ */
+export const DISPUTE_WINDOW_DAYS = 14;
+
 /** What a creator keeps of the value of a gift, in per cent, by tier. */
 export const CREATOR_SHARE_PERCENT = {
   Emerging: 70,

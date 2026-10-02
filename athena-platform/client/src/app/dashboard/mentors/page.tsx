@@ -378,11 +378,14 @@ export default function MentorsPage() {
                     {/* Zero is a rate: she mentors for free, and "Rate on
                         request" hid the one thing most likely to bring a
                         mentee to her. Null is the rate she has not set. */}
+                    {/* A mentor's rate is typed and charged in Australian dollars
+                        (the booking is charged in AUD whatever currency the viewer
+                        prefers), so it is shown as AUD and not relabelled. */}
                     {hourlyRate === null
                       ? 'Rate not set'
                       : hourlyRate === 0
                         ? 'Free'
-                        : `${formatCurrency(hourlyRate)}/hour`}
+                        : `${formatCurrency(hourlyRate, 'AUD')}/hour`}
                   </div>
                 </div>
 

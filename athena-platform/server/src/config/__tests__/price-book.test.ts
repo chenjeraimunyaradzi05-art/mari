@@ -35,6 +35,7 @@ jest.mock('../../services/stripe-connect.service', () => ({
 import {
   CREATOR_REVENUE_SHARE_PERCENT,
   CREATOR_SHARE_RANGE_PERCENT,
+  DISPUTE_WINDOW_DAYS,
   ESCROW_DEFAULT_FEE_PERCENT,
   FORMATION_FEES_CENTS,
   GIFT_POINT_CENTS,
@@ -43,6 +44,7 @@ import {
   MINIMUM_PAYOUT_AUD,
   PRICE_CURRENCY,
   REFUND_DAYS,
+  SESSION_CONFIRMATION_HOURS,
   TRIAL_DAYS,
   centsForGiftPoints,
   giftPointsForCents,
@@ -220,6 +222,11 @@ describe('the copy the web app prints', () => {
     expect(exportedNumber(pricingCopy, 'MENTOR_PLATFORM_FEE_PERCENT')).toBe(Math.round(MENTOR_PLATFORM_FEE_RATE * 100));
     expect(exportedNumber(pricingCopy, 'GIFT_POINT_VALUE_AUD')).toBe(GIFT_POINT_VALUE_AUD);
     expect(exportedNumber(pricingCopy, 'MINIMUM_PAYOUT_AUD')).toBe(MINIMUM_PAYOUT_AUD);
+    // The marketplace fee and the two windows around a disputed session, which
+    // the mentor pages, the sessions page and the mentor agreement print.
+    expect(exportedNumber(pricingCopy, 'MARKETPLACE_PLATFORM_FEE_PERCENT')).toBe(ESCROW_DEFAULT_FEE_PERCENT);
+    expect(exportedNumber(pricingCopy, 'SESSION_CONFIRMATION_HOURS')).toBe(SESSION_CONFIRMATION_HOURS);
+    expect(exportedNumber(pricingCopy, 'DISPUTE_WINDOW_DAYS')).toBe(DISPUTE_WINDOW_DAYS);
   });
 
   it('holds the same creator share for every tier', () => {

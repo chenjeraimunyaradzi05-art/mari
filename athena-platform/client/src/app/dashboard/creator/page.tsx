@@ -158,6 +158,10 @@ export default function CreatorDashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedPeriod, setSelectedPeriod] = useState<'7d' | '30d' | '90d' | 'all'>('30d');
   const [requestingPayout, setRequestingPayout] = useState(false);
+  // The server refused the payout until she has accepted the current Creator
+  // Terms Addendum (a creator from before it existed, or before it was last
+  // rewritten). Her earnings are untouched; this holds where it sent her.
+  const [termsNeeded, setTermsNeeded] = useState<{ message: string; href: string } | null>(null);
 
   const profileHref = user?.id ? `/profile/${user.id}` : '/profile';
 
@@ -183,7 +187,15 @@ export default function CreatorDashboardPage() {
           : current
       );
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'The payout could not be requested.');
+      const refusal = err?.response?.data ?? {};
+      if (refusal.code === 'CREATOR_TERMS_REQUIRED') {
+        setTermsNeeded({
+          message: refusal.error || refusal.message || 'Please read and accept the Creator Terms Addendum before you are paid.',
+          href: typeof refusal.setup === 'string' ? refusal.setup : '/creator-terms',
+        });
+        return;
+      }
+      toast.error(refusal.error || refusal.message || 'The payout could not be requested.');
     } finally {
       setRequestingPayout(false);
     }
@@ -546,6 +558,14 @@ export default function CreatorDashboardPage() {
                   )}
                   Request payout
                 </Button>
+                {termsNeeded && (
+                  <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                    {termsNeeded.message}{' '}
+                    <Link href={termsNeeded.href} className="font-semibold underline">
+                      Read and accept it
+                    </Link>
+                  </p>
+                )}
                 <p className="text-xs text-slate-500 text-center">
                   {stats?.payoutHold
                     ? 'Withdrawals are paused while ATHENA looks into a card payment connected to some of the gifts you were sent. Your balance is safe and keeps growing, and we will write to you when withdrawals are open again.'

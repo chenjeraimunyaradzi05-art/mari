@@ -113,13 +113,14 @@ To monetise content on the Platform, you must:
 - Have an account in good standing
 - Complete identity verification
 - Comply with applicable tax requirements
-- Accept the Creator Terms Addendum
+- Accept the [Creator Terms Addendum](/creator-terms)
 
 ### 5.2 Revenue Share
 For paid subscriptions, tips, and digital gifts:
 - **Creators receive**: {{price.creatorShareRange}} of net revenue (a higher share at each creator tier)
 - **Platform fee**: {{price.platformFeeRange}} (the rest, so it falls as your creator tier rises)
 - Card processing is covered by ATHENA's share: no separate processing fee is taken from what you keep, and ATHENA takes no fee when you withdraw (section 5.3)
+- Every fee ATHENA takes, for mentoring sessions and marketplace orders as well as gifts, is published on the [fees page](/fees)
 
 ### 5.3 Payouts
 - **Minimum payout:** {{price.minimumPayout}}. Gift points are bought and paid out in Australian dollars only. There is no other threshold and no waiting period of ours: once your balance has reached the minimum, you can ask for it.

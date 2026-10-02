@@ -598,6 +598,12 @@ export const mentorApi = {
     api.patch(`/mentors/sessions/${sessionId}`, { scheduledAt, ...(durationMinutes ? { durationMinutes } : {}) }),
   // The client secret to authorise a pending session payment, for the mentee.
   paymentIntent: (sessionId: string) => api.post(`/mentors/sessions/${sessionId}/payment-intent`),
+  // The mentee says a paid session did not take place. The card stays held, or a
+  // charge already made is not paid on, while ATHENA's team decides.
+  disputeSession: (sessionId: string, reason: string) => api.post(`/mentors/sessions/${sessionId}/dispute`, { reason }),
+  // The mentor's one answer to a session in dispute, kept for the team to read.
+  respondToSessionDispute: (sessionId: string, response: string) =>
+    api.post(`/mentors/sessions/${sessionId}/dispute/respond`, { response }),
 
   // The times this mentor is actually free on a day, already converted into the
   // viewer's timezone. `date` is `YYYY-MM-DD`.
@@ -1774,7 +1780,15 @@ export const creatorApi = {
 
   getPublicProfile: (userId: string) => api.get(`/creator/profile/${userId}`),
 
-  enable: () => api.post('/creator/enable'),
+  // Turning on creator mode is where a creator starts being paid, so the server
+  // asks for the Creator Terms Addendum here and refuses without it (Terms 5.1).
+  // The caller passes the acceptance she gave and the version she read, so an
+  // acceptance of old text is never recorded as one of the current text.
+  enable: (acceptance: { acceptCreatorTerms: true; termsVersion: string }) => api.post('/creator/enable', acceptance),
+
+  // A creator from before the addendum existed, or before it was last rewritten,
+  // accepts the current version. Her next withdrawal is refused until she has.
+  acceptTerms: (version: string) => api.post('/creator/terms/accept', { version }),
 
   onboard: () => api.post('/creator/onboard'),
 
@@ -1807,6 +1821,17 @@ export const creatorApi = {
 
   getLeaderboard: (params?: { period?: string; limit?: number }) =>
     api.get('/creator/leaderboard', { params }),
+};
+
+// ============================================
+// FEES API
+// ============================================
+// Every fee ATHENA takes, with the figures the code charges: what it keeps of a
+// mentoring session, a marketplace sale, a creator's gift by tier and an
+// automotive sale, job or report, whether card processing is charged on top,
+// and whether prices include GST yet. Public; the fees page reads it.
+export const feesApi = {
+  schedule: () => api.get('/fees'),
 };
 
 // ============================================

@@ -171,6 +171,7 @@ export default function AdminDashboardPage() {
     { href: '/admin/subscriptions', label: 'Subscriptions', icon: CreditCard, description: 'Manage user subscriptions' },
     { href: '/admin/disputes', label: 'Card Disputes', icon: CreditCard, description: 'Chargebacks Stripe has reported: evidence deadlines, outcomes, and what was done about each' },
     { href: '/admin/booking-disputes', label: 'Bookings in Dispute', icon: CreditCard, description: 'Hourly bookings a buyer says were not given: release the payment or give it back' },
+    { href: '/admin/service-disputes', label: 'Sessions & Orders in Dispute', icon: CreditCard, description: 'Mentoring sessions and marketplace orders a buyer says were not delivered: release the payment or give it back' },
     { href: '/admin/analytics', label: 'Analytics', icon: BarChart3, description: 'Platform metrics and insights' },
     { href: '/admin/gtm', label: 'Go-to-Market', icon: Target, description: 'Launch plans, channels, and initiatives' },
     { href: '/admin/marketing', label: 'Marketing Hub', icon: Megaphone, description: 'Campaigns, leads, and growth ops' },

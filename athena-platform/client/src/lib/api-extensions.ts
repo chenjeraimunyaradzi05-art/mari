@@ -582,6 +582,16 @@ export const skillsMarketplaceApi = {
   cancelOrder: (id: string, reason: string) =>
     api.post(`/skills-marketplace/orders/${id}/cancel`, { reason }),
 
+  // The buyer says the delivery was not what was agreed, or that nothing came by
+  // the due date. The hold stays on her card and the order's other buttons close
+  // until ATHENA's team decides.
+  disputeOrder: (id: string, reason: string) =>
+    api.post(`/skills-marketplace/orders/${id}/dispute`, { reason }),
+
+  // The provider's one answer to an order in dispute, kept for the team to read.
+  respondToOrderDispute: (id: string, response: string) =>
+    api.post(`/skills-marketplace/orders/${id}/dispute/respond`, { response }),
+
   // Leave review. Only a completed order can be reviewed, and only by its
   // buyer. ServiceReview stores a single 1-5 rating, so there are no separate
   // communication/service/recommend dimensions to send.
