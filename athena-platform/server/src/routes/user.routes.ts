@@ -46,7 +46,7 @@ import { gdprService, describeErasure } from '../services/gdpr.service';
 import { auditAfterCommit } from '../services/admin-audit.service';
 import { requireStepUp } from './auth.routes';
 import { isoDate, parseStrict } from '../utils/request-schema';
-import { maskLegalNamesInResponses, parseDisplayName, publicName } from '../utils/member-display';
+import { maskLegalNames, maskLegalNamesInResponses, parseDisplayName, publicName } from '../utils/member-display';
 
 const router = Router();
 
@@ -625,17 +625,23 @@ router.get(
         },
         orderBy: { createdAt: 'desc' },
       }),
+      // The other members in her export (who follows her, whom she follows, the
+      // mentor she booked) are named as the app names them to her: by their public
+      // name, never the legal surname (utils/member-display). It used to load
+      // `lastName` for each of them and hand the file over as it was, so a member's
+      // own download listed every follower's legal name, which is the one thing
+      // the public name exists to keep off the page.
       prisma.follow.findMany({
         where: { followingId: userId },
         include: {
-          follower: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+          follower: { select: { id: true, firstName: true, displayName: true, avatar: true } },
         },
         orderBy: { createdAt: 'desc' },
       }),
       prisma.follow.findMany({
         where: { followerId: userId },
         include: {
-          following: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+          following: { select: { id: true, firstName: true, displayName: true, avatar: true } },
         },
         orderBy: { createdAt: 'desc' },
       }),
@@ -689,7 +695,7 @@ router.get(
         include: {
           mentorProfile: {
             include: {
-              user: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+              user: { select: { id: true, firstName: true, displayName: true, avatar: true } },
             },
           },
         },
@@ -731,27 +737,33 @@ router.get(
       },
     });
 
+    // Her own record is hers to read whole; every other member's record in the
+    // file carries the public name and an empty surname, whatever a select above
+    // loads tomorrow.
     res.json({
       success: true,
-      data: {
-        exportedAt: new Date().toISOString(),
-        user,
-        profile,
-        skills,
-        education,
-        experience,
-        posts,
-        comments,
-        likes,
-        followers,
-        following,
-        jobApplications,
-        savedJobs,
-        courseEnrollments,
-        mentorSessions,
-        educationApplications,
-        organizationMemberships,
-      },
+      data: maskLegalNames(
+        {
+          exportedAt: new Date().toISOString(),
+          user,
+          profile,
+          skills,
+          education,
+          experience,
+          posts,
+          comments,
+          likes,
+          followers,
+          following,
+          jobApplications,
+          savedJobs,
+          courseEnrollments,
+          mentorSessions,
+          educationApplications,
+          organizationMemberships,
+        },
+        userId
+      ),
     });
   } catch (error) {
     next(error);
