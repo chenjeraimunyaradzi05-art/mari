@@ -411,13 +411,21 @@ export default function MentorSessionsPage() {
       session.status === 'COMPLETED' && session.paymentStatus === 'AUTHORIZED' && session.paymentReleaseAt
         ? new Date(session.paymentReleaseAt)
         : null;
+    // The hour is over: the mentor or the mentee has closed it, or its booked
+    // time has passed. The sweep can take the money for such a session before
+    // anyone marks it complete (a hold about to lapse), so a confirmed session
+    // already charged is reported the same way as a completed one.
+    const hourOver = session.status === 'COMPLETED' || (session.status === 'CONFIRMED' && ended);
+    // A dispute is raised once. After the team decides, the row keeps it, and
+    // the decision is shown below instead of a second button the server refuses.
+    const alreadyDisputed = Boolean(session.disputedAt) || Boolean(session.disputeResolution);
     const canDispute =
       role === 'mentee' &&
       paidSession &&
-      ((session.status === 'CONFIRMED' && ended && session.paymentStatus === 'AUTHORIZED') ||
-        (session.status === 'COMPLETED' && session.paymentStatus === 'AUTHORIZED') ||
-        (session.status === 'COMPLETED' && captured && withinDisputeWindow));
-    const wasCharged = role === 'mentee' && session.status === 'COMPLETED' && captured && paidSession;
+      !alreadyDisputed &&
+      hourOver &&
+      (session.paymentStatus === 'AUTHORIZED' || (captured && withinDisputeWindow));
+    const wasCharged = role === 'mentee' && hourOver && captured && paidSession && !alreadyDisputed;
     const pastDisputeWindow = wasCharged && !withinDisputeWindow;
     const inDispute = session.status === 'DISPUTED';
 

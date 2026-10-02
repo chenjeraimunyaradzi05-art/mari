@@ -55,6 +55,23 @@ describe('a payout refused until the addendum is accepted', () => {
     expect(screen.getAllByText(`$${MINIMUM_PAYOUT_AUD}.00`).length).toBeGreaterThan(0);
   });
 
+  // The only way into creator mode is accepting the addendum (POST /creator/enable
+  // refuses without it), so a member who has not is sent there, not offered a
+  // payout of nothing.
+  it('tells a member who has not turned creator mode on where to do that, and offers no payout', async () => {
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url === '/creator/analytics') return { data: { data: { summary: {}, profile: {}, topPosts: [] } } };
+      if (url === '/creator/profile') return { data: { data: null } };
+      return { data: { data: [] } };
+    });
+    render(<CreatorDashboardPage />);
+
+    expect(await screen.findByText(/Creator mode is not on yet/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Creator Terms Addendum' })).toHaveAttribute('href', '/creator-terms');
+    expect(screen.getByRole('button', { name: /Request payout/ })).toBeDisabled();
+    expect(apiMock.post).not.toHaveBeenCalled();
+  });
+
   it('still reports any other refusal as a toast, in the server’s words', async () => {
     apiMock.post.mockRejectedValue({ response: { status: 409, data: { message: 'Withdrawals are paused while a card payment is looked at.' } } });
     render(<CreatorDashboardPage />);

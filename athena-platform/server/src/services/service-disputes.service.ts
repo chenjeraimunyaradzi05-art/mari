@@ -106,6 +106,8 @@ export async function openSessionDispute(sessionId: string, menteeId: string, re
       paymentStatus: true,
       paymentCapturedAt: true,
       stripePaymentIntentId: true,
+      disputedAt: true,
+      disputeResolution: true,
       mentorProfile: { select: { userId: true } },
     },
   });
@@ -115,6 +117,17 @@ export async function openSessionDispute(sessionId: string, menteeId: string, re
   if (session.status === 'DISPUTED') {
     throw new ApiError(409, 'You have already told us about this session. ATHENA’s team is looking at it and will write to you.');
   }
+  // A session the team has already decided is not reopened from here: the
+  // decision stands, and the row keeps its first dispute, so it is said plainly
+  // rather than refused by the conditional write below as "just changed".
+  if (session.disputedAt || session.disputeResolution) {
+    throw new ApiError(
+      409,
+      session.disputeResolution === 'REFUNDED'
+        ? 'ATHENA’s team has already looked at this session and gave the payment back to you. If something is still wrong, please contact support.'
+        : 'ATHENA’s team has already looked at this session and decided it. If you disagree with the decision, please contact support and the team will go through it with you.'
+    );
+  }
   if (!session.stripePaymentIntentId || Number(session.sessionAmount) <= 0) {
     throw new ApiError(
       400,
@@ -123,29 +136,34 @@ export async function openSessionDispute(sessionId: string, menteeId: string, re
   }
 
   const endsAt = session.scheduledAt ? session.scheduledAt.getTime() + session.durationMinutes * 60 * 1000 : null;
-  if (session.status === 'CONFIRMED') {
-    if (endsAt === null || endsAt > now.getTime()) {
+  if (session.status === 'REQUESTED') {
+    throw new ApiError(400, 'Your mentor has not accepted this session. Withdraw it instead and the hold on your card is released.');
+  }
+  if (session.status !== 'CONFIRMED' && session.status !== 'COMPLETED') {
+    throw new ApiError(400, 'This session was cancelled, so nothing was taken from your card.');
+  }
+  if (session.status === 'CONFIRMED' && (endsAt === null || endsAt > now.getTime())) {
+    throw new ApiError(
+      400,
+      'This session has not happened yet. If you no longer want it, cancel it and the hold on your card is released.'
+    );
+  }
+
+  // The hour is over, whether or not anyone has marked it complete. The money
+  // has to be somewhere ATHENA can hold or give back: still held on her card, or
+  // taken (by her mentor's word, or by the sweep when a hold was about to lapse)
+  // within the window. A hold that lapsed, was declined or was released is
+  // nothing to decide about.
+  if (session.paymentStatus === 'CAPTURED') {
+    const takenAt = session.paymentCapturedAt ?? null;
+    if (takenAt && now.getTime() - takenAt.getTime() > DISPUTE_WINDOW_DAYS * DAY) {
       throw new ApiError(
         400,
-        'This session has not happened yet. If you no longer want it, cancel it and the hold on your card is released.'
+        `It is more than ${DISPUTE_WINDOW_DAYS} days since this session was paid for, so it cannot be reported from here. Please contact support and the team will look at it with you.`
       );
     }
-  } else if (session.status === 'COMPLETED') {
-    if (session.paymentStatus === 'CAPTURED') {
-      const takenAt = session.paymentCapturedAt ?? null;
-      if (takenAt && now.getTime() - takenAt.getTime() > DISPUTE_WINDOW_DAYS * DAY) {
-        throw new ApiError(
-          400,
-          `It is more than ${DISPUTE_WINDOW_DAYS} days since this session was paid for, so it cannot be reported from here. Please contact support and the team will look at it with you.`
-        );
-      }
-    } else if (session.paymentStatus !== 'AUTHORIZED') {
-      throw new ApiError(400, 'Nothing was taken from your card for this session, so there is nothing to give back.');
-    }
-  } else if (session.status === 'REQUESTED') {
-    throw new ApiError(400, 'Your mentor has not accepted this session. Withdraw it instead and the hold on your card is released.');
-  } else {
-    throw new ApiError(400, 'This session was cancelled, so nothing was taken from your card.');
+  } else if (session.paymentStatus !== 'AUTHORIZED') {
+    throw new ApiError(400, 'Nothing was taken from your card for this session, so there is nothing to give back.');
   }
 
   // Conditional on the status just read and on nothing having been said yet, so
@@ -226,6 +244,7 @@ export async function openOrderDispute(orderId: string, buyerId: string, reason:
       dueAt: true,
       totalAmount: true,
       packageName: true,
+      disputeResolution: true,
       service: { select: { title: true, providerId: true } },
       escrow: { select: { status: true, paymentIntentId: true } },
     },
@@ -234,6 +253,16 @@ export async function openOrderDispute(orderId: string, buyerId: string, reason:
 
   if (order.status === 'DISPUTED') {
     throw new ApiError(409, 'You have already told us about this order. ATHENA’s team is looking at it and will write to you.');
+  }
+  // Decided once. A completed or cancelled order that got there by the team's
+  // decision is told that, not that she approved it or that nothing was taken.
+  if (order.disputeResolution) {
+    throw new ApiError(
+      409,
+      order.disputeResolution === 'REFUNDED'
+        ? 'ATHENA’s team has already looked at this order and gave the payment back to you. If something is still wrong, please contact support.'
+        : 'ATHENA’s team has already looked at this order and released the payment to the provider. If you disagree with the decision, please contact support and the team will go through it with you.'
+    );
   }
   if (!order.escrow) {
     throw new ApiError(

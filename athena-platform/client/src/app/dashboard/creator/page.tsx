@@ -28,6 +28,7 @@ import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/hooks';
 import { CREATOR_SHARE_RANGE_PERCENT, GIFT_POINT_VALUE_AUD, MINIMUM_PAYOUT_AUD } from '@/lib/pricing';
+import { CREATOR_TERMS_PATH } from '@/lib/creator-terms';
 
 // The server refuses a payout below this; the button says so instead of
 // letting someone press it and read the refusal in a toast. It is the price
@@ -162,6 +163,10 @@ export default function CreatorDashboardPage() {
   // Terms Addendum (a creator from before it existed, or before it was last
   // rewritten). Her earnings are untouched; this holds where it sent her.
   const [termsNeeded, setTermsNeeded] = useState<{ message: string; href: string } | null>(null);
+  // Whether she has turned creator mode on. GET /creator/profile answers a member
+  // with no creator profile with `data: null`: there is nothing of hers to pay,
+  // and the way in is accepting the Creator Terms Addendum, not this button.
+  const [creatorModeOn, setCreatorModeOn] = useState(true);
 
   const profileHref = user?.id ? `/profile/${user.id}` : '/profile';
 
@@ -191,7 +196,7 @@ export default function CreatorDashboardPage() {
       if (refusal.code === 'CREATOR_TERMS_REQUIRED') {
         setTermsNeeded({
           message: refusal.error || refusal.message || 'Please read and accept the Creator Terms Addendum before you are paid.',
-          href: typeof refusal.setup === 'string' ? refusal.setup : '/creator-terms',
+          href: typeof refusal.setup === 'string' ? refusal.setup : CREATOR_TERMS_PATH,
         });
         return;
       }
@@ -222,6 +227,7 @@ export default function CreatorDashboardPage() {
         const summary = analytics.summary || {};
         const profile = analytics.profile || {};
         const creatorProfile = profileResponse.data?.data || {};
+        setCreatorModeOn(profileResponse.data?.data != null);
         const gifts = Array.isArray(giftsResponse.data?.data) ? giftsResponse.data.data : [];
 
         const periodEarnings = pointsToCurrency(summary.totalEarningsFromGifts);
@@ -546,10 +552,21 @@ export default function CreatorDashboardPage() {
                   <p className="text-sm text-green-700">Lifetime Earnings</p>
                   <p className="text-lg font-semibold text-green-800">{formatCurrency(stats?.totalEarnings || 0)}</p>
                 </div>
+                {!creatorModeOn && (
+                  <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+                    Creator mode is not on yet, so nothing can be paid to you. Read and accept the{' '}
+                    <Link href={CREATOR_TERMS_PATH} className="font-semibold underline">
+                      Creator Terms Addendum
+                    </Link>{' '}
+                    to turn it on.
+                  </p>
+                )}
                 <Button
                   className="w-full"
                   onClick={requestPayout}
-                  disabled={requestingPayout || Boolean(stats?.payoutHold) || (stats?.availableForPayout ?? 0) < MIN_PAYOUT_AUD}
+                  disabled={
+                    !creatorModeOn || requestingPayout || Boolean(stats?.payoutHold) || (stats?.availableForPayout ?? 0) < MIN_PAYOUT_AUD
+                  }
                 >
                   {requestingPayout ? (
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />

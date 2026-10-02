@@ -101,7 +101,10 @@ export default function FeesPage() {
               ATHENA keeps <strong className="text-slate-900 dark:text-white">{fees.marketplace.platformPercent}%</strong> of each
               order and each hourly booking. The provider receives the other {100 - fees.marketplace.platformPercent}%.
             </p>
-            <p>The buyer’s payment is held on her card when the order is placed and released when she approves the work.</p>
+            <p>
+              The buyer’s payment is held on her card when an order is placed and released when she approves the work. For an
+              hourly booking it is held when the booking is made and released once the booked time has been given.
+            </p>
           </Card>
 
           <Card title="Creator gifts">

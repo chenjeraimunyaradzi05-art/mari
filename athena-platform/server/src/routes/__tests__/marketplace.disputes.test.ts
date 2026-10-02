@@ -207,6 +207,18 @@ describe('A buyer disputes a marketplace order', () => {
     expect(prisma.serviceOrder.updateMany).not.toHaveBeenCalled();
   });
 
+  it('is not reopened once the team has decided it, and says what was decided', async () => {
+    prisma.serviceOrder.findUnique.mockResolvedValue(orderRow('COMPLETED', { disputeResolution: 'RELEASED' }));
+    const released = await dispute().expect(409);
+    expect(released.body.message).toMatch(/released the payment to the provider/);
+
+    prisma.serviceOrder.findUnique.mockResolvedValue(orderRow('CANCELLED', { disputeResolution: 'REFUNDED' }));
+    const refunded = await dispute().expect(409);
+    expect(refunded.body.message).toMatch(/gave the payment back to you/);
+
+    expect(prisma.serviceOrder.updateMany).not.toHaveBeenCalled();
+  });
+
   it('does not write over an order the provider changed while the dispute was being filed', async () => {
     prisma.serviceOrder.findUnique.mockResolvedValue(orderRow('DELIVERED'));
     prisma.serviceOrder.updateMany.mockResolvedValue({ count: 0 });
@@ -358,6 +370,42 @@ describe('A mentee disputes a mentoring session', () => {
     prisma.mentorSession.findUnique.mockResolvedValue(sessionRow('DISPUTED'));
     await dispute().expect(409);
 
+    expect(prisma.mentorSession.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('is not reopened once the team has decided it, and says so', async () => {
+    prisma.mentorSession.findUnique.mockResolvedValue(
+      sessionRow('COMPLETED', {
+        paymentStatus: 'CAPTURED',
+        paymentCapturedAt: new Date(Date.now() - DAY),
+        completedAt: new Date(Date.now() - DAY),
+        disputedAt: new Date(Date.now() - 2 * DAY),
+        disputeResolution: 'RELEASED',
+      })
+    );
+    const released = await dispute().expect(409);
+    expect(released.body.message).toMatch(/already looked at this session/);
+
+    prisma.mentorSession.findUnique.mockResolvedValue(
+      sessionRow('CANCELED', { paymentStatus: 'REFUNDED', disputedAt: new Date(Date.now() - 2 * DAY), disputeResolution: 'REFUNDED' })
+    );
+    const refunded = await dispute().expect(409);
+    expect(refunded.body.message).toMatch(/gave the payment back to you/);
+
+    expect(prisma.mentorSession.updateMany).not.toHaveBeenCalled();
+  });
+
+  // The sweep takes the money for a finished session whose hold is about to lapse
+  // before anyone marks it complete; that is still her hour to question. A hold
+  // that lapsed, was declined or was released is nothing to decide about.
+  it('is open on a confirmed session the sweep already charged, and not on one whose hold has ended', async () => {
+    prisma.mentorSession.findUnique.mockResolvedValue(sessionRow('CONFIRMED', { paymentStatus: 'CAPTURED', paymentCapturedAt: new Date(Date.now() - HOUR) }));
+    await dispute().expect(201);
+
+    prisma.mentorSession.updateMany.mockClear();
+    prisma.mentorSession.findUnique.mockResolvedValue(sessionRow('CONFIRMED', { paymentStatus: 'CANCELED' }));
+    const lapsed = await dispute().expect(400);
+    expect(lapsed.body.message).toMatch(/Nothing was taken/);
     expect(prisma.mentorSession.updateMany).not.toHaveBeenCalled();
   });
 

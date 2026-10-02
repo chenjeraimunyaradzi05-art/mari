@@ -269,6 +269,40 @@ describe('Mentoring sessions', () => {
       await waitFor(() => expect(api.respondToSessionDispute).toHaveBeenCalledWith('s2', 'We met on Zoom for the full hour'));
     });
 
+    it('shows a decided dispute and offers no second one, even inside the window', async () => {
+      api.getSessions.mockResolvedValue({
+        data: [
+          session({
+            status: 'COMPLETED',
+            paymentStatus: 'CAPTURED',
+            paymentCapturedAt: new Date(Date.now() - DAY).toISOString(),
+            disputedAt: new Date(Date.now() - 2 * DAY).toISOString(),
+            disputeReason: 'Nobody joined',
+            disputeResponse: 'We met for the hour',
+            disputeResolution: 'RELEASED',
+          }),
+        ],
+      });
+      renderPage();
+
+      expect(await screen.findByText(/the payment was released to the mentor/)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'It did not happen' })).not.toBeInTheDocument();
+      expect(screen.queryByText(/tell us below within/)).not.toBeInTheDocument();
+    });
+
+    // The sweep takes the money for a finished session whose hold is about to
+    // lapse before anyone has marked it complete. That is still her hour to
+    // question, inside the window, the same as one her mentor closed.
+    it('lets her object to a confirmed session the sweep already charged, while the window is open', async () => {
+      api.getSessions.mockResolvedValue({
+        data: [session({ status: 'CONFIRMED', paymentStatus: 'CAPTURED', paymentCapturedAt: new Date(Date.now() - HOUR).toISOString() })],
+      });
+      renderPage();
+
+      expect(await screen.findByRole('button', { name: 'It did not happen' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'It went ahead' })).toBeInTheDocument();
+    });
+
     it('shows the mentor’s answer to the mentee and that the money is held, with no way to move it', async () => {
       api.getSessions.mockResolvedValue({
         data: [session({ status: 'DISPUTED', disputeReason: 'Nobody joined', disputeResponse: 'We met for the full hour' })],
