@@ -92,8 +92,11 @@ wrong; those rows have to be rewritten by hand.
   every message of an erased member with her account, and the files under
   `chat/` go with them ([`server/src/services/chat-attachment-cleanup.service.ts`](../../server/src/services/chat-attachment-cleanup.service.ts)).
   The one exception is the file behind a message somebody has reported, which
-  the people deciding the report need to see; it is kept, and reached through
-  the report only.
+  the people deciding the report need to see; it is kept, the report's copy of
+  the message carries its key, and a member of staff with a second factor opens
+  it from the report through the same `POST /api/media/download-url`. The sender
+  cannot delete it by its key either: a file a message carries, or a report
+  names, is answered with 409 by `DELETE /api/media/delete`.
 - A member deletes her own upload with `DELETE /api/media/delete` and its key.
 
 A file that could not be removed from the bucket is counted, not swallowed:

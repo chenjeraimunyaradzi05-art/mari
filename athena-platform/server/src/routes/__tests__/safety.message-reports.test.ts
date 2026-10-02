@@ -185,6 +185,21 @@ describe('reporting a direct message', () => {
     expect(JSON.stringify(filedEvidence())).not.toContain('4821');
   });
 
+  it('keeps the key of a file in the chat folder, which is how the people deciding the report open it', async () => {
+    const key = 'chat/conv-1/him_0b0a1c2e-3f4a-4b5c-8d6e-7f8091a2b3c4.webp';
+    prisma.message.findUnique.mockResolvedValue(
+      messageRow({
+        content: '',
+        type: 'IMAGE',
+        metadata: { attachments: [{ key, name: 'kitchen.webp', contentType: 'image/webp', size: 4821 }] },
+      })
+    );
+
+    await request(app).post('/api/safety/reports').set(as('her')).send({ targetType: 'message', targetId: 'm3', reason: 'sexual' }).expect(201);
+
+    expect(filedEvidence().messageContext.reported.attachments).toEqual([{ name: 'kitchen.webp', key }]);
+  });
+
   it('asks only the lines still on the thread: not unsent ones, not expired ones', async () => {
     await request(app).post('/api/safety/reports').set(as('her')).send({ targetType: 'message', targetId: 'm3', reason: 'harassment' }).expect(201);
 

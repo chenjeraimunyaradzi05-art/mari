@@ -27,6 +27,11 @@ const ROLE_HIERARCHY: Record<UserRole, number> = {
 /** The roles that reach other members' records, the moderation queue or money. */
 const STAFF_ROLES: ReadonlySet<UserRole> = new Set(['MODERATOR', 'ADMIN', 'SUPER_ADMIN']);
 
+/** Whether this role is one of the staff roles: the ones that reach other members' records. */
+export function isStaffRole(role: string | undefined): boolean {
+  return STAFF_ROLES.has((role || 'USER') as UserRole);
+}
+
 /**
  * A staff account has to carry a second factor before any of its powers
  * work. Production always insists; elsewhere it can be switched off with

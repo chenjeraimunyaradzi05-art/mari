@@ -22,6 +22,7 @@
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { isBlockedRelationship } from '../utils/safety-store';
+import { isChatKey } from '../utils/chat-attachments';
 import { unexpiredMessageWhere } from './message-expiry.service';
 
 /** How many messages before the reported one are kept for context. */
@@ -38,7 +39,16 @@ const MESSAGE_NOT_FOUND =
 export interface SnapshotAttachment {
   name?: string;
   type?: string;
+  /** A link, on a message from before chat files were private. */
   url?: string;
+  /**
+   * Where a file sent since lives (utils/chat-attachments). The file behind a
+   * reported message is kept when the message goes, for the people deciding the
+   * report, and this is how they ask for it: POST /api/media/download-url opens
+   * a key a report's copy names to staff with a second factor
+   * (services/chat-attachment).
+   */
+  key?: string;
 }
 
 export interface SnapshotMessage {
@@ -91,7 +101,11 @@ function nameOf(sender: SenderRow): string | null {
   return full || null;
 }
 
-/** The attachments a message carried, as names and links only. */
+/**
+ * The attachments a message carried: names, links, and the key of a file in
+ * the chat folder, which is the only way the file behind the reported message
+ * can be opened once the message itself is gone.
+ */
 function attachmentsOf(metadata: unknown): SnapshotAttachment[] {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return [];
   const raw = (metadata as { attachments?: unknown }).attachments;
@@ -102,6 +116,7 @@ function attachmentsOf(metadata: unknown): SnapshotAttachment[] {
       ...(typeof item.name === 'string' ? { name: item.name } : {}),
       ...(typeof item.type === 'string' ? { type: item.type } : {}),
       ...(typeof item.url === 'string' ? { url: item.url } : {}),
+      ...(isChatKey(item.key) ? { key: item.key } : {}),
     }));
 }
 

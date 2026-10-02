@@ -12,8 +12,17 @@
 
 import Link from 'next/link';
 import { safeHref } from '@/lib/safe-href';
+import { isChatAttachmentKey, useChatAttachmentUrl } from '@/lib/chat-attachments';
 
-type SnapshotAttachment = { name?: string; type?: string; url?: string };
+/**
+ * A file on a copied message: a link, for one sent before chat files were
+ * private, or the key of a file in the chat folder. The file behind the
+ * reported message is kept when the message goes, and the API opens it to a
+ * member of staff with a second factor because the report names it; the files
+ * on the lines before it go with their own messages, so only their names are
+ * shown.
+ */
+type SnapshotAttachment = { name?: string; type?: string; url?: string; key?: string };
 
 type SnapshotMessage = {
   id: string;
@@ -101,11 +110,13 @@ function Line({
       {attachments && attachments.length > 0 && (
         <ul className="mt-1 space-y-0.5 text-xs">
           {attachments.map((attachment, index) => (
-            <li key={`${attachment.url ?? attachment.name ?? 'file'}-${index}`}>
+            <li key={`${attachment.key ?? attachment.url ?? attachment.name ?? 'file'}-${index}`}>
               {attachment.url ? (
                 <a href={safeHref(attachment.url)} target="_blank" rel="noopener noreferrer" className="text-primary-600 hover:underline">
                   {attachment.name || 'Attachment'}
                 </a>
+              ) : highlighted && isChatAttachmentKey(attachment.key) ? (
+                <KeptFileLink fileKey={attachment.key} name={attachment.name} />
               ) : (
                 <span>{attachment.name || 'Attachment'}</span>
               )}
@@ -115,6 +126,33 @@ function Line({
         </ul>
       )}
     </li>
+  );
+}
+
+/**
+ * The file behind the reported message, opened through the link the API mints
+ * for the member of staff looking (lib/chat-attachments). Said plainly when it
+ * cannot be opened: the file was never kept, or this account may not open it.
+ */
+function KeptFileLink({ fileKey, name }: { fileKey: string; name?: string }) {
+  const link = useChatAttachmentUrl(fileKey);
+  const label = name || 'Attachment';
+  const href = link.status === 'ready' ? safeHref(link.url) : undefined;
+
+  if (href) {
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary-600 hover:underline">
+        {label}
+      </a>
+    );
+  }
+  if (link.status === 'loading') {
+    return <span aria-busy="true">{label}</span>;
+  }
+  return (
+    <span>
+      {label} <span className="text-slate-500">(the file could not be opened)</span>
+    </span>
   );
 }
 

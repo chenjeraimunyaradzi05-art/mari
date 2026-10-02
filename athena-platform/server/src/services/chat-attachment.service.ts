@@ -21,6 +21,7 @@
 
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
+import { isStaffRole, staffTwoFactorRefusal } from '../middleware/roles';
 import { isBlockedEitherWay } from './audience.service';
 import { assertCanSendInConversation } from './direct-message.service';
 import { groupChatService } from './group-chat.service';
@@ -92,4 +93,73 @@ export async function mayReadChatAttachment(key: string, userId: string): Promis
   if (!(await isInChat(parsed.scopeId, userId))) return false;
   if (parsed.senderId !== userId && (await isBlockedEitherWay(userId, parsed.senderId))) return false;
   return true;
+}
+
+/** Where a report's copy of the reported message lists its files (services/report-context). */
+const REPORTED_ATTACHMENTS_PATH = ['messageContext', 'reported', 'attachments'];
+
+/**
+ * Whether a report on a message names this file in its copy of that message.
+ *
+ * The copy is taken when the report is filed, so this holds after the message
+ * is unsent or swept, which is exactly when the file behind it is kept for the
+ * people deciding the report (services/chat-attachment-cleanup). Only the
+ * reported message counts, not the lines copied before it for context: those
+ * files go with their own messages and are nobody's evidence.
+ */
+export async function isReportedChatAttachment(key: string): Promise<boolean> {
+  if (!parseChatKey(key)) return false;
+  const report = await prisma.contentReport.findFirst({
+    where: {
+      contentType: { equals: 'message', mode: 'insensitive' },
+      evidence: { path: REPORTED_ATTACHMENTS_PATH, array_contains: [{ key }] },
+    },
+    select: { id: true },
+  });
+  return Boolean(report);
+}
+
+/** Who is asking to read a file: the signed-in principal, as the auth middleware fills it in. */
+export type Reader = { id: string; role?: string; twoFactorEnabled?: boolean };
+
+/**
+ * Whether a member of staff may open this file although she is not in the
+ * conversation: only when a report names it, and only with the second factor
+ * every staff power is behind (middleware/roles). The file is the thing a
+ * moderator has to look at to decide a report on a picture, and the message it
+ * came with is usually gone by then. A staff account is given nothing else
+ * under the chat folder: a conversation nobody has reported is not hers to read.
+ */
+export async function mayStaffReadChatAttachment(reader: Reader, key: string): Promise<boolean> {
+  if (!isStaffRole(reader.role) || staffTwoFactorRefusal(reader) !== null) return false;
+  return isReportedChatAttachment(key);
+}
+
+/**
+ * Why a chat file is not the sender's to delete by its key on its own, or null
+ * when it is.
+ *
+ * A file goes with its message: unsending the message removes it, and the
+ * sweep and an erasure do the same, all through services/chat-attachment-cleanup,
+ * which keeps the file behind a reported message. A delete by key would go
+ * round that, so a key a live message carries ('sent'), or a report's copy
+ * names ('reported'), stays. What is left to delete by key is an upload no
+ * message ever carried: a send that failed after the file went up.
+ */
+export async function whyChatFileStays(key: string): Promise<'sent' | 'reported' | null> {
+  const parsed = parseChatKey(key);
+  if (!parsed) return null;
+
+  const carried = await prisma.message.findFirst({
+    where: {
+      conversationId: parsed.scopeId,
+      senderId: parsed.senderId,
+      deletedAt: null,
+      metadata: { path: ['attachments'], array_contains: [{ key }] },
+    },
+    select: { id: true },
+  });
+  if (carried) return 'sent';
+
+  return (await isReportedChatAttachment(key)) ? 'reported' : null;
 }

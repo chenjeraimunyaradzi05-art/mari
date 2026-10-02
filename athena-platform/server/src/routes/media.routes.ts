@@ -36,7 +36,13 @@ import {
 } from '../services/video-pipeline.service';
 import { canManageJobApplicants, isHiringMemberOfAny } from '../services/hiring-access.service';
 import { screenUpload } from '../services/malware-scan.service';
-import { mayReadChatAttachment, resolveChatUploadScope } from '../services/chat-attachment.service';
+import {
+  mayReadChatAttachment,
+  mayStaffReadChatAttachment,
+  resolveChatUploadScope,
+  whyChatFileStays,
+  type Reader,
+} from '../services/chat-attachment.service';
 import { CHAT_FOLDER, CHAT_LINK_SECONDS, chatObjectKey, parseChatKey } from '../utils/chat-attachments';
 
 const router = Router();
@@ -498,6 +504,8 @@ function validateOwnedUploadKey(key: string, userId: string) {
 
   // A chat file's second segment is the conversation, not an owner: the one who
   // may take it back is the member who sent it, and the key says who that is.
+  // Whether it may be taken back by its key at all is asked by the delete route
+  // (whyChatFileStays): a file a message carries goes with the message.
   if (folder === CHAT_FOLDER) {
     if (parseChatKey(normalizedKey)?.senderId !== userId) {
       logger.warn('Unauthorized file access attempt', { userId, attemptedKey: normalizedKey });
@@ -570,15 +578,18 @@ async function isHiringReaderOfResume(normalizedKey: string, ownerId: string, re
 /**
  * Who may read a private upload. The owner always. A résumé travels with a
  * job or apprenticeship application, so the hiring staff deciding on that
- * application may read that one file too (isHiringReaderOfResume). Anyone
- * else is told the file does not exist rather than whose it is.
+ * application may read that one file too (isHiringReaderOfResume). A chat file
+ * is read by the people in its conversation, and by a member of staff deciding
+ * a report that names it. Anyone else is told the file does not exist rather
+ * than whose it is.
  *
  * Deleting stays owner-only (validateOwnedUploadKey); this is for reads.
  */
 async function resolveReadableUploadKey(
   key: string,
-  userId: string
+  reader: Reader
 ): Promise<{ normalizedKey: string; folder: string }> {
+  const userId = reader.id;
   const normalizedKey = normalizeUploadKey(key);
   const keyParts = normalizedKey.split('/');
 
@@ -594,9 +605,16 @@ async function resolveReadableUploadKey(
 
   // A chat file belongs to a conversation, not to a member: whoever is in it
   // may read it, and nobody else, and the answer to anybody else is the one for
-  // a file that is not there (services/chat-attachment).
+  // a file that is not there (services/chat-attachment). The one exception is
+  // the file behind a reported message, which is kept when the message goes so
+  // that the people deciding the report can look at it: a member of staff with
+  // a second factor may open a key a report's copy names, and nothing else here.
   if (folder === CHAT_FOLDER) {
     if (await mayReadChatAttachment(normalizedKey, userId)) {
+      return { normalizedKey, folder };
+    }
+    if (await mayStaffReadChatAttachment(reader, normalizedKey)) {
+      logger.info('Chat file behind a report opened by staff', { userId, key: normalizedKey });
       return { normalizedKey, folder };
     }
     logger.warn('Chat file requested by someone outside the conversation', { userId, attemptedKey: normalizedKey });
@@ -912,7 +930,19 @@ router.delete('/delete', authenticate, async (req: AuthRequest, res, next) => {
       throw new ApiError(400, 'File key is required');
     }
 
-    const { normalizedKey } = validateOwnedUploadKey(key, req.user!.id);
+    const { normalizedKey, folder } = validateOwnedUploadKey(key, req.user!.id);
+
+    // A file sent in a conversation goes with its message: unsending the message
+    // removes it, and the sweep and an erasure do the same, all of them keeping
+    // the file behind a message somebody has reported for the people deciding the
+    // report (services/chat-attachment-cleanup). Deleting it by its key would go
+    // round that, so a key a message carries, or a report's copy names, stays.
+    // The answer is the same for both, since whether she has been reported is
+    // not something this route tells her. What she can still remove by key is an
+    // upload no message ever carried.
+    if (folder === CHAT_FOLDER && (await whyChatFileStays(normalizedKey))) {
+      throw new ApiError(409, 'A file sent in a conversation is removed with its message, not on its own.');
+    }
 
     let deletedFromS3 = false;
     let s3Failed = false;
@@ -983,7 +1013,7 @@ router.post('/download-url', authenticate, async (req: AuthRequest, res, next) =
       throw new ApiError(400, 'File key is required');
     }
 
-    const { normalizedKey, folder } = await resolveReadableUploadKey(key, req.user!.id);
+    const { normalizedKey, folder } = await resolveReadableUploadKey(key, req.user!);
     const visibility = PRIVATE_UPLOAD_FOLDERS.has(folder) ? 'private' : 'public';
     const fileName = path.basename(normalizedKey);
 
@@ -1030,7 +1060,7 @@ router.get('/local/*', authenticate, async (req: AuthRequest, res, next) => {
       throw new ApiError(400, 'File key is required');
     }
 
-    const { normalizedKey, folder } = await resolveReadableUploadKey(key, req.user!.id);
+    const { normalizedKey, folder } = await resolveReadableUploadKey(key, req.user!);
 
     if (!PRIVATE_UPLOAD_FOLDERS.has(folder)) {
       throw new ApiError(404, 'File not found');

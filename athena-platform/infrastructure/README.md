@@ -58,7 +58,8 @@ which is decided by the top-level folder, and the list is
 
 Files under `chat/` are removed when the message they were sent in expires, is
 unsent, or belongs to a member whose account is erased, except behind a message
-somebody has reported, which moderators need to see
+somebody has reported, which the staff deciding the report open from the report
+with the same API call, and which the sender cannot delete by its key
 ([`server/src/services/chat-attachment-cleanup.service.ts`](../server/src/services/chat-attachment-cleanup.service.ts)).
 A file sent in a conversation before chat files were private (before October
 2026) was uploaded as a post picture, a reel or a sound, into a public folder,

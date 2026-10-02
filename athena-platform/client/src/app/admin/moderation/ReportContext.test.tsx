@@ -1,6 +1,21 @@
 import '@testing-library/jest-dom';
 import { render, screen, within } from '@testing-library/react';
+
+jest.mock('@/lib/api', () => ({
+  api: { get: jest.fn() },
+  mediaApi: { downloadUrl: jest.fn() },
+}));
+
+import { mediaApi } from '@/lib/api';
+import { resetChatAttachmentLinks } from '@/lib/chat-attachments';
 import { ReportContext } from './ReportContext';
+
+const mint = mediaApi.downloadUrl as unknown as jest.Mock;
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  resetChatAttachmentLinks();
+});
 
 /**
  * What a moderator reads when she opens a report on something said.
@@ -16,7 +31,7 @@ const line = (id: string, senderName: string, content: string, minute: number) =
   senderId: id,
   senderName,
   content,
-  attachments: [] as Array<{ name?: string; type?: string; url?: string }>,
+  attachments: [] as Array<{ name?: string; type?: string; url?: string; key?: string }>,
   createdAt: `2026-10-01T03:0${minute}:00.000Z`,
 });
 
@@ -88,6 +103,48 @@ describe('a reported message', () => {
     expect(screen.getByRole('link', { name: 'photo.jpg' })).toHaveAttribute('href', '/uploads/photo.jpg');
     expect(screen.getByText('gone.pdf')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'gone.pdf' })).not.toBeInTheDocument();
+    expect(mint).not.toHaveBeenCalled();
+  });
+
+  it('opens the kept file behind the reported message through a link the API mints, and only that one', async () => {
+    const KEPT = 'chat/c1/m3_0b0a1c2e-3f4a-4b5c-8d6e-7f8091a2b3c4.webp';
+    const EARLIER = 'chat/c1/m3_1b0a1c2e-3f4a-4b5c-8d6e-7f8091a2b3c4.webp';
+    mint.mockResolvedValue({ data: { data: { downloadUrl: 'https://s3.example/signed?kept', expiresIn: 300 } } });
+
+    render(
+      <ReportContext
+        context={{
+          messageContext: {
+            ...messageContext,
+            reported: { ...messageContext.reported, attachments: [{ name: 'kitchen.webp', key: KEPT }] },
+            before: [{ ...line('m2', 'Dan', '', 2), attachments: [{ name: 'earlier.webp', key: EARLIER }] }],
+          },
+        }}
+      />
+    );
+
+    expect(await screen.findByRole('link', { name: 'kitchen.webp' })).toHaveAttribute('href', 'https://s3.example/signed?kept');
+    expect(mint).toHaveBeenCalledTimes(1);
+    expect(mint).toHaveBeenCalledWith(KEPT);
+    // The lines before it are context; their files go with their own messages and are not asked for.
+    expect(screen.getByText('earlier.webp')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'earlier.webp' })).not.toBeInTheDocument();
+  });
+
+  it('says so when the kept file cannot be opened, rather than offering a dead link', async () => {
+    const KEPT = 'chat/c1/m3_0b0a1c2e-3f4a-4b5c-8d6e-7f8091a2b3c4.webp';
+    mint.mockRejectedValue(Object.assign(new Error('Request failed'), { response: { status: 404 } }));
+
+    render(
+      <ReportContext
+        context={{
+          messageContext: { ...messageContext, reported: { ...messageContext.reported, attachments: [{ name: 'kitchen.webp', key: KEPT }] } },
+        }}
+      />
+    );
+
+    expect(await screen.findByText('(the file could not be opened)')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /kitchen\.webp/ })).not.toBeInTheDocument();
   });
 });
 

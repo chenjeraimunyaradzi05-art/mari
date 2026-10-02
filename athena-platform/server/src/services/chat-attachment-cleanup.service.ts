@@ -14,11 +14,14 @@
  * it.
  *
  * What is kept is the file behind a message somebody reported. A report keeps its
- * own copy of the words and the names of the files (services/report-context), but
- * the picture a moderator has to look at to decide is the file, and the sender
+ * own copy of the words and the names and keys of the files (services/report-context),
+ * but the picture a moderator has to look at to decide is the file, and the sender
  * unsending it a minute after it was reported is exactly when it would otherwise
- * go. It is kept for the people deciding the report, who reach it through the
- * report (routes/admin.routes) and nowhere else.
+ * go. It is kept for the people deciding the report: a member of staff with a
+ * second factor may ask POST /api/media/download-url for a key the report's copy
+ * names, and for no other key under the chat folder (services/chat-attachment
+ * mayStaffReadChatAttachment). The sender cannot delete it by its key either
+ * (DELETE /api/media/delete asks whyChatFileStays first).
  *
  * Every call is best effort and none throws: this runs after the row is gone, in
  * a sweep, in the middle of an erasure, or behind a member pressing unsend, and a
