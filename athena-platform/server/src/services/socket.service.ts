@@ -5,7 +5,12 @@
 
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { logger } from '../utils/logger';
-import { ACCOUNT_LOCKED_MESSAGE, authenticateSocketToken, SUSPENDED_ACCOUNT_MESSAGE } from '../middleware/auth';
+import {
+  ACCOUNT_LOCKED_MESSAGE,
+  authenticateSocketToken,
+  EMAIL_NOT_VERIFIED_MESSAGE,
+  SUSPENDED_ACCOUNT_MESSAGE,
+} from '../middleware/auth';
 import { liveChatThrottle, socketMessageThrottle } from '../middleware/socialLimits';
 import { sessionEvents, SessionRevokedEvent } from '../utils/session-events';
 import { isBlockedRelationship } from '../utils/safety-store';
@@ -96,7 +101,7 @@ export function disconnectRevokedSockets(io: SocketIOServer, event: SessionRevok
 export async function closedAccountRefusal(userId: string): Promise<{ message: string; code: string } | null> {
   const account = await prisma.user.findUnique({
     where: { id: userId },
-    select: { isSuspended: true, bannedAt: true, lockedAt: true },
+    select: { isSuspended: true, bannedAt: true, lockedAt: true, emailVerified: true },
   });
   if (!account || account.isSuspended || account.bannedAt) {
     return { message: SUSPENDED_ACCOUNT_MESSAGE, code: 'ACCOUNT_SUSPENDED' };
@@ -105,6 +110,14 @@ export async function closedAccountRefusal(userId: string): Promise<{ message: s
   // so), and this is the second line behind that, in its own words.
   if (account.lockedAt) {
     return { message: ACCOUNT_LOCKED_MESSAGE, code: 'ACCOUNT_LOCKED' };
+  }
+  // An address an admin has un-confirmed holds no session on the REST API
+  // (authenticate and /refresh refuse it), and the same rule applies to a
+  // connection opened before that happened: sign-in would refuse it, so a
+  // message from it is refused too. Only an explicit false counts, as in
+  // authenticate, so a row that does not say is not read as unconfirmed.
+  if (account.emailVerified === false) {
+    return { message: EMAIL_NOT_VERIFIED_MESSAGE, code: 'EMAIL_NOT_VERIFIED' };
   }
   return null;
 }

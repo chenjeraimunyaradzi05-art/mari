@@ -90,8 +90,14 @@ function createClient(name: string, opts: Partial<RedisOptions> = {}, onReady?: 
   return client;
 }
 
+// Whether the main client has been ready at least once since boot: see redisWouldHoldCommands.
+let mainHasBeenReady = false;
+
 // Main client (lazy)
-export const redis = createClient('main', {}, () => resumeSkippedSweeps());
+export const redis = createClient('main', {}, () => {
+  mainHasBeenReady = true;
+  resumeSkippedSweeps();
+});
 
 // Pub/Sub connections (lazy, unlimited retries per request for blocking ops)
 export const redisSub = createClient('sub', { maxRetriesPerRequest: null });
@@ -105,6 +111,26 @@ export const redisPub = createClient('pub', { maxRetriesPerRequest: null });
  */
 export function isRedisAvailable(): boolean {
   return redis.status === 'ready';
+}
+
+/**
+ * Whether a command sent to the main client now would be held rather than
+ * answered. ioredis keeps a command sent during an outage in its offline
+ * queue and answers it only when the connection is back or, every fourth
+ * reconnect attempt, with an error (maxRetriesPerRequest above); with the
+ * attempts three seconds apart that is up to twelve seconds a request waits
+ * for a cache read or a lock that every caller here can do without. Now that
+ * the client never stops retrying (redisRetryDelay), the wait would last the
+ * whole outage, where it used to end after six seconds with a dead client.
+ *
+ * A client that has never been opened is let through: the command is what
+ * opens it (lazyConnect), and that first connection is quick or fails
+ * outright. Once it has worked and been lost, anything but ready is the retry
+ * cycle.
+ */
+export function redisWouldHoldCommands(): boolean {
+  if (redis.status === 'ready') return false;
+  return mainHasBeenReady || redis.status === 'reconnecting';
 }
 
 /**
@@ -200,7 +226,9 @@ const DEFAULT_TTL = 3600; // 1 hour
  */
 export async function cacheGet<T>(key: string, options: CacheOptions = {}): Promise<T | null> {
   const fullKey = options.prefix ? `${options.prefix}:${key}` : key;
-  
+  // A miss, at once, rather than a request held for the length of the outage.
+  if (redisWouldHoldCommands()) return null;
+
   try {
     const value = await redis.get(fullKey);
     if (value === null) return null;
@@ -221,7 +249,8 @@ export async function cacheSet<T>(
 ): Promise<boolean> {
   const fullKey = options.prefix ? `${options.prefix}:${key}` : key;
   const ttl = options.ttl ?? DEFAULT_TTL;
-  
+  if (redisWouldHoldCommands()) return false;
+
   try {
     const serialized = JSON.stringify(value);
     if (ttl > 0) {
@@ -241,7 +270,8 @@ export async function cacheSet<T>(
  */
 export async function cacheDel(key: string, options: CacheOptions = {}): Promise<boolean> {
   const fullKey = options.prefix ? `${options.prefix}:${key}` : key;
-  
+  if (redisWouldHoldCommands()) return false;
+
   try {
     await redis.del(fullKey);
     return true;
@@ -255,6 +285,7 @@ export async function cacheDel(key: string, options: CacheOptions = {}): Promise
  * Delete all keys matching a pattern
  */
 export async function cacheDelPattern(pattern: string): Promise<number> {
+  if (redisWouldHoldCommands()) return 0;
   try {
     const keys = await redis.keys(pattern);
     if (keys.length === 0) return 0;
@@ -300,7 +331,9 @@ export async function acquireLock(
 ): Promise<(() => Promise<void>) | null> {
   const lockValue = `${process.pid}-${Date.now()}`;
   const fullKey = `lock:${lockKey}`;
-  
+  // Not acquired, at once: a lock that cannot be asked for is not held.
+  if (redisWouldHoldCommands()) return null;
+
   try {
     const acquired = await redis.set(fullKey, lockValue, 'PX', ttlMs, 'NX');
     

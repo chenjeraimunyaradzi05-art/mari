@@ -38,10 +38,16 @@ jest.mock('../../utils/prisma', () => ({
 }));
 
 const SUSPENDED_MESSAGE = 'This account has been suspended. If you believe this is a mistake, you can appeal from the sign-in page.';
+const LOCKED_MESSAGE =
+  'This account is locked. You locked it to keep it safe, and the email we sent you has the link to unlock it. If you cannot find it, ask for a new one from the sign-in page.';
+const UNCONFIRMED_MESSAGE = 'Please verify your email before signing in.';
 jest.mock('../../middleware/auth', () => ({
   authenticateSocketToken: jest.fn(),
   SUSPENDED_ACCOUNT_MESSAGE:
     'This account has been suspended. If you believe this is a mistake, you can appeal from the sign-in page.',
+  ACCOUNT_LOCKED_MESSAGE:
+    'This account is locked. You locked it to keep it safe, and the email we sent you has the link to unlock it. If you cannot find it, ask for a new one from the sign-in page.',
+  EMAIL_NOT_VERIFIED_MESSAGE: 'Please verify your email before signing in.',
 }));
 
 const isBlockedRelationship = jest.fn() as jest.Mock<(a: string, b: string) => Promise<boolean>>;
@@ -285,6 +291,32 @@ describe('a connection that is still open for an account that has since been clo
   it('lets an account in good standing through', async () => {
     userFindUnique.mockResolvedValue({ isSuspended: false, bannedAt: null });
     await expect(closedAccountRefusal('u1')).resolves.toBeNull();
+  });
+
+  // The two states the REST middleware refuses on every request besides a
+  // suspension: an account its owner locked, and an address an admin has
+  // un-confirmed. A socket opened before either happened is held to the same
+  // rule when it next sends, in the same words the sign-in screens match on.
+  it('refuses an account its owner has locked, in the lock wording', async () => {
+    userFindUnique.mockResolvedValue({ isSuspended: false, bannedAt: null, lockedAt: new Date(), emailVerified: true });
+    await expect(closedAccountRefusal('u1')).resolves.toEqual({ message: LOCKED_MESSAGE, code: 'ACCOUNT_LOCKED' });
+  });
+
+  it('refuses an address that is no longer confirmed, and only an explicit false counts', async () => {
+    userFindUnique.mockResolvedValue({ isSuspended: false, bannedAt: null, lockedAt: null, emailVerified: false });
+    await expect(closedAccountRefusal('u1')).resolves.toEqual({ message: UNCONFIRMED_MESSAGE, code: 'EMAIL_NOT_VERIFIED' });
+
+    // A row that does not say (an older mock, a select that left it out) is not read as unconfirmed.
+    userFindUnique.mockResolvedValue({ isSuspended: false, bannedAt: null, lockedAt: null });
+    await expect(closedAccountRefusal('u1')).resolves.toBeNull();
+  });
+
+  it('asks the database for every closing fact in one read', async () => {
+    userFindUnique.mockResolvedValue({ isSuspended: false, bannedAt: null, lockedAt: null, emailVerified: true });
+    await closedAccountRefusal('u1');
+    expect(userFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ select: expect.objectContaining({ isSuspended: true, bannedAt: true, lockedAt: true, emailVerified: true }) })
+    );
   });
 
   it.each([

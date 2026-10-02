@@ -81,7 +81,7 @@ jest.mock('../../utils/logger', () => ({
 }));
 
 import { app } from '../../index';
-import { generateAccessToken, generateRefreshToken } from '../../utils/jwt';
+import { generateAccessToken, generateRefreshToken, getJwtSecretOrThrow } from '../../utils/jwt';
 import { prisma as prismaTyped } from '../../utils/prisma';
 import { getCreatorAnalytics } from '../../services/creator.service';
 import { getRecommendedJobs } from '../../services/search.service';
@@ -319,28 +319,58 @@ describe('request size', () => {
     expect(blog.status).not.toBe(413);
   });
 
-  it('holds a caller with no token to the default on those routes, so a stranger cannot make the API buffer megabytes', async () => {
+  it('gives a caller with no token no larger limit on those routes: a body past the default is told to sign in, unread, so a stranger cannot make the API buffer megabytes', async () => {
+    // Not 413: the route needs a session, and "sign in" is the true answer. The
+    // 401 is what the web and phone apps refresh an expired token on and retry.
     const res = await request(app).post('/api/admin/breaches').set('x-test-role', 'ADMIN').send(body(300));
 
-    expect(res.status).toBe(413);
+    expect(res.status).toBe(401);
+    expect(res.body.message).toBe('No token provided');
   });
 
-  it('treats a forged, expired or refresh token as no token', async () => {
+  it('hands a caller with no token on unchanged when the body is within the default, for the route to answer', async () => {
+    // authenticate is replaced in this suite, so reaching the handler shows as its 400 for the content.
+    const res = await request(app).post('/api/wellness/entries/import').send(body(100));
+
+    expect(res.status).toBe(400);
+  });
+
+  it('treats a forged or a refresh token as no token, and an expired one as expired, each in the words authenticate would use', async () => {
     const forged = await request(app)
       .post('/api/wellness/entries/import')
       .set('Authorization', 'Bearer eyJhbGciOiJIUzI1NiJ9.e30.not-a-signature')
       .send(body(300));
-    expect(forged.status).toBe(413);
+    expect(forged.status).toBe(401);
+    expect(forged.body.message).toBe('Invalid token');
 
     const refresh = await request(app)
       .post('/api/wellness/entries/import')
       .set('Authorization', `Bearer ${generateRefreshToken(claims)}`)
       .send(body(300));
-    expect(refresh.status).toBe(413);
+    expect(refresh.status).toBe(401);
+    expect(refresh.body.message).toBe('Invalid token');
 
-    const expired = jwt.sign({ ...claims, typ: 'access' }, 'dev-only-secret-not-for-production', { algorithm: 'HS256', expiresIn: -60 });
+    // Signed with the real key, so what is refused is the expiry and nothing else:
+    // the member whose fifteen minutes ran out while she pasted the spreadsheet.
+    const expired = jwt.sign({ ...claims, typ: 'access' }, getJwtSecretOrThrow(), { algorithm: 'HS256', expiresIn: -60 });
     const stale = await request(app).post('/api/wellness/entries/import').set('Authorization', `Bearer ${expired}`).send(body(300));
-    expect(stale.status).toBe(413);
+    expect(stale.status).toBe(401);
+    expect(stale.body.message).toBe('Token expired');
+  });
+
+  it('refuses a large body with an expired token at the parser, not at the route, and never reads it', async () => {
+    // Declared as five megabytes and sent as a few bytes: a parser that read the
+    // body would answer 400 for the length not matching, so a 401 means it was
+    // answered on the token and the Content-Length alone.
+    const expired = jwt.sign({ ...claims, typ: 'access' }, getJwtSecretOrThrow(), { algorithm: 'HS256', expiresIn: -60 });
+    const res = await request(app)
+      .post('/api/admin/breaches')
+      .set('Authorization', `Bearer ${expired}`)
+      .set('Content-Type', 'application/json')
+      .set('Content-Length', String(5 * 1024 * 1024))
+      .send('{}');
+
+    expect(res.status).toBe(401);
   });
 
   it('still refuses a body past even the larger limit', async () => {

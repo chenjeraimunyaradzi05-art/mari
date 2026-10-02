@@ -60,11 +60,14 @@ import { opsSnapshot, resetOpsMetrics } from '../ops-metrics';
 import {
   REDIS_PING_TIMEOUT_MS,
   SWEEPS_SKIPPED_CONDITION,
+  acquireLock,
+  cacheGet,
   ensureRedisConnected,
   isRedisAvailable,
   pingRedis,
   redisReadyForTraffic,
   redisRetryDelay,
+  redisWouldHoldCommands,
   resetSkippedSweeps,
   runExclusively,
 } from '../redis';
@@ -74,6 +77,8 @@ type Fake = {
   options: { retryStrategy: (times: number) => number | null };
   connect: jest.Mock<() => Promise<void>>;
   ping: jest.Mock<() => Promise<string>>;
+  get: jest.Mock<(key: string) => Promise<string | null>>;
+  set: jest.Mock<(...args: unknown[]) => Promise<string>>;
   go: (status: string) => void;
 };
 
@@ -282,6 +287,44 @@ describe('pingRedis and the readiness answer', () => {
     process.env.NODE_ENV = 'production';
     delete process.env.REDIS_URL;
     await expect(redisReadyForTraffic()).resolves.toBe(true);
+  });
+});
+
+describe('a cache read or a lock while Redis is being reconnected to', () => {
+  // ioredis holds a command sent during an outage in its offline queue and
+  // answers it every fourth reconnect attempt at the earliest: at three seconds
+  // an attempt, a request would wait twelve seconds for a cache miss.
+  it('is answered at once, as a miss or as not acquired, and nothing is sent to wait in the queue', async () => {
+    main().go('ready');
+    main().go('close');
+    main().go('reconnecting');
+    expect(redisWouldHoldCommands()).toBe(true);
+
+    await expect(cacheGet('report')).resolves.toBeNull();
+    await expect(acquireLock('sweep:x')).resolves.toBeNull();
+
+    expect(main().get).not.toHaveBeenCalled();
+    expect(main().set).not.toHaveBeenCalled();
+  });
+
+  it('is also answered at once while a lost connection is being opened again, not only while it waits its turn', () => {
+    main().go('ready');
+    main().go('close');
+    main().status = 'connecting';
+
+    expect(redisWouldHoldCommands()).toBe(true);
+  });
+
+  it('asks Redis as soon as it is ready again', async () => {
+    main().go('ready');
+    expect(redisWouldHoldCommands()).toBe(false);
+
+    await cacheGet('report');
+    const release = await acquireLock('sweep:x');
+
+    expect(main().get).toHaveBeenCalledWith('report');
+    expect(main().set).toHaveBeenCalledWith('lock:sweep:x', expect.any(String), 'PX', expect.any(Number), 'NX');
+    expect(release).not.toBeNull();
   });
 });
 

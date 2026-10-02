@@ -22,10 +22,17 @@
  * any route's `authenticate`, so without this a stranger could post five
  * megabytes at /api/admin/breaches and have the API buffer and parse all of it
  * before being told to sign in. The check here is the signature on the bearer
- * token, which costs one HMAC and no database read: a request that carries no
- * token, a forged one, an expired one or a refresh token is read by the default
- * parser below, and at 256kb it is answered 413 like any other over-long body.
- * The route's own `authenticate` still decides whether the session is live.
+ * token, which costs one HMAC and no database read. A request that carries no
+ * token, a forged one, an expired one or a refresh token gets no larger limit:
+ * within the default it is read by the default parser below and the route's
+ * `authenticate` answers as it always did; past the default it is answered 401
+ * here, with the sentence `authenticate` would use, and not a byte of the body
+ * is read. Not 413, deliberately. An access token lasts fifteen minutes and
+ * neither client refreshes it ahead of time: both refresh on the first 401 and
+ * send the request again. A member who spent twenty minutes on a breach notice
+ * or pasting a spreadsheet would otherwise be told her file was too large when
+ * it was her token that had lapsed, and nothing would retry. The route's own
+ * `authenticate` still decides whether the session behind a good token is live.
  *
  * Not listed, because they never meet this parser: the Stripe and SendGrid
  * webhooks, which take the raw body (mounted before this in index.ts), and file
@@ -34,9 +41,13 @@
  */
 
 import express, { Application, Request, RequestHandler } from 'express';
+import jwt from 'jsonwebtoken';
 import { verifyToken } from '../utils/jwt';
+import { UnauthorizedError } from '../middleware/errorHandler';
 
-export const DEFAULT_JSON_LIMIT = '256kb';
+/** The default limit in bytes: body-parser reads `256kb` as 256 × 1024. */
+export const DEFAULT_JSON_LIMIT_BYTES = 256 * 1024;
+export const DEFAULT_JSON_LIMIT = `${DEFAULT_JSON_LIMIT_BYTES / 1024}kb`;
 
 export interface LargerJsonBody {
   /** The path prefix the larger limit applies to. */
@@ -90,33 +101,62 @@ export const LARGER_JSON_BODIES: readonly LargerJsonBody[] = [
 ];
 
 /**
- * Whether the request carries an access token this server signed and that has
- * not expired. Says nothing about the session behind it, which is for
- * `authenticate` to check once the body is read.
+ * Why the request's bearer token does not stand as a signed, unexpired access
+ * token, in the words `authenticate` (middleware/auth.ts) uses for the same
+ * refusal, or null when it does. Says nothing about the session behind a good
+ * token, which is for `authenticate` to check once the body is read.
  */
-export function carriesSignedAccessToken(req: Request): boolean {
+export function accessTokenRefusal(req: Request): string | null {
   const header = req.headers.authorization;
   if (typeof header !== 'string' || !header.startsWith('Bearer ')) {
-    return false;
+    return 'No token provided';
   }
   const token = header.slice('Bearer '.length).trim();
   if (!token) {
-    return false;
+    return 'No token provided';
   }
   try {
     verifyToken(token, 'access');
-    return true;
-  } catch {
-    return false;
+    return null;
+  } catch (error) {
+    return error instanceof jwt.TokenExpiredError ? 'Token expired' : 'Invalid token';
   }
 }
 
-/** Mounts the JSON and form body parsers: each larger route at its own limit for a signed-in caller, then everything else at the default. */
+/** Whether the request carries an access token this server signed and that has not expired. */
+export function carriesSignedAccessToken(req: Request): boolean {
+  return accessTokenRefusal(req) === null;
+}
+
+/**
+ * Whether the request says, in its Content-Length, that its body is past the
+ * default limit. A body sent chunked declares nothing and answers false; the
+ * default parser below then stops it at the limit as it does any other.
+ */
+export function declaresBodyPastDefault(req: Request): boolean {
+  const declared = Number(req.headers['content-length']);
+  return Number.isFinite(declared) && declared > DEFAULT_JSON_LIMIT_BYTES;
+}
+
+/**
+ * Mounts the JSON and form body parsers: each larger route at its own limit
+ * for a caller with a signed access token, then everything else at the default.
+ * On a larger route, a caller without one is answered 401 before the body is
+ * read when the body is past the default, and otherwise handed on unchanged.
+ */
 export function mountJsonBodyParsers(app: Application): void {
   for (const { path, limit } of LARGER_JSON_BODIES) {
     const parser = express.json({ limit });
-    const forSignedInCallers: RequestHandler = (req, res, next) =>
-      carriesSignedAccessToken(req) ? parser(req, res, next) : next();
+    const forSignedInCallers: RequestHandler = (req, res, next) => {
+      const refusal = accessTokenRefusal(req);
+      if (refusal === null) {
+        return parser(req, res, next);
+      }
+      if (declaresBodyPastDefault(req)) {
+        return next(UnauthorizedError(refusal));
+      }
+      return next();
+    };
     app.use(path, forSignedInCallers);
   }
   app.use(express.json({ limit: DEFAULT_JSON_LIMIT }));
