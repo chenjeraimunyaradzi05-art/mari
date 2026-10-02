@@ -80,7 +80,7 @@ const faqCategories = [
       },
       {
         question: 'Is there a free trial?',
-        answer: `Yes. Pro comes with a ${TRIAL_DAYS}-day free trial. You enter card details to start it, nothing is charged during the trial, and if you cancel before it ends you pay nothing. If you do not cancel, your card is charged the Pro price on the day the trial ends, and we email you a few days before.`,
+        answer: `Yes. A first Pro subscription comes with a ${TRIAL_DAYS}-day free trial, offered once for each person. You enter card details to start it, nothing is charged during the trial, and if you cancel before it ends you pay nothing. If you do not cancel, your card is charged the Pro price on the day the trial ends, and we email you a few days before. If you have subscribed before, there is no second trial and your card is charged when you check out.`,
       },
       {
         question: 'How do I cancel my subscription?',

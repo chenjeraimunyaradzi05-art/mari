@@ -290,6 +290,69 @@ describe('while she is on a free trial', () => {
 });
 
 /**
+ * Which plan she is on comes from the subscription row. /auth/me has never set
+ * `user.subscriptionTier` (see the note on the field in lib/types.ts), so a page
+ * that read it called every member a free member: a paying member was offered
+ * Upgrade and sent to a checkout the server refuses, and the trial notice above
+ * could not show to anyone, because it was gated on the same field.
+ */
+describe('which plan she is on', () => {
+  const paidRow = (extra: Record<string, unknown> = {}) => ({
+    tier: 'PREMIUM_CAREER',
+    status: 'TRIALING',
+    amount: '9.99',
+    currency: 'AUD',
+    interval: 'month',
+    currentPeriodEnd: '2099-01-20T12:00:00.000Z',
+    cancelAtPeriodEnd: false,
+    ...extra,
+  });
+
+  beforeEach(() => {
+    // The user object as the server really sends it: no tier on it at all.
+    authUser = { region: 'ANZ' };
+  });
+
+  it('is read from the subscription row, so a member on a trial sees the notice although the user object names no tier', async () => {
+    subscriptionRow = paidRow();
+
+    renderPage();
+
+    expect(await screen.findByText(/Your free trial ends on/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel before I am charged' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Manage Billing' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Upgrade' })).not.toBeInTheDocument();
+  });
+
+  it('shows a paying member her plan, and does not start a second checkout from ?upgrade=', async () => {
+    searchParams = new URLSearchParams('upgrade=pro');
+    subscriptionRow = paidRow({ status: 'ACTIVE' });
+    realCheckoutCall = jest.fn().mockResolvedValue({ data: { data: {} } });
+
+    renderPage();
+    await screen.findByText(/9\.99\/month/);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    expect(screen.getAllByText('ATHENA Pro').length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByRole('button', { name: 'Upgrade' })).not.toBeInTheDocument();
+    expect(realCheckoutCall).not.toHaveBeenCalled();
+  });
+
+  it('treats a membership that has ended as the free plan, whatever tier the row still names', async () => {
+    subscriptionRow = paidRow({ status: 'CANCELED' });
+
+    renderPage();
+    await screen.findAllByText(/9\.99/);
+
+    expect(screen.getByRole('button', { name: 'Upgrade' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Manage Billing' })).not.toBeInTheDocument();
+    expect(document.body.textContent ?? '').not.toMatch(/free trial ends/i);
+  });
+});
+
+/**
  * The plan cards listed "5 job applications/month" on Free, "Unlimited job
  * applications" on Pro, "Priority support" and "Exclusive events access". No
  * route caps applications, and there is no priority support and no events

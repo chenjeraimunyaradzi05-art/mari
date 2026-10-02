@@ -690,7 +690,7 @@ export default function SecuritySettingsPage() {
                   <button
                     onClick={() => revokeSession.mutate(session.id)}
                     disabled={revokeSession.isPending}
-                    aria-label={`Sign out ${session.device || 'this device'}`}
+                    aria-label={`Revoke ${session.device || 'this device'}`}
                     className="min-h-11 rounded-md px-3 text-sm text-red-600 hover:text-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:opacity-60"
                   >
                     Revoke

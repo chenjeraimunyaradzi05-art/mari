@@ -112,7 +112,10 @@ const faqs = [
     // Stripe Checkout collects card details to start a subscription trial, so
     // "no credit card required" was never true. The trial itself is real —
     // subscription.routes.ts sets trial_period_days from the same constant.
-    answer: `Yes — ${TRIAL_DAYS} days of Pro, free. You enter card details to start it, nothing is charged during the trial, and if you cancel before it ends you pay nothing.`,
+    // Once per person, as the Terms (6.4) say and as checkout enforces: a member
+    // who has had a subscription before gets no second trial and is charged when
+    // she checks out, so the page does not promise her one.
+    answer: `Yes — ${TRIAL_DAYS} days of Pro, free, with your first subscription. You enter card details to start it, nothing is charged during the trial, and if you cancel before it ends you pay nothing. The trial is offered once for each person: if you have subscribed before, your card is charged when you check out.`,
   },
   {
     question: 'What happens when my trial ends?',
@@ -291,8 +294,9 @@ export default function PricingPage() {
                   // Said at the button, where the decision is made: a card is
                   // needed to start the trial, and it is charged when it ends.
                   <p className="mt-3 text-center text-xs text-slate-500 dark:text-slate-400">
-                    {TRIAL_DAYS}-day free trial. A card is needed to start it, and it is charged {firstCharge} on the
-                    day the trial ends unless you cancel first.
+                    {TRIAL_DAYS}-day free trial with a first subscription. A card is needed to start it, and it is
+                    charged {firstCharge} on the day the trial ends unless you cancel first. If you have subscribed
+                    before, your card is charged {firstCharge} when you check out.
                   </p>
                 )}
 

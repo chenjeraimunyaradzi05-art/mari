@@ -125,6 +125,12 @@ describe('the Terms read their figures from the price book', () => {
     expect(section![1]).toContain(
       `${100 - CREATOR_SHARE_RANGE_PERCENT.max}% to ${100 - CREATOR_SHARE_RANGE_PERCENT.min}%`
     );
+    // The public fee schedule (GET /api/fees, from the price book's
+    // PROCESSING_FEE_STATEMENT) says card processing is covered by ATHENA's share
+    // and nothing is deducted from what a creator keeps; the code pays out every
+    // point at a cent. The Terms said processing fees "may apply". One statement.
+    expect(section![1]).toMatch(/no separate processing fee/i);
+    expect(section![1]).not.toMatch(/processing fees may apply/i);
   });
 
   it('states the payout minimum in Australian dollars only', () => {

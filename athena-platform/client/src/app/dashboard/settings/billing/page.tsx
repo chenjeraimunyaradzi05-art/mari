@@ -135,6 +135,27 @@ function formatSubscriptionPrice(subscription: SubscriptionRow | undefined): str
   }
 }
 
+/**
+ * The plan a member is on, read from her subscription row.
+ *
+ * This page used to read `user.subscriptionTier`, a field no server response has
+ * ever set: /auth/me sends `subscription: { tier, status }` and nothing else names
+ * a tier (see the note on the field in lib/types.ts). So every member was on the
+ * free plan here, whatever she paid: a paying member was offered Upgrade and sent
+ * to a checkout the server refuses, and a member on a trial was shown no trial,
+ * no end date and no way to cancel before the charge. The row is what the Stripe
+ * webhook writes, so it is what is read. A row that has ended is the free plan,
+ * whatever tier it still names. The user field is kept only as a fallback for a
+ * server that one day sets it, and only when there is no row to read.
+ */
+function planOf(subscription: SubscriptionRow | undefined, fallbackTier: string | undefined): string {
+  if (subscription) {
+    if (subscription.status === 'CANCELED') return 'FREE';
+    return subscription.tier ?? 'FREE';
+  }
+  return fallbackTier ?? 'FREE';
+}
+
 export default function BillingSettingsPage() {
   return (
     <Suspense fallback={null}>
@@ -147,7 +168,8 @@ function BillingContent() {
   const { user } = useAuth();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
-  const { data: subscription } = useSubscription() as { data: SubscriptionRow | undefined };
+  const subscriptionQuery = useSubscription() as { data: SubscriptionRow | undefined; isLoading?: boolean };
+  const subscription = subscriptionQuery.data;
   const cancelSubscription = useCancelSubscription();
   const manageBilling = useManageBilling();
   const createCheckout = useCreateCheckout();
@@ -170,14 +192,21 @@ function BillingContent() {
   // ?upgrade=pro: she would have had a refusal toast and a request to Stripe in a
   // loop until the payment limiter stopped it. A refused or failed start is
   // reported once, and the Upgrade button is her way to try again.
+  // The plan she is on, from the subscription row; see planOf.
+  const currentPlan = planOf(subscription, user?.subscriptionTier);
+  const isPremium = currentPlan !== 'FREE';
+
   const autoCheckoutStarted = useRef(false);
-  const alreadyOnPaidPlan = (user?.subscriptionTier ?? 'FREE') !== 'FREE';
+  // Not before the row has been read: a paying member's row arrives a moment
+  // after the page does, and starting the checkout on the empty first render
+  // would send her to the 409 she was never going to get past.
+  const subscriptionSettled = !subscriptionQuery.isLoading;
   useEffect(() => {
     const upgradeTier = searchParams.get('upgrade');
-    if (!upgradeTier || autoCheckoutStarted.current || alreadyOnPaidPlan) return;
+    if (!upgradeTier || autoCheckoutStarted.current || !subscriptionSettled || isPremium) return;
     autoCheckoutStarted.current = true;
     createCheckout.mutate(upgradeTier === 'pro' ? PRO_TIER : upgradeTier);
-  }, [searchParams, createCheckout, alreadyOnPaidPlan]);
+  }, [searchParams, createCheckout, subscriptionSettled, isPremium]);
 
   // Back from Stripe Checkout. The tier changes when Stripe's webhook arrives,
   // which is usually within seconds of the redirect but not always before it,
@@ -198,8 +227,6 @@ function BillingContent() {
     isLoading: paymentMethodsLoading,
     isError: paymentMethodsError,
   } = usePaymentMethods(paymentRegion);
-  const currentPlan = user?.subscriptionTier || 'FREE';
-  const isPremium = currentPlan !== 'FREE';
   const currentPlanName = TIER_NAMES[currentPlan] ?? 'Paid membership';
   const currentPrice = formatSubscriptionPrice(subscription);
 

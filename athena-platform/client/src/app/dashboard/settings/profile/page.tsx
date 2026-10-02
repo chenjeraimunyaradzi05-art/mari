@@ -117,7 +117,11 @@ function IdentityGatesCard() {
     mutationFn: womanGateApi.complete,
     onSuccess: (response) => {
       refresh();
-      if (response.data?.documentCheck === 'verified') {
+      // Only while it really is with a reviewer. The route now reports a
+      // decision that has already been made, and the card below shows it; a
+      // toast saying "with a reviewer" over a card saying "Verified" would be
+      // the page contradicting itself.
+      if (response.data?.documentCheck === 'verified' && response.status === 'PENDING') {
         toast.success('Your document check passed. Your request is with a reviewer.');
       }
     },
