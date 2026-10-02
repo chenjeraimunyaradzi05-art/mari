@@ -66,8 +66,9 @@ const registerSchema = z
       .refine((value) => value === true, 'You must confirm you are a woman to join'),
     // Asked for here because it cannot be asked for later: an account created
     // without a date of birth has no age for the platform to check, and both
-    // the Terms and the Privacy Policy say ATHENA is for adults and verifies
-    // it. The server applies the same rule.
+    // the Terms and the Privacy Policy say ATHENA is for adults. The date is
+    // the one she gives; nothing calls it verified (Terms 12.4). The server
+    // applies the same rule.
     dateOfBirth: z
       .string()
       .min(1, 'Please enter your date of birth')
