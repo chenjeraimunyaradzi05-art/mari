@@ -16,6 +16,7 @@ import { ApiError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
 import { bestEffort } from '../utils/best-effort';
 import { createJournalEntry } from './accounting.service';
+import { assertOrgMembership } from '../utils/org-scope';
 
 const BASIQ_BASE = 'https://au-api.basiq.io';
 const BASIQ_CONSENT = 'https://consent.basiq.io/home';
@@ -185,10 +186,18 @@ async function ownedTransaction(userId: string, transactionId: string) {
 async function assertLedgerAccess(userId: string, ledgerAccountId: string, allowedTypes?: string[]) {
   const account = await prisma.accountingAccount.findUnique({ where: { id: ledgerAccountId } });
   if (!account) throw new ApiError(404, 'Ledger account not found');
-  if (account.userId !== userId) {
-    if (!account.organizationId) throw new ApiError(403, 'That ledger account is not yours');
-    const membership = await prisma.organizationMember.findFirst({ where: { organizationId: account.organizationId, userId } });
-    if (!membership) throw new ApiError(403, 'That ledger account is not yours');
+  // An organisation's ledger account is for its accepted members, whoever
+  // typed it in: a pending invitation is not a membership, and the id stamped
+  // on a row by a person who has since left is not a key. A personal account
+  // is its owner's.
+  if (account.organizationId) {
+    try {
+      await assertOrgMembership(account.organizationId, userId);
+    } catch {
+      throw new ApiError(403, 'That ledger account is not yours');
+    }
+  } else if (account.userId !== userId) {
+    throw new ApiError(403, 'That ledger account is not yours');
   }
   if (allowedTypes && !allowedTypes.includes(account.type)) {
     throw new ApiError(400, `That ledger account has to be one of: ${allowedTypes.map((t) => t.toLowerCase()).join(', ')}`);

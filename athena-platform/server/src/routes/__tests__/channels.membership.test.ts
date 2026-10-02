@@ -13,6 +13,9 @@ jest.mock('../../utils/prisma', () => ({
     },
     channelMessage: { findMany: jest.fn(), count: jest.fn(), groupBy: jest.fn() },
     user: { findUnique: jest.fn() },
+    // A block is read from both stores, in both directions (see channel.blocks.test.ts).
+    userSafetySettings: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
+    dvSafetyProfile: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
   },
 }));
 
@@ -115,6 +118,23 @@ describe('Channel discovery and unread counts avoid the /:id route', () => {
     const where = (prisma.channelMessage.groupBy as any).mock.calls[0][0].where;
     expect(where.authorId).toEqual({ not: MEMBER });
     expect(where.OR).toEqual([{ channelId: 'c1', createdAt: { gt: lastReadAt } }]);
+  });
+
+  it('GET /unread does not count a reply from a member on either side of a block with her', async () => {
+    (prisma.channelMember.findMany as any).mockResolvedValue([
+      { channelId: 'c1', lastReadAt: new Date('2026-01-01T00:00:00Z'), joinedAt: new Date('2025-01-01T00:00:00Z') },
+    ]);
+    (prisma.channelMessage.groupBy as any).mockResolvedValue([]);
+    (prisma.userSafetySettings.findUnique as any).mockResolvedValueOnce({ blockedUsers: ['him'] });
+    (prisma.userSafetySettings.findMany as any).mockResolvedValueOnce([{ userId: 'blocked-her' }]);
+    (prisma.dvSafetyProfile.findUnique as any).mockResolvedValueOnce({ blockedUserIds: ['dv-only'] });
+    (prisma.dvSafetyProfile.findMany as any).mockResolvedValueOnce([{ userId: 'dv-blocked-her' }]);
+
+    await request(app).get('/api/channels/unread').set(as(MEMBER)).expect(200);
+
+    const { authorId } = (prisma.channelMessage.groupBy as any).mock.calls[0][0].where;
+    expect(authorId.not).toBe(MEMBER);
+    expect([...authorId.notIn].sort()).toEqual(['blocked-her', 'dv-blocked-her', 'dv-only', 'him']);
   });
 
   it('stays one query no matter how many channels the member is in', async () => {
@@ -324,10 +344,34 @@ describe('Channel read state, search and deletion', () => {
 
     await request(app).post('/api/channels/c1/typing').set(as(MEMBER)).send({}).expect(200);
 
-    expect(emitToChannel).toHaveBeenCalledWith('c1', 'channels:user_typing', {
-      channelId: 'c1',
-      userId: MEMBER,
-    });
+    expect(emitToChannel).toHaveBeenCalledWith(
+      'c1',
+      'channels:user_typing',
+      { channelId: 'c1', userId: MEMBER },
+      { exceptUserIds: [] }
+    );
+  });
+
+  it('typing is not shown to a member on either side of a block with the typist, in either store', async () => {
+    mockChannel();
+    (prisma.userSafetySettings.findUnique as any).mockResolvedValueOnce({ blockedUsers: ['him'] });
+    (prisma.userSafetySettings.findMany as any).mockResolvedValueOnce([{ userId: 'blocked-her' }]);
+    (prisma.dvSafetyProfile.findUnique as any).mockResolvedValueOnce({ blockedUserIds: ['dv-only'] });
+    (prisma.dvSafetyProfile.findMany as any).mockResolvedValueOnce([{ userId: 'dv-blocked-her' }]);
+
+    await request(app).post('/api/channels/c1/typing').set(as(MEMBER)).send({}).expect(200);
+
+    const [, , , options] = emitToChannel.mock.calls[0] as unknown as [string, string, unknown, { exceptUserIds: string[] }];
+    expect([...options.exceptUserIds].sort()).toEqual(['blocked-her', 'dv-blocked-her', 'dv-only', 'him']);
+  });
+
+  it('typing is not sent at all when the block lists cannot be read', async () => {
+    mockChannel();
+    (prisma.userSafetySettings.findMany as any).mockRejectedValueOnce(new Error('connection reset'));
+
+    await request(app).post('/api/channels/c1/typing').set(as(MEMBER)).send({}).expect(200);
+
+    expect(emitToChannel).not.toHaveBeenCalled();
   });
 
   it('typing can signal that it stopped', async () => {
@@ -342,6 +386,7 @@ describe('Channel read state, search and deletion', () => {
     expect(emitToChannel).toHaveBeenCalledWith(
       'c1',
       'channels:user_stopped_typing',
+      expect.anything(),
       expect.anything()
     );
   });

@@ -5,6 +5,9 @@
 
 import { prisma } from '../utils/prisma';
 import { cacheGetOrSet, cacheDel, CacheKeys } from '../utils/cache';
+import type { Prisma } from '@prisma/client';
+import { notPrivateProfileWhere } from './audience.service';
+import { hiddenMemberWhere } from './search.service';
 
 // ==========================================
 // ACHIEVEMENT DEFINITIONS
@@ -491,12 +494,65 @@ export async function getXPHistory(userId: string, limit = 20) {
 // LEADERBOARDS
 // ==========================================
 
+/**
+ * Who a leaderboard may name. It is public and signed-out visitors read it, so
+ * it shows what a stranger searching by name would be shown and nothing more: a
+ * member who asked to be hidden from search, a member in Safe Mode and a member
+ * whose profile is private are not on it, however high they score. It lists
+ * their id, name, picture and counts, and the id is the key to everything else
+ * about them.
+ *
+ * Built from the signed-out searcher's filter, not the viewer's, because the
+ * result is cached and shared across every viewer for five minutes. What is
+ * specific to a viewer, the two sides of a block, is removed after the cache,
+ * in withoutBlockedMembers.
+ *
+ * Exported because the creator leaderboard (routes/creator.routes.ts) is the
+ * other public board and has to answer the same question the same way.
+ */
+export const listedOnLeaderboards = (): Prisma.UserWhereInput => ({
+  AND: [hiddenMemberWhere({ blockedIds: [], followingIds: [] }), notPrivateProfileWhere],
+});
+
+/** The leaderboard without the members on either side of a block with this viewer. */
+export function withoutBlockedMembers<List extends readonly unknown[]>(entries: List, blockedIds: string[]): List {
+  if (blockedIds.length === 0) return entries;
+  const blocked = new Set(blockedIds);
+  // A page of entries is one shape per board: the member's own columns, or a
+  // streak row with the member nested under `user`. The streak row has an `id`
+  // of its own, which is the streak's and not hers, so the nested member is read
+  // first: asking `id` first would never find the man she blocked on that board.
+  return entries.filter((entry) => {
+    const row = entry as { id?: string; user?: { id?: string } | null };
+    const id = row.user?.id ?? row.id;
+    return !id || !blocked.has(id);
+  }) as unknown as List;
+}
+
+const LEADERBOARD_TYPES: ReadonlyArray<string> = ['xp', 'followers', 'posts', 'streak'];
+const LEADERBOARD_PERIODS: ReadonlyArray<string> = ['daily', 'weekly', 'monthly', 'alltime'];
+
 export async function getLeaderboard(
   type: 'xp' | 'followers' | 'posts' | 'streak',
   period: 'daily' | 'weekly' | 'monthly' | 'alltime' = 'weekly',
   limit = 10
 ) {
-  const cacheKey = CacheKeys.leaderboard(`${type}:${period}`);
+  // The routes pass the query string through, and the public ones are open to
+  // anyone. A type or period nobody defined used to become part of the cache
+  // key, so each new spelling was a miss that ran the whole ranking query again:
+  // a signed-out visitor could keep the database busy by varying a parameter.
+  // What is not a board is answered with nothing, a period that is not one is
+  // the default, and the size is held to a sane range, so the key space is the
+  // few boards there are.
+  if (!LEADERBOARD_TYPES.includes(type)) return [];
+  if (!LEADERBOARD_PERIODS.includes(period)) period = 'weekly';
+  limit = Math.min(Math.max(Math.trunc(Number(limit)) || 10, 1), 1000);
+
+  // The size is part of the key. It was not, so whichever request came first in
+  // a five-minute window fixed the size for every later one: the rank lookup
+  // asks for a thousand and was answered with the ten a page had cached, and a
+  // page asking for fifty got the ten the rank lookup had cached.
+  const cacheKey = CacheKeys.leaderboard(`${type}:${period}:${limit}`);
 
   return cacheGetOrSet(
     cacheKey,
@@ -522,7 +578,7 @@ export async function getLeaderboard(
       switch (type) {
         case 'xp':
           return prisma.user.findMany({
-            where: { isActive: true },
+            where: { AND: [{ isActive: true }, listedOnLeaderboards()] },
             select: {
               id: true,
               displayName: true,
@@ -535,7 +591,7 @@ export async function getLeaderboard(
 
         case 'followers':
           return prisma.user.findMany({
-            where: { isActive: true },
+            where: { AND: [{ isActive: true }, listedOnLeaderboards()] },
             select: {
               id: true,
               displayName: true,
@@ -550,7 +606,9 @@ export async function getLeaderboard(
           const postCounts = await prisma.post.groupBy({
             by: ['authorId'],
             _count: true,
-            where: startDate ? { createdAt: { gte: startDate } } : {},
+            // Filtered here, before the take: members left out afterwards
+            // would shorten the page instead of making room for the next.
+            where: { ...(startDate ? { createdAt: { gte: startDate } } : {}), author: listedOnLeaderboards() },
             orderBy: { _count: { authorId: 'desc' } },
             take: limit,
           });
@@ -572,7 +630,7 @@ export async function getLeaderboard(
 
         case 'streak':
           return prisma.userStreak.findMany({
-            where: { type: 'post' },
+            where: { type: 'post', user: listedOnLeaderboards() },
             include: {
               user: { select: { id: true, displayName: true, avatar: true } },
             },

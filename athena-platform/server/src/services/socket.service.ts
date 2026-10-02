@@ -5,22 +5,22 @@
 
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { logger } from '../utils/logger';
-import { authenticateSocketToken } from '../middleware/auth';
+import { ACCOUNT_LOCKED_MESSAGE, authenticateSocketToken, SUSPENDED_ACCOUNT_MESSAGE } from '../middleware/auth';
 import { liveChatThrottle, socketMessageThrottle } from '../middleware/socialLimits';
 import { sessionEvents, SessionRevokedEvent } from '../utils/session-events';
 import { isBlockedRelationship } from '../utils/safety-store';
-import { canOpenConversation } from './message-permissions.service';
-import { assertContentAllowed } from './moderation.service';
+import { blockedEitherWayIds } from './audience.service';
 import { pushPreview, pushToUser } from './push.service';
 
 /** A direct message reaches the recipient's phone when no client of theirs is connected. */
 function pushMessageIfAway(
   receiverId: string,
-  message: { id?: string; conversationId?: string | null; senderId?: string; content?: string | null; sender?: { firstName?: string | null; lastName?: string | null } | null },
+  message: { id?: string; conversationId?: string | null; senderId?: string; content?: string | null; sender?: { firstName?: string | null; displayName?: string | null } | null },
   options: { request?: boolean } = {}
 ) {
   if (isUserOnline(receiverId)) return;
-  const name = [message.sender?.firstName, message.sender?.lastName].filter(Boolean).join(' ').trim() || 'New message';
+  // Her public name, else her first name: a push title is read on a lock screen by whoever is holding the phone.
+  const name = message.sender?.displayName?.trim() || message.sender?.firstName?.trim() || 'New message';
   void pushToUser(receiverId, 'MESSAGE', {
     // A request knocks once and says so; the preview waits until they accept.
     title: options.request ? `${name} wants to message you` : name,
@@ -35,9 +35,9 @@ import { prisma } from '../utils/prisma';
 import { i18nService, NOTIFICATION_KEYS, SupportedLocale } from './i18n.service';
 import { getLocaleForUser } from '../utils/region';
 import { directMessageGateRefusal } from '../middleware/account-gates';
+import { accountStandingRefusal } from '../middleware/account-standing';
 import { CONTENT_LIMITS, normalizeUserText } from '../utils/contentSafety';
-import { findDirectConversation, getOrCreateDirectConversation } from './direct-message.service';
-import { conversationTtl, expiryFor } from './message-expiry.service';
+import { findDirectConversation, readReceiptsWithheldFrom, sendDirectMessage } from './direct-message.service';
 import { LIVE_CHAT_MAX_LENGTH, postChatMessage, recordViewerCount } from './livestream.service';
 // presence.service imports emitToUserRoom from this file; the cycle resolves
 // at call time, as it already does for livestream.service.
@@ -75,6 +75,62 @@ export function disconnectRevokedSockets(io: SocketIOServer, event: SessionRevok
     logger.info('Sockets closed after session revocation', { userId: event.userId, reason: event.reason, closed });
   }
   return closed;
+}
+
+/**
+ * Whether an account may still send over a connection it opened earlier.
+ *
+ * A socket authenticates once, at the handshake. A member suspended or banned
+ * afterwards kept a connection that went on sending direct messages and live
+ * chat until it dropped: the REST API refuses her on her next request, but
+ * nothing here read her standing again. Revoking her sessions closes her
+ * sockets (disconnectRevokedSockets), and this is the second line behind that,
+ * for a revocation that failed or a path that closed an account without
+ * revoking. It is read from the database at the moment of sending, like the
+ * REST middleware does, and an account that no longer exists is refused too.
+ *
+ * Returns the refusal to emit, or null when the account is in good standing.
+ * The words are the ones every other surface uses, so the account's state is
+ * never inferable from the wording.
+ */
+export async function closedAccountRefusal(userId: string): Promise<{ message: string; code: string } | null> {
+  const account = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { isSuspended: true, bannedAt: true, lockedAt: true },
+  });
+  if (!account || account.isSuspended || account.bannedAt) {
+    return { message: SUSPENDED_ACCOUNT_MESSAGE, code: 'ACCOUNT_SUSPENDED' };
+  }
+  // She locked it herself. Locking closes her sockets too (the revocation says
+  // so), and this is the second line behind that, in its own words.
+  if (account.lockedAt) {
+    return { message: ACCOUNT_LOCKED_MESSAGE, code: 'ACCOUNT_LOCKED' };
+  }
+  return null;
+}
+
+/**
+ * The account-standing rule authenticate applies to every write over HTTP
+ * (middleware/account-standing.ts), asked of a socket: a member a reviewer has
+ * refused, or whose date of birth is under the minimum, may not act on other
+ * members. Live chat arrives over the socket (the page sends there, and the
+ * REST route behind authenticate is the other door), so without this a refused
+ * member could still speak in a host's room.
+ *
+ * A refusal of the message and not of the connection: she can go on reading,
+ * which is what the rule leaves her. Returns null when she may write, and also
+ * when her row cannot be found, because closedAccountRefusal has already turned
+ * that away.
+ */
+export async function standingRefusal(userId: string): Promise<{ message: string; code: string } | null> {
+  const account = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { womanVerificationStatus: true, dateOfBirth: true },
+  });
+  if (!account) return null;
+  // The path is not one any exemption names, so a write is refused.
+  const refusal = accountStandingRefusal(account, 'POST', '/socket');
+  return refusal ? { message: refusal.error, code: refusal.code } : null;
 }
 
 export function initializeSocketHandlers(io: SocketIOServer) {
@@ -190,9 +246,9 @@ export function initializeSocketHandlers(io: SocketIOServer) {
 
         // The socket is a second door into someone's inbox, so it is held to
         // exactly what the REST route enforces: a ceiling on how fast one
-        // account can send, no thread across a block, the recipient's "who
-        // can message me" choice, the women-only floor, the age gate, and the
-        // same content moderation.
+        // account can send, her standing, the women-only floor and the age gate
+        // here, and from sendDirectMessage the block, the recipient's "who can
+        // message me" choice, the request rules and the content moderation.
         if (!socketMessageThrottle.allow(userId)) {
           socket.emit('messages:error', {
             message: 'You are sending messages very quickly. Take a short break and try again.',
@@ -203,91 +259,34 @@ export function initializeSocketHandlers(io: SocketIOServer) {
           socket.emit('messages:error', { message: 'Choose someone to message' });
           return;
         }
-        if (await isBlockedRelationship(userId, receiverId)) {
-          socket.emit('messages:error', { message: 'You cannot message this user' });
+        // Her standing now, not at the handshake: a suspension or a ban made
+        // since then ends this connection instead of letting it keep sending.
+        const closed = await closedAccountRefusal(userId);
+        if (closed) {
+          socket.emit('messages:error', closed);
+          socket.disconnect(true);
           return;
         }
+        // The women-only floor and the age gate are about her, and stay at the
+        // door; everything about who may write to whom is in sendDirectMessage,
+        // the function the REST route calls, so this door cannot be held to less
+        // than that one. It used to be: it skipped the request cap and a declined
+        // request, so an opener could send without limit past a no, and every line
+        // buzzed her phone and wrote a notification because the quiet rule for
+        // requests was only on the REST side.
         const gateRefusal = await directMessageGateRefusal(userId);
         if (gateRefusal) {
           socket.emit('messages:error', gateRefusal);
           return;
         }
-        const verdict = await canOpenConversation(userId, receiverId);
-        if (!verdict.allowed) {
-          socket.emit('messages:error', { message: verdict.reason });
-          return;
-        }
-        await assertContentAllowed(content, { kind: 'message', userId });
+        const sent = await sendDirectMessage({ senderId: userId, receiverId, content });
 
-        const conversation = await getOrCreateDirectConversation(userId, receiverId);
-        // Disappearing messages: stamped at send time from the thread's setting.
-        const expiresAt = expiryFor(await conversationTtl(conversation.id));
+        // The recipient was reached by sendDirectMessage. The sender's own
+        // devices, every one of them and not only the one that sent, get the
+        // stored message here, which is how a socket client sees its own line.
+        io.to(`user:${userId}`).emit('messages:new', sent.message);
 
-        const [message] = await prisma.$transaction([
-          prisma.message.create({
-            data: {
-              conversationId: conversation.id,
-              senderId: userId,
-              receiverId,
-              content,
-              type: 'TEXT',
-              expiresAt,
-            },
-            include: {
-              sender: {
-                select: { id: true, firstName: true, lastName: true, avatar: true },
-              },
-            },
-          }),
-          prisma.conversation.update({
-            where: { id: conversation.id },
-            data: {
-              lastMessageAt: new Date(),
-              messageCount: { increment: 1 },
-            },
-          }),
-          prisma.conversationParticipant.updateMany({
-            where: {
-              conversationId: conversation.id,
-              userId: { not: userId },
-            },
-            data: {
-              hasUnread: true,
-              unreadCount: { increment: 1 },
-            },
-          }),
-        ]);
-
-        const roomId = getConversationRoomId(userId, receiverId);
-
-        // Union of the two rooms, so a receiver who has not opened the thread
-        // still gets the message and one who has does not get it twice.
-        io.to(roomId).to(`user:${receiverId}`).emit('messages:new', message);
-
-        // Also emit to receiver's personal room for notification badge
-        io.to(`user:${receiverId}`).emit('messages:unread_count_updated');
-
-        if (isUserOnline(receiverId)) {
-          io.to(`user:${userId}`).emit('messages:delivered', {
-            conversationId: conversation.id,
-            messageIds: [message.id],
-            receiverId,
-          });
-        }
-
-        pushMessageIfAway(receiverId, message);
-
-        // Create notification for receiver
-        await createNotification(io, {
-          userId: receiverId,
-          type: 'MESSAGE',
-          title: 'Athena',
-          i18nKey: NOTIFICATION_KEYS.MESSAGE_RECEIVED,
-          i18nParams: { name: message.sender.firstName },
-          link: `/dashboard/messages?user=${userId}`,
-        });
-
-        logger.debug('Message sent', { from: userId, to: receiverId, messageId: message.id });
+        logger.debug('Message sent', { from: userId, to: receiverId, messageId: sent.message.id });
       } catch (error) {
         // A refusal the sender can act on (moderation, permissions) is said
         // plainly; anything else stays generic so internals never leak.
@@ -353,16 +352,24 @@ export function initializeSocketHandlers(io: SocketIOServer) {
       socket.leave(getChannelRoomId(channelId));
     });
 
-    socket.on('channels:typing', (channelId: string) => {
+    // "Is typing" names her id to everyone in the room, and a member on either
+    // side of a block with her is not among them (the replies are held to the
+    // same rule). If the block lists cannot be read the indicator is not sent:
+    // it is a nicety, and the cost of a missing one is nothing.
+    socket.on('channels:typing', async (channelId: string) => {
       if (typeof channelId !== 'string' || !channelId) return;
-      socket.to(getChannelRoomId(channelId)).emit('channels:user_typing', { channelId, userId });
+      const except = await blockedRoomsOf(userId);
+      if (!except) return;
+      const room = socket.to(getChannelRoomId(channelId));
+      (except.length > 0 ? room.except(except) : room).emit('channels:user_typing', { channelId, userId });
     });
 
-    socket.on('channels:stop_typing', (channelId: string) => {
+    socket.on('channels:stop_typing', async (channelId: string) => {
       if (typeof channelId !== 'string' || !channelId) return;
-      socket
-        .to(getChannelRoomId(channelId))
-        .emit('channels:user_stopped_typing', { channelId, userId });
+      const except = await blockedRoomsOf(userId);
+      if (!except) return;
+      const room = socket.to(getChannelRoomId(channelId));
+      (except.length > 0 ? room.except(except) : room).emit('channels:user_stopped_typing', { channelId, userId });
     });
 
     // ==========================================
@@ -437,6 +444,15 @@ export function initializeSocketHandlers(io: SocketIOServer) {
           });
         }
         if (hideReceipts) return;
+
+        // And never to the person who opened a request that has not been
+        // accepted: the banner tells the asked person she cannot see when it was
+        // read. A thread that cannot be read is treated as withheld, as above.
+        const thread = await prisma.conversation.findUnique({
+          where: { id: conversationId },
+          select: { requestedById: true, requestAcceptedAt: true },
+        });
+        if (!thread || readReceiptsWithheldFrom(thread, senderId)) return;
 
         const payload = { conversationId, readerId: userId, messageIds };
         const roomId = getConversationRoomId(userId, senderId);
@@ -526,6 +542,21 @@ export function initializeSocketHandlers(io: SocketIOServer) {
           });
           return;
         }
+        // The same re-check as direct messages: a host's room is as much a place
+        // to reach someone as her inbox is.
+        const closed = await closedAccountRefusal(userId);
+        if (closed) {
+          socket.emit('live:error', { streamId, message: closed.message, code: closed.code });
+          socket.disconnect(true);
+          return;
+        }
+        // Reading a room is hers; speaking in it is not, once a reviewer has
+        // refused her or her date of birth is under the minimum.
+        const notInStanding = await standingRefusal(userId);
+        if (notInStanding) {
+          socket.emit('live:error', { streamId, message: notInStanding.message, code: notInStanding.code });
+          return;
+        }
         const content = normalizeUserText(data?.content, {
           field: 'content',
           maxLength: LIVE_CHAT_MAX_LENGTH,
@@ -533,8 +564,18 @@ export function initializeSocketHandlers(io: SocketIOServer) {
         // postChatMessage broadcasts live:message to the room itself.
         await postChatMessage(streamId, userId, content);
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Message not sent';
-        socket.emit('live:error', { streamId, message });
+        // A refusal she can act on (muted, slow mode, a block, moderation, the
+        // moderation service being down) is said plainly. Anything else is not:
+        // a database error's text names tables and queries, and this socket is
+        // the one an audience is sitting on.
+        const { isOperational, statusCode } = (error ?? {}) as { isOperational?: boolean; statusCode?: number };
+        const sayable =
+          error instanceof Error &&
+          isOperational === true &&
+          typeof statusCode === 'number' &&
+          (statusCode < 500 || statusCode === 503);
+        if (!sayable) logger.error('Failed to post live chat', { streamId, error });
+        socket.emit('live:error', { streamId, message: sayable ? (error as Error).message : 'Message not sent' });
       }
     });
 
@@ -619,6 +660,34 @@ export function getChannelRoomId(channelId: string): string {
   return `channel:${channelId}`;
 }
 
+// A typing event is sent as often as someone types, so the block lists behind
+// it are read at most once in half a minute for each member rather than on every
+// event. A block made in that half minute holds from the next read; what it
+// lets through meanwhile is a "typing" notice, not a word.
+const TYPING_BLOCK_TTL_MS = 30_000;
+const TYPING_BLOCK_CACHE_MAX = 5_000;
+const typingBlockCache = new Map<string, { until: number; rooms: string[] }>();
+
+/**
+ * The personal rooms of every member on either side of a block with this one,
+ * to leave out of a broadcast she makes; null when the lists cannot be read, so
+ * that the caller sends nothing rather than everything.
+ */
+async function blockedRoomsOf(userId: string): Promise<string[] | null> {
+  const now = Date.now();
+  const cached = typingBlockCache.get(userId);
+  if (cached && cached.until > now) return cached.rooms;
+  try {
+    const rooms = (await blockedEitherWayIds(userId)).map((id) => `user:${id}`);
+    if (typingBlockCache.size >= TYPING_BLOCK_CACHE_MAX) typingBlockCache.clear();
+    typingBlockCache.set(userId, { until: now + TYPING_BLOCK_TTL_MS, rooms });
+    return rooms;
+  } catch (error) {
+    logger.warn('Typing notice not sent: the block lists could not be read', { userId, error });
+    return null;
+  }
+}
+
 export function getLiveRoomId(streamId: string): string {
   return `live:${streamId}`;
 }
@@ -663,22 +732,45 @@ export function removeFromLiveRoom(streamId: string, userId: string): number {
 
 // The live stream routes and service push chat, gifts and status changes to
 // the room without importing `io` from index.ts (same reason as emitToChannel).
-export function emitToLiveRoom(streamId: string, event: string, payload: unknown): void {
+//
+// `exceptUserIds` keeps one broadcast from reaching particular members even
+// though they are in the room: every socket of a member is also in her own
+// `user:` room, so excluding that room reaches all of her devices at once. It is
+// how a line from someone she blocked never arrives on her screen.
+export function emitToLiveRoom(
+  streamId: string,
+  event: string,
+  payload: unknown,
+  options: { exceptUserIds?: string[] } = {}
+): void {
   if (!ioInstance) {
     logger.debug('Socket.IO not initialized, skipping live broadcast', { streamId, event });
     return;
   }
-  ioInstance.to(getLiveRoomId(streamId)).emit(event, payload);
+  const except = (options.exceptUserIds ?? []).map((id) => `user:${id}`);
+  const room = ioInstance.to(getLiveRoomId(streamId));
+  (except.length > 0 ? room.except(except) : room).emit(event, payload);
 }
 
 // Lets the REST channel routes broadcast without importing `io` from index.ts,
 // which would close an import cycle (index -> routes -> index).
-export function emitToChannel(channelId: string, event: string, payload: unknown): void {
+//
+// `exceptUserIds` is the same keep-it-from-a-blocked-member list emitToLiveRoom
+// and emitToGroupRoom take: a reply in a channel is not pushed to a member on
+// either side of a block with whoever wrote it.
+export function emitToChannel(
+  channelId: string,
+  event: string,
+  payload: unknown,
+  options: { exceptUserIds?: string[] } = {}
+): void {
   if (!ioInstance) {
     logger.debug('Socket.IO not initialized, skipping channel broadcast', { channelId, event });
     return;
   }
-  ioInstance.to(getChannelRoomId(channelId)).emit(event, payload);
+  const except = (options.exceptUserIds ?? []).map((id) => `user:${id}`);
+  const room = ioInstance.to(getChannelRoomId(channelId));
+  (except.length > 0 ? room.except(except) : room).emit(event, payload);
 }
 
 export function getGroupRoomId(groupId: string): string {
@@ -687,12 +779,25 @@ export function getGroupRoomId(groupId: string): string {
 
 // The group chat routes push new, removed and pinned messages to everyone
 // with the room open, without importing `io` from index.ts (as emitToChannel).
-export function emitToGroupRoom(groupId: string, event: string, payload: unknown): void {
+//
+// `exceptUserIds` is how a message is kept from a member who is on either side
+// of a block with whoever wrote it, though both are in the room (see
+// emitToLiveRoom for how a member is excluded on every device at once). The
+// list a member reads is filtered the same way, so the block holds in the live
+// push as much as in the history.
+export function emitToGroupRoom(
+  groupId: string,
+  event: string,
+  payload: unknown,
+  options: { exceptUserIds?: string[] } = {}
+): void {
   if (!ioInstance) {
     logger.debug('Socket.IO not initialized, skipping group broadcast', { groupId, event });
     return;
   }
-  ioInstance.to(getGroupRoomId(groupId)).emit(event, payload);
+  const except = (options.exceptUserIds ?? []).map((id) => `user:${id}`);
+  const room = ioInstance.to(getGroupRoomId(groupId));
+  (except.length > 0 ? room.except(except) : room).emit(event, payload);
 }
 
 // Same reason as emitToChannel: the REST message routes need to push without

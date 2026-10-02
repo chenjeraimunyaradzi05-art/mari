@@ -10,6 +10,11 @@ jest.mock('../../utils/prisma', () => ({
 
 jest.mock('../../utils/email', () => ({
   sendEmail: jest.fn(async () => true),
+  accountLockUrl: (token: string) => `https://app.example.test/lock-account?token=${token}`,
+}));
+
+jest.mock('../account-lock.service', () => ({
+  issueLockLink: jest.fn(async () => 'f'.repeat(64)),
 }));
 
 jest.mock('../../utils/logger', () => ({
@@ -18,6 +23,7 @@ jest.mock('../../utils/logger', () => ({
 
 import { prisma as prismaTyped } from '../../utils/prisma';
 import { sendEmail } from '../../utils/email';
+import { issueLockLink } from '../account-lock.service';
 import { describeDevice, isUnfamiliarDevice, noteSignIn } from '../login-alert.service';
 
 const prisma: any = prismaTyped;
@@ -97,6 +103,66 @@ describe('noteSignIn', () => {
     expect(mail.subject).toBe('New sign-in to your ATHENA account');
     expect(mail.text).toContain('Hi Sarah,');
     expect(mail.text).toContain('/dashboard/settings/security');
+  });
+
+  it('puts a one-time "this was not me" link in the email, because she may have no session to use the settings page', async () => {
+    prisma.session.count.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+
+    await noteSignIn(event());
+
+    // One link, made for this account, and only its address travels in the mail.
+    expect(issueLockLink).toHaveBeenCalledTimes(1);
+    expect(issueLockLink).toHaveBeenCalledWith('u1');
+    const mail = (sendEmail as any).mock.calls[0][0];
+    const lockLink = `https://app.example.test/lock-account?token=${'f'.repeat(64)}`;
+    expect(mail.text).toContain(lockLink);
+    expect(mail.html).toContain(`href="${lockLink}"`);
+    expect(mail.html).toContain('lock your account now');
+    // The settings link is still there for the member who does have a session.
+    expect(mail.text).toContain('/dashboard/settings/security');
+  });
+
+  it('prints a first name that is markup as text in the email, and leaves the plain-text part as typed', async () => {
+    prisma.user.findUnique.mockResolvedValue({ email: 'owner@athena.com', firstName: '<a href="https://elsewhere.example">Sign in here</a>' });
+    prisma.session.count.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+
+    await noteSignIn(event());
+
+    const mail = (sendEmail as any).mock.calls[0][0];
+    expect(mail.html).not.toContain('<a href="https://elsewhere.example">');
+    expect(mail.html).toContain('&lt;a href=&quot;https://elsewhere.example&quot;&gt;Sign in here&lt;/a&gt;');
+    expect(mail.text).toContain('<a href="https://elsewhere.example">Sign in here</a>');
+  });
+
+  it('points the in-app notice at the page that has the lock button', async () => {
+    prisma.session.count.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+
+    await noteSignIn(event());
+
+    const data = prisma.notification.create.mock.calls[0][0].data;
+    expect(data.link).toBe('/dashboard/settings/security');
+    expect(data.message).toContain('lock your account');
+  });
+
+  it('still sends the alert, without the lock link, when the link cannot be made', async () => {
+    prisma.session.count.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+    (issueLockLink as any).mockRejectedValueOnce(new Error('db away'));
+
+    await noteSignIn(event());
+
+    const mail = (sendEmail as any).mock.calls[0][0];
+    expect(mail.to).toBe('owner@athena.com');
+    expect(mail.text).not.toContain('lock-account');
+    expect(mail.html).not.toContain('lock-account');
+    expect(mail.text).toContain('/dashboard/settings/security');
+  });
+
+  it('makes no lock link for a sign-in that raises no alert', async () => {
+    prisma.session.count.mockResolvedValueOnce(2).mockResolvedValueOnce(1);
+
+    await noteSignIn(event());
+
+    expect(issueLockLink).not.toHaveBeenCalled();
   });
 
   it('never lets a failure surface to the sign-in', async () => {

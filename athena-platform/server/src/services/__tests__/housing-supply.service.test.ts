@@ -31,7 +31,12 @@ import {
   safetyCheckClock,
   staffListingData,
   staffListingSchema,
+  takenDownByStaff,
+  withCheckedNote,
   withSafetyCheckRequest,
+  withStaffTakedown,
+  withoutSafetyCheckRequest,
+  withoutStaffTakedown,
 } from '../housing-supply.service';
 
 const prisma: any = prismaTyped;
@@ -66,6 +71,44 @@ describe('the check clock', () => {
     expect(second).toEqual(['Garden', 'dv-safe-note:two', `dv-safe-check-requested:${now.toISOString()}`]);
     expect(publicFeatures(second)).toEqual(['Garden']);
     expect(publicFeatures(['ok', 3, null])).toEqual(['ok']);
+  });
+});
+
+describe('the staff take-down mark', () => {
+  const marked = withStaffTakedown(['Garden', 'dv-safe-note:quiet'], now);
+
+  it('is written once, beside what the listing already carries, and is not a feature a member sees', () => {
+    expect(marked).toEqual(['Garden', 'dv-safe-note:quiet', `staff-takedown:${now.toISOString()}`]);
+    expect(withStaffTakedown(marked, new Date(now.getTime() + HOUR))).toHaveLength(3);
+    expect(takenDownByStaff(marked)).toBe(true);
+    expect(publicFeatures(marked)).toEqual(['Garden']);
+  });
+
+  it('is on only where staff put it: no features, a list of plain features, or something that is not a list', () => {
+    expect(takenDownByStaff(['Garden'])).toBe(false);
+    expect(takenDownByStaff([])).toBe(false);
+    expect(takenDownByStaff(null)).toBe(false);
+    expect(takenDownByStaff('staff-takedown:x')).toBe(false);
+  });
+
+  it('is carried over by every helper that rebuilds the features, so asking for a check does not wash it off', () => {
+    expect(takenDownByStaff(withSafetyCheckRequest(marked, 'new note', now))).toBe(true);
+    expect(takenDownByStaff(withoutSafetyCheckRequest(marked))).toBe(true);
+    expect(takenDownByStaff(withCheckedNote(marked, 'checked'))).toBe(true);
+    expect(withSafetyCheckRequest(marked, 'new note', now).filter((f) => f.startsWith('staff-takedown:'))).toHaveLength(1);
+  });
+
+  it('is taken off only by staff putting the listing back, and nothing else goes with it', () => {
+    expect(withoutStaffTakedown(marked)).toEqual(['Garden', 'dv-safe-note:quiet']);
+    expect(withoutStaffTakedown(undefined)).toEqual([]);
+  });
+
+  it('cannot be written by a member, or by a spreadsheet a partner sent', () => {
+    expect(publicFeatures(['Garden', 'staff-takedown:2026-01-01T00:00:00.000Z'])).toEqual(['Garden']);
+    const input = staffListingSchema.parse({ title: 'Unit', description: 'Quiet', type: 'RENTAL', features: ['Garden', 'staff-takedown:2026-01-01T00:00:00.000Z'] });
+    expect(staffListingData(input, 'lister', { safetyVerified: false }).features).toEqual(['Garden']);
+    const held = staffListingData({ ...input, type: 'EMERGENCY' }, 'lister', { safetyVerified: false, now });
+    expect(takenDownByStaff(held.features)).toBe(false);
   });
 });
 

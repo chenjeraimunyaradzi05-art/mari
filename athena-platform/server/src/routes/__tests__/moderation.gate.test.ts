@@ -18,8 +18,18 @@ jest.mock('../../utils/prisma', () => ({
     channelMessage: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
     video: { findUnique: jest.fn(), update: jest.fn() },
     videoComment: { create: jest.fn(), findUnique: jest.fn(), count: jest.fn(async () => 0) },
-    user: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
+    // findFirst is whether the reel's author is in Safe Mode (audience.service isDiscreet).
+    user: { findUnique: jest.fn(async () => null), findFirst: jest.fn(async () => null), findMany: jest.fn(async () => []) },
     notification: { create: jest.fn(async () => ({ id: 'n1' })) },
+    // A reel is opened, and a message pushed, only across no block: both stores, both directions.
+    // Nobody is blocked here.
+    userSafetySettings: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
+    dvSafetyProfile: {
+      findFirst: jest.fn(async () => null),
+      findUnique: jest.fn(async () => null),
+      findMany: jest.fn(async () => []),
+    },
+    follow: { findUnique: jest.fn(async () => null), findFirst: jest.fn(async () => null) },
   },
 }));
 

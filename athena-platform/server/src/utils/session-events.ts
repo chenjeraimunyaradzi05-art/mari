@@ -14,7 +14,24 @@ export interface SessionRevokedEvent {
   sessionId?: string;
   /** A session to leave alone: the one doing the revoking. */
   exceptSessionId?: string;
-  reason: 'logout' | 'revoked' | 'password-changed' | 'password-reset' | 'suspended' | 'reuse-detected';
+  /**
+   * Why, for the live socket's last message and the log. 'suspended' and 'banned' are a
+   * moderator's decision, 'role-changed' is staff access given or taken away (the
+   * member signs in again and gets a token that says what she now is), and
+   * 'account-deleted' is the member closing her own account, and 'locked' is
+   * the member freezing it herself because she suspects someone else has it.
+   */
+  reason:
+    | 'logout'
+    | 'revoked'
+    | 'password-changed'
+    | 'password-reset'
+    | 'suspended'
+    | 'banned'
+    | 'role-changed'
+    | 'account-deleted'
+    | 'locked'
+    | 'reuse-detected';
 }
 
 class SessionEvents extends EventEmitter {

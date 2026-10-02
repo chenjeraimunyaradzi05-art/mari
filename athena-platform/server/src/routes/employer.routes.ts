@@ -16,7 +16,8 @@ import {
 } from '../services/hiring-access.service';
 import { createRateLimiter } from '../middleware/rateLimiter';
 import { assertContentAllowed } from '../services/moderation.service';
-import { blockUser, getBlockedRelationshipIds } from '../utils/safety-store';
+import { getBlockedRelationshipIds } from '../utils/safety-store';
+import { applyBlock } from '../services/block.service';
 
 const router = Router();
 
@@ -1227,7 +1228,7 @@ router.post(
       });
       for (const manager of managers) {
         if (manager.userId === req.user!.id) continue;
-        const { created } = await blockUser(req.user!.id, manager.userId);
+        const { created } = await applyBlock(req.user!.id, manager.userId, { source: 'employer-invitation' });
         if (created) blocked += 1;
       }
     }

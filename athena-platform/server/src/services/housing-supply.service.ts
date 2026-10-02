@@ -39,6 +39,19 @@ import { recordFailure } from '../utils/ops-metrics';
 import { parseCsv } from './automotive/catalogue-admin.service';
 
 export const LISTING_TYPES = ['RENTAL', 'SHARE', 'EMERGENCY', 'TRANSITIONAL'] as const;
+
+/**
+ * The types that are confidential whether or not the lister ticks DV-safe. A
+ * place offered as emergency or transitional accommodation is offered to a
+ * woman leaving a bad situation, which is exactly the offer a bad actor would
+ * make, so these are held for the same staff check as a DV-safe claim.
+ */
+export const CONFIDENTIAL_LISTING_TYPES = ['EMERGENCY', 'TRANSITIONAL'] as const;
+
+/** Whether a listing is confidential, and so held for a staff check before it is shown. */
+export const isConfidentialListing = (l: { dvSafe?: boolean | null; type?: string | null }): boolean =>
+  Boolean(l.dvSafe) || (CONFIDENTIAL_LISTING_TYPES as readonly string[]).includes(String(l.type));
+
 export const AU_STATES = ['QLD', 'NSW', 'VIC', 'WA', 'SA', 'TAS', 'ACT', 'NT'] as const;
 
 /**
@@ -56,15 +69,41 @@ const HOUR_MS = 60 * 60 * 1000;
 
 export const DV_SAFE_NOTE_PREFIX = 'dv-safe-note:';
 export const CHECK_REQUESTED_PREFIX = 'dv-safe-check-requested:';
-const INTERNAL_PREFIXES = [DV_SAFE_NOTE_PREFIX, CHECK_REQUESTED_PREFIX];
+/**
+ * Marks a listing that staff took down: an administrator withdrew it, or a
+ * moderator removed it on a report. A listing's status alone cannot say so,
+ * because its lister may withdraw it too, and a lister can move her own listing
+ * back to ACTIVE; without this a take-down of an ordinary listing lasted only
+ * until its lister pressed "Available" again. While it is on a listing, only
+ * staff put the listing back (the admin route clears it).
+ */
+export const STAFF_TAKEDOWN_PREFIX = 'staff-takedown:';
+const INTERNAL_PREFIXES = [DV_SAFE_NOTE_PREFIX, CHECK_REQUESTED_PREFIX, STAFF_TAKEDOWN_PREFIX];
 
 const isInternal = (feature: string) => INTERNAL_PREFIXES.some((prefix) => feature.startsWith(prefix));
+const isTakedownTag = (feature: unknown): feature is string => typeof feature === 'string' && feature.startsWith(STAFF_TAKEDOWN_PREFIX);
 
 /** The features a member may see: strings only, and none of the internal tags. */
 export function publicFeatures(features: unknown): string[] {
   if (!Array.isArray(features)) return [];
   return features.filter((f): f is string => typeof f === 'string' && !isInternal(f));
 }
+
+/** Whether staff took this listing down, and nobody but staff has put it back. */
+export const takenDownByStaff = (features: unknown): boolean => Array.isArray(features) && features.some(isTakedownTag);
+
+/** The take-down tag if there is one, so the helpers that rebuild a listing's features carry it over rather than drop it. */
+const takedownTagOf = (features: unknown): string[] => (Array.isArray(features) ? features.filter(isTakedownTag).slice(0, 1) : []);
+
+/** The features of a listing staff have just taken down: everything it had, plus when. */
+export function withStaffTakedown(features: unknown, at: Date = new Date()): string[] {
+  const kept = Array.isArray(features) ? features.filter((f): f is string => typeof f === 'string' && !isTakedownTag(f)) : [];
+  return [...kept, `${STAFF_TAKEDOWN_PREFIX}${at.toISOString()}`];
+}
+
+/** The features of a listing staff have put back: everything it had, minus the take-down. */
+export const withoutStaffTakedown = (features: unknown): string[] =>
+  Array.isArray(features) ? features.filter((f): f is string => typeof f === 'string' && !isTakedownTag(f)) : [];
 
 /** The lister's note on why the place is DV-safe. */
 export function dvSafeNoteOf(features: string[] | null | undefined): string | null {
@@ -78,15 +117,22 @@ export function dvSafeNoteOf(features: string[] | null | undefined): string | nu
  * request replaces the first rather than stacking beside it.
  */
 export function withSafetyCheckRequest(features: unknown, note: string, at: Date = new Date()): string[] {
-  return [...publicFeatures(features), `${DV_SAFE_NOTE_PREFIX}${note}`, `${CHECK_REQUESTED_PREFIX}${at.toISOString()}`];
+  // An emergency or transitional listing asks for the check without claiming
+  // DV-safe, so it may have no note; an empty one is not written as a tag.
+  return [
+    ...publicFeatures(features),
+    ...(note ? [`${DV_SAFE_NOTE_PREFIX}${note}`] : []),
+    `${CHECK_REQUESTED_PREFIX}${at.toISOString()}`,
+    ...takedownTagOf(features),
+  ];
 }
 
 /** The features of a listing that no longer claims to be DV-safe: the note and the request go with the claim. */
-export const withoutSafetyCheckRequest = (features: unknown): string[] => publicFeatures(features);
+export const withoutSafetyCheckRequest = (features: unknown): string[] => [...publicFeatures(features), ...takedownTagOf(features)];
 
 /** The features of a listing staff have checked at creation: the note stays for the record; nothing is waiting. */
 export function withCheckedNote(features: unknown, note: string): string[] {
-  return [...publicFeatures(features), `${DV_SAFE_NOTE_PREFIX}${note}`];
+  return [...publicFeatures(features), ...(note ? [`${DV_SAFE_NOTE_PREFIX}${note}`] : []), ...takedownTagOf(features)];
 }
 
 // ------------------------------------------------------------- the clock
@@ -127,13 +173,14 @@ export function safetyCheckClock(listing: ClockSource, now: Date = new Date()): 
 }
 
 /**
- * The listings waiting for a check. A listing staff took down, or one its
- * lister has since let or withdrawn, is no longer waiting for anything: the
- * queue used to keep a taken-down listing in it for ever, because taking it
- * down left it DV-safe and unchecked.
+ * The listings waiting for a check: DV-safe ones, and emergency and
+ * transitional ones, which are confidential on their own. A listing staff took
+ * down, or one its lister has since let or withdrawn, is no longer waiting for
+ * anything: the queue used to keep a taken-down listing in it for ever, because
+ * taking it down left it DV-safe and unchecked.
  */
 export const SAFETY_CHECK_QUEUE_WHERE: Prisma.HousingListingWhereInput = {
-  dvSafe: true,
+  OR: [{ dvSafe: true }, { type: { in: [...CONFIDENTIAL_LISTING_TYPES] } }],
   safetyVerified: false,
   status: { notIn: ['WITHDRAWN', 'LEASED'] },
 };
@@ -313,9 +360,10 @@ export const staffListingSchema = z
 export type StaffListingInput = z.infer<typeof staffListingSchema>;
 
 /**
- * What a listing staff enter is written as. A DV-safe listing staff have
- * checked goes live checked; one they have not is held in the queue like a
- * member's, with its clock started; anything else is live at once.
+ * What a listing staff enter is written as. A confidential listing (DV-safe,
+ * emergency or transitional) staff have checked goes live checked; one they have
+ * not is held in the queue like a member's, with its clock started; anything
+ * else is live at once.
  */
 export function staffListingData(
   input: StaffListingInput,
@@ -323,12 +371,16 @@ export function staffListingData(
   check: { safetyVerified: boolean; now?: Date }
 ): Prisma.HousingListingUncheckedCreateInput {
   const now = check.now ?? new Date();
-  const checked = input.dvSafe && check.safetyVerified;
-  const features = input.dvSafe
+  const confidential = isConfidentialListing(input);
+  const checked = confidential && check.safetyVerified;
+  // A partner's sheet cannot write one of the internal tags, the take-down
+  // among them, into a listing it is creating.
+  const given = publicFeatures(input.features);
+  const features = confidential
     ? checked
-      ? withCheckedNote(input.features, input.dvSafeNote ?? '')
-      : withSafetyCheckRequest(input.features, input.dvSafeNote ?? '', now)
-    : publicFeatures(input.features);
+      ? withCheckedNote(given, input.dvSafeNote ?? '')
+      : withSafetyCheckRequest(given, input.dvSafeNote ?? '', now)
+    : given;
   return {
     agentId: listerId,
     title: input.title,
@@ -353,7 +405,7 @@ export function staffListingData(
     flexibleLease: input.flexibleLease,
     availableFrom: input.availableFrom ?? null,
     minLeaseTerm: input.minLeaseTerm ?? null,
-    status: input.dvSafe && !checked ? 'PENDING' : 'ACTIVE',
+    status: confidential && !checked ? 'PENDING' : 'ACTIVE',
   };
 }
 

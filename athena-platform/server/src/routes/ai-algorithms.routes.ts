@@ -29,6 +29,9 @@ import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { aiLimiter } from '../middleware/rateLimiter';
 import { ApiError } from '../middleware/errorHandler';
+import { z } from 'zod';
+import { VideoCategory } from '@prisma/client';
+import { parseWith } from '../middleware/validate';
 import { creatorTierStanding, refreshCreatorAnalytics } from '../services/creator.service';
 
 const router = Router();
@@ -584,8 +587,7 @@ router.get(['/mentor-match', '/mentor-match/:mentorId'], (_req: Request, _res: R
 // member another member's score, badges and identity-verification flag by id.
 // Nothing in the web or mobile app called either. /dashboard/ai/trust reads
 // /api/trust-score, which returns the factors behind the score and only ever
-// her own. Both answer 410 so a stale caller is told where the real one is;
-// POST /report below is still the report path.
+// her own. Both answer 410 so a stale caller is told where the real one is.
 router.get(['/trust-score', '/trust-score/:userId'], (_req: Request, _res: Response, next: NextFunction) => {
   next(
     new ApiError(
@@ -596,34 +598,25 @@ router.get(['/trust-score', '/trust-score/:userId'], (_req: Request, _res: Respo
 });
 
 // Report content
-router.post('/report', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const userId = (req as any).user?.id;
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    const { contentType, contentId, reportedUserId, reason, description } = req.body;
-
-    if (!contentType || !contentId || !reportedUserId || !reason) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-
-    const report = await prisma.contentReport.create({
-      data: {
-        reporterId: userId,
-        contentType,
-        contentId,
-        reportedUserId,
-        reason,
-        description,
-      },
-    });
-
-    res.json({ data: { id: report.id }, message: 'Report submitted successfully' });
-  } catch (error) {
-    next(error);
-  }
+//
+// This wrote a report row as it was sent and nothing else. The reported user
+// was whoever the caller named, with no check that she wrote the content, so
+// any member could file a report against any other member by id; there was no
+// limiter, no reference to quote, no review deadline, no alert to Trust & Safety
+// however serious the reason, and no safety-score update. The report from the
+// report button (POST /api/safety/reports) has all of those, and is the one
+// door the Online Safety Act's review clocks are measured on, so a report that
+// came in here was handled worse than the same report filed there. The only
+// caller was a form that asked a member to type the content and user ids, which
+// is gone. The route answers 410, in the manner of the two above, so a stale
+// client is told where to go.
+router.post('/report', (_req: Request, _res: Response, next: NextFunction) => {
+  next(
+    new ApiError(
+      410,
+      'Reports are filed at /api/safety/reports, which gives you a reference and a review deadline. This route no longer takes them.'
+    )
+  );
 });
 
 // =============================================
@@ -793,6 +786,12 @@ router.get('/feed-preferences', async (req: Request, res: Response, next: NextFu
 });
 
 // Update feed preferences
+const feedPreferenceFields = z.object({
+  followedCategories: z.array(z.nativeEnum(VideoCategory)).max(12).optional(),
+  preferredDuration: z.string().trim().toUpperCase().pipe(z.enum(['SHORT', 'MEDIUM', 'LONG'])).optional(),
+  autoplayEnabled: z.boolean().optional(),
+});
+
 router.patch('/feed-preferences', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user?.id;
@@ -800,7 +799,11 @@ router.patch('/feed-preferences', async (req: Request, res: Response, next: Next
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const { followedCategories, inNetworkRatio, preferredDuration, autoplayEnabled } = req.body;
+    // The three that are not lists of strings. followedCategories is an enum
+    // array in the database, so a category that does not exist was a 500, and
+    // autoplayEnabled went in as whatever type it arrived.
+    const { followedCategories, preferredDuration, autoplayEnabled } = parseWith(feedPreferenceFields, req.body);
+    const { inNetworkRatio } = req.body;
     const followedHashtags = stringListOrUndefined(req.body.followedHashtags, 'followedHashtags');
     const blockedHashtags = stringListOrUndefined(req.body.blockedHashtags, 'blockedHashtags');
     const blockedCreators = stringListOrUndefined(req.body.blockedCreators, 'blockedCreators');

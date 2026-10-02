@@ -19,7 +19,10 @@ import {
   parseBoundedInteger,
   parseOptionalDate,
 } from '../utils/contentSafety';
+import { requireChatAttachments } from '../utils/chat-attachments';
 import { prisma } from '../utils/prisma';
+import { logger } from '../utils/logger';
+import { blockedEitherWayIds } from '../services/audience.service';
 import { emitToGroupRoom } from '../services/socket.service';
 // Group chat reaches a whole room at once and had no ceiling of its own:
 // only the global tier limit, which allows a message every few seconds all
@@ -88,12 +91,21 @@ router.get('/:groupId/members/banned', authenticate, async (req: AuthRequest, re
 router.get('/:groupId/chat/pinned', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { groupId } = req.params;
-    const canRead = await validatePermission(groupId, req.user!.id, 'send_messages');
+    const viewerId = req.user!.id;
+    const canRead = await validatePermission(groupId, viewerId, 'send_messages');
     if (!canRead) {
       throw new ApiError(403, 'You are not a member of this group');
     }
+    // A message pinned by a moderator is still a message, and still not one she
+    // is shown from either side of a block.
+    const blocked = await blockedEitherWayIds(viewerId);
     const pinned = await prisma.message.findMany({
-      where: { conversationId: groupId, deletedAt: null, metadata: { path: ['pinned'], equals: true } },
+      where: {
+        conversationId: groupId,
+        deletedAt: null,
+        metadata: { path: ['pinned'], equals: true },
+        ...(blocked.length > 0 ? { senderId: { notIn: blocked } } : {}),
+      },
       include: { sender: { select: { id: true, displayName: true, avatar: true } } },
       orderBy: { createdAt: 'desc' },
       take: 20,
@@ -111,10 +123,14 @@ router.get('/:groupId/chat/pinned', authenticate, async (req: AuthRequest, res: 
  */
 // Speaking in a group chat is the surface a refused account would use to reach
 // a room full of members at once, so the women-only floor applies to the write.
+// validated: content goes through normalizeUserText with the group message limit, attachments
+//   through normalizeMessageAttachments (at most 5), replyToId is read as trimmed text and then
+//   looked up.
 router.post('/:groupId/chat/message', authenticate, requireWomanMember, messageLimiter, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { groupId } = req.params;
-    const attachments = normalizeMessageAttachments(req.body?.attachments);
+    const senderId = req.user!.id;
+    let attachments = normalizeMessageAttachments(req.body?.attachments);
     const content = req.body?.content === undefined || req.body?.content === null
       ? ''
       : normalizeUserText(req.body.content, {
@@ -130,9 +146,17 @@ router.post('/:groupId/chat/message', authenticate, requireWomanMember, messageL
       throw new ApiError(400, 'Content or attachments required');
     }
     
-    const sendPolicy = await groupChatService.canSendMessage(groupId, req.user!.id);
+    const sendPolicy = await groupChatService.canSendMessage(groupId, senderId);
     if (!sendPolicy.allowed) {
       throw new ApiError(403, sendPolicy.reason || 'You are not allowed to send messages in this group');
+    }
+
+    // A file in a room is one she uploaded to this room (utils/chat-attachments):
+    // by key, never by link, so nothing the room stores can be opened without
+    // asking the API, and a room cannot be made to show a picture from somewhere
+    // else, or a file somebody else sent.
+    if (attachments?.length) {
+      attachments = requireChatAttachments(attachments, groupId, senderId);
     }
 
     // Screened after the membership check, so somebody who cannot post here
@@ -140,7 +164,7 @@ router.post('/:groupId/chat/message', authenticate, requireWomanMember, messageL
     // write, so nothing a provider refuses is ever stored or broadcast. A
     // message that is only an attachment has no text to screen.
     if (content) {
-      await assertContentAllowed(content, { kind: 'group_message', userId: req.user!.id });
+      await assertContentAllowed(content, { kind: 'group_message', userId: senderId });
     }
 
     await ensureGroupConversation(groupId);
@@ -148,18 +172,28 @@ router.post('/:groupId/chat/message', authenticate, requireWomanMember, messageL
     if (replyToId) {
       const replyTo = await prisma.message.findUnique({
         where: { id: replyToId },
-        select: { conversationId: true, deletedAt: true },
+        select: { conversationId: true, deletedAt: true, senderId: true },
       });
 
       if (!replyTo || replyTo.conversationId !== groupId || replyTo.deletedAt) {
         throw new ApiError(400, 'Invalid reply target');
+      }
+
+      // A reply carries the line it answers, and the history never shows her a
+      // message from either side of a block, so she cannot have chosen one to
+      // reply to; an id she was not shown is refused as one that does not exist.
+      // Not best-effort: if the block lists cannot be read the reply fails.
+      if (replyTo.senderId && replyTo.senderId !== senderId) {
+        if ((await blockedEitherWayIds(senderId)).includes(replyTo.senderId)) {
+          throw new ApiError(400, 'Invalid reply target');
+        }
       }
     }
     
     // Store message
     const message = await chatStorageService.storeMessage({
       conversationId: groupId,
-      senderId: req.user!.id,
+      senderId,
       content,
       // Was `attachments ? 'IMAGE' : 'TEXT'`: a PDF, a voice note, or an
       // empty list all came back labelled a picture.
@@ -168,8 +202,27 @@ router.post('/:groupId/chat/message', authenticate, requireWomanMember, messageL
       metadata: { groupId, attachments },
     });
 
-    // Everyone with the room open sees it now rather than on the next poll.
-    emitToGroupRoom(groupId, 'groups:message', { groupId, message });
+    // Everyone with the room open sees it now rather than on the next poll,
+    // except the members on either side of a block with the sender: a room is a
+    // way round a block unless the push is held to it as the history is. If the
+    // block lists cannot be read nothing is pushed rather than everything; the
+    // message is stored, and the history read applies the same rule.
+    //
+    // A reply also carries the line it answers, which is somebody else's words:
+    // the history wipes that line for a reader on either side of a block with
+    // its author, so the push is not sent to one either (they read it, with the
+    // line wiped, on their next read).
+    try {
+      const exceptUserIds = await blockedEitherWayIds(message.senderId);
+      const quotedAuthorId: unknown = message.replyTo?.senderId;
+      if (typeof quotedAuthorId === 'string' && quotedAuthorId !== message.senderId) {
+        const quotedBlocked = await blockedEitherWayIds(quotedAuthorId);
+        exceptUserIds.push(...quotedBlocked.filter((id) => id !== message.senderId));
+      }
+      emitToGroupRoom(groupId, 'groups:message', { groupId, message }, { exceptUserIds });
+    } catch (error) {
+      logger.warn('Group message not pushed: the sender\'s block lists could not be read', { groupId, error });
+    }
 
     res.json({
       success: true,
@@ -193,16 +246,22 @@ router.get('/:groupId/chat/messages', authenticate, async (req: AuthRequest, res
     const after = parseOptionalDate(req.query.after, 'after');
     
     // Validate membership
-    const canRead = await validatePermission(groupId, req.user!.id, 'send_messages');
+    const viewerId = req.user!.id;
+    const canRead = await validatePermission(groupId, viewerId, 'send_messages');
     if (!canRead) {
       throw new ApiError(403, 'You are not a member of this group');
     }
     
+    // What a block ends is contact, and a group chat is contact with everyone in
+    // the room at once: two members who have blocked each other, in either
+    // store and either direction, do not read each other's messages here. The
+    // group posts list already holds to this; the chat was the way round.
     const messages = await chatStorageService.getMessages({
       conversationId: groupId,
       limit,
       before,
       after,
+      excludeSenderIds: await blockedEitherWayIds(viewerId),
     });
     
     res.json({
@@ -221,6 +280,7 @@ router.get('/:groupId/chat/messages', authenticate, async (req: AuthRequest, res
  *       becomes a join request for them to approve (202).
  * @access Private (members with invite rights; the service decides)
  */
+// validated: userId must be non-empty text and role one of GROUP_ROLES.
 router.post('/:groupId/members', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { groupId } = req.params;
@@ -268,6 +328,7 @@ router.post('/:groupId/members', authenticate, async (req: AuthRequest, res: Res
  * @desc Update member role
  * @access Private (Admin)
  */
+// validated: role must be ADMIN, MODERATOR or MEMBER.
 router.patch('/:groupId/members/:userId/role', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { groupId, userId } = req.params;
@@ -298,6 +359,8 @@ router.patch('/:groupId/members/:userId/role', authenticate, async (req: AuthReq
  * @desc Mute a member
  * @access Private (Admin/Moderator)
  */
+// validated: duration goes through parseBoundedInteger (1 minute to 30 days) and reason through
+//   optionalReason.
 router.post('/:groupId/members/:userId/mute', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { groupId, userId } = req.params;
@@ -341,6 +404,7 @@ router.post('/:groupId/members/:userId/unmute', authenticate, async (req: AuthRe
  * @desc Ban a member
  * @access Private (Admin)
  */
+// validated: reason goes through optionalReason, which measures it.
 router.post('/:groupId/members/:userId/ban', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { groupId, userId } = req.params;
@@ -425,6 +489,7 @@ router.delete('/:groupId/chat/messages/:messageId', authenticate, async (req: Au
  * @desc Pin a message
  * @access Private (Admin/Moderator)
  */
+// validated: the only field read is pinned, as !== false.
 router.patch('/:groupId/chat/messages/:messageId/pin', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { groupId, messageId } = req.params;

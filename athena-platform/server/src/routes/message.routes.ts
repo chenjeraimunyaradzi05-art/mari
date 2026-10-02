@@ -4,9 +4,8 @@ import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireAdultAccount, requireWomanMember } from '../middleware/account-gates';
-import { emitToUserRoom, isUserOnline, sendRealTimeMessage } from '../services/socket.service';
+import { emitToUserRoom, isUserOnline } from '../services/socket.service';
 import { onlineCounterpartsFor } from '../services/presence.service';
-import { messageTypeForAttachments } from '../services/chat-storage.service';
 import { buildPaginationMeta, parsePagination } from '../utils/pagination';
 import {
   CONTENT_LIMITS,
@@ -17,22 +16,31 @@ import {
 import {
   assertCanSendInConversation,
   getOrCreateDirectConversation,
+  readersHidingReceipts,
+  readReceiptsWithheldFrom,
   requestStateFor,
+  sendDirectMessage,
 } from '../services/direct-message.service';
 import { assertContentAllowed } from '../services/moderation.service';
-import { isBlockedRelationship } from '../utils/safety-store';
+import { blockedEitherWayIds, isBlockedEitherWay } from '../services/audience.service';
 import { canOpenConversation } from '../services/message-permissions.service';
+import { reviewUnwantedContact } from '../services/unwanted-contact.service';
+import { deleteChatAttachmentFiles } from '../services/chat-attachment-cleanup.service';
 import { conversationLimiter, messageLimiter } from '../middleware/socialLimits';
 import { Prisma } from '@prisma/client';
+import { maskLegalNamesInResponses } from '../utils/member-display';
 import {
-  conversationTtl,
-  expiryFor,
   isAllowedTtl,
   setDisappearingTtl,
   unexpiredMessageWhere,
 } from '../services/message-expiry.service';
 
 const router = Router();
+
+// Every answer from here goes to other members, so a member who is not the reader is
+// named by her public name and her legal first and last name are never sent (see
+// utils/member-display: the pseudonymous display name). The other person in a thread, and each message's sender, are both covered.
+router.use(maskLegalNamesInResponses);
 
 type RawReaction = { emoji: string; userId: string };
 
@@ -66,7 +74,7 @@ async function loadReactableMessage(messageId: string, userId: string) {
 
   const { receiverId } = await assertCanSendInConversation(message.conversationId, userId);
 
-  if (await isBlockedRelationship(userId, receiverId)) {
+  if (await isBlockedEitherWay(userId, receiverId)) {
     throw new ApiError(403, 'You cannot message this user');
   }
 
@@ -104,9 +112,22 @@ router.get('/conversations', authenticate, async (req: AuthRequest, res, next) =
 
     // A request this person declined is gone from their side; the opener
     // still sees it, closed.
+    //
+    // And so is a thread with anyone on either side of a block with her, in either
+    // store: the list shows the other person's name, picture and last message, so
+    // a thread left in it was a place the person she blocked (or who blocked her)
+    // stayed in front of her, and the unread badge counted what they had written.
+    // Left out in the query, so a page is full and the total is the number of
+    // threads she can see. The messages are not deleted; a report of them still
+    // carries a copy. If the block lists cannot be read the list fails rather than
+    // showing every thread.
+    const blocked = await blockedEitherWayIds(userId);
     const where: Prisma.ConversationParticipantWhereInput = {
       userId,
-      conversation: { OR: [{ requestDeclinedAt: null }, { requestedById: userId }] },
+      conversation: {
+        OR: [{ requestDeclinedAt: null }, { requestedById: userId }],
+        ...(blocked.length > 0 ? { participants: { none: { userId: { in: blocked } } } } : {}),
+      },
     };
 
     // The unread badge is a total over every thread, not over the page on
@@ -127,7 +148,6 @@ router.get('/conversations', authenticate, async (req: AuthRequest, res, next) =
                     select: {
                       id: true,
                       firstName: true,
-                      lastName: true,
                       displayName: true,
                       avatar: true,
                       isVerified: true,
@@ -166,10 +186,19 @@ router.get('/conversations', authenticate, async (req: AuthRequest, res, next) =
       0
     );
 
+    // Who of the people she is writing to has switched read receipts off, so
+    // the "read" tick on her last message is withheld in the list as it is in
+    // the thread. One lookup for the whole page.
+    const hidingReceipts = await readersHidingReceipts(
+      conversations.flatMap((cp) => cp.conversation.participants.map((participant) => participant.userId))
+    );
+
     const formatted = conversations.map((cp) => {
       const conv = cp.conversation;
       const otherParticipant = conv.participants[0]?.user;
       const lastMessage = conv.messages[0];
+      const receiptsWithheldHere =
+        readReceiptsWithheldFrom(conv, userId) || conv.participants.some((participant) => hidingReceipts.has(participant.userId));
 
       return {
         id: conv.id,
@@ -190,7 +219,7 @@ router.get('/conversations', authenticate, async (req: AuthRequest, res, next) =
               content: lastMessage.content,
               createdAt: lastMessage.createdAt,
               senderId: lastMessage.senderId,
-              isRead: lastMessage.isRead,
+              isRead: lastMessage.senderId === userId && receiptsWithheldHere ? false : lastMessage.isRead,
               deletedAt: lastMessage.deletedAt,
             }
           : null,
@@ -254,11 +283,31 @@ router.get('/conversations/:id/messages', authenticate, async (req: AuthRequest,
           userId,
         },
       },
+      include: {
+        conversation: {
+          select: {
+            requestedById: true,
+            requestAcceptedAt: true,
+            participants: { where: { userId: { not: userId } }, select: { userId: true } },
+          },
+        },
+      },
     });
 
     if (!participation) {
       throw new ApiError(403, 'Not a participant of this conversation');
     }
+
+    // The person who opened a request is not told whether, or when, it was read
+    // until it is accepted: the request banner promises as much, and a read
+    // receipt is how a stranger learns she is online and looking. Nor is anyone
+    // told by a member who has switched her read receipts off, which the live
+    // tick honoured and this read did not, so the tick came back on a reload.
+    const hidingReceipts = await readersHidingReceipts(
+      (participation.conversation?.participants ?? []).map((participant) => participant.userId)
+    );
+    const receiptsWithheld =
+      readReceiptsWithheldFrom(participation.conversation, userId) || hidingReceipts.size > 0;
 
     // Mark as read
     if (participation.hasUnread) {
@@ -294,7 +343,7 @@ router.get('/conversations/:id/messages', authenticate, async (req: AuthRequest,
           select: {
             id: true,
             firstName: true,
-            lastName: true,
+            displayName: true,
             avatar: true,
           },
         },
@@ -307,6 +356,7 @@ router.get('/conversations/:id/messages', authenticate, async (req: AuthRequest,
 
     const shaped = messages.map(({ reactions, ...message }) => ({
       ...message,
+      ...(receiptsWithheld && message.senderId === userId ? { isRead: false, readAt: null } : {}),
       reactions: shapeReactions(reactions, userId),
     }));
 
@@ -343,8 +393,9 @@ router.post(
       const { userId: targetUserId } = req.body;
       const myUserId = req.user!.id;
 
-      // Neither side of a block gets to open a thread with the other.
-      if (await isBlockedRelationship(myUserId, targetUserId)) {
+      // Neither side of a block gets to open a thread with the other, in either
+      // of the two stores a block can be written to.
+      if (await isBlockedEitherWay(myUserId, targetUserId)) {
         throw new ApiError(403, 'You cannot message this user');
       }
 
@@ -407,86 +458,17 @@ router.post(
         throw new ApiError(400, 'Content or attachments required');
       }
 
-      const { conversation: thread, receiverId } = await assertCanSendInConversation(id, userId);
-
-      if (await isBlockedRelationship(userId, receiverId)) {
-        throw new ApiError(403, 'You cannot message this user');
-      }
-
-      // A reply may only quote a live message from this same thread, otherwise
-      // the quote leaks content the recipient never had access to.
-      if (replyToId) {
-        const replyTo = await prisma.message.findUnique({
-          where: { id: replyToId },
-          select: { conversationId: true, deletedAt: true },
-        });
-
-        if (!replyTo || replyTo.conversationId !== id || replyTo.deletedAt) {
-          throw new ApiError(400, 'Invalid reply target');
-        }
-      }
-
-      if (content) {
-        await assertContentAllowed(content, { kind: 'message', userId });
-      }
-
-      // Disappearing messages: stamped at send time from the thread's setting,
-      // so changing the setting later never touches what was already sent.
-      const expiresAt = expiryFor(await conversationTtl(id));
-
-      // The person who was asked replying is the acceptance. A muted thread, or
-      // a request they have not accepted, reaches them without a push or a badge
-      // bump; the very first request message does knock once, so they know
-      // someone is waiting.
-      const pendingRequest = Boolean(thread.requestedById) && !thread.requestAcceptedAt && !thread.requestDeclinedAt;
-      const acceptsRequest = pendingRequest && thread.requestedById !== userId;
-      const receiverMuted = thread.participants.some((p) => p.userId === receiverId && p.isMuted);
-      const quiet =
-        receiverMuted ||
-        (pendingRequest && !acceptsRequest && (await prisma.message.count({ where: { conversationId: id, senderId: userId } })) > 0);
-
-      const [message] = await prisma.$transaction([
-        prisma.message.create({
-          data: {
-            conversationId: id,
-            senderId: userId,
-            receiverId,
-            content,
-            type: messageTypeForAttachments(attachments),
-            replyToId,
-            expiresAt,
-            ...(attachments ? { metadata: { attachments } } : {}),
-          },
-          include: {
-            sender: {
-                select: { id: true, firstName: true, lastName: true, avatar: true }
-            },
-            replyTo: {
-                select: { id: true, senderId: true, content: true }
-            }
-          }
-        }),
-        prisma.conversation.update({
-          where: { id },
-          data: {
-            lastMessageAt: new Date(),
-            ...(acceptsRequest ? { requestAcceptedAt: new Date(), requestDeclinedAt: null } : {}),
-          },
-        }),
-        prisma.conversationParticipant.updateMany({
-          where: {
-            conversationId: id,
-            userId: { not: userId },
-          },
-          data: {
-            hasUnread: true,
-            unreadCount: { increment: 1 },
-          },
-        }),
-      ]);
-
-      // Emit Socket Event
-      await sendRealTimeMessage(receiverId, message, { quiet, request: pendingRequest && !acceptsRequest });
+      // The rules about who may write to whom — the participant check, the
+      // block, the request cap and a declined request, moderation, expiry and
+      // the quiet request delivery — are in sendDirectMessage, which the socket
+      // door calls too, so neither can be held to less than the other.
+      const { message } = await sendDirectMessage({
+        senderId: userId,
+        conversationId: id,
+        content,
+        attachments,
+        replyToId,
+      });
 
       res.status(201).json({
         success: true,
@@ -602,6 +584,10 @@ router.post('/conversations/:id/request/decline', authenticate, async (req: Auth
       where: { id: conversation.id },
       data: { requestDeclinedAt: new Date() },
     });
+    // One woman's no is answered by the thread closing. Several women's no, to
+    // the same account, is something a moderator should hear about; this counts
+    // them and never throws, so the decline she just made is what she is told.
+    await reviewUnwantedContact(conversation.requestedById!);
     res.json({ success: true, data: { conversationId: conversation.id, accepted: false } });
   } catch (error) {
     next(error);
@@ -658,6 +644,8 @@ async function loadOwnMessage(messageId: string, userId: string) {
       isRead: true,
       deletedAt: true,
       createdAt: true,
+      // What the unsend takes away, read before it goes: the files it carried.
+      metadata: true,
       conversation: { select: { participants: { select: { userId: true } } } },
     },
   });
@@ -708,6 +696,12 @@ router.delete('/:messageId', authenticate, async (req: AuthRequest, res: Respons
     for (const participantId of message.participantIds) {
       emitToUserRoom(participantId, 'messages:deleted', payload);
     }
+
+    // The files go with the words. The row's attachments were cleared above, and
+    // what they pointed at is removed here, unless somebody has reported the
+    // message, in which case the people deciding the report keep it
+    // (services/chat-attachment-cleanup).
+    await deleteChatAttachmentFiles([{ id: message.id, metadata: message.metadata }]);
 
     res.json({ success: true, message: 'Message unsent', data: { id: message.id, deletedAt } });
   } catch (error) {

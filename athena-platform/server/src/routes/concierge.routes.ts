@@ -5,6 +5,8 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../middleware/auth';
+import { z } from 'zod';
+import { parseWith } from '../middleware/validate';
 import * as conciergeService from '../services/concierge.service';
 import { logger } from '../utils/logger';
 
@@ -15,12 +17,26 @@ const router = Router();
  * @desc Send a message to the AI Concierge
  * @access Private
  */
+// The history is the conversation so far and goes to the assistant as context, so
+// it is a short list of turns and nothing else. All three used to be taken as
+// they came: a message of any length, a history of any size and any shape.
+const chatBody = z.object({
+  message: z.string().max(4000),
+  conversationHistory: z
+    .array(z.object({ role: z.string().max(20), content: z.string().max(8000) }))
+    // The panel sends every turn of the sitting, so this is generous: it is a
+    // ceiling against abuse, not a limit anyone chatting reaches.
+    .max(200)
+    .optional(),
+  currentPage: z.string().trim().max(300).optional(),
+});
+
 router.post('/chat', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = (req as any).user;
-    const { message, conversationHistory, currentPage } = req.body;
+    const { message, conversationHistory, currentPage } = parseWith(chatBody, req.body);
 
-    if (typeof message !== 'string' || !message.trim()) {
+    if (!message.trim()) {
       return res.status(400).json({ error: 'Message is required' });
     }
 

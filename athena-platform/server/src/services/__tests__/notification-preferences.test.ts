@@ -11,6 +11,10 @@ jest.mock('../../utils/logger', () => ({
   logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
 
+// Nobody is blocked here; the block rule has its own suite
+// (utils/__tests__/social-notifications.block.test.ts).
+jest.mock('../audience.service', () => ({ isBlockedEitherWay: jest.fn(async () => false) }));
+
 import { prisma as prismaTyped } from '../../utils/prisma';
 import { wantsSocialNotification } from '../notification-preferences.service';
 import { notifySocial } from '../../utils/social-notifications';

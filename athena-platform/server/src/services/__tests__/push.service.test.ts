@@ -5,6 +5,7 @@ jest.mock('../../utils/prisma', () => ({
     user: { findUnique: jest.fn() },
     pushToken: { findMany: jest.fn(), updateMany: jest.fn(async () => ({ count: 0 })) },
     dvSafetyProfile: { findUnique: jest.fn() },
+    profile: { findUnique: jest.fn() },
   },
 }));
 
@@ -66,6 +67,7 @@ describe('pushToUser', () => {
     // No DV safety profile: the member has never been near the safety page, so
     // her notifications read as written.
     prisma.dvSafetyProfile.findUnique.mockResolvedValue(null);
+    prisma.profile.findUnique.mockResolvedValue({ isSafeMode: false });
     delete process.env.EXPO_ACCESS_TOKEN;
   });
   afterEach(() => {
@@ -164,6 +166,65 @@ describe('pushToUser', () => {
       // lock screen that must not name her or what was said.
       data: { conversationId: 'c1', link: '/dashboard/messages?user=mei' },
     });
+  });
+
+  it('sends the real words to a member who has not asked for anything', async () => {
+    // No DV profile row and Safe Mode off: nobody has chosen vague wording for
+    // her, so nothing is swapped. The row used to be made by a read, with the
+    // switch on, which put every member who opened the dashboard here.
+    prisma.dvSafetyProfile.findUnique.mockResolvedValue(null);
+    prisma.profile.findUnique.mockResolvedValue({ isSafeMode: false });
+    prisma.pushToken.findMany.mockResolvedValue([{ id: 't1', token: 'ExponentPushToken[live]', platform: 'ios' }]);
+    const calls = expoAnswers([{ status: 'ok' }]);
+
+    await pushToUser('u1', 'MESSAGE', { title: 'Mei Chen', body: 'Are you free Thursday?' });
+
+    expect(calls[0].body[0]).toMatchObject({ title: 'Mei Chen', body: 'Are you free Thursday?' });
+  });
+
+  it('keeps the lock screen vague for a member in Safe Mode from the Safety Centre, with no DV row', async () => {
+    // The Safety Centre's switch writes Profile.isSafeMode and nothing else; it
+    // is described to her as keeping notifications vague, so it has to.
+    prisma.dvSafetyProfile.findUnique.mockResolvedValue(null);
+    prisma.profile.findUnique.mockResolvedValue({ isSafeMode: true });
+    prisma.pushToken.findMany.mockResolvedValue([{ id: 't1', token: 'ExponentPushToken[live]', platform: 'ios' }]);
+    const calls = expoAnswers([{ status: 'ok' }]);
+
+    await pushToUser('u1', 'MESSAGE', { title: 'Mei Chen', body: 'Are you safe tonight?' });
+
+    expect(calls[0].body[0]).toMatchObject({ title: 'New Update', body: 'You have a new update. Open app to view.' });
+  });
+
+  it('keeps the lock screen vague for a member in Safe Mode on the DV page even if the switch row says off', async () => {
+    prisma.dvSafetyProfile.findUnique.mockResolvedValue({ notificationsSafe: false, isSafeMode: true });
+    prisma.profile.findUnique.mockResolvedValue(null);
+    prisma.pushToken.findMany.mockResolvedValue([{ id: 't1', token: 'ExponentPushToken[live]', platform: 'ios' }]);
+    const calls = expoAnswers([{ status: 'ok' }]);
+
+    await pushToUser('u1', 'MESSAGE', { title: 'Mei Chen', body: 'Are you safe tonight?' });
+
+    expect(calls[0].body[0]).toMatchObject({ title: 'New Update' });
+  });
+
+  it('sends the real words to a member whose DV row exists but has the switch off', async () => {
+    prisma.dvSafetyProfile.findUnique.mockResolvedValue({ notificationsSafe: false, isSafeMode: false });
+    prisma.pushToken.findMany.mockResolvedValue([{ id: 't1', token: 'ExponentPushToken[live]', platform: 'ios' }]);
+    const calls = expoAnswers([{ status: 'ok' }]);
+
+    await pushToUser('u1', 'MESSAGE', { title: 'Mei Chen', body: 'Hello' });
+
+    expect(calls[0].body[0]).toMatchObject({ title: 'Mei Chen', body: 'Hello' });
+  });
+
+  it('falls back to the vague wording when the Safe Mode setting cannot be read', async () => {
+    prisma.dvSafetyProfile.findUnique.mockResolvedValue(null);
+    prisma.profile.findUnique.mockRejectedValue(new Error('connection lost'));
+    prisma.pushToken.findMany.mockResolvedValue([{ id: 't1', token: 'ExponentPushToken[live]', platform: 'ios' }]);
+    const calls = expoAnswers([{ status: 'ok' }]);
+
+    await pushToUser('u1', 'MESSAGE', { title: 'Mei Chen', body: 'Are you safe tonight?' });
+
+    expect(calls[0].body[0]).toMatchObject({ title: 'New Update' });
   });
 
   it('falls back to the vague wording when the safety setting cannot be read', async () => {

@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import Stripe from 'stripe';
+import { Prisma } from '@prisma/client';
+import { z } from 'zod';
 import { getStripe } from '../utils/stripe';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
@@ -12,11 +14,19 @@ import {
   isPlaceholderPriceId,
   getSubscriptionPlanPrices,
 } from '../services/payments-orchestration.service';
+import { TRIAL_DAYS, publicPriceBook } from '../config/price-book';
+import { isGstRegistered } from '../services/invoice.service';
+import { minorUnitScale } from '../services/stripe-connect.service';
+import { startingAPayment } from '../middleware/moneyLimits';
+import { zodBody } from '../middleware/validate';
+import { BILLING_STATUSES, hasLiveEntitlement, pastDueGraceEndsAt } from '../utils/subscription-entitlement';
+import { entitlementsFor, planEntitlements } from '../services/entitlements.service';
+import { getPaymentsPause } from '../services/feature-flags.service';
 
-// Must match TRIAL_DAYS in client/src/lib/pricing.ts, which is what the
-// pricing page and its FAQ render. If these two drift, the site advertises
-// one trial length and Stripe grants another.
-const TRIAL_DAYS = 14;
+// The trial length is TRIAL_DAYS in the price book. client/src/lib/pricing.ts
+// holds the copy the static pages render, and a test in each package fails when
+// the two differ, so the site cannot advertise one trial length while Stripe
+// grants another.
 
 const router = Router();
 
@@ -88,9 +98,19 @@ router.get('/me', authenticate, async (req: AuthRequest, res, next) => {
       throw new ApiError(404, 'Subscription not found');
     }
 
+    // The row as it is, and what it is worth today: whether the paid tools are on
+    // (the one rule every plan gate reads) and, for a payment that failed, the day
+    // they will pause if it is not put right. The billing page says which of those
+    // she is in rather than guessing it from the status.
     res.json({
       success: true,
-      data: subscription,
+      data: {
+        ...subscription,
+        entitled: hasLiveEntitlement(subscription),
+        graceEndsAt: pastDueGraceEndsAt(subscription)?.toISOString() ?? null,
+        // What the member gets today, from the same table the paid routes are gated by.
+        entitlements: entitlementsFor(subscription),
+      },
     });
   } catch (error) {
     next(error);
@@ -131,9 +151,43 @@ router.get('/plans', optionalAuth, async (req: AuthRequest, res, next) => {
 
     const plans = await getSubscriptionPlanPrices(currency);
 
+    // The rest of the price book rides along: the refund promise, the fees and
+    // the GST sentence a price page prints beside the price. `currency` here is
+    // the one the membership is priced in; the book's own currency is what
+    // everything that is not a membership is charged in.
+    const book = publicPriceBook(isGstRegistered());
+
+    // The GST sentence opens "Prices are in Australian dollars". It is printed
+    // beside the membership prices, which are the Stripe prices checkout
+    // charges, and a deployment that has set up a price in another currency
+    // (STRIPE_PRICE_<TIER>_<CURRENCY>) shows that price to a member who has
+    // chosen that currency. Printing the sentence beside a price in US dollars
+    // would say something false on the page that sells the plan, and GST is not
+    // a statement about a foreign-currency price anyway, so it is sent only when
+    // every price shown is in Australian dollars.
+    const sellsOnlyInAud = plans.every((plan) => !plan.available || plan.currency === book.currency);
+
+    // Whether new payments are paused (services/feature-flags.service), so a page
+    // can say so and hold its upgrade button instead of letting each press fail.
+    // The message is the admin's own wording or the default; it is public.
+    const pause = await getPaymentsPause();
+
     res.json({
       success: true,
-      data: { currency, trialDays: TRIAL_DAYS, plans },
+      data: {
+        currency,
+        trialDays: book.trialDays,
+        refundDays: book.refundDays,
+        gst: sellsOnlyInAud ? book.gst : null,
+        fees: book.fees,
+        plans,
+        // What Free and a paid membership each get, from the table the paid
+        // routes are gated by (services/entitlements.service), so the pages print
+        // the facts the server enforces and nothing it does not.
+        entitlements: planEntitlements(),
+        paused: pause.paused,
+        pauseMessage: pause.paused ? pause.message : null,
+      },
     });
   } catch (error) {
     next(error);
@@ -143,7 +197,8 @@ router.get('/plans', optionalAuth, async (req: AuthRequest, res, next) => {
 // ===========================================
 // CREATE CHECKOUT SESSION
 // ===========================================
-router.post('/checkout', authenticate, async (req: AuthRequest, res, next) => {
+// validated: tier must be one of VALID_TIERS before anything is read or created.
+router.post('/checkout', authenticate, startingAPayment, async (req: AuthRequest, res, next) => {
   try {
     const { tier } = req.body;
 
@@ -190,29 +245,73 @@ router.post('/checkout', authenticate, async (req: AuthRequest, res, next) => {
     // Whether this customer has already used their trial. Stripe will happily
     // grant a fresh trial on every new subscription, so without this check
     // someone could cancel and resubscribe indefinitely and never pay.
+    //
+    // The same list says whether she already has one. Stripe is asked, not the
+    // row on our side: a membership that was bought a moment ago is not on the row
+    // until its webhook arrives, and a row that still says ACTIVE for a membership
+    // Stripe has since ended would lock her out of buying again. Without this a
+    // second checkout made a second subscription, the webhook then pointed her row
+    // at the new one, and the first went on billing her card with nothing of ours
+    // pointing at it.
     const previousSubscriptions = await getStripe().subscriptions.list({
       customer: customerId,
       status: 'all',
-      limit: 1,
+      limit: 100,
     });
+    const alreadyBilled = previousSubscriptions.data.find((held) =>
+      (BILLING_STATUSES as readonly string[]).includes(held.status.toUpperCase())
+    );
+    if (alreadyBilled) {
+      const endsOn =
+        alreadyBilled.cancel_at_period_end && typeof alreadyBilled.current_period_end === 'number'
+          ? new Date(alreadyBilled.current_period_end * 1000).toLocaleDateString('en-AU', {
+              day: 'numeric',
+              month: 'long',
+              year: 'numeric',
+              timeZone: 'Australia/Brisbane',
+            })
+          : null;
+      throw new ApiError(
+        409,
+        endsOn
+          ? `You already have an ATHENA membership. It is set to end on ${endsOn}, and you keep it until then. To carry on without a gap, use Manage billing on this page; you will not be charged twice.`
+          : 'You already have an ATHENA membership, so there is nothing to buy. To change your card or your plan, use Manage billing on this page.'
+      );
+    }
     const isFirstSubscription = previousSubscriptions.data.length === 0;
 
     // Create checkout session.
     //
-    // The pricing page advertises a 14-day free trial. Until now the session
+    // The pricing page advertises a free trial. Until now the session
     // carried no trial at all, so anyone who took that offer was charged the
     // full amount immediately — a representation we made and did not honour.
     // TRIAL_DAYS is the same constant the marketing copy renders from.
+    //
+    // The trial is a card trial and says so. The card is collected here, at the
+    // start (`payment_method_collection: 'always'` is Stripe's default for a
+    // subscription, written out so a change of default cannot turn this into a
+    // no-card trial that converts without her having given a card), and it is
+    // charged on the day the trial ends unless she cancels first. Stripe's own
+    // checkout page shows the trial and the price after it; the sentence under
+    // the button repeats it in ATHENA's words so the charge is never a surprise.
     const session = await getStripe().checkout.sessions.create({
       customer: customerId,
       mode: 'subscription',
       payment_method_types: ['card'],
+      payment_method_collection: 'always',
       line_items: [
         {
           price: priceId,
           quantity: 1,
         },
       ],
+      custom_text: {
+        submit: {
+          message: isFirstSubscription
+            ? `Your ${TRIAL_DAYS}-day free trial starts today and nothing is charged now. Your card is charged the price shown on the day the trial ends, and then on each renewal, unless you cancel first. You can cancel any time from Settings, then Billing, and we will email you a few days before the first charge.`
+            : 'Your card is charged the price shown today, and then on each renewal, until you cancel. You can cancel any time from Settings, then Billing.',
+        },
+      },
       ...(isFirstSubscription
         ? {
             subscription_data: {
@@ -293,7 +392,7 @@ router.post('/cancel', authenticate, async (req: AuthRequest, res, next) => {
     }
 
     // Cancel at period end
-    await getStripe().subscriptions.update(subscription.stripeSubscriptionId, {
+    const updated = await getStripe().subscriptions.update(subscription.stripeSubscriptionId, {
       cancel_at_period_end: true,
     });
 
@@ -302,9 +401,146 @@ router.post('/cancel', authenticate, async (req: AuthRequest, res, next) => {
       data: { cancelAtPeriodEnd: true },
     });
 
+    // The day the membership ends, as Stripe has it. A cancel is a promise about
+    // a date ("you keep Pro until then", or for a trial "you will not be
+    // charged"), and the page used to say only that it had been cancelled, which
+    // reads as ending now. For a trial the period is the trial, so the date is
+    // the day the card would have been charged.
+    const endsAt = typeof updated?.current_period_end === 'number' ? new Date(updated.current_period_end * 1000) : null;
+
     res.json({
       success: true,
       message: 'Subscription will be canceled at end of billing period',
+      data: {
+        cancelAtPeriodEnd: true,
+        currentPeriodEnd: endsAt ? endsAt.toISOString() : null,
+        trialing: updated?.status === 'trialing',
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
+// CHANGE PLAN
+// ===========================================
+// The tier is checked against the ones checkout sells before anything is read or changed.
+const changePlanBody = z.object({
+  tier: z
+    .string({ required_error: 'Invalid subscription tier', invalid_type_error: 'Invalid subscription tier' })
+    .refine((value): value is SubscriptionTierKey => (VALID_TIERS as string[]).includes(value), 'Invalid subscription tier'),
+});
+
+/**
+ * Moves a live membership onto another paid tier, in place.
+ *
+ * Checkout refuses a member who already has a membership, so changing plan used
+ * to mean the Stripe portal, if the portal happened to be set up to allow it, or
+ * cancelling and buying again. This changes the one subscription Stripe is
+ * billing, on the price of the new tier in the currency she is already billed
+ * in (a subscription cannot change currency), and lets Stripe work out the
+ * difference to the day: it is added to, or credited against, her next bill, and
+ * a trial carries on untouched. Nothing is charged by this request itself.
+ *
+ * Her tier on our side is written here as well as by the webhook, so the page she
+ * is looking at says the new plan at once; the webhook then writes the same thing.
+ */
+router.post('/change-plan', authenticate, startingAPayment, zodBody(changePlanBody), async (req: AuthRequest, res, next) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) throw new ApiError(401, 'Sign in to continue');
+    const { tier } = req.body as z.output<typeof changePlanBody>;
+
+    const subscription = await prisma.subscription.findUnique({
+      where: { userId },
+    });
+
+    const isBilled = subscription && (BILLING_STATUSES as readonly string[]).includes(subscription.status);
+    if (!subscription?.stripeSubscriptionId || !isBilled) {
+      throw new ApiError(409, 'You do not have a membership to change. You can start one from the plans on this page.');
+    }
+
+    if (subscription.status === 'PAST_DUE') {
+      throw new ApiError(
+        409,
+        'Your last payment did not go through. Update your card with Manage billing first, and then you can change your plan.'
+      );
+    }
+
+    if (subscription.tier === tier) {
+      throw new ApiError(400, 'You are already on this plan.');
+    }
+
+    const stripe = getStripe();
+    const live = await stripe.subscriptions.retrieve(subscription.stripeSubscriptionId);
+
+    if (live.status !== 'active' && live.status !== 'trialing') {
+      throw new ApiError(
+        409,
+        'Stripe shows this membership as not active, so its plan cannot be changed here. Open Manage billing to see where it stands.'
+      );
+    }
+
+    // One price on the subscription, because that is what checkout makes. Anything
+    // else was set up by hand, and swapping "the" price on it would be a guess.
+    const items = live.items?.data ?? [];
+    if (items.length !== 1) {
+      throw new ApiError(409, 'This membership cannot be changed from here. Please get in touch and we will change it for you.');
+    }
+    const item = items[0];
+
+    // A subscription cannot move to a price in another currency, whatever she has
+    // since chosen as her own, so the new price is looked up in the one she pays in.
+    const currency = (item.price?.currency || subscription.currency || 'AUD').toUpperCase();
+    const priceId = getPriceIdForTier(tier, currency);
+    assertRealPriceId(priceId, tier, currency);
+
+    if (priceId === item.price?.id) {
+      throw new ApiError(400, 'You are already on this plan.');
+    }
+
+    // getPriceIdForTier falls back to the Australian-dollar price for a currency
+    // that has none set up, which Stripe would refuse with its own words. Read the
+    // price first and say it plainly.
+    const price = await stripe.prices.retrieve(priceId);
+    if (!price.active || !price.recurring || price.currency.toUpperCase() !== currency) {
+      throw new ApiError(
+        409,
+        `That plan is not available in ${currency}, the currency your membership is billed in. Please get in touch and we will move it for you.`
+      );
+    }
+
+    await stripe.subscriptions.update(live.id, {
+      items: [{ id: item.id, price: priceId }],
+      proration_behavior: 'create_prorations',
+    });
+
+    const billed =
+      typeof price.unit_amount === 'number'
+        ? {
+            amount: new Prisma.Decimal(price.unit_amount).div(minorUnitScale(price.currency)),
+            currency: price.currency.toUpperCase(),
+            interval: price.recurring.interval ?? null,
+          }
+        : {};
+
+    await prisma.subscription.update({
+      where: { userId },
+      data: { tier, stripePriceId: priceId, ...billed },
+    });
+
+    res.json({
+      success: true,
+      message:
+        live.status === 'trialing'
+          ? 'Your plan has been changed. Your free trial carries on, and nothing is charged until it ends.'
+          : 'Your plan has been changed. The difference for the rest of this period is worked out to the day and taken from, or credited to, your next bill.',
+      data: {
+        tier,
+        trialing: live.status === 'trialing',
+        currentPeriodEnd: typeof live.current_period_end === 'number' ? new Date(live.current_period_end * 1000).toISOString() : null,
+      },
     });
   } catch (error) {
     next(error);

@@ -15,11 +15,11 @@ import { notifySocial, socialLinks } from '../utils/social-notifications';
 import { assertSoundExists, attachSounds, recordSoundUse } from '../services/sound.service';
 import { enqueueVideoProcessing } from '../services/video-pipeline.service';
 import { bestEffort } from '../utils/best-effort';
-import { viewerContextFor } from '../services/search.service';
-import { isBlockedEitherWay } from '../services/audience.service';
+import { viewerContextFor, visibleAuthorWhere } from '../services/search.service';
+import { authorVisibleWhere, blockedEitherWayIds, canViewAuthor, isBlockedEitherWay } from '../services/audience.service';
 import { createRateLimiter } from '../middleware/rateLimiter';
 import { COUNTED_VIEW_WINDOW_MS } from '../services/creator-content-analytics.service';
-import { commentLimiter, postLimiter, reactionLimiter } from '../middleware/socialLimits';
+import { commentLimiter, postLimiter, reactionLimiter, withinTargetLimit } from '../middleware/socialLimits';
 
 const router = Router();
 
@@ -91,13 +91,21 @@ function mergeHashtags(explicit: string[], implied: string[]): string[] {
 // was answered with "Already liked this video".
 // A duet names the reel it answers: the player shows "Duet with @name" and
 // links to it. One query for the page, like sounds.
-async function attachDuets<T extends { id: string; duetOfVideoId?: string | null }>(videos: T[]) {
+//
+// The original's author is named only to a viewer who may be shown her: a duet
+// of a reel by a member in Safe Mode would otherwise carry her id and name into
+// a list that her closed profile is meant to keep her out of. The same goes for
+// an author on either side of a block with the viewer (the reply is in her list,
+// the reel it answers is by someone she blocked), and for an original that has
+// since been taken down or is not published: its title, picture and author are
+// not for a list to carry once nobody can open it.
+async function attachDuets<T extends { id: string; duetOfVideoId?: string | null }>(videos: T[], viewerId?: string) {
   const ids = Array.from(
     new Set(videos.map((v) => v.duetOfVideoId).filter((id): id is string => typeof id === 'string' && id.length > 0))
   );
   if (ids.length === 0) return videos.map((video) => ({ ...video, duetOf: null as null }));
   const originals = await prisma.video.findMany({
-    where: { id: { in: ids } },
+    where: { id: { in: ids }, ...PUBLIC_VIDEO_WHERE, ...(await visibleAuthorWhere(viewerId)) },
     select: { id: true, title: true, thumbnailUrl: true, author: { select: { id: true, displayName: true } } },
   });
   const byId = new Map(originals.map((o) => [o.id, o]));
@@ -114,7 +122,7 @@ async function withViewerState<T extends { id: string; audioTrackId?: string | n
   userId?: string
 ) {
   if (!userId || videos.length === 0) {
-    return attachDuets(await attachSounds(videos.map((video) => ({ ...video, isLiked: false, isSaved: false }))));
+    return attachDuets(await attachSounds(videos.map((video) => ({ ...video, isLiked: false, isSaved: false }))), userId);
   }
 
   const ids = videos.map((video) => video.id);
@@ -138,7 +146,8 @@ async function withViewerState<T extends { id: string; audioTrackId?: string | n
         isLiked: liked.has(video.id),
         isSaved: saved.has(video.id),
       }))
-    )
+    ),
+    userId
   );
 }
 
@@ -245,6 +254,17 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
       };
     }
 
+    // A member in Safe Mode is discreet: her reels reach herself and her
+    // verified connections, and no one else's feed, signed in or not. A reel
+    // carries her name and picture, so leaving them in For You and Trending
+    // named her to the strangers her closed profile is meant to be closed to.
+    // This is not the hide-from-search rule the comment above sets aside: that
+    // switch is about being found by name and Safe Mode is about being known.
+    // The same goes for a member whose profile is private, or connections-only
+    // and the viewer does not follow her: the settings page promises that her
+    // posts appear in no one else's feed, and her reels are posts to her.
+    where.AND = [...(where.AND ?? []), { author: authorVisibleWhere(req.user?.id) }];
+
     const orderBy: any[] =
       feed === 'trending'
         ? [{ engagementScore: 'desc' }, { viewCount: 'desc' }, { id: 'desc' }]
@@ -283,17 +303,18 @@ function parsePage(value: unknown): number {
 
 /**
  * The clause that keeps reels between two members who have blocked each other
- * out of each other's lists: the same rule the feed above applies, for the
- * trending, category and per-author lists that browse the same reels. Null for
- * a signed-out viewer, who has blocked nobody. Fails closed, like the feed.
+ * out of each other's lists, and a discreet member's reels out of the lists of
+ * everyone who is not her verified connection: the same rules the feed above
+ * applies, for the trending, category and per-author lists that browse the
+ * same reels, and a member whose profile is private (or connections-only, for
+ * a viewer who does not follow her) out of the lists of everyone outside her
+ * audience, as her posts are. A signed-out viewer has blocked nobody but is
+ * still a stranger to a discreet or private member. Fails closed, like the feed.
  */
-async function blockedAuthorsWhere(viewerId: string | undefined): Promise<Record<string, unknown> | null> {
-  if (!viewerId) return null;
-  const viewer = await viewerContextFor(viewerId);
-  return {
-    ...(viewer.blockedIds.length > 0 ? { authorId: { notIn: viewer.blockedIds } } : {}),
-    author: { NOT: { dvSafetyProfile: { is: { blockedUserIds: { has: viewerId } } } } },
-  };
+async function blockedAuthorsWhere(viewerId: string | undefined): Promise<Record<string, unknown>> {
+  // One definition for every list of reels, kept in the search service beside
+  // the rule for members: a sound's page asks the same question.
+  return { ...(await visibleAuthorWhere(viewerId)) };
 }
 
 // Page-based listing shared by the trending, category and per-author routes.
@@ -304,8 +325,7 @@ async function listVideos(
 ) {
   const page = parsePage(req.query.page);
   const limit = parseLimit(req.query.limit, 20, 50);
-  const safety = await blockedAuthorsWhere(req.user?.id);
-  const where = safety ? { AND: [baseWhere, safety] } : baseWhere;
+  const where = { AND: [baseWhere, await blockedAuthorsWhere(req.user?.id)] };
 
   const [videos, total] = await Promise.all([
     prisma.video.findMany({
@@ -356,9 +376,14 @@ router.get('/trending', optionalAuth, async (req: AuthRequest, res, next) => {
 // ===========================================
 router.get('/bookmarked', authenticate, async (req: AuthRequest, res, next) => {
   try {
+    const viewerId = req.user!.id;
     const page = parsePage(req.query.page);
     const limit = parseLimit(req.query.limit, 20, 50);
-    const where = { userId: req.user!.id, video: PUBLIC_VIDEO_WHERE };
+    // A reel she saved stays in her list only while she may still be shown its
+    // author. A member who has since blocked her, or gone into Safe Mode, drops
+    // out of it, rather than her list going on carrying that member's name and
+    // picture to the very person she closed her profile to.
+    const where = { userId: viewerId, video: { AND: [PUBLIC_VIDEO_WHERE, await blockedAuthorsWhere(viewerId)] } };
 
     const [saves, total] = await Promise.all([
       prisma.videoSave.findMany({
@@ -373,7 +398,7 @@ router.get('/bookmarked', authenticate, async (req: AuthRequest, res, next) => {
 
     const videos = await withViewerState(
       saves.map((save) => save.video),
-      req.user!.id
+      viewerId
     );
 
     res.json({
@@ -451,6 +476,16 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
     // have blocked each other is not found, the same answer as one that does
     // not exist, so the link does not confirm the block either.
     if (req.user && req.user.role !== 'ADMIN' && (await isBlockedEitherWay(req.user.id, video.authorId))) {
+      throw new ApiError(404, 'Video not found');
+    }
+
+    // The same answer for a reel whose author the viewer may not be shown: a
+    // discreet member's, for anyone who is neither her nor her verified
+    // connection, and one whose profile is private, or connections-only for a
+    // viewer who does not follow her. A link that confirmed the reel exists
+    // would confirm who made it, and the lists above already leave it out.
+    // Staff reach it through moderation.
+    if (req.user?.role !== 'ADMIN' && !(await canViewAuthor(req.user?.id, video.authorId))) {
       throw new ApiError(404, 'Video not found');
     }
 
@@ -551,9 +586,17 @@ router.post(
       if (duetOfVideoId) {
         const original = await prisma.video.findUnique({
           where: { id: duetOfVideoId },
-          select: { id: true, status: true, isHidden: true },
+          select: { id: true, authorId: true, status: true, isHidden: true },
         });
         if (!original || original.isHidden || original.status !== 'PUBLISHED') {
+          throw new ApiError(400, 'That reel cannot be duetted');
+        }
+        // A duet carries the original's picture and sound into a reel of her own,
+        // which is public. A reel she may not be shown (its author has blocked
+        // her, is in Safe Mode, or has a private or connections-only profile she
+        // is outside of) is not one she may re-publish, and the answer is the one
+        // for a reel that is not there.
+        if (!(await canViewAuthor(req.user!.id, original.authorId))) {
           throw new ApiError(400, 'That reel cannot be duetted');
         }
       }
@@ -740,9 +783,27 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res, next) => {
   }
 });
 
-// A hidden or unpublished reel is treated as absent for everyone but its
-// author, the same rule the read route applies.
-async function loadPublicVideo(id: string) {
+// A hidden or unpublished reel is treated as absent for everyone, and so is one
+// by an author the viewer may not be shown: either side of a block, a member in
+// Safe Mode she is not a verified connection of, a profile that is private or
+// connections-only to someone outside it. The read route applies the same rule
+// (GET /:id), but a like, a save, a comment or the comments list only asked
+// whether the reel existed, so a woman's reel could be commented on, and its
+// thread read, by an account she had blocked who held its id. Staff reach a reel
+// through moderation. A block or Safe Mode lookup that fails fails the request.
+// `viewer` is whoever is asking, or undefined for a signed-out visitor, who is
+// still a stranger to a private or discreet author.
+async function loadPublicVideo(id: string, viewer?: { id: string; role?: string }) {
+  const video = await loadPublishedVideo(id);
+  if (viewer?.role !== 'ADMIN' && !(await canViewAuthor(viewer?.id, video.authorId))) {
+    throw new ApiError(404, 'Video not found');
+  }
+  return video;
+}
+
+// Only that the reel exists and is published: for the one route that answers
+// nothing about the reel and is called on every watch.
+async function loadPublishedVideo(id: string) {
   const video = await prisma.video.findUnique({ where: { id } });
   if (!video || video.isHidden || video.status !== 'PUBLISHED') {
     throw new ApiError(404, 'Video not found');
@@ -756,7 +817,7 @@ async function loadPublicVideo(id: string) {
 router.post('/:id/like', authenticate, reactionLimiter, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
-    const video = await loadPublicVideo(id);
+    const video = await loadPublicVideo(id, req.user);
 
     // Idempotent: the player toggles optimistically, and a second tap or a
     // stale local state used to get a 400 that reverted a like the server
@@ -826,15 +887,28 @@ router.get('/:id/comments', optionalAuth, async (req: AuthRequest, res, next) =>
     const { id } = req.params;
     const limit = parseLimit(req.query.limit, 20, 50);
 
+    // The thread of a reel she may not open is not hers to read either: the
+    // same answer as the reel (a hidden, unpublished or closed-off reel, or one
+    // by someone across a block, is not found). This list was open to anyone who
+    // held a reel's id.
+    await loadPublicVideo(id, req.user);
+
+    // And the comments of someone she has blocked, or who has blocked her, in
+    // either store, are left out in the query, so a page is full: a woman's own
+    // thread was a place the person she blocked went on speaking to her. Staff
+    // read the whole thread, as on a post.
+    const blocked = req.user && req.user.role !== 'ADMIN' ? await blockedEitherWayIds(req.user.id) : [];
+    const notBlocked = blocked.length > 0 ? { authorId: { notIn: blocked } } : {};
+
     // A pinned comment is the creator's chosen opener, so it leads.
     const comments = await prisma.videoComment.findMany({
-      where: { videoId: id, parentId: null, isHidden: false },
+      where: { videoId: id, parentId: null, isHidden: false, ...notBlocked },
       orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }],
       take: limit,
       include: {
         ...COMMENT_AUTHOR_SELECT,
         replies: {
-          where: { isHidden: false },
+          where: { isHidden: false, ...notBlocked },
           include: COMMENT_AUTHOR_SELECT,
           orderBy: { createdAt: 'asc' },
         },
@@ -863,7 +937,14 @@ router.post(
       }
 
       const { id } = req.params;
-      const video = await loadPublicVideo(id);
+      const video = await loadPublicVideo(id, req.user);
+
+      // The per-member limit above is across everything a member does; this is
+      // across what she does to one member. Her own reel is never limited, and
+      // the count is the one comments under that member's posts share.
+      if (video.authorId !== req.user!.id && !(await withinTargetLimit('comment', req.user!.id, video.authorId))) {
+        throw new ApiError(429, 'You have commented a lot on reels by this member in the last hour. Please give the conversation a rest for a while.');
+      }
 
       const parentId = typeof req.body.parentId === 'string' && req.body.parentId.trim()
         ? req.body.parentId.trim()
@@ -946,7 +1027,7 @@ router.post(
 router.patch('/:id/comments/:commentId/pin', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { id, commentId } = req.params;
-    const video = await loadPublicVideo(id);
+    const video = await loadPublicVideo(id, req.user);
 
     if (video.authorId !== req.user!.id && req.user!.role !== 'ADMIN') {
       throw new ApiError(403, 'Only the creator can pin a comment');
@@ -1032,7 +1113,7 @@ router.delete('/:id/comments/:commentId', authenticate, async (req: AuthRequest,
 router.post('/:id/save', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
-    await loadPublicVideo(id);
+    await loadPublicVideo(id, req.user);
 
     const existing = await prisma.videoSave.findUnique({
       where: { videoId_userId: { videoId: id, userId: req.user!.id } },
@@ -1099,7 +1180,10 @@ router.post(
       }
 
       const { id } = req.params;
-      const video = await loadPublicVideo(id);
+      // Not held to the viewer's audience as the reel's other routes are: this
+      // is a ping that returns nothing of the reel, it arrives for every watch,
+      // and a watch is of a reel the player already showed her.
+      const video = await loadPublishedVideo(id);
       const viewerId = req.user?.id;
 
       // viewCount is not analytics. It is printed on the reel, it is the

@@ -75,7 +75,17 @@ export interface MemberOverrides {
   giftBalance?: number;
   stripeConnectAccountId?: string | null;
   isSuspended?: boolean;
+  /**
+   * An adult by default. Every write behind `authenticate` is refused for an
+   * account with no date of birth (account-standing.ts), so a member built
+   * without one could not do anything a test sends her to do. Pass `null` to
+   * test what a legacy account with none meets.
+   */
+  dateOfBirth?: Date | null;
 }
+
+/** Old enough, on any day the suite is run, for the minimum age (18). */
+const ADULT_DATE_OF_BIRTH = new Date('1990-01-01T00:00:00.000Z');
 
 /**
  * A member row with the columns the schema insists on and nothing else, so a
@@ -95,6 +105,7 @@ export async function createMember(overrides: MemberOverrides = {}) {
       giftBalance: overrides.giftBalance,
       stripeConnectAccountId: overrides.stripeConnectAccountId ?? undefined,
       isSuspended: overrides.isSuspended,
+      dateOfBirth: overrides.dateOfBirth === undefined ? ADULT_DATE_OF_BIRTH : overrides.dateOfBirth,
     },
   });
 }

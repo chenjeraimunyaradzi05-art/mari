@@ -165,6 +165,9 @@ enum MentorSessionStatus {
   CONFIRMED
   CANCELED
   COMPLETED
+  // The mentee says the session was not given. The money stays held (or, if it
+  // had already been taken, is not paid on) while ATHENA's team decides.
+  DISPUTED
 }
 
 enum ReferralStatus {
@@ -221,6 +224,10 @@ enum AuditAction {
   // A member's own account security, and a staff decision on a safety report.
   SIGN_IN_PROVIDER_LINKED
   SAFETY_REPORT_DECIDED
+
+  // A member locking her own account, and unlocking it from the emailed link.
+  ACCOUNT_LOCKED
+  ACCOUNT_UNLOCKED
 }
 
 enum VerificationBadgeType {
@@ -403,6 +410,13 @@ enum HousingListingStatus {
   PENDING
   LEASED
   WITHDRAWN
+}
+
+enum HousingProviderStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
 }
 
 enum HousingInquiryStatus {
@@ -631,6 +645,11 @@ model User {
   bannedAt                DateTime?
   banReason               String?
   bannedById              String?
+  // The member locking her own account because she suspects someone else has
+  // it. Not a moderation state: staff did not decide it, there is no appeal
+  // behind it, and the only way out is the link mailed to her address. While it
+  // is set every sign-in route and every live session is refused.
+  lockedAt                DateTime?
   notificationPreferences Json?
   twoFactorEnabled        Boolean   @default(false)
   twoFactorSecret         String?
@@ -699,6 +718,7 @@ model User {
   auditLogsAsTarget          AuditLog[]                          @relation("AuditLogTargetUser")
   verificationBadges         VerificationBadge[]                 @relation("VerificationApplicant")
   verificationReviews        VerificationBadge[]                 @relation("VerificationReviewer")
+  housingProviderCheck       HousingProviderVerification?
   appeals                    Appeal[]                            @relation("AppealRequester")
   appealsReviewed            Appeal[]                            @relation("AppealReviewer")
   sessions                   Session[]
@@ -951,7 +971,10 @@ model VerificationToken {
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   token     String   @unique
-  type      String // 'EMAIL_VERIFICATION' | 'PASSWORD_RESET'
+  // A free string, not an enum: 'EMAIL_VERIFICATION', 'PASSWORD_RESET', 'ACCOUNT_UNLOCK'
+  // and 'ACCOUNT_LOCK_LINK' (services/account-lock.service.ts), and the prefixed
+  // 'EMAIL_CHANGE:...' kind the data-rights rectification uses.
+  type      String
   expiresAt DateTime
   createdAt DateTime @default(now())
 
@@ -994,8 +1017,15 @@ model EscrowPayment {
   paymentIntentId       String?            @unique // Alias for lookup
   description           String?
   metadata              Json?
-  sessionType           String? // 'mentor_session' | 'course_purchase' | 'creator_content' | 'service_order'
+  sessionType           String? // 'mentor_session' | 'course_purchase' | 'creator_content' | 'service_order' | 'service_booking' | 'custom_request'
   serviceOrder          ServiceOrder?
+  serviceBooking        ServiceBooking?
+  serviceProposal       ServiceProposal?
+  // How much of this payment has been given back to the buyer, in cents, as
+  // Stripe reports it (cumulative, so it only ever grows). Status says REFUNDED
+  // only when all of it has been; a partial refund leaves the sale CAPTURED and
+  // says how much came back here.
+  refundedAmount        Int                @default(0)
   releasedAt            DateTime?
   capturedAt            DateTime?
   canceledAt            DateTime?
@@ -1217,6 +1247,12 @@ model Invoice {
   dueAt    DateTime?
   paidAt   DateTime?
 
+  // What has been credited back to the buyer against this invoice, as a refund
+  // or a lost dispute. A full credit also moves status to CANCELLED; a part
+  // credit leaves it PAID and is printed on the document as a credit line.
+  creditedAmount Decimal   @default(0) @db.Decimal(10, 2)
+  creditedAt     DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1243,12 +1279,64 @@ model Payment {
   type        String? // "subscription", "course", "service", "gift"
   referenceId String? // ID of the related entity
 
+  // How much has been refunded, in the same dollars as `amount`. Cumulative.
+  // status moves to REFUNDED only when it reaches `amount`.
+  refundedAmount Decimal @default(0) @db.Decimal(10, 2)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([userId])
   @@index([status])
   @@index([stripePaymentIntentId])
+}
+
+// A card dispute (chargeback) as Stripe reports it: one row per Stripe dispute,
+// written and moved only by the charge.dispute.* events, so a replayed or
+// reordered event lands on the same row. Until this existed a dispute was a log
+// line and one email, and nothing recorded what became of it.
+//
+// Plain ids rather than relations on purpose: this is a finance record that has
+// to outlive the member, the Payment row or the hold it is about.
+model PaymentDispute {
+  id              String    @id @default(uuid())
+  stripeDisputeId String    @unique
+  chargeId        String?
+  paymentIntentId String?
+  amount          Int // in the currency's minor units, as Stripe reports it
+  currency        String    @default("AUD")
+  reason          String?
+  // Stripe's own status: warning_needs_response, needs_response, under_review, won, lost, ...
+  status          String
+  // OPEN while it can still go either way, then WON, LOST, or CLOSED for an
+  // early-warning inquiry that never became a chargeback.
+  outcome         String    @default("OPEN")
+  evidenceDueBy   DateTime?
+  openedAt        DateTime  @default(now())
+  closedAt        DateTime?
+  // True from funds_withdrawn until funds_reinstated: the money is out of
+  // ATHENA's Stripe balance while the dispute is decided.
+  fundsWithdrawn  Boolean   @default(false)
+
+  // What the disputed charge was, as far as our own rows can say.
+  kind            String? // GIFT_BALANCE, SUBSCRIPTION, MENTOR_SESSION, FORMATION, ... or ESCROW
+  userId          String? // the member whose card it was
+  paymentId       String?
+  escrowPaymentId String?
+
+  // What was done about it. effectsAppliedAt is what makes a lost dispute
+  // apply its consequences once however many times its event is delivered.
+  effectsAppliedAt      DateTime?
+  effects               Json?
+  heldCreatorProfileIds String[]
+  holdsReleasedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([outcome, openedAt])
+  @@index([paymentIntentId])
+  @@index([userId])
 }
 
 // ===========================================
@@ -1278,6 +1366,9 @@ model Organization {
   // Verification
   isVerified  Boolean @default(false)
   safetyScore Int? // 0-100
+  // The ABN the organisation attested to when it asked to host apprentices;
+  // checksum-checked, and looked up on the ABR when a lookup is configured.
+  abn String?
 
   // Social
   followerCount Int @default(0)
@@ -1292,6 +1383,8 @@ model Organization {
   apprenticeshipsAsHost Apprenticeship[]       @relation("ApprenticeshipHost")
   providerOutcomes      ProviderOutcome[]
   members               OrganizationMember[]
+
+  hostSafetyAttestations HostEmployerSafetyAttestation[]
 
   // Finance
   accountingAccounts AccountingAccount[]
@@ -2173,14 +2266,42 @@ model LiveStream {
   startedAt       DateTime?
   endedAt         DateTime?
   replayVideoId   String?
+  // Slow mode: the fewest seconds that must pass between one viewer's chat
+  // lines. Null is off. The host's own lines are never held to it.
+  slowModeSeconds Int?
+  // Taken down by staff. A suspended stream is ENDED as well, but where ENDED
+  // alone means the host chose to stop, this means it cannot be restarted, is
+  // never listed, and is refused by the ingest key check. Only the host and
+  // staff can still open it.
+  suspendedAt     DateTime?
+  suspendedById   String?
+  suspendedReason String?
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 
   messages LiveStreamMessage[]
   gifts    GiftTransaction[]
+  mutes    LiveStreamMute[]
 
   @@index([status, startedAt])
   @@index([hostId])
+}
+
+// A viewer the host has silenced for a while. The viewer can still watch; only
+// her chat is refused, until `until`. userId and mutedById carry no foreign key
+// to User on purpose: this table is registered for erasure by key, and a mute
+// must not be what stops an account being removed.
+model LiveStreamMute {
+  id        String     @id @default(uuid())
+  streamId  String
+  stream    LiveStream @relation(fields: [streamId], references: [id], onDelete: Cascade)
+  userId    String
+  mutedById String
+  until     DateTime
+  createdAt DateTime   @default(now())
+
+  @@unique([streamId, userId])
+  @@index([until])
 }
 
 model LiveStreamMessage {
@@ -2529,6 +2650,21 @@ model CreatorProfile {
   followerCount Int @default(0)
   totalEarnings Int @default(0) // In gift points
   pendingPayout Int @default(0) // In gift points
+
+  // A freeze on withdrawals while a payment connected to what she earned is
+  // being looked at (a card dispute on the points a supporter spent on gifts).
+  // It stops requestPayout and nothing else: the balance keeps growing and is
+  // hers again the moment the hold is released.
+  payoutHold       Boolean   @default(false)
+  payoutHoldReason String?
+  payoutHeldAt     DateTime?
+
+  // The Creator Terms Addendum she accepted before she could be paid: which
+  // version, and when. Null for a creator who enabled creator mode before the
+  // addendum existed, and she is asked at her next withdrawal rather than
+  // treated as having agreed.
+  creatorTermsVersion    String?
+  creatorTermsAcceptedAt DateTime?
 
   // Creator Fund
   isEligible Boolean @default(false)
@@ -3026,6 +3162,41 @@ model Apprenticeship {
   @@index([isFeatured])
 }
 
+// What a host employer has told ATHENA about how it keeps an apprentice safe,
+// and what staff decided about it. An organisation may place apprentices
+// through ATHENA only while it is verified (Organization.isVerified) AND holds
+// an APPROVED, unexpired row here (hostMayPlaceApprentices). One row per
+// attestation, so a renewal keeps the history. These are organisation-level
+// facts only: ATHENA never collects an individual's police or background check.
+// `attestedById` and `reviewedById` have no foreign key, so erasing either
+// person's account detaches their name from the record without losing it.
+model HostEmployerSafetyAttestation {
+  id                 String             @id @default(uuid())
+  organizationId     String
+  // The wording attested to; bumped in host-safety.service when the questions change.
+  version            Int                @default(1)
+  // The yes/no items, keyed by question id.
+  answers            Json
+  safetyContactName  String
+  safetyContactEmail String?
+  safetyContactPhone String?
+  abn                String?
+  // What the ABR answered (entity name and status only), or null when no lookup is configured.
+  abnCheck           Json?
+  attestedById       String?
+  attestedAt         DateTime           @default(now())
+  status             VerificationStatus @default(PENDING)
+  reviewedById       String?
+  reviewedAt         DateTime?
+  reviewNote         String?
+  expiresAt          DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status])
+  @@index([status, attestedAt])
+}
+
 model ApprenticeshipBookmark {
   id               String   @id @default(uuid())
   apprenticeshipId String
@@ -3187,6 +3358,18 @@ model ServiceOrder {
   deliveryMessage    String?
   revisionReason     String?
   cancellationReason String?
+
+  // The buyer's dispute and what became of it. The money stays held while it is
+  // open; the provider may answer once, and ATHENA's team decides it, releasing
+  // the payment to the provider or giving it back to the buyer.
+  disputedAt          DateTime?
+  disputeReason       String?
+  disputeResponse     String?
+  disputeRespondedAt  DateTime?
+  disputeResolution   String? // RELEASED or REFUNDED
+  disputeResolvedAt   DateTime?
+  disputeResolvedById String?
+
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
@@ -3211,6 +3394,9 @@ enum ServiceOrderStatus {
   REVISION_REQUESTED
   COMPLETED
   CANCELLED
+  // The buyer says the work was not delivered as agreed. The money stays held
+  // while ATHENA's team decides.
+  DISPUTED
 }
 
 // The reverse of a SkillService listing: a buyer posts what they need and
@@ -3258,6 +3444,12 @@ model ServiceProposal {
   request  ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
   provider User           @relation("ServiceProposalsProvider", fields: [providerId], references: [id], onDelete: Cascade)
 
+  // The buyer's money, held on her card when she accepts this proposal and
+  // taken only when she releases it. Null for proposals accepted before
+  // acceptance was paid, and for every proposal that was not accepted.
+  escrowPaymentId String?        @unique
+  escrow          EscrowPayment? @relation(fields: [escrowPaymentId], references: [id])
+
   // One pitch per provider per request; revising means updating that pitch.
   @@unique([requestId, providerId])
   @@index([requestId])
@@ -3292,6 +3484,17 @@ model ServiceBooking {
 
   service SkillService @relation(fields: [serviceId], references: [id], onDelete: Cascade)
   client  User         @relation("ServiceBookingsClient", fields: [clientId], references: [id], onDelete: Cascade)
+
+  // The buyer's money: held on her card when the booking is requested and taken
+  // only when she says the time was given. Null only for bookings that predate
+  // escrow, which carry no payment and can only be cancelled.
+  escrowPaymentId String?        @unique
+  escrow          EscrowPayment? @relation(fields: [escrowPaymentId], references: [id])
+
+  // When the buyer said it was not given, and what she said. The money stays held
+  // while ATHENA's team decides; this is what they read to decide it.
+  disputedAt    DateTime?
+  disputeReason String?
 
   @@index([serviceId])
   @@index([clientId])
@@ -3378,8 +3581,28 @@ model MentorSession {
   paymentCapturedAt     DateTime?
   paymentCanceledAt     DateTime?
   paymentFailedAt       DateTime?
-  createdAt             DateTime            @default(now())
-  updatedAt             DateTime            @updatedAt
+
+  // When the mentor said the session was given, and when the mentee's card is
+  // charged for it. A session the mentor closes is not paid for at once: the
+  // mentee has until paymentReleaseAt to say it did not happen, and the expiry
+  // sweep takes the money after that unless it is disputed. A session the
+  // mentee confirms herself is paid at once and has neither set.
+  completedAt      DateTime?
+  paymentReleaseAt DateTime?
+
+  // The mentee's dispute and what became of it. The money stays held while it is
+  // open; the mentor may answer once, and ATHENA's team decides it, releasing the
+  // payment to the mentor or giving it back to the mentee.
+  disputedAt          DateTime?
+  disputeReason       String?
+  disputeResponse     String?
+  disputeRespondedAt  DateTime?
+  disputeResolution   String? // RELEASED or REFUNDED
+  disputeResolvedAt   DateTime?
+  disputeResolvedById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   mentorProfile MentorProfile @relation("MentorSessions", fields: [mentorProfileId], references: [id], onDelete: Cascade)
   mentee        User          @relation("MenteeSessions", fields: [menteeId], references: [id], onDelete: Cascade)
@@ -3389,6 +3612,7 @@ model MentorSession {
   @@index([status])
   @@index([scheduledAt])
   @@index([paymentStatus])
+  @@index([paymentReleaseAt])
 }
 
 // ===========================================
@@ -3429,6 +3653,10 @@ model GiftBalancePurchase {
   paymentIntentId String @unique
   amountCents     Int
   giftPoints      Int
+  // How many of these points have been taken back from her balance because the
+  // payment was refunded or lost to a dispute. It is what lets a refund that
+  // arrives in two parts, or twice, take each point back once.
+  reversedPoints  Int    @default(0)
 
   createdAt DateTime @default(now())
 
@@ -3436,13 +3664,51 @@ model GiftBalancePurchase {
   @@index([createdAt])
 }
 
+// One row per Stripe event, written when the event is first taken up and marked
+// done when its handler has finished. A row with no completedAt is an event that
+// was claimed and not finished: the process died between the claim and the end of
+// the handler (a deploy, an out-of-memory kill), so the work may be half done and
+// Stripe's retry must be let through to finish it, once the claim has stood long
+// enough that nobody can still be working on it. Handlers are safe to repeat.
+// `processedAt` is when the event was first seen and never moves; `claimedAt`
+// moves each time a stale claim is taken over.
+//
+// `subjectId` is the Stripe object the event is about (a subscription id for
+// subscription events) and `eventCreatedAt` when Stripe made the event, so a
+// handler can tell that a newer event for the same subject has already been
+// applied and an older one that arrived late must not overwrite it.
 model StripeWebhookEvent {
-  id          String   @id
-  type        String
-  processedAt DateTime @default(now())
+  id             String    @id
+  type           String
+  processedAt    DateTime  @default(now())
+  claimedAt      DateTime  @default(now())
+  completedAt    DateTime?
+  subjectId      String?
+  eventCreatedAt DateTime?
 
   @@index([type])
   @@index([processedAt])
+  @@index([subjectId, eventCreatedAt])
+}
+
+// An address SendGrid has told us it cannot deliver to: a hard bounce, a drop
+// for a bounced or invalid address, or a spam report. Written only by the signed
+// SendGrid Event Webhook and read before every send, so a mistyped address or a
+// closed mailbox is not mailed again and again, and a registration that nobody
+// can confirm stops looking like a delivery problem of ours. One row per
+// address, lower-case; a second event for the same address moves `updatedAt`
+// rather than adding a row, which is also what makes a replayed webhook
+// harmless. The address is the only personal data it holds and it has no foreign
+// key to User on purpose: an address that bounced usually has no account.
+model EmailSuppression {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  reason    String
+  source    String   @default("sendgrid")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([createdAt])
 }
 
 model GiftTransaction {
@@ -4678,6 +4944,37 @@ model HousingInquiry {
   @@index([status])
 }
 
+// Who ATHENA has checked as a provider of confidential housing (DV-safe,
+// emergency and transitional places). A listing is badged "Checked by ATHENA
+// staff" only while its lister holds an APPROVED, unexpired row here: the
+// badge is a promise about the person offering the place as well as the place.
+// One row per member; a renewal rewrites it. EXPIRED is written by the hourly
+// sweep when expiresAt passes, and takes the member's badged listings down with
+// it. `basis` is what staff checked, in their words, and `evidence` the checks
+// they ran as data. `reviewedById` has no foreign key on purpose, like the other
+// staff columns, so a staff account's erasure cannot cascade into this record.
+model HousingProviderVerification {
+  id           String                @id @default(uuid())
+  userId       String                @unique
+  providerName String
+  relationship String // "OWNER", "AGENT" or "SERVICE"
+  abn          String?
+  statement    String?
+  status       HousingProviderStatus @default(PENDING)
+  basis        String?
+  evidence     Json?
+  reviewedById String?
+  reviewedAt   DateTime?
+  expiresAt    DateTime?
+  submittedAt  DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, submittedAt])
+  @@index([status, expiresAt])
+}
+
 model SavingsGoal {
   id              String            @id @default(uuid())
   userId          String
@@ -5184,10 +5481,14 @@ model BridgingEnrollment {
 model SafetyPlan {
   id                String    @id @default(uuid())
   userId            String    @unique
-  emergencyContacts Json? // Encrypted
-  safeLocations     Json? // Encrypted
-  warningTriggers   Json? // Encrypted
-  exitStrategies    Json? // Encrypted
+  // Each part below is one sealed string (AES-256-GCM under DV_ENCRYPTION_KEY,
+  // 'enc:v1:' prefix) holding a JSON list of lines she wrote. A row saved before
+  // sealing may still hold a plain list; utils/safety-plan-seal.ts reads both
+  // and scripts/seal-safety-plans.ts seals what is left.
+  emergencyContacts Json? // People she would call
+  safeLocations     Json? // Places she could go
+  warningTriggers   Json? // Signs it is time to leave
+  exitStrategies    Json? // How she would leave
   importantDocs     Json? // List of important documents to secure
   financialPlan     Json? // Steps to financial independence
   legalContacts     Json? // Lawyers, police contacts
@@ -5808,20 +6109,28 @@ model UserSafetySettings {
   userId String @unique
 
   // Message controls
-  allowMessagesFrom      String  @default("connections") // all, connections, none
+  allowMessagesFrom String @default("connections") // all, connections, none
+  // RESERVED. Nothing reads this: messages are screened the same way for every
+  // recipient, whatever it says. The API stopped serving and accepting it
+  // (routes/safety.routes.ts) and the page that offered it as a switch is gone.
+  // The column stays so that no migration is needed.
   filterOffensiveContent Boolean @default(true)
   hideReadReceipts       Boolean @default(false)
 
   // Profile visibility
   profileVisibility String  @default("public") // public, connections, private
   hideOnlineStatus  Boolean @default(false)
-  hideLastSeen      Boolean @default(false)
+  // RESERVED. No last-seen time is served to anyone, so there is nothing for it
+  // to hide. Not served or accepted by the API; kept so no migration is needed.
+  hideLastSeen Boolean @default(false)
 
   // Blocking
   blockedUsers    String[]
   blockedKeywords String[]
 
-  // Safety alerts
+  // RESERVED. No alert listens to it, and the alerts that matter (a new sign-in
+  // device, a Safe Mode panic) are not something she can switch off here. Not
+  // served or accepted by the API; kept so no migration is needed.
   enableSafetyAlerts Boolean @default(true)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -5857,7 +6166,11 @@ model DvSafetyProfile {
   panicButtonEnabled Boolean @default(false)
   activityLogEnabled Boolean @default(true)
   disguisedAppIcon   Boolean @default(false)
-  notificationsSafe  Boolean @default(true)
+  // Off until she turns it on (or turns on Safe Mode, which does). This was
+  // true, and the row used to be made by a read, so every member who opened the
+  // quick exit had every notification rewritten to "New Update" without having
+  // chosen it.
+  notificationsSafe  Boolean @default(false)
 
   // [{ id, name, phone, email?, relationship, notifyOnPanic }]
   emergencyContacts Json     @default("[]")

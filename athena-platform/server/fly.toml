@@ -15,6 +15,22 @@
 #     # DATABASE_URL DIRECT_DATABASE_URL JWT_SECRET DV_ENCRYPTION_KEY REDIS_URL
 #     # PROXY_SHARED_SECRET (same value as Netlify's) API_URL (this app's public
 #     # https address) AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY S3_BUCKET
+#     # SENDGRID_API_KEY SENDGRID_FROM_EMAIL (an address on a domain authenticated
+#     # in SendGrid: nobody can verify an account without it).
+#     # Generated values, never copied from a local .env or an example file:
+#     #   fly secrets set JWT_SECRET=$(openssl rand -hex 32) \
+#     #     DV_ENCRYPTION_KEY=$(openssl rand -hex 32) PROXY_SHARED_SECRET=$(openssl rand -hex 32)
+#     # And once, before the first ban is recorded, BANNED_IDENTITY_HASH_KEY
+#     # (openssl rand -hex 32): without it the ban list is keyed from JWT_SECRET
+#     # and rotating that would unban everyone. Keep it with the DV key's backup.
+#     # The process starts without Stripe, but /health/launch-readiness answers
+#     # not_ready and the log and Sentry say so at every boot until these are set:
+#     # STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET STRIPE_CONNECT_WEBHOOK_SECRET (the
+#     # second Stripe endpoint, "Listen to events on Connected accounts": without
+#     # it a failed payout is never heard about) and the four STRIPE_PRICE_* ids.
+#     # Malware scanning: CLAMAV_HOST, the private address of a ClamAV app
+#     # (see "Malware scanning" below). Until it answers, a résumé or a document
+#     # is refused and /health/launch-readiness answers not_ready.
 #   fly deploy --ha=false
 #   fly scale count 1                      # then `fly status` must list one machine
 #
@@ -133,3 +149,24 @@ primary_region = "syd"
 # restart and therefore look like it works, which is how a deployment ends up
 # running for months with members' photographs on a single machine's disk and
 # no backup. Configure S3; the readiness check asks for it.
+
+# Malware scanning, and why this file does not run it. Every upload is looked
+# inside by ClamAV before it is kept (src/services/malware-scan.service.ts), and
+# a résumé or a document that cannot be scanned is refused. ClamAV's signature
+# database needs about 1.5 GB of memory, which this machine does not have to
+# spare, and a scanner is a program that parses hostile files, so it runs as an
+# app of its own on Fly's private network:
+#
+#   fly launch --image clamav/clamav:stable --name athena-clamav --region syd \
+#     --no-public-ips --vm-memory 2048 --internal-port 3310 --no-deploy
+#   fly deploy --app athena-clamav --ha=false
+#   fly secrets set CLAMAV_HOST=athena-clamav.internal --app athena-api
+#
+# CLAMAV_HOST is a secret here only because that is where the other settings
+# of this kind live; it is not sensitive. Nothing sets it in [env] on purpose:
+# a name in this file would look configured while no such app existed. The
+# scanner's first start downloads the signature database and takes a few
+# minutes. MALWARE_SCAN_REQUIRED is left unset, which in production means
+# "documents": résumés and documents are refused when they cannot be scanned,
+# and pictures, which are rewritten on the way in, are not. Set it to "all" or
+# "off" with `fly secrets set` to decide otherwise.

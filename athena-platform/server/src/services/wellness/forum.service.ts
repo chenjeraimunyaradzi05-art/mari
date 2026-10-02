@@ -6,6 +6,7 @@
  */
 
 import { CONTENT_WARNINGS, PRACTITIONER_KINDS } from './wellness-library';
+import { publicName } from '../../utils/member-display';
 
 export interface AuthorLike {
   id: string;
@@ -40,20 +41,30 @@ export function presentAuthor(author: AuthorLike, isAnonymous: boolean, viewerId
   if (isAnonymous) {
     return { id: null, name: isYou ? 'You, anonymously' : 'A member', avatar: null, isAnonymous: true, isYou, isModerator: false, isPractitioner: false, practitionerKind: null };
   }
-  const name = author.displayName || [author.firstName, author.lastName].filter(Boolean).join(' ') || 'A member';
+  // Her chosen public name, else her first name alone: a forum is read by strangers, and the legal surname is never shown.
+  const name = publicName(author, 'A member');
   const profile = author.practitionerProfile && author.practitionerProfile.isVerified && author.practitionerProfile.kind !== 'SERVICE' ? author.practitionerProfile : null;
   const kindLabel = profile ? PRACTITIONER_KINDS.find((k) => k.key === profile.kind)?.label ?? profile.kind : null;
   return { id: author.id, name, avatar: author.avatar ?? null, isAnonymous: false, isYou, isModerator, isPractitioner: Boolean(profile), practitionerKind: kindLabel };
 }
 
+// Conservative on purpose: every match puts the lines in front of a woman and, on a
+// shared surface, raises a safety concern a person has to read. The phrasings added
+// after the first list are ones the first list missed ("don't want to be alive", "end
+// my own life", "wish I was dead"), each narrow enough that ordinary talk ("I'm alive
+// and well", "dead tired", "not worth living in Brisbane") does not match; the tests
+// pin both sides.
 const CRISIS_PATTERNS: RegExp[] = [
-  /\b(kill(ing)?\s+myself|end\s+(it\s+all|my\s+life)|take\s+my\s+(own\s+)?life)\b/i,
+  /\b(kill(ing)?\s+myself|end(ing)?\s+(it\s+all|my\s+(own\s+)?life)|take\s+my\s+(own\s+)?life)\b/i,
   /\bsuicid(e|al)\b/i,
   /\b(want|wanted|wanting|going)\s+to\s+die\b/i,
-  /\b(don'?t|do\s+not)\s+want\s+to\s+(be\s+here|live|wake\s+up|go\s+on)\b/i,
-  /\b(self[-\s]?harm(ing)?|hurt(ing)?\s+myself|cut(ting)?\s+myself)\b/i,
+  /\b(don'?t|do\s+not|no\s+longer)\s+want\s+to\s+(be\s+here|be\s+alive|live|wake\s+up|go\s+on)\b/i,
+  /\b(self[-\s]?harm(ing)?|hurt(ing)?\s+myself|cut(ting)?\s+myself|harm(ing)?\s+myself)\b/i,
   /\b(overdos(e|ing)|no\s+reason\s+to\s+(live|go\s+on)|better\s+off\s+(dead|without\s+me))\b/i,
   /\b(can'?t|cannot)\s+(go\s+on|do\s+this\s+any\s*more)\b/i,
+  /\bwish\s+(i|that\s+i)\s+(was|were)\s+(dead|not\s+(alive|here)|never\s+born)\b/i,
+  /\b(life\s+(is\s+not|isn'?t)\s+worth\s+living|nothing\s+(left\s+)?to\s+live\s+for)\b/i,
+  /\b(think(ing)?|thoughts?)\s+(of|about)\s+(dying|ending\s+it)\b/i,
 ];
 
 export interface CrisisCheck {

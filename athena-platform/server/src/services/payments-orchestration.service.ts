@@ -10,6 +10,8 @@ import { ApiError } from '../middleware/errorHandler';
 import { getStripe, isStripeConfigured } from '../utils/stripe';
 import { getPriceIdForTier, SubscriptionTierKey } from '../config/regions';
 import { minorUnitScale } from './stripe-connect.service';
+import { assertPaymentsOpen } from './feature-flags.service';
+import { CREATOR_REVENUE_SHARE_PERCENT } from '../config/price-book';
 
 // Stripe comes from the one shared client in utils/stripe; `Stripe` is still
 // imported here for the PaymentIntent type the webhook handlers take. Whether a
@@ -37,9 +39,54 @@ export interface PaymentRequest {
   amount: number;
   currency: Currency;
   description: string;
+  /**
+   * Free-text notes only. The keys the Stripe webhook reads as the truth about
+   * what was bought (see RESERVED_METADATA_KEYS) are removed from whatever is
+   * given here, so a request assembled from a caller's input cannot name a
+   * session, a registration, an enrolment or a number of gift points. The one
+   * path that needs those keys passes them as `serverMetadata` to
+   * processPayment, which a caller's request body cannot reach.
+   */
   metadata?: Record<string, string>;
   paymentMethodId?: string;
   returnUrl?: string;
+}
+
+/**
+ * The metadata keys the webhook, the invoice pipeline and the reconciler treat
+ * as facts: who paid, what for, which of our rows it belongs to, and how much
+ * was quoted. Only server code writes them.
+ */
+const RESERVED_METADATA_KEYS = new Set([
+  'type',
+  'userId',
+  'sessionId',
+  'menteeId',
+  'mentorProfileId',
+  'registrationId',
+  'enrollmentId',
+  'cohortId',
+  'giftPoints',
+  'amountCents',
+  'currency',
+  'buyerId',
+  'sellerId',
+  'sessionType',
+  'payoutId',
+]);
+
+/** The caller's notes with every reserved key taken out, then the server's own on top. */
+function buildIntentMetadata(
+  callerMetadata: Record<string, string> | undefined,
+  serverMetadata: Record<string, string> | undefined
+): Record<string, string> {
+  const metadata: Record<string, string> = {};
+  for (const [key, value] of Object.entries(callerMetadata ?? {})) {
+    if (!RESERVED_METADATA_KEYS.has(key) && typeof value === 'string') {
+      metadata[key] = value;
+    }
+  }
+  return { ...metadata, ...(serverMetadata ?? {}) };
 }
 
 export interface PaymentResult {
@@ -251,11 +298,25 @@ export function getAvailablePaymentMethods(region: string): {
 }
 
 /**
- * Process payment with optimal provider routing
+ * Process payment with optimal provider routing.
+ *
+ * Server code only: there is no route that calls this (POST /api/payments/process
+ * was removed because it let a member choose the amount and the metadata). The
+ * facts about the sale go in `serverMetadata`, which the caller writes itself.
+ *
+ * `options.idempotencyKey` is for a caller that has a row to derive one from, so
+ * that two requests for the same sale that arrive together create one intent.
  */
 export async function processPayment(
-  request: PaymentRequest
+  request: PaymentRequest,
+  serverMetadata?: Record<string, string>,
+  options?: { idempotencyKey?: string }
 ): Promise<PaymentResult> {
+  // Outside the try below on purpose: that block turns every failure into a
+  // "failed" result, and a pause is not a failure of this payment. It reaches the
+  // caller as the 503 with its code.
+  await assertPaymentsOpen();
+
   const region = CURRENCY_REGION[request.currency] || 'AU';
   // No live provider means Stripe has no key in this environment. Stripe is
   // still the path, because its own branch is what says so — as a 503 in
@@ -275,7 +336,7 @@ export async function processPayment(
       return providerNotAvailable(provider);
     }
 
-    return await processStripePayment(request);
+    return await processStripePayment(request, serverMetadata, options);
   } catch (error: any) {
     logger.error('Payment processing failed', { error: error.message, provider });
     return {
@@ -290,7 +351,11 @@ export async function processPayment(
 /**
  * Process Stripe payment
  */
-async function processStripePayment(request: PaymentRequest): Promise<PaymentResult> {
+async function processStripePayment(
+  request: PaymentRequest,
+  serverMetadata?: Record<string, string>,
+  options?: { idempotencyKey?: string }
+): Promise<PaymentResult> {
   if (!isStripeConfigured()) {
     assertProviderConfigured('stripe');
     return {
@@ -304,16 +369,21 @@ async function processStripePayment(request: PaymentRequest): Promise<PaymentRes
   const customerId = await resolveStripeCustomerId(request.userId);
 
   // Create payment intent
-  const paymentIntent = await getStripe().paymentIntents.create({
-    amount: Math.round(request.amount * 100), // Convert to cents
+  const intentParams: Stripe.PaymentIntentCreateParams = {
+    // In the currency's own smallest unit: a hundredth for most, a whole unit for
+    // the zero-decimal ones, where `* 100` charged a hundred times the price.
+    amount: Math.round(request.amount * minorUnitScale(request.currency)),
     currency: request.currency.toLowerCase(),
     customer: customerId,
     description: request.description,
-    metadata: request.metadata || {},
+    metadata: buildIntentMetadata(request.metadata, serverMetadata),
     payment_method: request.paymentMethodId,
     confirm: !!request.paymentMethodId,
     return_url: request.returnUrl,
-  });
+  };
+  const paymentIntent = options?.idempotencyKey
+    ? await getStripe().paymentIntents.create(intentParams, { idempotencyKey: options.idempotencyKey })
+    : await getStripe().paymentIntents.create(intentParams);
 
   return {
     success: paymentIntent.status === 'succeeded',
@@ -552,17 +622,6 @@ const REGION_CURRENCY: Record<string, string> = {
   IN: 'INR',
 };
 
-// The platform's cut and the card processor's, per region. Unchanged from the
-// table these sat in; only the membership prices beside them were invented.
-const CREATOR_FEES: Record<string, { platformFee: number; paymentFee: number }> = {
-  AU: { platformFee: 0.20, paymentFee: 0.029 },
-  US: { platformFee: 0.20, paymentFee: 0.029 },
-  UK: { platformFee: 0.20, paymentFee: 0.025 },
-  SG: { platformFee: 0.25, paymentFee: 0.034 },
-  PH: { platformFee: 0.25, paymentFee: 0.034 },
-  IN: { platformFee: 0.25, paymentFee: 0.02 },
-};
-
 /**
  * Membership prices for a region, for the mobile upgrade screen.
  *
@@ -580,7 +639,7 @@ export async function getRegionalPricing(region: string): Promise<{
   currency: string;
   subscriptionTiers: Record<string, number>;
   prices: SubscriptionPlanPrice[];
-  creatorFees: { platformFee: number; paymentFee: number };
+  creatorSharePercent: Record<string, number>;
 }> {
   const regionCode = REGION_CURRENCY[region] ? region : 'AU';
   const prices = await getSubscriptionPlanPrices(REGION_CURRENCY[regionCode]);
@@ -607,7 +666,11 @@ export async function getRegionalPricing(region: string): Promise<{
     currency,
     subscriptionTiers,
     prices,
-    creatorFees: CREATOR_FEES[regionCode],
+    // What a creator keeps of a gift, by tier, from the price book. This used to
+    // be a per-region table of platform and card fees (20 to 25 per cent) that
+    // nothing charged: gifts are split by tier, in Australian dollars, whatever
+    // the region.
+    creatorSharePercent: { ...CREATOR_REVENUE_SHARE_PERCENT },
   };
 }
 
@@ -632,6 +695,9 @@ export type AcceleratorPaymentOutcome =
   | { status: 'confirmed'; enrollmentId: string }
   | { status: 'already_processed'; enrollmentId: string }
   | { status: 'amount_mismatch'; enrollmentId: string }
+  // The intent is not the one this enrolment started, or was made for somebody
+  // else. Nothing is applied.
+  | { status: 'intent_mismatch'; enrollmentId: string }
   | { status: 'unknown_enrollment'; enrollmentId: string | null };
 
 /**
@@ -677,21 +743,52 @@ export async function createAcceleratorEnrollmentPayment(params: {
     return { free: true, amountCents: 0, currency: 'AUD', status: 'completed' };
   }
 
-  const result = await processPayment({
-    userId: params.userId,
-    amount: amountCents / 100,
-    currency: 'AUD',
-    description: `Accelerator cohort: ${params.cohortName}`,
-    metadata: {
+  // One live intent per enrolment. Every press of "pay" used to start another
+  // intent and overwrite the stored id, so a place could have two payable
+  // intents at once and only the newest was the one the webhook would accept.
+  // The earlier one is cancelled first, and a payment already going through
+  // stops the new one instead.
+  const current = await prisma.acceleratorEnrollment.findUnique({
+    where: { id: params.enrollmentId },
+    select: { paymentId: true },
+  });
+  if ((await cancelUnpaidAcceleratorIntent(current?.paymentId ?? null)) === 'in_flight') {
+    return {
+      free: false,
+      amountCents,
+      currency: 'AUD',
+      status: 'pending',
+      error: 'A payment for this place is already going through. Please give it a few minutes to be confirmed.',
+    };
+  }
+
+  const result = await processPayment(
+    {
+      userId: params.userId,
+      amount: amountCents / 100,
+      currency: 'AUD',
+      description: `Accelerator cohort: ${params.cohortName}`,
+    },
+    {
       type: ACCELERATOR_PAYMENT_TYPE,
       enrollmentId: params.enrollmentId,
       cohortId: params.cohortId,
       userId: params.userId,
-      // Stripe signs this back to us on the webhook, so it is the price the
-      // applicant actually agreed to even if the cohort is repriced later.
+      // The price the applicant actually agreed to, even if the cohort is
+      // repriced later. It is only believed on an intent that the enrolment
+      // itself recorded as its own (see confirmAcceleratorEnrollmentPayment).
       amountCents: String(amountCents),
     },
-  });
+    {
+      // Two presses of "pay" that arrive together both read the same earlier
+      // intent and get the same key, so Stripe hands the second the intent the
+      // first made. The earlier intent is in the key so that once it has been
+      // cancelled, the next press makes a new one instead of being handed the
+      // cancelled one back for the next day; the price is in it so that a
+      // cohort repriced in between is a new request, not a mismatched one.
+      idempotencyKey: `accelerator-pay-${params.enrollmentId}-${amountCents}-${current?.paymentId ?? 'first'}`,
+    }
+  );
 
   if (!result.transactionId) {
     return {
@@ -706,6 +803,18 @@ export async function createAcceleratorEnrollmentPayment(params: {
   await prisma.acceleratorEnrollment.update({
     where: { id: params.enrollmentId },
     data: { paymentId: result.transactionId },
+  });
+
+  // Cancelling the earlier intent above makes Stripe send payment_intent.canceled
+  // for it, and that can reach the webhook before the line above has written the
+  // new id. The webhook then sees the earlier intent as the one the place is
+  // waiting on and marks the place FAILED, so she would be told to try again
+  // while paying the new one. Now that the new intent is the live one, a failure
+  // recorded for the one it replaced is put back. Only this intent's own FAILED
+  // is touched: a settled place is never moved.
+  await prisma.acceleratorEnrollment.updateMany({
+    where: { id: params.enrollmentId, paymentId: result.transactionId, paymentStatus: 'FAILED' },
+    data: { paymentStatus: 'PENDING' },
   });
 
   return {
@@ -752,6 +861,27 @@ export async function confirmAcceleratorEnrollmentPayment(
 
   if (enrollment.paymentStatus === 'PAID') {
     return { status: 'already_processed', enrollmentId };
+  }
+
+  // The intent has to be the one this enrolment itself started. Its id is
+  // written by createAcceleratorEnrollmentPayment, on the server, before the
+  // client secret is handed out, so no payment can be confirmed before it is
+  // recorded here and nobody else can write it. Without this the webhook
+  // believed whatever the intent's metadata said about the enrolment, the price
+  // and the payer, and a payment of one dollar that named an expensive place
+  // marked it paid. `userId` is checked as well, because the Payment row and the
+  // invoice are written against the member the metadata names.
+  const metadataUserId = typeof metadata.userId === 'string' ? metadata.userId : null;
+  if (
+    enrollment.paymentId !== paymentIntent.id ||
+    (metadataUserId !== null && metadataUserId !== enrollment.userId)
+  ) {
+    logger.error('Accelerator payment intent is not the one this enrolment started', {
+      enrollmentId,
+      paymentIntentId: paymentIntent.id,
+      recordedPaymentId: enrollment.paymentId,
+    });
+    return { status: 'intent_mismatch', enrollmentId };
   }
 
   const quoted = Number(metadata.amountCents);
@@ -806,6 +936,11 @@ export async function recordAcceleratorPaymentFailure(
 
   // Never move a settled enrollment backwards on a late failure event.
   if (!enrollment || enrollment.paymentStatus !== 'PENDING') return;
+
+  // Only the intent the enrolment is waiting on can fail it. An earlier intent
+  // that was cancelled when she started again must not overwrite the id of the
+  // live one and mark her place failed.
+  if (enrollment.paymentId !== paymentIntent.id) return;
 
   await prisma.acceleratorEnrollment.update({
     where: { id: enrollmentId },

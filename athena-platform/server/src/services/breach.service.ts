@@ -24,7 +24,9 @@
 
 import { BreachSeverity, BreachStatus, DataCategory, Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
+import { ApiError } from '../middleware/errorHandler';
 import { sendEmail } from './email.service';
+import { sendNotification as sendInAppNotification } from './socket.service';
 
 /** Which regime a breach is handled under. A breach can touch more than one. */
 export type BreachJurisdiction = 'AU' | 'UK' | 'EU';
@@ -147,10 +149,245 @@ const paragraphs = (value: string): string =>
  * being told their data was exposed; the link they are given to find out more
  * has to work. CLIENT_URL is the web app, and it is what every other member
  * email on this server already uses.
+ *
+ * The path was /help/security, which the web app has never had a page at, so
+ * the link still led nowhere. The security settings are where she can change
+ * her password and sign other devices out, which is what the notice asks of
+ * her; signed out, she is sent to sign in and brought back.
  */
 function securitySupportUrl(): string {
   const base = (process.env.CLIENT_URL || 'http://localhost:3000').trim().replace(/\/$/, '');
-  return `${base}/help/security`;
+  return `${base}/dashboard/settings/security`;
+}
+
+// ===========================================
+// Telling the people affected, safely
+// ===========================================
+
+/**
+ * What a breach notice does for members whose safety depends on it not being
+ * seen. All of it is off by default: the default for these members is the app
+ * only, no email.
+ */
+export interface SafetyNoticeOptions {
+  /** Email these members as well as telling them in the app. Needs counselConsulted and neutralSubject. */
+  emailSafetyMembers?: boolean;
+  /** Privacy counsel has approved the wording and sending email to members who use Safe Mode. */
+  counselConsulted?: boolean;
+  /** The subject counsel approved for that email. It must not say what the notice is about. */
+  neutralSubject?: string;
+  /** What these members read, when it should differ from the general notice. Used for the app notice and any email. */
+  safetyNotificationContent?: string;
+}
+
+export interface NoticeAudienceCounts {
+  requested: number;
+  /** The ids that matched an account. */
+  found: number;
+  /** Members who will be told in the app and not emailed. */
+  safetyMembers: number;
+  /** Members who will be emailed. */
+  ordinaryMembers: number;
+}
+
+export interface NoticeOutcome {
+  requested: number;
+  found: number;
+  /** Emails that were accepted for delivery. */
+  emailed: number;
+  /** Members told in the app. */
+  inApp: number;
+  safetyMembers: number;
+  /** Safety-group members who were told in the app and not emailed. */
+  safetyMembersInAppOnly: number;
+  /** What the breach record now says: EMAIL, IN_APP or EMAIL+IN_APP. */
+  method: 'EMAIL' | 'IN_APP' | 'EMAIL+IN_APP' | null;
+  /** Members no notice reached, by id, so the send can be repeated for them alone. */
+  failedUserIds: string[];
+}
+
+const NOTICE_BATCH_SIZE = 100;
+const NEUTRAL_NOTICE_TITLE = 'Account security update';
+
+/**
+ * What counts as a safety report. A member who has made one has told us about
+ * someone who may be a danger to her, which is what makes an email that names
+ * a breach worth holding back. Anonymous reports have no reporter to find.
+ *
+ * The reasons are the ones content-report.service accepts that are about a
+ * person or a harm rather than about spam, fraud or misinformation, in both
+ * vocabularies it lists (the public form says hate_speech, the in-app dialog
+ * says hate and violence). The two doors also spell them differently: the in-app
+ * route (POST /api/safety/reports) stores them in lower case and the public form
+ * (POST /api/compliance/reports) in upper case, and a text column matches case
+ * for case. Matching only the upper-case spelling missed every member who
+ * reported from inside the app, which is the member most likely to be emailed.
+ */
+const SAFETY_REPORT_REASONS = [
+  'harassment',
+  'hate_speech',
+  'hate',
+  'harmful',
+  'self_harm',
+  'illegal',
+  'violence',
+  'sexual',
+  'impersonation',
+  'unsafe',
+  'csam',
+  'terrorism',
+  // The two a woman is most likely to be filing about herself or about someone
+  // she is afraid of: an intimate image shared without her consent, and a
+  // threat to hurt someone. She has told us about a person who may be a danger
+  // to her, which is what this list is for, and she is the member least able to
+  // have an email about her data land in an inbox he can read.
+  'intimate_image',
+  'threat',
+].flatMap((reason) => [reason, reason.toUpperCase()]);
+
+/**
+ * Whether a DV page row shows that she has set anything protective up. A field
+ * the query did not return reads as "not set": only a switch that is plainly on
+ * (or a messages switch plainly off) counts.
+ */
+function usesDvProtections(
+  profile:
+    | {
+        isSafeMode?: boolean | null;
+        notificationsSafe?: boolean | null;
+        hideFromSearch?: boolean | null;
+        allowMessages?: boolean | null;
+        safeExitEnabled?: boolean | null;
+        panicButtonEnabled?: boolean | null;
+        blockedUserIds?: string[] | null;
+        emergencyContacts?: unknown;
+      }
+    | null
+    | undefined
+): boolean {
+  if (!profile) return false;
+  return Boolean(
+    profile.isSafeMode ||
+      profile.notificationsSafe ||
+      profile.hideFromSearch ||
+      profile.allowMessages === false ||
+      profile.safeExitEnabled ||
+      profile.panicButtonEnabled ||
+      (Array.isArray(profile.blockedUserIds) && profile.blockedUserIds.length > 0) ||
+      (Array.isArray(profile.emergencyContacts) && profile.emergencyContacts.length > 0)
+  );
+}
+
+/** Wording that would tell a reader why the member is being contacted. */
+const REVEALING_WORDING = /\b(domestic|violence|abus\w*|safe\s*mode|safety\s+(report|plan)|panic|refuge|stalk\w*|coercive)\b/i;
+
+/**
+ * Who is who, from one look at the database. A member is in the safety group
+ * when she is in Safe Mode (from the Safety Centre or the DV page), has asked
+ * for private notifications, has set up any of the DV page's protections (a
+ * closed inbox, hidden from search, the quick exit or the safety alert, a block
+ * she made there, an emergency contact), or has filed a safety report.
+ *
+ * The DV page's own row used to be enough on its own, because its private
+ * notifications column defaulted to on. It now defaults to off, so that a row
+ * made by simply opening a page no longer silences every notification on the
+ * platform; a woman who has deliberately set the page up, without turning on
+ * either of those two switches, is therefore recognised by what she set.
+ *
+ * If this throws, nothing has been sent and the caller must not send: with no
+ * answer to "who is safe to email", the only safe answer is none of them.
+ */
+async function resolveNoticeAudience(userIds: string[]): Promise<{
+  members: Array<{ id: string; email: string; firstName: string }>;
+  safetyMemberIds: Set<string>;
+}> {
+  const [users, reporters, incidentReporters] = await Promise.all([
+    prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        dvSafetyProfile: {
+          select: {
+            isSafeMode: true,
+            notificationsSafe: true,
+            // What the DV page holds beyond those two switches.
+            hideFromSearch: true,
+            allowMessages: true,
+            safeExitEnabled: true,
+            panicButtonEnabled: true,
+            blockedUserIds: true,
+            emergencyContacts: true,
+          },
+        },
+        // The Safety Centre's own Safe Mode switch, which is not on the DV profile at all.
+        profile: { select: { isSafeMode: true } },
+      },
+    }),
+    prisma.contentReport.findMany({
+      where: { reporterId: { in: userIds }, reason: { in: SAFETY_REPORT_REASONS } },
+      select: { reporterId: true },
+      distinct: ['reporterId'],
+    }),
+    // The incident a signed-in report also records against the member it is
+    // about (safety-score.service handleUserReport) carries the reporter and is
+    // typed REPORT. USER_REPORT is the anonymous kind, which has no reporter.
+    prisma.safetyIncident.findMany({
+      where: { reporterId: { in: userIds }, type: 'REPORT', reason: { in: SAFETY_REPORT_REASONS } },
+      select: { reporterId: true },
+      distinct: ['reporterId'],
+    }),
+  ]);
+
+  const safetyMemberIds = new Set<string>();
+  for (const user of users) {
+    if (usesDvProtections(user.dvSafetyProfile) || user.profile?.isSafeMode) safetyMemberIds.add(user.id);
+  }
+  for (const row of reporters) safetyMemberIds.add(row.reporterId);
+  for (const row of incidentReporters) if (row.reporterId) safetyMemberIds.add(row.reporterId);
+
+  return {
+    members: users.map(({ id, email, firstName }) => ({ id, email, firstName })),
+    safetyMemberIds,
+  };
+}
+
+/**
+ * The rule that keeps an email from reaching a member who may share an inbox:
+ * it needs counsel's sign-off, said out loud, and a subject that gives nothing
+ * away. Refused here, in the service, so no caller can skip it.
+ */
+function assertSafetyEmailAllowed(options: SafetyNoticeOptions): void {
+  if (!options.emailSafetyMembers) return;
+
+  if (options.counselConsulted !== true) {
+    throw new ApiError(
+      400,
+      'Members who use Safe Mode or have filed a safety report are told in the app, not by email, because an email can be read by the person they are protecting themselves from. Emailing them needs privacy counsel to have approved the wording and the send first: confirm counselConsulted.'
+    );
+  }
+
+  const subject = options.neutralSubject?.trim();
+  if (!subject) {
+    throw new ApiError(400, 'Give the neutral subject counsel approved for the email to these members, for example "Account security update".');
+  }
+  if (subject.length > 120) {
+    throw new ApiError(400, 'The subject for these members must be 120 characters or fewer.');
+  }
+  if (REVEALING_WORDING.test(subject) || /breach|exposed|leak|hack/i.test(subject)) {
+    throw new ApiError(
+      400,
+      'The subject of an email to these members must not say what it is about: anyone who can see their inbox can read it. Use a neutral subject such as "Account security update".'
+    );
+  }
+}
+
+function noticeMethod(emailed: boolean, inApp: boolean): NoticeOutcome['method'] {
+  if (emailed && inApp) return 'EMAIL+IN_APP';
+  if (emailed) return 'EMAIL';
+  if (inApp) return 'IN_APP';
+  return null;
 }
 
 export class BreachNotificationService {
@@ -465,13 +702,13 @@ export class BreachNotificationService {
         html: `
           <h1>Data Breach Alert</h1>
           <p><strong>Breach ID:</strong> ${breach.id}</p>
-          <p><strong>Title:</strong> ${breach.title}</p>
+          <p><strong>Title:</strong> ${escapeHtml(String(breach.title))}</p>
           <p><strong>Severity:</strong> ${breach.severity}</p>
           <p><strong>Detected At:</strong> ${breach.detectedAt.toISOString()}</p>
           <p><strong>Regimes:</strong> ${jurisdictionsOf(breach).join(', ') || 'not recorded'}</p>
           <p><strong>Applicable clock:</strong></p>
           <ul>${clockList}</ul>
-          <p><strong>Description:</strong> ${breach.description}</p>
+          <p><strong>Description:</strong> ${escapeHtml(String(breach.description ?? '')).replace(/\n/g, '<br>')}</p>
           <p>Please take immediate action.</p>
         `,
       });
@@ -602,12 +839,12 @@ export class BreachNotificationService {
       html: `
         <h1>Data Breach Notification</h1>
         <p><strong>Organization:</strong> ATHENA Platform</p>
-        <p><strong>Breach Title:</strong> ${breach.title}</p>
+        <p><strong>Breach Title:</strong> ${escapeHtml(breach.title)}</p>
         <p><strong>Detected At:</strong> ${breach.detectedAt.toISOString()}</p>
         <p><strong>Hours Since Detection:</strong> ${hoursSinceDetection.toFixed(1)}</p>
         <p><strong>Submitted Within 72 Hours:</strong> ${hoursSinceDetection <= 72 ? 'Yes' : 'No'}</p>
         <h2>Notification Content</h2>
-        <p>${notificationContent}</p>
+        ${paragraphs(notificationContent)}
       `,
     });
 
@@ -721,19 +958,50 @@ export class BreachNotificationService {
   }
 
   /**
+   * Which of these members must not be told by email, and how many there are.
+   *
+   * Used by the admin page before anything is sent, so the person about to
+   * press the button sees how many members will be told in the app only. It
+   * reads, and sends nothing.
+   */
+  async previewNoticeAudience(userIds: string[]): Promise<NoticeAudienceCounts> {
+    const audience = await resolveNoticeAudience(userIds);
+    return {
+      requested: userIds.length,
+      found: audience.members.length,
+      safetyMembers: audience.members.filter((member) => audience.safetyMemberIds.has(member.id)).length,
+      ordinaryMembers: audience.members.filter((member) => !audience.safetyMemberIds.has(member.id)).length,
+    };
+  }
+
+  /**
    * Notify affected users.
    *
    * Under s 26WL the people affected are told the same things the Commissioner
    * was, including what they can do about it, so an Australian breach needs a
    * "What you can do" section: the statement's recommended steps, or steps
    * supplied here. For other breaches the section is included when supplied.
+   *
+   * A member who uses Safe Mode or has filed a safety report may share a device
+   * or an inbox with the person she is protecting herself from, so an email
+   * saying "your data was exposed" can do the harm the breach is being reported
+   * to prevent. Those members are told in the app, under a neutral title, and
+   * are not emailed. They are emailed only when the operator says privacy
+   * counsel has approved the wording and the send (counselConsulted) and gives
+   * the neutral subject counsel approved; see docs/security/incident-response.md.
+   * Everyone else is emailed as before.
+   *
+   * The people who cannot be reached are returned, by id, rather than thrown:
+   * a failure halfway through a list of thousands must not hide who has been
+   * told and who has not.
    */
   async notifyAffectedUsers(
     breachId: string,
     userIds: string[],
     notificationContent: string,
-    recommendedSteps?: string
-  ): Promise<void> {
+    recommendedSteps?: string,
+    options: SafetyNoticeOptions = {}
+  ): Promise<NoticeOutcome> {
     const breach = await prisma.dataBreach.findUnique({
       where: { id: breachId },
     });
@@ -749,58 +1017,170 @@ export class BreachNotificationService {
       );
     }
 
-    // Get affected users' emails
-    const users = await prisma.user.findMany({
-      where: { id: { in: userIds } },
-      select: { id: true, email: true, firstName: true },
-    });
+    assertSafetyEmailAllowed(options);
+
+    // One look at who is who, before a single notice goes out. If it fails
+    // nothing is sent: guessing who is safe to email is the failure to avoid.
+    const { members, safetyMemberIds } = await resolveNoticeAudience(userIds);
+    const safetyMembers = members.filter((member) => safetyMemberIds.has(member.id));
+    const ordinaryMembers = members.filter((member) => !safetyMemberIds.has(member.id));
+
+    if (userIds.length > 0 && members.length === 0) {
+      throw new ApiError(400, 'None of those member ids matches an account, so nobody was notified and nothing has been recorded.');
+    }
+
+    const safetyContent = (options.safetyNotificationContent?.trim() || notificationContent).trim();
+    if (safetyMembers.length > 0 && REVEALING_WORDING.test(`${safetyContent}\n${steps ?? ''}`)) {
+      throw new ApiError(
+        400,
+        'The wording these members will read mentions Safe Mode, safety reports or violence, and anyone who can see their phone or inbox could read it. Write neutral wording for them in safetyNotificationContent (see docs/security/templates/safety-breach-notice.md).'
+      );
+    }
 
     const stepsSection = steps ? `<h2>What you can do</h2>${paragraphs(steps)}` : '';
+    const failedUserIds: string[] = [];
+    let emailed = 0;
+    let inApp = 0;
+    let safetyEmailed = 0;
+    let safetyInAppOnly = 0;
 
-    // Send notifications in batches
-    const batchSize = 100;
-    for (let i = 0; i < users.length; i += batchSize) {
-      const batch = users.slice(i, i + batchSize);
-      await Promise.all(
-        batch.map(user =>
+    // The general notice, by email, in batches. Unchanged for members who are
+    // not in the safety group.
+    for (let i = 0; i < ordinaryMembers.length; i += NOTICE_BATCH_SIZE) {
+      const batch = ordinaryMembers.slice(i, i + NOTICE_BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map((user) =>
           sendEmail({
             to: user.email,
             subject: 'Important Security Notice from ATHENA',
             html: `
               <h1>Important Security Notice</h1>
-              <p>Dear ${user.firstName},</p>
-              <p>${notificationContent}</p>
+              <p>Dear ${escapeHtml(user.firstName ?? '')},</p>
+              ${paragraphs(notificationContent)}
               ${stepsSection}
-              <p>For more information, please visit our <a href="${securitySupportUrl()}">security support page</a>.</p>
+              <p>For more information, please visit your <a href="${securitySupportUrl()}">security settings</a>.</p>
               <p>Best regards,<br>The ATHENA Security Team</p>
             `,
           })
         )
       );
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled' && result.value) emailed += 1;
+        else failedUserIds.push(batch[index].id);
+      });
+    }
+
+    // The safety group, in the app. Written straight to the member's
+    // notifications rather than through the preference-aware dispatcher: a
+    // legally required notice is not something a muted category may swallow.
+    const inAppMessage = steps ? `${safetyContent}\n\nWhat you can do: ${steps}` : safetyContent;
+    for (let i = 0; i < safetyMembers.length; i += NOTICE_BATCH_SIZE) {
+      const batch = safetyMembers.slice(i, i + NOTICE_BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map((user) =>
+          sendInAppNotification({
+            userId: user.id,
+            type: 'SYSTEM',
+            title: NEUTRAL_NOTICE_TITLE,
+            message: inAppMessage,
+            link: '/dashboard/settings/security',
+            data: { kind: 'account-security-notice' },
+          })
+        )
+      );
+
+      const told: typeof batch = [];
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          inApp += 1;
+          told.push(batch[index]);
+        } else {
+          failedUserIds.push(batch[index].id);
+        }
+      });
+
+      if (!options.emailSafetyMembers || told.length === 0) {
+        safetyInAppOnly += told.length;
+        continue;
+      }
+
+      // Counsel has approved an email too: neutral subject, neutral body, no
+      // mention of why this member is getting it in the app as well. She has
+      // been told in the app either way, so an email that does not go is not a
+      // failure to notify her.
+      const subject = options.neutralSubject!.trim();
+      const emailResults = await Promise.allSettled(
+        told.map((user) =>
+          sendEmail({
+            to: user.email,
+            subject,
+            html: `
+              <h1>${escapeHtml(subject)}</h1>
+              ${paragraphs(safetyContent)}
+              ${stepsSection}
+              <p>The ATHENA team</p>
+            `,
+          })
+        )
+      );
+      const sent = emailResults.filter((result) => result.status === 'fulfilled' && result.value).length;
+      safetyEmailed += sent;
+      safetyInAppOnly += told.length - sent;
+    }
+
+    const method = noticeMethod(emailed + safetyEmailed > 0, inApp > 0);
+    const reached = emailed + inApp;
+
+    if (members.length > 0 && reached === 0) {
+      // Nothing went, so nothing is stamped: the breach must not read as "people
+      // notified" on the strength of a send that reached nobody.
+      throw new ApiError(502, 'No notice could be delivered, so nothing has been recorded as sent. Check the email and notification services and try again.');
     }
 
     // Update breach record
-    await prisma.dataBreach.update({
-      where: { id: breachId },
-      data: {
-        usersNotifiedAt: new Date(),
-        notificationMethod: 'EMAIL',
-        ...(steps && !breach.statementRecommendedSteps ? { statementRecommendedSteps: steps } : {}),
-      },
-    });
+    if (reached > 0) {
+      await prisma.dataBreach.update({
+        where: { id: breachId },
+        data: {
+          usersNotifiedAt: new Date(),
+          notificationMethod: method,
+          ...(steps && !breach.statementRecommendedSteps ? { statementRecommendedSteps: steps } : {}),
+        },
+      });
+    }
 
+    // Counts only, never ids: this row is read by people who must not be able to
+    // tell from it who among the members is in the safety group.
     await prisma.privacyAuditLog.create({
       data: {
         action: 'USERS_NOTIFIED_OF_BREACH',
         resourceType: 'DataBreach',
         resourceId: breachId,
         details: {
-          usersNotified: users.length,
-          method: 'EMAIL',
+          usersNotified: reached,
+          method,
+          channels: { email: emailed + safetyEmailed, inApp },
+          safetyMembers: safetyMembers.length,
+          safetyMembersInAppOnly: safetyInAppOnly,
+          safetyMembersEmailed: safetyEmailed,
+          counselConsulted: options.counselConsulted === true,
+          ...(options.emailSafetyMembers ? { neutralSubject: options.neutralSubject!.trim() } : {}),
+          notNotified: failedUserIds.length,
           recommendedStepsIncluded: Boolean(steps),
         },
       },
     });
+
+    return {
+      requested: userIds.length,
+      found: members.length,
+      emailed: emailed + safetyEmailed,
+      inApp,
+      safetyMembers: safetyMembers.length,
+      safetyMembersInAppOnly: safetyInAppOnly,
+      method,
+      failedUserIds,
+    };
   }
 
   /**

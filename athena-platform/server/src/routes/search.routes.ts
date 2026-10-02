@@ -5,23 +5,26 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { optionalAuth, AuthRequest } from '../middleware/auth';
-import { searchLimiter } from '../middleware/rateLimiter';
+import { memberSearchLimiter, searchLimiter } from '../middleware/rateLimiter';
 import * as searchService from '../services/search.service';
 import { logger } from '../utils/logger';
+import { clampLimit, clampPage } from '../utils/pagination';
 
 const router = Router();
 
 // A search a second per address is plenty for a person typing and a wall
 // for a scraper walking the directory. Keyed by address: the routes below
 // resolve the member themselves, and doing it here too would look the
-// session up twice per search.
+// session up twice per search. The member's own budget (memberSearchLimiter)
+// sits on the two routes that find members, after the session is known, so a
+// script that signs in once and rotates addresses does not get a new one.
 router.use(searchLimiter);
 
 /**
  * GET /api/search
  * Unified search across all content types
  */
-router.get('/', optionalAuth, async (req: Request, res: Response, next: NextFunction) => {
+router.get('/', optionalAuth, memberSearchLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const {
       q,
@@ -58,8 +61,10 @@ router.get('/', optionalAuth, async (req: Request, res: Response, next: NextFunc
       query: q,
       type: type as any,
       sort: sort as any,
-      page: Math.max(1, parseInt(page as string)),
-      limit: Math.min(50, Math.max(1, parseInt(limit as string))),
+      // `parseInt` of text that is not a number is NaN, and Math.min/max pass NaN
+      // through, so the old bound here held only for numbers.
+      page: clampPage(page),
+      limit: clampLimit(limit, 20, 50),
       // Who is asking decides what comes back: members who asked to be hidden,
       // posts their author kept to herself and either side of a block are all
       // filtered in the query, so the id has to travel with the search.
@@ -131,7 +136,7 @@ router.get('/trending', async (req: Request, res: Response, next: NextFunction) 
  * GET /api/search/users
  * Search users only
  */
-router.get('/users', optionalAuth, async (req: Request, res: Response, next: NextFunction) => {
+router.get('/users', optionalAuth, memberSearchLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { q, page = '1', limit = '20', role, verified } = req.query;
 
@@ -142,8 +147,8 @@ router.get('/users', optionalAuth, async (req: Request, res: Response, next: Nex
     const results = await searchService.search({
       query: q,
       type: 'users',
-      page: parseInt(page as string),
-      limit: parseInt(limit as string),
+      page: clampPage(page),
+      limit: clampLimit(limit, 20, 50),
       viewerId: (req as AuthRequest).user?.id,
       persona: (req as AuthRequest).user?.persona,
       filters: {
@@ -173,8 +178,8 @@ router.get('/posts', optionalAuth, async (req: Request, res: Response, next: Nex
     const results = await searchService.search({
       query: q,
       type: 'posts',
-      page: parseInt(page as string),
-      limit: parseInt(limit as string),
+      page: clampPage(page),
+      limit: clampLimit(limit, 20, 50),
       viewerId: (req as AuthRequest).user?.id,
       filters: {
         ...(postType && { postType: postType as any }),
@@ -212,8 +217,8 @@ router.get('/jobs', optionalAuth, async (req: Request, res: Response, next: Next
     const results = await searchService.search({
       query: q,
       type: 'jobs',
-      page: parseInt(page as string),
-      limit: parseInt(limit as string),
+      page: clampPage(page),
+      limit: clampLimit(limit, 20, 50),
       viewerId: (req as AuthRequest).user?.id,
       persona: (req as AuthRequest).user?.persona,
       filters: {
@@ -246,8 +251,8 @@ router.get('/courses', optionalAuth, async (req: Request, res: Response, next: N
     const results = await searchService.search({
       query: q,
       type: 'courses',
-      page: parseInt(page as string),
-      limit: parseInt(limit as string),
+      page: clampPage(page),
+      limit: clampLimit(limit, 20, 50),
       viewerId: (req as AuthRequest).user?.id,
       filters: {
         ...(level && { level: level as string }),
@@ -276,8 +281,8 @@ router.get('/videos', optionalAuth, async (req: Request, res: Response, next: Ne
     const results = await searchService.search({
       query: q,
       type: 'videos',
-      page: parseInt(page as string),
-      limit: parseInt(limit as string),
+      page: clampPage(page),
+      limit: clampLimit(limit, 20, 50),
       viewerId: (req as AuthRequest).user?.id,
     });
 
@@ -302,8 +307,8 @@ router.get('/mentors', optionalAuth, async (req: Request, res: Response, next: N
     const results = await searchService.search({
       query: q,
       type: 'mentors',
-      page: parseInt(page as string),
-      limit: parseInt(limit as string),
+      page: clampPage(page),
+      limit: clampLimit(limit, 20, 50),
       viewerId: (req as AuthRequest).user?.id,
       persona: (req as AuthRequest).user?.persona,
     });

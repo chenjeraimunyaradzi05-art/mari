@@ -280,8 +280,10 @@ function collectCallsIn(src, record) {
   {
 
     // 1. The axios helper: `api.get('/posts/feed')`, path relative to /api.
+    //    `uploadClient` is the same helper pointed straight at the API for
+    //    uploads (lib/api.ts), so its calls are part of the contract too.
     for (const m of src.matchAll(
-      /\bapi\s*\.\s*(get|post|put|patch|delete)\s*(?:<[^>]*>)?\s*\(\s*([`'"])([^`'"]*)\2/g
+      /\b(?:api|uploadClient)\s*\.\s*(get|post|put|patch|delete)\s*(?:<[^>]*>)?\s*\(\s*([`'"])([^`'"]*)\2/g
     )) {
       const raw = m[3];
       if (!raw.startsWith('/')) continue; // absolute URLs are not our contract

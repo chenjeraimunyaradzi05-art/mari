@@ -11,6 +11,7 @@
 import Stripe from 'stripe';
 import { ApiError } from '../middleware/errorHandler';
 import { logger } from './logger';
+import { stripeModeOf } from './stripe-mode';
 
 export const STRIPE_API_VERSION = '2023-10-16' as const;
 
@@ -39,6 +40,9 @@ export function getStripe(): Stripe {
   clientKey = key;
   if (key) {
     client = new Stripe(key, { apiVersion: STRIPE_API_VERSION });
+    // Said once per key, so the log says which kind of money this process moves.
+    // GET /health/launch-readiness reports the same thing from the same prefix.
+    logger.info(`Stripe client ready in ${stripeModeOf(key)} mode`);
     return client;
   }
   if (process.env.NODE_ENV === 'production') {

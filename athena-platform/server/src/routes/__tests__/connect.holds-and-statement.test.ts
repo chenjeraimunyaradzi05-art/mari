@@ -315,6 +315,52 @@ describe('The earnings statement', () => {
     expect(res.text).toMatch(/not a tax invoice and not tax advice/);
   });
 
+  it('says when a released sale was refunded in part, instead of reading as a sale that stood or one that was lost', async () => {
+    prisma.escrowPayment.findMany.mockResolvedValue([
+      {
+        id: 'escrow-p',
+        amount: 24000,
+        platformFee: 3600,
+        currency: 'aud',
+        status: 'CAPTURED',
+        description: 'Pitch review (120 minute booking)',
+        sessionType: 'service_booking',
+        capturedAt: lateJune,
+        // A$10 of the A$240, as Stripe reports it.
+        refundedAmount: 1000,
+      },
+    ]);
+
+    const json = await request(app()).get('/api/connect/earnings/statement?fy=2026');
+    expect(json.body.data.lines[0]).toMatchObject({ kind: 'Marketplace booking', status: 'RELEASED', gross: 24000, refunded: 1000 });
+    // Still a released sale: it is in the totals, and the line is what says part came back.
+    expect(json.body.data.totals[0]).toMatchObject({ count: 1, gross: 24000, refundedCount: 0 });
+
+    const csv = await request(app()).get('/api/connect/earnings/statement?fy=2026&format=csv');
+    expect(csv.text).toContain('Released; 10.00 of it refunded to the buyer');
+    expect(csv.text).toContain('1 payment(s) released and not refunded in full');
+  });
+
+  it('labels a proposal a buyer accepted on a brief as a marketplace request', async () => {
+    prisma.escrowPayment.findMany.mockResolvedValue([
+      {
+        id: 'escrow-q',
+        amount: 90000,
+        platformFee: 13500,
+        currency: 'aud',
+        status: 'CAPTURED',
+        description: null,
+        sessionType: 'custom_request',
+        capturedAt: lateJune,
+        refundedAmount: 0,
+      },
+    ]);
+
+    const res = await request(app()).get('/api/connect/earnings/statement?fy=2026');
+
+    expect(res.body.data.lines[0]).toMatchObject({ kind: 'Marketplace request', description: 'Marketplace request', refunded: 0 });
+  });
+
   it('refuses a year that has not started', async () => {
     const res = await request(app()).get('/api/connect/earnings/statement?fy=2099');
     expect(res.status).toBe(400);

@@ -12,7 +12,9 @@ jest.mock('../../utils/prisma', () => ({
     videoSave: { findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn(), deleteMany: jest.fn(), count: jest.fn() },
     follow: { findMany: jest.fn() },
     userFeedPreferences: { findUnique: jest.fn() },
-    user: { findUnique: jest.fn() },
+    // Whether a member is in Safe Mode is asked of the user table with findFirst
+    // (audience.service isDiscreet); nobody is in it here.
+    user: { findFirst: jest.fn(async () => null), findUnique: jest.fn() },
     notification: { create: jest.fn() },
   },
 }));

@@ -21,7 +21,12 @@ import type { Server as SocketIOServer } from 'socket.io';
 type Query = jest.Mock<(args?: any) => Promise<unknown>>;
 
 const messageCreate = jest.fn() as Query;
+const messageCount = jest.fn() as Query;
 const conversationUpdate = jest.fn() as Query;
+const conversationFindMany = jest.fn() as Query;
+const conversationFindUnique = jest.fn() as Query;
+const conversationCreate = jest.fn() as Query;
+const followFindUnique = jest.fn() as Query;
 const participantUpdateMany = jest.fn() as Query;
 const userFindUnique = jest.fn() as Query;
 const notificationCreate = jest.fn() as Query;
@@ -29,17 +34,27 @@ const liveStreamFindUnique = jest.fn() as Query;
 const messageFindMany = jest.fn() as Query;
 const messageUpdateMany = jest.fn() as Query;
 const safetySettingsFindUnique = jest.fn() as Query;
+// The DV safety page's own block list, the second place a block can be written.
+const dvBlockFindFirst = jest.fn() as Query;
 const transaction = jest.fn() as jest.Mock<(ops: Array<Promise<unknown>>) => Promise<unknown[]>>;
 
 jest.mock('../../utils/prisma', () => ({
   prisma: {
-    message: { create: messageCreate, findMany: messageFindMany, updateMany: messageUpdateMany },
-    conversation: { update: conversationUpdate },
+    message: { create: messageCreate, findMany: messageFindMany, updateMany: messageUpdateMany, count: messageCount },
+    conversation: {
+      update: conversationUpdate,
+      findMany: conversationFindMany,
+      findUnique: conversationFindUnique,
+      create: conversationCreate,
+    },
+    follow: { findUnique: followFindUnique },
     conversationParticipant: { updateMany: participantUpdateMany },
     user: { findUnique: userFindUnique },
     notification: { create: notificationCreate },
     liveStream: { findUnique: liveStreamFindUnique },
     userSafetySettings: { findUnique: safetySettingsFindUnique },
+    // The DV safety page's own block list, the second place a block can be written: nobody is blocked there unless a test says so.
+    dvSafetyProfile: { findFirst: dvBlockFindFirst, findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
     $transaction: transaction,
   },
 }));
@@ -50,6 +65,14 @@ jest.mock('../../middleware/auth', () => ({ authenticateSocketToken }));
 const isBlockedRelationship = jest.fn() as jest.Mock<(a: string, b: string) => Promise<boolean>>;
 jest.mock('../../utils/safety-store', () => ({ isBlockedRelationship }));
 
+// A broadcast a member makes is kept from everyone on either side of a block with her;
+// the lists are read from both stores by audience.service, which has its own suites.
+const blockedEitherWayIds = jest.fn() as jest.Mock<(userId: string) => Promise<string[]>>;
+jest.mock('../audience.service', () => ({
+  ...(jest.requireActual('../audience.service') as object),
+  blockedEitherWayIds: (userId: string) => blockedEitherWayIds(userId),
+}));
+
 const canOpenConversation = jest.fn() as jest.Mock<(a: string, b: string) => Promise<{ allowed: boolean; reason?: string }>>;
 jest.mock('../message-permissions.service', () => ({ canOpenConversation }));
 
@@ -59,10 +82,16 @@ jest.mock('../moderation.service', () => ({ assertContentAllowed }));
 const pushToUser = jest.fn();
 jest.mock('../push.service', () => ({ pushToUser, pushPreview: (text: string) => text }));
 
+// The real direct-message service, so messages:send is held to the rules the REST
+// route is: the request cap, a declined request, quiet delivery. Only the lookup
+// the read-receipt handler uses is replaced; sendDirectMessage reaches its own
+// copy of it, which reads the mocked database below. The service used to be
+// mocked whole here, which is why the socket door skipping those rules went
+// unseen.
 const findDirectConversation = jest.fn() as jest.Mock<(a: string, b: string) => Promise<string | null>>;
 jest.mock('../direct-message.service', () => ({
-  findDirectConversation,
-  getOrCreateDirectConversation: jest.fn(async () => ({ id: 'conv-1' })),
+  ...(jest.requireActual('../direct-message.service') as object),
+  findDirectConversation: (a: string, b: string) => findDirectConversation(a, b),
 }));
 
 jest.mock('../message-expiry.service', () => ({
@@ -96,17 +125,22 @@ import { ApiError } from '../../middleware/errorHandler';
 // ------------------------------------------------------------------ harness
 
 type Handler = (...args: any[]) => unknown;
-type Emission = { rooms: string[]; event: string; payload: unknown };
+type Emission = { rooms: string[]; except: string[]; event: string; payload: unknown };
 
 /** Everything the server emitted through io.to(...), with the rooms it chose. */
 const roomEmissions: Emission[] = [];
 let connectionHandler: ((socket: FakeSocket) => void) | undefined;
 let authMiddleware: ((socket: any, next: (err?: Error) => void) => unknown) | undefined;
 
-const chain = (rooms: string[]) => ({
-  to: (room: string) => chain([...rooms, room]),
+const chain = (rooms: string[], except: string[] = []): {
+  to: (room: string) => unknown;
+  except: (excluded: string | string[]) => unknown;
+  emit: (event: string, payload?: unknown) => boolean;
+} => ({
+  to: (room: string) => chain([...rooms, room], except),
+  except: (excluded: string | string[]) => chain(rooms, [...except, ...(Array.isArray(excluded) ? excluded : [excluded])]),
   emit: (event: string, payload?: unknown) => {
-    roomEmissions.push({ rooms, event, payload });
+    roomEmissions.push({ rooms, except, event, payload });
     return true;
   },
 });
@@ -169,8 +203,27 @@ let accountCount = 0;
 /** A fresh account name, so the per-account throttles start empty. */
 const account = (name: string) => `${name}-${(accountCount += 1)}`;
 
+/**
+ * The thread the next send finds. `existing` says whether it was there already
+ * or is opened by this very message; the request fields are the thread's own.
+ */
+let threadMembers: string[] = [];
+let threadFields: Record<string, unknown> = {};
+function givenThread(
+  sender: string,
+  receiver: string,
+  { existing = true, ...fields }: { existing?: boolean } & Record<string, unknown> = {}
+) {
+  threadMembers = [sender, receiver];
+  threadFields = fields;
+  conversationFindMany.mockResolvedValue(
+    existing ? [{ id: 'conv-1', participants: [{ userId: sender }, { userId: receiver }] }] : []
+  );
+}
+
 /** An adult member in good standing, as the gate and the notification read her. */
 const memberRow = (overrides: Record<string, unknown> = {}) => ({
+  allowMessages: true,
   womanVerificationStatus: 'UNVERIFIED',
   dateOfBirth: new Date('1991-04-02'),
   dvSafetyProfile: null,
@@ -189,6 +242,8 @@ beforeEach(() => {
   roomEmissions.length = 0;
   userFindUnique.mockResolvedValue(memberRow());
   isBlockedRelationship.mockResolvedValue(false);
+  dvBlockFindFirst.mockResolvedValue(null);
+  blockedEitherWayIds.mockResolvedValue([]);
   canOpenConversation.mockResolvedValue({ allowed: true });
   assertContentAllowed.mockResolvedValue(undefined);
   messageCreate.mockImplementation(async (args: any) => ({
@@ -197,6 +252,21 @@ beforeEach(() => {
     sender: { id: args.data.senderId, firstName: 'Amira', lastName: 'K', avatar: null },
   }));
   conversationUpdate.mockResolvedValue({});
+  conversationCreate.mockResolvedValue({ id: 'conv-1' });
+  conversationFindMany.mockResolvedValue([]);
+  conversationFindUnique.mockImplementation(async () => ({
+    id: 'conv-1',
+    requestedById: null,
+    requestAcceptedAt: null,
+    requestDeclinedAt: null,
+    disappearingTtlSeconds: null,
+    participants: threadMembers.map((userId) => ({ userId, isMuted: false })),
+    ...threadFields,
+  }));
+  followFindUnique.mockResolvedValue({ followerId: 'bea' });
+  messageCount.mockResolvedValue(0);
+  threadMembers = [];
+  threadFields = {};
   participantUpdateMany.mockResolvedValue({ count: 1 });
   transaction.mockImplementation(async (ops) => Promise.all(ops));
   notificationCreate.mockImplementation(async (args: any) => ({ id: 'n-1', ...args.data }));
@@ -232,6 +302,7 @@ describe('messages:send', () => {
   it('stores the message, delivers it once to the thread and the recipient, and notifies her', async () => {
     const amira = account('amira');
     const sender = connect(amira);
+    givenThread(amira, 'bea', { existing: false });
 
     await sender.fire('messages:send', { receiverId: 'bea', content: '  Are you coming on Thursday?  ' });
 
@@ -244,18 +315,23 @@ describe('messages:send', () => {
       type: 'TEXT',
     });
 
+    // Once to her, by the one delivery the REST route uses, and once to the
+    // sender's own devices, which is how a socket client sees its own line.
     const delivered = roomEmissions.filter((e) => e.event === 'messages:new');
-    expect(delivered).toHaveLength(1);
-    expect(delivered[0].rooms).toEqual([`conversation:${[amira, 'bea'].sort().join(':')}`, 'user:bea']);
+    expect(delivered.map((e) => e.rooms)).toEqual([['user:bea'], [`user:${amira}`]]);
+    expect(roomEmissions.filter((e) => e.event === 'messages:new_count').map((e) => e.rooms)).toEqual([['user:bea']]);
 
-    expect(notificationCreate.mock.calls[0][0].data).toMatchObject({ userId: 'bea', type: 'MESSAGE' });
+    // No bell entry per message, as the REST route has always had none.
+    expect(notificationCreate).not.toHaveBeenCalled();
     // Nobody for Bea is connected, so her phone hears about it instead.
     expect(pushToUser).toHaveBeenCalledWith('bea', 'MESSAGE', expect.objectContaining({ link: `/dashboard/messages?user=${amira}` }));
     expect(sender.errors('messages:error')).toEqual([]);
   });
 
   it(`holds one account to ${SOCIAL_LIMITS.message.max} messages in the window, as the REST route does`, async () => {
-    const sender = connect(account('flooder'));
+    const flooder = account('flooder');
+    const sender = connect(flooder);
+    givenThread(flooder, 'bea');
 
     for (let i = 0; i < SOCIAL_LIMITS.message.max; i += 1) {
       await sender.fire('messages:send', { receiverId: 'bea', content: `line ${i}` });
@@ -279,6 +355,20 @@ describe('messages:send', () => {
 
     expect(sender.errors('messages:error')).toEqual([{ message: 'Choose someone to message' }, { message: 'Choose someone to message' }]);
     expect(messageCreate).not.toHaveBeenCalled();
+  });
+
+  it('refuses a thread across a block written only to the DV safety page, as it refuses one on the platform list', async () => {
+    const him = account('blocked-dv');
+    const sender = connect(him);
+    dvBlockFindFirst.mockResolvedValue({ userId: 'her' });
+
+    await sender.fire('messages:send', { receiverId: 'her', content: 'why did you block me' });
+
+    expect(sender.errors('messages:error')).toEqual([{ message: 'You cannot message this user' }]);
+    expect(canOpenConversation).not.toHaveBeenCalled();
+    expect(messageCreate).not.toHaveBeenCalled();
+    expect(roomEmissions).toEqual([]);
+    expect(pushToUser).not.toHaveBeenCalled();
   });
 
   it('refuses a thread across a block, before anything else about the recipient is read', async () => {
@@ -335,6 +425,29 @@ describe('messages:send', () => {
     expect(messageCreate).not.toHaveBeenCalled();
   });
 
+  it('refuses a message to a member who has closed her messages, in a thread that exists or a new one, and stores nothing', async () => {
+    // "Close my messages" (User.allowMessages) is checked on the socket door as
+    // on the REST one: any client can emit the event, so this is the door that
+    // matters if the check is only on the other.
+    const sender = connect(account('persistent'));
+    userFindUnique.mockImplementation(async (args: any) =>
+      args?.where?.id === 'bea' ? memberRow({ allowMessages: false }) : memberRow()
+    );
+
+    givenThread('persistent', 'bea', { existing: true });
+    await sender.fire('messages:send', { receiverId: 'bea', content: 'are you there?' });
+    givenThread('persistent', 'bea', { existing: false });
+    await sender.fire('messages:send', { receiverId: 'bea', content: 'please answer' });
+
+    expect(sender.errors('messages:error')).toEqual([
+      { message: 'This user is not accepting messages' },
+      { message: 'This user is not accepting messages' },
+    ]);
+    expect(messageCreate).not.toHaveBeenCalled();
+    expect(roomEmissions.filter((e) => e.event === 'messages:new')).toEqual([]);
+    expect(pushToUser).not.toHaveBeenCalled();
+  });
+
   it('screens the text the same way the REST route does, and stores nothing it refuses', async () => {
     const sender = connect(account('abusive'));
     assertContentAllowed.mockRejectedValue(new ApiError(422, 'This message was not sent because it breaks the community guidelines.'));
@@ -344,6 +457,8 @@ describe('messages:send', () => {
     expect(assertContentAllowed).toHaveBeenCalledWith('something vile', expect.objectContaining({ kind: 'message' }));
     expect(sender.errors('messages:error')).toEqual([{ message: 'This message was not sent because it breaks the community guidelines.' }]);
     expect(messageCreate).not.toHaveBeenCalled();
+    // A first message the gate refuses must not leave an empty request waiting in her inbox.
+    expect(conversationCreate).not.toHaveBeenCalled();
     expect(roomEmissions).toEqual([]);
   });
 
@@ -362,12 +477,138 @@ describe('messages:send', () => {
   });
 
   it('says only "Failed to send message" when something inside breaks', async () => {
-    const sender = connect(account('unlucky'));
+    const unlucky = account('unlucky');
+    const sender = connect(unlucky);
+    givenThread(unlucky, 'bea');
     transaction.mockRejectedValue(new Error('connection to 10.0.3.7:5432 refused'));
 
     await sender.fire('messages:send', { receiverId: 'bea', content: 'hello' });
 
     expect(sender.errors('messages:error')).toEqual([{ message: 'Failed to send message' }]);
+  });
+});
+
+// ------------------------------------------------------------------ message requests
+
+// The socket was a second door that skipped the request rules. It called
+// getOrCreateDirectConversation, which hands back an existing thread without
+// looking at it, and never assertCanSendInConversation, so an opener could send
+// without limit, a declined sender could keep writing to the woman who had said
+// no, a reply never accepted a request, and every line buzzed her phone. Any
+// client can emit this event, so none of those was a rule at all.
+describe('messages:send and message requests', () => {
+  it('lets the opener introduce herself, and the first line knocks once, saying it is a request', async () => {
+    const opener = account('opener');
+    const socket = connect(opener);
+    givenThread(opener, 'bea', { existing: false, requestedById: opener });
+    followFindUnique.mockResolvedValue(null); // Bea does not follow her, so it is a request
+
+    await socket.fire('messages:send', { receiverId: 'bea', content: 'Hi Bea, I am a friend of Ana' });
+
+    expect(conversationCreate.mock.calls[0][0].data.requestedById).toBe(opener);
+    expect(messageCreate).toHaveBeenCalledTimes(1);
+    expect(pushToUser).toHaveBeenCalledWith('bea', 'MESSAGE', expect.objectContaining({
+      title: expect.stringContaining('wants to message you'),
+      link: '/dashboard/messages?tab=requests',
+    }));
+    expect(socket.errors('messages:error')).toEqual([]);
+  });
+
+  it('refuses the opener a fourth message before an answer, writes nothing and says why', async () => {
+    const opener = account('eager');
+    const socket = connect(opener);
+    givenThread(opener, 'bea', { requestedById: opener });
+    messageCount.mockResolvedValue(3);
+
+    await socket.fire('messages:send', { receiverId: 'bea', content: 'Did you see my message?' });
+
+    expect(socket.errors('messages:error')).toEqual([
+      { message: 'Wait for them to accept your message request before sending more' },
+    ]);
+    expect(messageCreate).not.toHaveBeenCalled();
+    expect(transaction).not.toHaveBeenCalled();
+    expect(roomEmissions).toEqual([]);
+    expect(pushToUser).not.toHaveBeenCalled();
+    expect(notificationCreate).not.toHaveBeenCalled();
+  });
+
+  it('keeps a declined request closed to the one who asked, however many times she tries', async () => {
+    const declined = account('declined');
+    const socket = connect(declined);
+    givenThread(declined, 'bea', { requestedById: declined, requestDeclinedAt: new Date() });
+
+    await socket.fire('messages:send', { receiverId: 'bea', content: 'Please, just one thing' });
+    await socket.fire('messages:send', { receiverId: 'bea', content: 'Please?' });
+
+    expect(socket.errors('messages:error')).toEqual([
+      { message: 'They declined your message request' },
+      { message: 'They declined your message request' },
+    ]);
+    expect(messageCreate).not.toHaveBeenCalled();
+    expect(roomEmissions).toEqual([]);
+    expect(pushToUser).not.toHaveBeenCalled();
+  });
+
+  it('delivers a later request line without a push, a badge or a notification', async () => {
+    const opener = account('second');
+    const socket = connect(opener);
+    givenThread(opener, 'bea', { requestedById: opener });
+    messageCount.mockResolvedValue(1); // one already sent, still under the cap
+
+    await socket.fire('messages:send', { receiverId: 'bea', content: 'Just one more thing' });
+
+    expect(messageCreate).toHaveBeenCalledTimes(1);
+    // It reaches her thread, and nothing buzzes or lights up for it.
+    expect(roomEmissions.filter((e) => e.event === 'messages:new').map((e) => e.rooms)).toEqual([['user:bea'], [`user:${opener}`]]);
+    expect(roomEmissions.some((e) => e.event === 'messages:new_count')).toBe(false);
+    expect(pushToUser).not.toHaveBeenCalled();
+    expect(notificationCreate).not.toHaveBeenCalled();
+  });
+
+  it('treats the asked person replying as accepting, as the REST route does', async () => {
+    const bea = account('bea');
+    const socket = connect(bea);
+    givenThread(bea, 'opener-1', { requestedById: 'opener-1' });
+
+    await socket.fire('messages:send', { receiverId: 'opener-1', content: 'Hi, yes, happy to chat' });
+
+    const update = conversationUpdate.mock.calls[0][0].data;
+    expect(update.requestAcceptedAt).toBeInstanceOf(Date);
+    expect(update.requestDeclinedAt).toBeNull();
+    expect(socket.errors('messages:error')).toEqual([]);
+  });
+
+  it('stays quiet for a muted thread too', async () => {
+    const sender = account('friend');
+    const socket = connect(sender);
+    givenThread(sender, 'bea');
+    conversationFindUnique.mockImplementation(async () => ({
+      id: 'conv-1',
+      requestedById: null,
+      requestAcceptedAt: null,
+      requestDeclinedAt: null,
+      disappearingTtlSeconds: null,
+      participants: [{ userId: sender, isMuted: false }, { userId: 'bea', isMuted: true }],
+    }));
+
+    await socket.fire('messages:send', { receiverId: 'bea', content: 'No rush' });
+
+    expect(messageCreate).toHaveBeenCalledTimes(1);
+    expect(pushToUser).not.toHaveBeenCalled();
+    expect(roomEmissions.some((e) => e.event === 'messages:new_count')).toBe(false);
+  });
+
+  it('refuses a send to a thread the sender is not part of', async () => {
+    const stranger = account('stranger');
+    const socket = connect(stranger);
+    // The lookup finds a thread, but it is between two other people.
+    conversationFindMany.mockResolvedValue([{ id: 'conv-1', participants: [{ userId: stranger }, { userId: 'bea' }] }]);
+    threadMembers = ['someone', 'bea'];
+
+    await socket.fire('messages:send', { receiverId: 'bea', content: 'hello' });
+
+    expect(socket.errors('messages:error')).toEqual([{ message: 'Not a participant' }]);
+    expect(messageCreate).not.toHaveBeenCalled();
   });
 });
 
@@ -406,6 +647,41 @@ describe('live chat and the live room', () => {
     await socket.fire('live:chat', { streamId: 'stream-1', content: 'let me back in' });
 
     expect(socket.errors('live:error')).toEqual([{ streamId: 'stream-1', message: 'You cannot take part in this stream.' }]);
+  });
+
+  it('tells a muted viewer why her line did not go, and a viewer in slow mode how long to wait', async () => {
+    const socket = connect(account('muted'));
+    postChatMessage.mockRejectedValueOnce(
+      new ApiError(403, 'The host has muted you in this chat for about 5 more minutes. You can keep watching.')
+    );
+    await socket.fire('live:chat', { streamId: 'stream-1', content: 'hello?' });
+
+    postChatMessage.mockRejectedValueOnce(new ApiError(429, 'Slow mode is on. You can send another message in 12 seconds.'));
+    await socket.fire('live:chat', { streamId: 'stream-1', content: 'hello??' });
+
+    expect(socket.errors('live:error')).toEqual([
+      { streamId: 'stream-1', message: 'The host has muted you in this chat for about 5 more minutes. You can keep watching.' },
+      { streamId: 'stream-1', message: 'Slow mode is on. You can send another message in 12 seconds.' },
+    ]);
+  });
+
+  it('says what went wrong only when it is something she can act on, and never a database error', async () => {
+    const socket = connect(account('unlucky'));
+    postChatMessage.mockRejectedValueOnce(new Error('Invalid `prisma.liveStreamMessage.create()` invocation: connection reset'));
+    await socket.fire('live:chat', { streamId: 'stream-1', content: 'hello' });
+
+    postChatMessage.mockRejectedValueOnce(new ApiError(500, 'Recipient not found'));
+    await socket.fire('live:chat', { streamId: 'stream-1', content: 'hello again' });
+
+    // The moderation check being down is an operational refusal she is owed the words of.
+    postChatMessage.mockRejectedValueOnce(new ApiError(503, 'We cannot check messages right now. Please try again shortly.'));
+    await socket.fire('live:chat', { streamId: 'stream-1', content: 'hello once more' });
+
+    expect(socket.errors('live:error')).toEqual([
+      { streamId: 'stream-1', message: 'Message not sent' },
+      { streamId: 'stream-1', message: 'Message not sent' },
+      { streamId: 'stream-1', message: 'We cannot check messages right now. Please try again shortly.' },
+    ]);
   });
 
   it('keeps someone on either side of a block out of the host’s room, not just her chat', async () => {
@@ -497,6 +773,44 @@ describe('messages:mark_read', () => {
     expect(readReceipts()).toEqual([]);
   });
 
+  it('does not tell the person who opened a request, until it is accepted, that she read it', async () => {
+    const reader = account('asked');
+    const socket = connect(reader);
+    // `sender` wrote first, to someone she does not follow, and nobody has said yes.
+    threadFields = { requestedById: 'sender', requestAcceptedAt: null };
+
+    await socket.fire('messages:mark_read', 'sender');
+
+    // Read all the same, so her own badge clears; the opener is not told.
+    expect(messageUpdateMany).toHaveBeenCalledTimes(1);
+    expect(readReceipts()).toEqual([]);
+  });
+
+  it('does not tell the opener of a request that was declined either', async () => {
+    const socket = connect(account('declined'));
+    threadFields = { requestedById: 'sender', requestAcceptedAt: null, requestDeclinedAt: new Date() };
+
+    await socket.fire('messages:mark_read', 'sender');
+
+    expect(readReceipts()).toEqual([]);
+  });
+
+  it('tells the sender once the request is accepted, and always tells someone who was the one asked', async () => {
+    const accepted = connect(account('accepted'));
+    threadFields = { requestedById: 'sender', requestAcceptedAt: new Date() };
+    await accepted.fire('messages:mark_read', 'sender');
+    expect(readReceipts().length).toBeGreaterThan(0);
+
+    // She opened it herself: it is the other person who is reading, and the
+    // request rule is about what the opener may learn, so the sender here is not the opener.
+    roomEmissions.length = 0;
+    const opener = account('opener');
+    const socket = connect(opener);
+    threadFields = { requestedById: opener, requestAcceptedAt: null };
+    await socket.fire('messages:mark_read', 'someone-she-wrote-to');
+    expect(readReceipts().length).toBeGreaterThan(0);
+  });
+
   it('withholds the receipt when her settings cannot be read', async () => {
     const socket = connect(account('unreadable'));
     safetySettingsFindUnique.mockRejectedValue(new Error('connection reset'));
@@ -505,5 +819,75 @@ describe('messages:mark_read', () => {
 
     expect(messageUpdateMany).toHaveBeenCalledTimes(1);
     expect(readReceipts()).toEqual([]);
+  });
+});
+
+// ------------------------------------------------------------------ channel typing
+
+describe('channels:typing', () => {
+  const typingNotices = () => roomEmissions.filter((e) => e.event === 'channels:user_typing' || e.event === 'channels:user_stopped_typing');
+
+  it('names her to the channel, and to nobody on either side of a block with her', async () => {
+    const typist = account('typist');
+    const socket = connect(typist);
+    // The lists are read in both stores and both directions: she blocked him, and the
+    // second blocked her from the DV page alone.
+    blockedEitherWayIds.mockResolvedValue(['him', 'dv-blocked-her']);
+
+    await socket.fire('channels:typing', 'c1');
+    await socket.fire('channels:stop_typing', 'c1');
+
+    expect(typingNotices()).toEqual([
+      {
+        rooms: ['channel:c1'],
+        except: ['user:him', 'user:dv-blocked-her'],
+        event: 'channels:user_typing',
+        payload: { channelId: 'c1', userId: typist },
+      },
+      {
+        rooms: ['channel:c1'],
+        except: ['user:him', 'user:dv-blocked-her'],
+        event: 'channels:user_stopped_typing',
+        payload: { channelId: 'c1', userId: typist },
+      },
+    ]);
+  });
+
+  it('is sent to the whole channel when she has no block', async () => {
+    const socket = connect(account('free'));
+
+    await socket.fire('channels:typing', 'c1');
+
+    expect(typingNotices().map((e) => [e.rooms, e.except])).toEqual([[['channel:c1'], []]]);
+  });
+
+  it('sends nothing, rather than everything, when the block lists cannot be read', async () => {
+    const socket = connect(account('unreadable-blocks'));
+    blockedEitherWayIds.mockRejectedValue(new Error('connection reset'));
+
+    await socket.fire('channels:typing', 'c1');
+    await socket.fire('channels:stop_typing', 'c1');
+
+    expect(typingNotices()).toEqual([]);
+  });
+
+  it('reads her block lists once in a while, not on every keystroke', async () => {
+    const socket = connect(account('keystrokes'));
+    blockedEitherWayIds.mockResolvedValue(['him']);
+
+    for (let i = 0; i < 5; i += 1) await socket.fire('channels:typing', 'c1');
+
+    expect(blockedEitherWayIds).toHaveBeenCalledTimes(1);
+    expect(typingNotices()).toHaveLength(5);
+  });
+
+  it('ignores an event that does not name a channel', async () => {
+    const socket = connect(account('nameless'));
+
+    await socket.fire('channels:typing', '');
+    await socket.fire('channels:typing', { not: 'a string' });
+
+    expect(typingNotices()).toEqual([]);
+    expect(blockedEitherWayIds).not.toHaveBeenCalled();
   });
 });

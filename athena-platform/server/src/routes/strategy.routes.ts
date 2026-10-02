@@ -9,9 +9,11 @@
 
 import { Router, Response, NextFunction } from 'express';
 import { z } from 'zod';
+import type { PortfolioHolding } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { ownedBy, requireResourceAccess } from '../middleware/resource-access';
 import { AU_STATES, RATES_AS_AT } from '../services/strategy/au-rates';
 import {
   assessRentAffordability,
@@ -365,16 +367,15 @@ router.post('/investing/holdings', authenticate, async (req: AuthRequest, res: R
   }
 });
 
-async function ownHolding(userId: string, id: string) {
-  const holding = await prisma.portfolioHolding.findUnique({ where: { id } });
-  if (!holding) throw new ApiError(404, 'Holding not found');
-  if (holding.userId !== userId) throw new ApiError(403, 'Not authorized');
-  return holding;
-}
+// Someone else's holding and one that does not exist answer alike (404): the
+// 403 this used to give told a stranger the id was real.
+const ownHolding = requireResourceAccess<PortfolioHolding>({
+  load: (req) => prisma.portfolioHolding.findUnique({ where: { id: req.params.id } }),
+  allow: ownedBy('userId'),
+});
 
-router.patch('/investing/holdings/:id', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.patch('/investing/holdings/:id', authenticate, ownHolding, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    await ownHolding(req.user!.id, req.params.id);
     const data = parse(holdingSchema.partial(), req.body);
     const kind = data.category ? (LIABILITY_CATEGORIES.includes(data.category) ? 'LIABILITY' : 'ASSET') : undefined;
     const holding = await prisma.portfolioHolding.update({ where: { id: req.params.id }, data: { ...data, acquiredAt: acquiredDate(data.acquiredAt), ...(kind ? { kind } : {}) } });
@@ -384,9 +385,8 @@ router.patch('/investing/holdings/:id', authenticate, async (req: AuthRequest, r
   }
 });
 
-router.delete('/investing/holdings/:id', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.delete('/investing/holdings/:id', authenticate, ownHolding, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    await ownHolding(req.user!.id, req.params.id);
     await prisma.portfolioHolding.delete({ where: { id: req.params.id } });
     res.status(204).send();
   } catch (error) {

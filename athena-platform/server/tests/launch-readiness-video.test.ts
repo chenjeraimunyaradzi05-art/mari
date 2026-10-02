@@ -32,7 +32,14 @@ import { describe, it, expect, jest, beforeEach, afterAll } from '@jest/globals'
  * in sockets, workers and schedulers for no coverage.
  */
 
-jest.mock('../src/utils/prisma', () => ({ prisma: { $queryRaw: jest.fn() } }));
+// Readiness also asks the database whether every migration ran; this one has them all.
+jest.mock('../src/utils/prisma', () => ({
+  prisma: {
+    $queryRaw: jest.fn(async () =>
+      (jest.requireActual('./support/applied-migrations') as typeof import('./support/applied-migrations')).appliedMigrationRows()
+    ),
+  },
+}));
 jest.mock('../src/utils/cache', () => ({ getRedisClient: () => null }));
 jest.mock('../src/utils/opensearch', () => ({ getOpenSearchClient: () => null }));
 jest.mock('../src/services/ml.service', () => ({ mlService: { healthCheck: jest.fn() } }));
@@ -80,17 +87,27 @@ function configuredProduction(): void {
     DATABASE_URL: 'postgresql://u:p@localhost:5432/db',
     CLIENT_URL: 'https://example.test',
     ALLOWED_ORIGINS: 'https://example.test',
-    JWT_SECRET: 'a'.repeat(64),
-    DV_ENCRYPTION_KEY: 'b'.repeat(64),
+    // Random-looking, because readiness now refuses a repeated character as a
+    // placeholder (utils/secret-strength.ts).
+    JWT_SECRET: '21c983cb1baec38efae62af1e84dc644fdc9306f8b190a8e76dd98eed44be44b',
+    DV_ENCRYPTION_KEY: '1e7668712a2dfacf98da6906a9b348287f7013dbba1cd6f6421e36f7273132e1',
     METRICS_TOKEN: 'metrics-token',
     HEALTH_DIAGNOSTICS_TOKEN: 'health-token',
     SENDGRID_API_KEY: 'SG.test',
+    SENDGRID_FROM_EMAIL: 'noreply@mail.ourdomain.org',
     STRIPE_SECRET_KEY: 'sk_live_test',
     STRIPE_WEBHOOK_SECRET: 'whsec_test',
+    STRIPE_CONNECT_WEBHOOK_SECRET: 'whsec_connect_test',
     STRIPE_PRICE_CAREER: 'price_1',
     STRIPE_PRICE_PROFESSIONAL: 'price_2',
     STRIPE_PRICE_ENTREPRENEUR: 'price_3',
     STRIPE_PRICE_CREATOR: 'price_4',
+    // Who ATHENA is on an invoice: required in production, because no invoice
+    // document is produced without them (services/invoice.service supplierReadiness).
+    ATHENA_LEGAL_NAME: 'Example Trading Pty Ltd',
+    ATHENA_ABN: '51824753556',
+    ATHENA_BILLING_ADDRESS: '1 Example St|Brisbane QLD 4000',
+    ATHENA_BILLING_EMAIL: 'billing@mail.ourdomain.org',
     S3_BUCKET: 'athena-uploads',
     AWS_REGION: 'ap-southeast-2',
     AWS_ACCESS_KEY_ID: 'AKIATEST',

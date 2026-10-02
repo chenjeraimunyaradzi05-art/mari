@@ -5,6 +5,8 @@ import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { parsePagination } from '../utils/pagination';
 import { body, validationResult } from 'express-validator';
+import { z } from 'zod';
+import { zodBody } from '../middleware/validate';
 import { randomBytes } from 'crypto';
 import { normalizeSafeUrl } from '../utils/contentSafety';
 import { bestEffort } from '../utils/best-effort';
@@ -821,6 +823,7 @@ async function requestPlace(
 // provider for a place, which shows them her name and email: the page says so
 // on the button that sends it, and nothing is shared without it. Enrolling
 // without it only keeps the course in her dashboard.
+// validated: the only field read is requestPlace, as === true.
 router.post('/:courseId/enroll', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { courseId } = req.params;
@@ -1383,14 +1386,23 @@ async function loadModuleOf(courseId: string, moduleId: string) {
   return module;
 }
 
-router.patch('/:courseId/modules/:moduleId', authenticate, async (req: AuthRequest, res, next) => {
+// Creating a module measures its title (200) and description (2000); editing one
+// read each by type and nothing else, so a title of any length went in, and a
+// position of NaN, -1 or 1e308 went to an Int column.
+const moduleEditBody = z.object({
+  title: z.string().trim().max(200).optional(),
+  description: z.string().trim().max(2000).optional(),
+  position: z.number().int().min(0).max(10_000).optional(),
+});
+
+router.patch('/:courseId/modules/:moduleId', authenticate, zodBody(moduleEditBody), async (req: AuthRequest, res, next) => {
   try {
     const { courseId, moduleId } = req.params;
     await assertCourseEditor(courseId, req.user!);
     await loadModuleOf(courseId, moduleId);
     const data: Record<string, unknown> = {};
-    if (typeof req.body.title === 'string' && req.body.title.trim()) data.title = req.body.title.trim();
-    if (typeof req.body.description === 'string') data.description = req.body.description.trim() || null;
+    if (req.body.title) data.title = req.body.title;
+    if (typeof req.body.description === 'string') data.description = req.body.description || null;
     if (typeof req.body.position === 'number') data.position = req.body.position;
     const updated = await prisma.courseModule.update({ where: { id: moduleId }, data });
     res.json({ success: true, data: updated });
@@ -1445,6 +1457,8 @@ async function loadLessonOf(courseId: string, lessonId: string) {
   return lesson;
 }
 
+// validated: pickLessonFields reads each field by type, passes links through normalizeSafeUrl and
+//   requires a whole number of minutes and a position of 0 or more.
 router.patch('/:courseId/lessons/:lessonId', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { courseId, lessonId } = req.params;

@@ -32,4 +32,33 @@ export const httpRequestDurationSeconds = new Histogram({
   registers: [register],
 });
 
+/**
+ * The emails a member cannot get in or back in without: the confirmation link
+ * after registering, a resent one, a password-reset link, the link that unlocks an
+ * account its owner locked, and the notice that an address already has an
+ * account. `outcome` is `sent` when the provider accepted
+ * the message and `failed` when every attempt was refused or timed out.
+ *
+ * What alerts.yml reads (AthenaAuthEmailFailing). Before this, a refused or
+ * lost one of these was a line in the log and nothing else: the member was
+ * locked out and nobody could see it happening.
+ */
+export const AUTH_EMAIL_KINDS = ['verification', 'resend_verification', 'password_reset', 'account_exists', 'account_unlock'] as const;
+export type AuthEmailKind = (typeof AUTH_EMAIL_KINDS)[number];
+
+export const authEmailTotal = new Counter({
+  name: 'athena_auth_email_total',
+  help: 'Verification, password-reset and account-exists emails by what became of them',
+  labelNames: ['kind', 'outcome'] as const,
+  registers: [register],
+});
+
+// Every series starts at zero, so the first failure after a restart is an
+// increase Prometheus can see instead of a series that appears already at one.
+for (const kind of AUTH_EMAIL_KINDS) {
+  for (const outcome of ['sent', 'failed'] as const) {
+    authEmailTotal.labels(kind, outcome);
+  }
+}
+
 export { client };

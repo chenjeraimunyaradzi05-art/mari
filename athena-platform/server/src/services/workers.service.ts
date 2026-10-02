@@ -24,6 +24,7 @@ import { markWorkersRunning, resolveWorkerRedisUrl } from '../utils/worker-confi
 import { processVideo } from './video-pipeline.service';
 import { alertOverdueReports } from './content-report.service';
 import { alertOverdueSafetyChecks } from './housing-supply.service';
+import { sweepProviderChecks } from './housing-provider.service';
 import { sweepPractitionerRechecks } from './wellness/practitioner-recheck.service';
 
 const isProductionRuntime =
@@ -191,7 +192,12 @@ export const scheduledTasksWorker = new Worker<ScheduledTaskJob>(
         // the counts are logged at info as the record that it ran.
         const { waiting, overdue, notified } = await alertOverdueSafetyChecks();
         logger.info('Housing safety-check sweep finished', { jobId: job.id, waiting, overdue, notified });
-        return { success: true, waiting, overdue, notified };
+        // The same hour keeps the badge honest: a provider check that has run
+        // out is marked, and the confidential listings that rested on it come
+        // off the list and back into the queue. Never throws.
+        const providerChecks = await sweepProviderChecks();
+        logger.info('Housing provider-check sweep finished', { jobId: job.id, ...providerChecks });
+        return { success: true, waiting, overdue, notified, providerChecks };
       }
       case SCHEDULED_TASKS.PRACTITIONER_RECHECK_SWEEP: {
         // Practitioner verifications a year on: the admins hear who is due,

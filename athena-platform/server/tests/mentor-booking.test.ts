@@ -83,12 +83,16 @@ jest.mock('../src/middleware/auth', () => ({
   requirePremium: (_req: any, _res: any, next: any) => next(),
 }));
 
+// Nobody has blocked anybody in these tests: a payment is refused across a block.
+jest.mock('../src/utils/safety-store', () => ({ isBlockedRelationship: jest.fn(async () => false) }));
+
 jest.mock('../src/utils/logger', () => ({
   logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
 
 import Stripe from 'stripe';
 import { app } from '../src/index';
+import { resetMemoryRateLimits } from '../src/middleware/rateLimiter';
 import { prisma as prismaTyped } from '../src/utils/prisma';
 import { notificationService } from '../src/services/notification.service';
 
@@ -130,9 +134,15 @@ function mockUser(overrides: Record<string, unknown> = {}) {
   });
 }
 
+const DAY = 24 * 60 * 60 * 1000;
+
+// Relative to now, because a time that has passed cannot be booked and a paid
+// session cannot be booked further out than its card hold lasts.
+const inDays = (days: number) => new Date(Date.now() + days * DAY).toISOString();
+
 function bookingBody(overrides: Record<string, unknown> = {}) {
   return {
-    scheduledAt: '2026-02-15T02:00:00.000Z',
+    scheduledAt: inDays(3),
     durationMinutes: 60,
     note: 'Looking forward to discussing career options',
     ...overrides,
@@ -142,6 +152,9 @@ function bookingBody(overrides: Record<string, unknown> = {}) {
 describe('Booking a mentor session', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    // Every test books as the same member, and a member may start only so many
+    // payments an hour (middleware/moneyLimits.ts), so the window starts empty.
+    resetMemoryRateLimits();
     // The hold is created through the shared escrow service now, and that
     // service falls back to a fabricated intent when no key is configured. This
     // suite is about the real authorisation — the amount, the currency, the
@@ -211,6 +224,57 @@ describe('Booking a mentor session', () => {
     expect(created.mentorPayout).toBeCloseTo(48);
   });
 
+  // A 45-minute session at 33.33 an hour was charged as 25.00 with a 5.00 fee and
+  // recorded as 24.9975, 4.9995 and 19.998: the rows, the card and Stripe did not
+  // agree by a fraction of a cent, and the earnings statement added the fractions.
+  // The amount and the fee are rounded to a cent once, in cents, and the same
+  // cents go to Stripe and to the rows.
+  it('records, to the cent, exactly what the card is charged and Stripe is sent as the fee (45 minutes at 33.33)', async () => {
+    mockMentorProfile({ hourlyRate: 33.33 });
+
+    await request(app)
+      .post(`/api/mentors/${MENTOR_PROFILE}/book`)
+      .set(as(MENTEE))
+      .send(bookingBody({ durationMinutes: 45 }))
+      .expect(201);
+
+    const intent = stripe.paymentIntents.create.mock.calls[0][0];
+    expect(intent.amount).toBe(2500);
+    expect(intent.application_fee_amount).toBe(500);
+
+    const created = (prisma.mentorSession.create as any).mock.calls[0][0].data;
+    expect(created.sessionAmount).toBe(25);
+    expect(created.platformFee).toBe(5);
+    expect(created.mentorPayout).toBe(20);
+    // Two decimals at most, and the three add up to the charge.
+    expect(Math.round(created.sessionAmount * 100)).toBe(intent.amount);
+    expect(Math.round(created.platformFee * 100)).toBe(intent.application_fee_amount);
+    expect(Math.round(created.mentorPayout * 100)).toBe(intent.amount - intent.application_fee_amount);
+  });
+
+  it.each([
+    [29.99, 20],
+    [77.77, 50],
+    [45.5, 75],
+    [100, 15],
+  ])('splits a session at %d an hour for %d minutes so that fee and payout always add up to the charge', async (rate, minutes) => {
+    mockMentorProfile({ hourlyRate: rate });
+
+    await request(app)
+      .post(`/api/mentors/${MENTOR_PROFILE}/book`)
+      .set(as(MENTEE))
+      .send(bookingBody({ durationMinutes: minutes }))
+      .expect(201);
+
+    const intent = stripe.paymentIntents.create.mock.calls[0][0];
+    const created = (prisma.mentorSession.create as any).mock.calls[0][0].data;
+    expect(Number.isInteger(intent.amount)).toBe(true);
+    expect(Number.isInteger(intent.application_fee_amount)).toBe(true);
+    expect(Math.round(created.sessionAmount * 100)).toBe(intent.amount);
+    expect(Math.round(created.platformFee * 100)).toBe(intent.application_fee_amount);
+    expect(Math.round(created.mentorPayout * 100) + Math.round(created.platformFee * 100)).toBe(intent.amount);
+  });
+
   it('defaults to AUD and authorises the charge without capturing it', async () => {
     mockMentorProfile();
 
@@ -230,9 +294,32 @@ describe('Booking a mentor session', () => {
     });
   });
 
-  it('honours a supported preferred currency', async () => {
+  // A mentor's hourlyRate is a bare number that every page shows as Australian
+  // dollars. It used to be charged in whatever currency the mentee had chosen,
+  // so 100 was A$100 to one mentee and 100 dong to another, and the mentor was
+  // paid out of the smaller charge. Whatever she has chosen, the session is
+  // charged in AUD at the amount the page quoted.
+  it.each(['gbp', 'VND', 'PHP', 'xyz'])(
+    'charges in AUD, at the quoted amount, whatever currency the mentee prefers (%s)',
+    async (preferredCurrency) => {
+      mockMentorProfile({ hourlyRate: 100 });
+      mockUser({ preferredCurrency });
+
+      await request(app)
+        .post(`/api/mentors/${MENTOR_PROFILE}/book`)
+        .set(as(MENTEE))
+        .send(bookingBody())
+        .expect(201);
+
+      const intent = stripe.paymentIntents.create.mock.calls[0][0];
+      expect(intent.currency).toBe('aud');
+      expect(intent.amount).toBe(10000);
+      expect((prisma.mentorSession.create as any).mock.calls[0][0].data.currency).toBe('AUD');
+    }
+  );
+
+  it('asks Stripe for one hold per booking, so a repeated request cannot make two', async () => {
     mockMentorProfile();
-    mockUser({ preferredCurrency: 'gbp' });
 
     await request(app)
       .post(`/api/mentors/${MENTOR_PROFILE}/book`)
@@ -240,7 +327,7 @@ describe('Booking a mentor session', () => {
       .send(bookingBody())
       .expect(201);
 
-    expect(stripe.paymentIntents.create.mock.calls[0][0].currency).toBe('gbp');
+    expect(stripe.paymentIntents.create.mock.calls[0][1]).toEqual({ idempotencyKey: 'mentor-hold-sess-1' });
   });
 
   it('stores the payment intent id against the session', async () => {
@@ -258,8 +345,24 @@ describe('Booking a mentor session', () => {
     });
   });
 
-  it('notifies the mentor that a request is waiting', async () => {
+  // A paid request is the mentor's to answer once the mentee's card is held, so
+  // she is told by the webhook that says so, not when the intent is created.
+  it('does not tell the mentor of a paid request until the card is authorised', async () => {
     mockMentorProfile();
+
+    await request(app)
+      .post(`/api/mentors/${MENTOR_PROFILE}/book`)
+      .set(as(MENTEE))
+      .send(bookingBody())
+      .expect(201);
+
+    expect(notificationService.notify).not.toHaveBeenCalled();
+  });
+
+  // A free session has no card step, so there is nothing to wait for.
+  it('notifies the mentor at once that a free request is waiting', async () => {
+    mockMentorProfile({ hourlyRate: 0 });
+    mockUser({ stripeConnectAccountId: null, mentorProfile: { stripeAccountId: null } });
 
     await request(app)
       .post(`/api/mentors/${MENTOR_PROFILE}/book`)
@@ -271,6 +374,68 @@ describe('Booking a mentor session', () => {
       userId: MENTOR_USER,
       type: 'MENTOR_SESSION',
     });
+  });
+
+  it('refuses a time that has passed, and holds nothing', async () => {
+    mockMentorProfile();
+
+    await request(app)
+      .post(`/api/mentors/${MENTOR_PROFILE}/book`)
+      .set(as(MENTEE))
+      .send(bookingBody({ scheduledAt: inDays(-1) }))
+      .expect(400);
+
+    expect(prisma.mentorSession.create).not.toHaveBeenCalled();
+    expect(stripe.paymentIntents.create).not.toHaveBeenCalled();
+  });
+
+  // The hold on a card lasts about a week and nothing renews it. Booked three
+  // weeks out, it ran out in the first, the capture failed, and the mentor was
+  // never paid for the hour.
+  it('refuses a paid session further out than its card hold will last, and holds nothing', async () => {
+    mockMentorProfile();
+
+    const res = await request(app)
+      .post(`/api/mentors/${MENTOR_PROFILE}/book`)
+      .set(as(MENTEE))
+      .send(bookingBody({ scheduledAt: inDays(21) }))
+      .expect(400);
+
+    expect(res.body.message ?? res.body.error).toMatch(/up to 6 days ahead/);
+    expect(prisma.mentorSession.create).not.toHaveBeenCalled();
+    expect(stripe.paymentIntents.create).not.toHaveBeenCalled();
+  });
+
+  it('books a free session a month ahead, which has no hold to run out', async () => {
+    mockMentorProfile({ hourlyRate: 0 });
+    mockUser({ stripeConnectAccountId: null, mentorProfile: { stripeAccountId: null } });
+
+    await request(app)
+      .post(`/api/mentors/${MENTOR_PROFILE}/book`)
+      .set(as(MENTEE))
+      .send(bookingBody({ scheduledAt: inDays(30) }))
+      .expect(201);
+
+    expect(prisma.mentorSession.create).toHaveBeenCalledTimes(1);
+  });
+
+  // The note is the mentee's own words, and the mentor reads it in an email from
+  // ATHENA's address, so it is shown as text. A free request is the one the mentor
+  // is told of at booking; a paid one is told of by the webhook, with the same
+  // notice.
+  it('puts a mentee\'s note into the mentor\'s email as text, never as markup', async () => {
+    mockMentorProfile({ hourlyRate: 0 });
+    mockUser({ stripeConnectAccountId: null, mentorProfile: { stripeAccountId: null } });
+
+    await request(app)
+      .post(`/api/mentors/${MENTOR_PROFILE}/book`)
+      .set(as(MENTEE))
+      .send(bookingBody({ note: '<a href="https://evil.example/login">Confirm your payout</a>' }))
+      .expect(201);
+
+    const html: string = (notificationService.notify as any).mock.calls[0][0].emailTemplate.html;
+    expect(html).toContain('&lt;a href=&quot;https://evil.example/login&quot;&gt;Confirm your payout&lt;/a&gt;');
+    expect(html).not.toContain('<a href="https://evil.example');
   });
 
   it('refuses a session with yourself', async () => {

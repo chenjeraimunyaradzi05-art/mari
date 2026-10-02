@@ -8,6 +8,7 @@ jest.mock('../../utils/prisma', () => ({
     serviceFavorite: { upsert: jest.fn(), deleteMany: jest.fn(), findMany: jest.fn() },
     apprenticeship: { findUnique: jest.fn(), findMany: jest.fn() },
     apprenticeshipBookmark: { upsert: jest.fn(), deleteMany: jest.fn(), findMany: jest.fn() },
+    organization: { findMany: jest.fn(async () => []) },
   },
 }));
 
@@ -203,7 +204,9 @@ describe('Apprenticeship featured and bookmarks', () => {
 
     const res = await request(app).get('/api/apprenticeships/bookmarked').expect(200);
 
-    expect(res.body.data).toEqual([{ id: 'a1', title: 'Carpentry' }]);
+    // The listing, with the honest label for its host: nothing names a host
+    // here, so there is nobody ATHENA has checked.
+    expect(res.body.data).toEqual([{ id: 'a1', title: 'Carpentry', hostVerified: false, hostSafetyChecked: false, hostMayPlace: false }]);
   });
 
   it('bookmarking is idempotent via upsert', async () => {

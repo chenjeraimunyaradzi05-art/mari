@@ -19,13 +19,18 @@ import { sendEmail } from '../utils/email';
 // dressed as ATHENA's own alert. Everything a reporter typed is escaped.
 import { escapeHtml } from './email.service';
 import { logger } from '../utils/logger';
+import { bestEffort } from '../utils/best-effort';
 import { recordFailure } from '../utils/ops-metrics';
 import { AU_ONLINE_SAFETY_CONFIG, resolveContactEmail } from '../config/region.config';
 import { notifyAdmins } from './admin-notify.service';
 import { recordBannedIdentity } from './banned-identity.service';
+import { sessionService } from './session.service';
+import { takenDownByStaff, withStaffTakedown, withoutStaffTakedown } from './housing-supply.service';
+import { captureMessageForEvidence } from './report-context.service';
+import { IMMEDIATE_HIDE_ACTION } from './moderation-threshold.service';
 
 export type ContentType = 'post' | 'message' | 'profile' | 'comment' | 'job' | 'other';
-export type ReportReason = 'illegal' | 'harmful' | 'harassment' | 'hate_speech' | 'spam' | 'misinformation' | 'csam' | 'terrorism' | 'fraud' | 'other';
+export type ReportReason = 'illegal' | 'harmful' | 'harassment' | 'hate_speech' | 'spam' | 'misinformation' | 'csam' | 'terrorism' | 'fraud' | 'intimate_image' | 'threat' | 'other';
 export type ReportPriority = 'low' | 'medium' | 'high' | 'critical';
 /** The priority as ContentReport.priority stores it, which the queue sorts and filters on. */
 export type ReportPriorityLevel = 'URGENT' | 'HIGH' | 'NORMAL';
@@ -65,7 +70,15 @@ const ACTION_OUTCOMES: Record<ModerationAction, string> = {
 
 // Reports we are obliged to refer on to an outside body rather than simply
 // action ourselves, and who each one goes to.
-export const AUTHORITY_REPORTABLE_REASONS: ReportReason[] = ['csam', 'terrorism'];
+//
+// An intimate image shared without consent is on the list for a different reason
+// from the other two. ATHENA has no statutory duty to refer it, but the
+// Commissioner is the body with the power to order the image taken down
+// wherever it has spread and to act against the person who shared it, and a
+// woman reporting it is often reporting it nowhere else. The row is the queue
+// item that has staff help her do that, and keep what the Commissioner will ask
+// for, as the Trust & Safety runbook sets out.
+export const AUTHORITY_REPORTABLE_REASONS: ReportReason[] = ['csam', 'terrorism', 'intimate_image'];
 
 /**
  * Who a referral is filed with.
@@ -85,6 +98,7 @@ export const AUTHORITY_REPORTABLE_REASONS: ReportReason[] = ['csam', 'terrorism'
 export const REFERRAL_AUTHORITY = {
   childAbuse: 'Australian Federal Police (ACCCE)',
   violentExtremism: 'Australian Federal Police',
+  imageAbuse: 'eSafety Commissioner',
 } as const;
 
 const DEFAULT_AUTHORITY = REFERRAL_AUTHORITY.violentExtremism;
@@ -92,6 +106,7 @@ const DEFAULT_AUTHORITY = REFERRAL_AUTHORITY.violentExtremism;
 const AUTHORITY_FOR_REASON: Partial<Record<ReportReason, string>> = {
   csam: REFERRAL_AUTHORITY.childAbuse,
   terrorism: REFERRAL_AUTHORITY.violentExtremism,
+  intimate_image: REFERRAL_AUTHORITY.imageAbuse,
 };
 
 // An escalation is filed by hand, so its lifecycle is: we recorded it
@@ -152,6 +167,14 @@ const REASON_PRIORITY: Record<string, ReportPriority> = {
   // Somebody at risk of harming herself is the most time-critical report there
   // is, whoever it is filed by.
   self_harm: 'critical',
+  // The two a woman is most likely to be filing about herself, and the two that
+  // had no name on any door: she had to guess "sexual content" or "violence",
+  // and either ran at high on the harmful-content clock. An intimate image
+  // shared without consent and a threat to hurt someone are critical on the
+  // illegal-content clock, hidden at once (moderation-threshold.service), and
+  // seen by a person within CRITICAL_FIRST_LOOK_HOURS.
+  intimate_image: 'critical',
+  threat: 'critical',
 };
 
 /** Every reason either door may file under, lower-case. Anything else is refused at intake. */
@@ -165,7 +188,16 @@ export function isReportableReason(reason: unknown): reason is string {
  * Reasons that are about illegal content rather than harmful content, and so
  * run on the shorter of the two review clocks.
  */
-const ILLEGAL_CONTENT_REASONS: ReadonlySet<string> = new Set(['illegal', 'csam', 'terrorism']);
+const ILLEGAL_CONTENT_REASONS: ReadonlySet<string> = new Set(['illegal', 'csam', 'terrorism', 'intimate_image', 'threat']);
+
+/**
+ * ATHENA's own target for a person to open a critical report, inside the 24
+ * hours the reporter is promised. The promise is the ceiling; this is the
+ * aim, and it is what the alert to Trust & Safety names and what the overdue
+ * sweep holds the queue to. A woman whose intimate image is in front of people
+ * is not helped by an answer on the afternoon of the next day.
+ */
+export const CRITICAL_FIRST_LOOK_HOURS = 4;
 
 // ============================================
 // Intake, shared by every way in
@@ -510,7 +542,12 @@ async function applyReportDecision(
   const enforcementReason = decisionReason(notes, report.contentType, report.reason);
   switch (action) {
     case 'remove':
-      await removeContent(report.contentType, report.contentId);
+      await keepMessageEvidence(report);
+      await removeContent(report.contentType, report.contentId, { moderatorId, reason: enforcementReason });
+      await tellAuthorOfRemoval(report, ticketId);
+      break;
+    case 'dismiss':
+      await restoreWhatThisReportHid(report, ticketId);
       break;
     case 'warn':
       await warnUser(report.reportedUserId, report.contentType, report.contentId);
@@ -831,6 +868,18 @@ function reportAlertUndeliverable(kind: string, ticketId: string): void {
   recordFailure(`content-report.${kind}`, error);
 }
 
+/** When a critical report filed now should have been opened, in Brisbane time. */
+function firstLookBy(now: Date = new Date()): string {
+  return new Date(now.getTime() + CRITICAL_FIRST_LOOK_HOURS * 60 * 60 * 1000).toLocaleString('en-AU', {
+    timeZone: 'Australia/Brisbane',
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 /**
  * Alert Trust & Safety team
  */
@@ -857,6 +906,7 @@ export async function alertTrustAndSafety(
       <p><strong>Reason:</strong> ${escapeHtml(String(report.reason))}</p>
       <p><strong>Description:</strong> ${report.description ? escapeHtml(report.description) : 'N/A'}</p>
       <p><strong>Urgent Flag:</strong> ${report.isUrgent ? 'Yes' : 'No'}</p>
+      ${priority === 'critical' ? `<p><strong>Target:</strong> a person opens this within ${CRITICAL_FIRST_LOOK_HOURS} hours of it being filed (by ${escapeHtml(firstLookBy())}). The reporter has been promised an answer within 24 hours.</p>` : ''}
       <br>
       <p>Please review this report in the moderation dashboard.</p>
     `,
@@ -921,9 +971,43 @@ async function notifyEscalationQueue(
       <p><strong>Content Type:</strong> ${escapeHtml(String(report.contentType))}</p>
       <p><strong>Content ID:</strong> ${escapeHtml(String(report.contentId))}</p>
       <br>
-      <p>File the referral, then record the authority's reference number against it on the Authority referrals screen of the admin console, so the referral can be followed to its end. Do not open, copy or forward the reported content.</p>
+      ${
+        report.reason === 'intimate_image'
+          ? `<p>This is an intimate image reported as shared without consent. ATHENA has hidden what it can at once; the steps for the rest, including how the Commissioner is told, what is kept as evidence, and what to do if it sends ATHENA a removal notice, are in the Trust &amp; Safety runbook under intimate images. Record the Commissioner's reference number against this referral on the Authority referrals screen once there is one. Do not open, copy or forward the image itself.</p>`
+          : `<p>File the referral, then record the authority's reference number against it on the Authority referrals screen of the admin console, so the referral can be followed to its end. Do not open, copy or forward the reported content.</p>`
+      }
     `,
   });
+}
+
+/**
+ * Before a reported message is deleted, make sure the report holds its words.
+ *
+ * Reports filed since the intake started copying the message already do, and
+ * this does nothing for them. A report filed before that has only a message id,
+ * and removing the message would leave a moderator's decision pointing at
+ * nothing: the record of what was said, and the thing an appeal is read
+ * against, would be the one row the decision itself had just deleted. Those get
+ * the copy taken now, while the row is still there. Never throws: the decision
+ * is recorded either way, and a copy that could not be taken is logged.
+ */
+async function keepMessageEvidence(report: ContentReport): Promise<void> {
+  if (report.contentType.toLowerCase() !== 'message') return;
+  const evidence = evidenceObject(report.evidence);
+  if (evidence.messageContext) return;
+  try {
+    const context = await captureMessageForEvidence(report.contentId);
+    if (!context) return;
+    await prisma.contentReport.update({
+      where: { id: report.id },
+      data: { evidence: { ...evidence, messageContext: context } as unknown as Prisma.InputJsonObject },
+    });
+  } catch (error) {
+    logger.error('The reported message could not be copied before removal', {
+      reportId: report.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 // Content moderation action functions.
@@ -934,7 +1018,11 @@ async function notifyEscalationQueue(
 // warning line in the log while the content stayed up. Models that carry an
 // isHidden flag are hidden, because hiding can be undone on appeal; the ones
 // that do not are deleted, which restoreContent is honest about.
-async function removeContent(contentType: string, contentId: string): Promise<void> {
+async function removeContent(
+  contentType: string,
+  contentId: string,
+  context?: { moderatorId: string; reason: string }
+): Promise<void> {
   logger.info(`Removing ${contentType} with ID ${contentId}`);
 
   // Remove content based on type - use isHidden flag for soft delete
@@ -964,8 +1052,44 @@ async function removeContent(contentType: string, contentId: string): Promise<vo
       });
       break;
     case 'message':
-      // Messages use soft delete via the conversation
-      await prisma.message.delete({ where: { id: contentId } });
+      // deleteMany, not delete: the sender may have unsent it, a disappearing
+      // thread may have swept it, or a second moderator may have removed it
+      // first, and none of those should turn a decision already recorded into
+      // an error. The words are not lost with the row — the report kept its own
+      // copy when it was filed (keepMessageEvidence covers the older ones).
+      await prisma.message.deleteMany({ where: { id: contentId } });
+      break;
+    case 'live_message': {
+      // A line of live chat. The host may have deleted it already, which is
+      // the common case; the report holds the words either way.
+      const { removeChatMessageAsStaff } = await import('./livestream.service');
+      await removeChatMessageAsStaff(contentId);
+      break;
+    }
+    case 'livestream': {
+      // Ends the stream and suspends it, so it cannot be restarted or listed,
+      // and tells the room and the host. Reversible on appeal.
+      if (!context) {
+        logger.warn(`A live stream was ordered removed with no moderator to record: ${contentId}`);
+        break;
+      }
+      const { suspendStream } = await import('./livestream.service');
+      try {
+        await suspendStream(contentId, context.moderatorId, context.reason);
+      } catch (error) {
+        // The stream is gone (its host's erasure took it with her): there is
+        // nothing left to end, and the decision is already recorded, so a missing
+        // row must not turn it into an error, as for a message already unsent.
+        if ((error as { statusCode?: number })?.statusCode !== 404) throw error;
+        logger.warn(`The live stream ordered removed no longer exists: ${contentId}`);
+      }
+      break;
+    }
+    case 'group':
+      // Hidden, not deleted: its members and posts stay, and an appeal can
+      // bring it back. A hidden group is already what the group routes treat
+      // as invisible to everyone but an administrator.
+      await prisma.group.updateMany({ where: { id: contentId }, data: { isHidden: true } });
       break;
     case 'channel_message': {
       // ChannelMessage has no hidden flag, so removal is a delete. The
@@ -997,6 +1121,42 @@ async function removeContent(contentType: string, contentId: string): Promise<vo
         data: { status: 'CLOSED' },
       });
       break;
+    case 'event':
+      // Hidden, not deleted: it comes off the list and its page answers 404 to
+      // everyone but its host and staff, and an upheld appeal can bring it back.
+      // A report of an event could be filed, and decided "remove", and nothing
+      // happened to the event, because this switch had no branch for it.
+      await prisma.event.updateMany({ where: { id: contentId }, data: { isHidden: true } });
+      break;
+    case 'housing_listing': {
+      // Off the list, and the safety check with it: a listing a moderator took
+      // down for a report must not be put back live by its lister with
+      // "Checked by ATHENA staff" still on it. And marked as staff's, because a
+      // listing's status is a switch its lister can press: an ordinary listing
+      // has no check to go back through, so without the mark she could put a
+      // listing a moderator had removed straight back on the list.
+      const listing = await prisma.housingListing.findUnique({ where: { id: contentId }, select: { features: true } });
+      await prisma.housingListing.updateMany({
+        where: { id: contentId },
+        data: {
+          status: 'WITHDRAWN',
+          safetyVerified: false,
+          ...(listing ? { features: withStaffTakedown(listing.features) } : {}),
+        },
+      });
+      break;
+    }
+    case 'wellness_post':
+      // A mental health forum post. Hidden, not deleted, like every other model that
+      // carries a flag: the thread keeps its replies, the author still sees her own
+      // post marked as hidden with the reason, and an appeal can bring it back. A
+      // report of one, decided "remove", used to log "Unknown content type for
+      // removal" and leave the post up.
+      await prisma.wellnessPost.updateMany({ where: { id: contentId }, data: { isHidden: true, hiddenReason: 'Removed by a moderator' } });
+      break;
+    case 'wellness_reply':
+      await prisma.wellnessReply.updateMany({ where: { id: contentId }, data: { isHidden: true } });
+      break;
     case 'profile':
       // A profile is not content that can be taken down on its own. Saying so
       // here stops the decision looking as though it was carried out.
@@ -1026,10 +1186,166 @@ async function restoreContent(contentType: string, contentId: string): Promise<b
     case 'video_comment':
       await prisma.videoComment.updateMany({ where: { id: contentId }, data: { isHidden: false } });
       return true;
+    case 'group':
+      await prisma.group.updateMany({ where: { id: contentId }, data: { isHidden: false } });
+      return true;
+    case 'wellness_post':
+      await prisma.wellnessPost.updateMany({ where: { id: contentId }, data: { isHidden: false, hiddenReason: null } });
+      return true;
+    case 'wellness_reply':
+      await prisma.wellnessReply.updateMany({ where: { id: contentId }, data: { isHidden: false } });
+      return true;
+    case 'event':
+      await prisma.event.updateMany({ where: { id: contentId }, data: { isHidden: false } });
+      return true;
+    case 'livestream': {
+      // The broadcast is over, so what comes back is that the stream is listed
+      // and open to view again, and its key may push; the host starts afresh.
+      const { liftStreamSuspension } = await import('./livestream.service');
+      try {
+        await liftStreamSuspension(contentId);
+      } catch (error) {
+        // Nothing to put back if the stream no longer exists; an appeal upheld
+        // against it must still be recorded.
+        if ((error as { statusCode?: number })?.statusCode !== 404) throw error;
+        return false;
+      }
+      return true;
+    }
+    case 'housing_listing': {
+      // Not put back automatically: its safety check ended when it came down, so
+      // a confidential one returns only through the staff check, which records
+      // who looked. What an upheld appeal does undo is the mark that stops its
+      // lister putting it back herself, so she can; the answer stays "not
+      // restored", because the listing is still off the list until she does.
+      const listing = await prisma.housingListing.findUnique({ where: { id: contentId }, select: { features: true } });
+      if (listing && takenDownByStaff(listing.features)) {
+        await prisma.housingListing.updateMany({ where: { id: contentId }, data: { features: withoutStaffTakedown(listing.features) } });
+      }
+      return false;
+    }
     default:
       logger.warn(`Unknown content type for restore: ${contentType}`);
       return false;
   }
+}
+
+/**
+ * Puts back what one report hid, when a moderator finds nothing wrong with it.
+ *
+ * A report of an intimate image, a threat, child abuse material or terrorism
+ * hides the content the moment it is filed (moderation-threshold.service), and
+ * writes down which report did it. That is only a safe thing to do if the
+ * report being wrong costs the author a few hours and not her post, so the
+ * dismissal is what undoes it. It puts the content back only when a report
+ * about it did hide it at once (three reporters adding up are not undone by
+ * one of them being wrong), no other report about the same content is still
+ * waiting for a person, and no person has upheld another report about it.
+ *
+ * That last condition is what keeps a removal a removal. Two women report the
+ * same image; a moderator removes it on the second report and dismisses the
+ * first, the one that hid it, as a duplicate. Putting the post back because
+ * the first report was dismissed would undo the removal the moderator had just
+ * made, so any decision against the content (a removal, a warning, a
+ * suspension, a ban: everything but a dismissal) leaves it as it is.
+ *
+ * The hiding report need not be the one dismissed last: if it was dismissed
+ * while another was still open, the content stayed down, and it is the last
+ * report to be dismissed that finds nothing left to wait for and puts it back.
+ * Best effort: the decision is recorded either way, and a moderator can still
+ * unhide from the content screen, which is where she is pointed.
+ */
+async function restoreWhatThisReportHid(report: ContentReport, ticketId: string | null): Promise<void> {
+  const type = report.contentType.toLowerCase();
+  if (!ticketId || (type !== 'post' && type !== 'comment' && type !== 'video')) return;
+
+  await bestEffort('content-report.restore-after-dismissal', async () => {
+    const siblings = await prisma.contentReport.findMany({
+      where: { contentType: report.contentType, contentId: report.contentId, id: { not: report.id } },
+      select: { status: true, evidence: true },
+    });
+    if (siblings.some((other) => OPEN_REPORT_STATUSES.includes(other.status))) return;
+    if (siblings.some((other) => other.status === 'RESOLVED')) return;
+
+    const tickets = [ticketId];
+    for (const other of siblings) {
+      const reference = evidenceObject(other.evidence).ticketId;
+      if (typeof reference === 'string' && reference) tickets.push(reference);
+    }
+    const hid = await prisma.moderationLog.findFirst({
+      where: { ticketId: { in: tickets }, action: IMMEDIATE_HIDE_ACTION },
+      select: { id: true },
+    });
+    if (!hid) return;
+
+    if (await restoreContent(type, report.contentId)) {
+      await prisma.notification.create({
+        data: {
+          userId: report.reportedUserId,
+          type: 'SYSTEM',
+          title: 'Your content is back',
+          message: `After a review we put your ${REMOVED_THING[type] ?? 'content'} back: it follows our community guidelines.`,
+          link: '/dashboard/safety',
+          data: { reportId: report.id, contentType: report.contentType, action: 'restored' },
+        },
+      });
+    }
+  });
+}
+
+/** What the member is told was removed, in the words she would use for it. */
+const REMOVED_THING: Record<string, string> = {
+  post: 'post',
+  comment: 'comment',
+  video: 'reel',
+  video_comment: 'comment',
+  message: 'message',
+  live_message: 'chat message',
+  channel_message: 'message',
+  group: 'group',
+  group_post: 'group post',
+  status: 'story',
+  job: 'job listing',
+  event: 'event',
+  housing_listing: 'housing listing',
+  wellness_post: 'forum post',
+  wellness_reply: 'forum reply',
+};
+
+/**
+ * Tell the member whose content was removed that it was, and how to appeal.
+ *
+ * The decision told the reporter and nobody else. The member whose post, reel or
+ * listing came down heard nothing, so the appeal the platform offers — which asks
+ * for the reference "from your email", an email only the reporter was ever sent —
+ * was one she could not know she had cause to make, and could not name. This is
+ * the notice: what was removed, that she can appeal, and the reference to quote.
+ *
+ * What it does not say matters as much. It does not say who reported, or that
+ * anyone did; it carries none of the report's text; and it is an in-app notice,
+ * not an email, because an email to a shared address can tell the wrong reader
+ * what she posted. A live stream is not covered, because ending one already tells
+ * its host (livestream.service suspendStream), and a profile is not covered
+ * because nothing of it was removed. A notice that cannot be written does not
+ * undo a decision already made; it is logged.
+ */
+async function tellAuthorOfRemoval(report: ContentReport, ticketId: string | null): Promise<void> {
+  const thing = REMOVED_THING[report.contentType.toLowerCase()];
+  if (!thing) return;
+
+  const reference = ticketId || report.id;
+  await bestEffort('content-report.author-removal-notice', () =>
+    prisma.notification.create({
+      data: {
+        userId: report.reportedUserId,
+        type: 'SYSTEM',
+        title: 'Something you shared was removed',
+        message: `After a review we removed your ${thing}, because it did not meet our community guidelines. If you think we got this wrong you can appeal. Your reference is ${reference}.`,
+        link: '/help/appeal?type=content_removal',
+        data: { reportId: report.id, reference, contentType: report.contentType, action: 'remove' },
+      },
+    })
+  );
 }
 
 async function warnUser(userId: string, contentType: string, contentId: string): Promise<void> {
@@ -1061,6 +1377,28 @@ function decisionReason(notes: string | undefined, contentType: string, reason: 
 }
 
 /**
+ * Ends every session of an account that has just been closed, and with them
+ * the live connections on those sessions.
+ *
+ * Closing an account only set a flag. The REST API reads the flag on every
+ * request and refuses the account, but the session rows stayed live and a
+ * socket authenticates once, at the handshake, so a member who had just been
+ * suspended for threatening someone went on holding open connections that kept
+ * delivering and accepting direct messages and live chat until they dropped.
+ * Revoking the sessions announces it, and the socket service closes every
+ * connection that belonged to them.
+ *
+ * Best effort on purpose: the lock has already been applied and is what
+ * refuses her, so a failure here must not make the moderator's decision read as
+ * failed, but it is logged under its own label.
+ */
+async function endSessionsOfClosedAccount(userId: string, reason: 'suspended' | 'banned'): Promise<void> {
+  await bestEffort(`end the sessions of an account after ${reason}`, () =>
+    sessionService.revokeAllUserSessions(userId, { reason })
+  );
+}
+
+/**
  * Lock an account, and say why, when and by whom.
  *
  * isSuspended alone recorded that an account was shut and nothing else, so an
@@ -1079,6 +1417,8 @@ export async function suspendAccount(userId: string, context: { moderatorId: str
       suspendedById: context.moderatorId,
     },
   });
+
+  await endSessionsOfClosedAccount(userId, 'suspended');
 }
 
 /**
@@ -1116,6 +1456,10 @@ export async function banAccount(
     },
     select: { email: true },
   });
+
+  // Before the address is recorded: the lock is already on, and nothing that
+  // can go wrong writing the ban list should leave her connections open.
+  await endSessionsOfClosedAccount(userId, 'banned');
 
   try {
     await recordBannedIdentity({
@@ -1408,7 +1752,7 @@ export async function resolveAnonymousReport(
   const enforcementReason = decisionReason(notes, contentType, incident.reason);
   switch (action) {
     case 'remove':
-      if (contentId) await removeContent(contentType, contentId);
+      if (contentId) await removeContent(contentType, contentId, { moderatorId, reason: enforcementReason });
       break;
     case 'warn':
       await warnUser(incident.userId, contentType, contentId);
@@ -1790,7 +2134,7 @@ export async function alertOverdueReports(now: Date = new Date()): Promise<{ ove
     recordFailure('content-report.stamp-review-clock', error);
   }
 
-  const [namedLate, namedUnstamped, namedLateTotal, anonymous] = await Promise.all([
+  const [namedLate, namedUnstamped, namedLateTotal, anonymous, criticalUnopened] = await Promise.all([
     prisma.contentReport.findMany({
       where: { status: { in: OPEN_REPORT_STATUSES }, reviewDeadline: { lt: now } },
       select: { id: true, createdAt: true, reason: true, reviewDeadline: true, evidence: true },
@@ -1811,9 +2155,42 @@ export async function alertOverdueReports(now: Date = new Date()): Promise<{ ove
       orderBy: { createdAt: 'asc' },
       take: DEADLINE_SORT_WINDOW,
     }),
+    // Critical reports nobody has opened yet, past ATHENA's own first-look
+    // target but still inside the 24 hours the reporter was given: the
+    // deadline column would not call them late for another twenty hours.
+    //
+    // "Nobody has opened it" is that no person has taken it (reviewerId is set
+    // by a moderator claiming or deciding it), not that its status is still
+    // PENDING. The report that hides a post, comment or reel at once also moves
+    // every pending report on it to REVIEWING (moderation-threshold.service),
+    // with no moderator behind that, so keying on PENDING would have left out
+    // exactly the intimate-image and threat reports that were hidden on the
+    // spot, which are the ones this target is for.
+    prisma.contentReport.findMany({
+      where: {
+        status: { in: OPEN_REPORT_STATUSES },
+        reviewerId: null,
+        priority: 'URGENT',
+        createdAt: { lt: new Date(now.getTime() - CRITICAL_FIRST_LOOK_HOURS * 60 * 60 * 1000) },
+        reviewDeadline: { gte: now },
+      },
+      select: { id: true, createdAt: true, reason: true, reviewDeadline: true, evidence: true },
+      orderBy: { createdAt: 'asc' },
+      take: DEADLINE_SORT_WINDOW,
+    }),
   ]);
 
-  const late: Array<{ reference: string; reason: string; due: Date; anonymous: boolean }> = [];
+  const late: Array<{ reference: string; reason: string; due: Date; anonymous: boolean; firstLook?: true }> = [];
+  for (const report of criticalUnopened ?? []) {
+    const ticketId = evidenceObject(report.evidence).ticketId;
+    late.push({
+      reference: typeof ticketId === 'string' ? ticketId : report.id,
+      reason: report.reason,
+      due: new Date(report.createdAt.getTime() + CRITICAL_FIRST_LOOK_HOURS * 60 * 60 * 1000),
+      anonymous: false,
+      firstLook: true,
+    });
+  }
   // Overdue named reports beyond the window are still counted, though only the
   // oldest are listed: an alert that under-reported the backlog would be worse
   // than no alert.
@@ -1860,12 +2237,12 @@ export async function alertOverdueReports(now: Date = new Date()): Promise<{ ove
         subject: `[OVERDUE] ${overdue} report${overdue === 1 ? '' : 's'} past the review deadline`,
         html: `
           <h2>${overdue} report${overdue === 1 ? ' is' : 's are'} past the review deadline</h2>
-          <p>Reporters were told 24 hours for illegal content and 48 hours for everything else. The oldest:</p>
+          <p>Reporters were told 24 hours for illegal content and 48 hours for everything else. A critical report is also listed here once it has sat unopened for ${CRITICAL_FIRST_LOOK_HOURS} hours, which is ATHENA's own target. The oldest:</p>
           <ul>
             ${oldest
               .map(
                 (item) =>
-                  `<li>${escapeHtml(item.reference)} — ${escapeHtml(String(item.reason))}${item.anonymous ? ' (filed without an account)' : ''} — ${hoursLate(item.due)} hours late</li>`
+                  `<li>${escapeHtml(item.reference)} — ${escapeHtml(String(item.reason))}${item.anonymous ? ' (filed without an account)' : ''}${item.firstLook ? ' (critical, not yet opened)' : ''} — ${hoursLate(item.due)} hours late</li>`
               )
               .join('')}
           </ul>
@@ -1946,6 +2323,10 @@ const TRANSPARENCY_CATEGORY_FOR_REASON: Record<string, string> = {
   terrorism: 'terrorism',
   fraud: 'fraud',
   other: 'other',
+  // Image-based abuse and a threat to hurt someone are offences, so they count
+  // as illegal content in the published categories, which are fixed.
+  intimate_image: 'illegal',
+  threat: 'illegal',
   hate: 'hate_speech',
   violence: 'harmful',
   sexual: 'harmful',

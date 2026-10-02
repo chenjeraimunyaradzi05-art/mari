@@ -308,7 +308,7 @@ export const AU_PRIVACY_CONFIG = {
       id: 'anonymity',
       principle: 'APP 2',
       name: 'Deal with us anonymously where practicable',
-      description: 'Use a pseudonym on the platform; a legal name is only needed where a payment or the law requires it.',
+      description: 'Choose a public name that is not your legal name, under Settings, then Profile, on the web and in the app. Other members see only that name, never your legal first and last name. Your legal name is used only where a payment, an identity check you choose to do, or the law needs it.',
     },
     {
       id: 'overseas_disclosure',

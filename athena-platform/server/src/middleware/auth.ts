@@ -5,6 +5,9 @@ import { ForbiddenError, UnauthorizedError } from './errorHandler';
 import { verifyToken } from '../utils/jwt';
 import { sessionService } from '../services/session.service';
 import { staffTwoFactorRefusal } from './roles';
+import { accountStandingRefusal } from './account-standing';
+import { logger } from '../utils/logger';
+import { hasLiveEntitlement, isSubscriptionLive } from '../utils/subscription-entitlement';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -41,6 +44,25 @@ export const SUSPENDED_ACCOUNT_MESSAGE =
   'This account has been suspended. If you believe this is a mistake, you can appeal from the sign-in page.';
 
 /**
+ * Said to a member whose account she has locked herself (POST /auth/lock, or
+ * the "this was not me" link in a new-device sign-in email), on every surface
+ * that refuses it. It is deliberately not the suspended wording: nobody on
+ * staff did this, there is nothing to appeal, and the way back is the link in
+ * the email she was sent. Keep the word "locked": both sign-in screens look for
+ * it to offer a new unlock email.
+ */
+export const ACCOUNT_LOCKED_MESSAGE =
+  'This account is locked. You locked it to keep it safe, and the email we sent you has the link to unlock it. If you cannot find it, ask for a new one from the sign-in page.';
+
+/**
+ * Said at sign-in, and to a session that outlived the address's confirmation,
+ * when the address has not been proved to be hers. Both sign-in screens match
+ * on "verify your email" to offer a new link, and auth-recovery.test.ts pins
+ * the sentence.
+ */
+export const EMAIL_NOT_VERIFIED_MESSAGE = 'Please verify your email before signing in.';
+
+/**
  * What a staff member without a second factor may still reach: enrolling one,
  * reading who she is, and keeping or ending her session. Every other authenticated route is
  * refused until the factor is enrolled, whether it checks the role through
@@ -65,6 +87,10 @@ const TWO_FACTOR_ENROLMENT_ROUTES: ReadonlySet<string> = new Set([
   'POST /api/auth/refresh',
   'POST /api/auth/logout',
   'POST /api/auth/logout-all',
+  // Locking her own account only ever shuts a door, and an unenrolled staff
+  // account is the one most likely to be told, mid-enrolment, that somebody
+  // else is in it.
+  'POST /api/auth/lock',
 ]);
 
 /**
@@ -93,7 +119,20 @@ async function resolveAuthenticatedUser(token: string) {
       persona: true,
       isSuspended: true,
       bannedAt: true,
+      // Her own lock and the address's confirmation, read on every request
+      // so that neither depends on the sessions having been revoked: a sign-in
+      // that was part-way through when she locked the account would otherwise
+      // hold a live token for a locked account, and an address an admin
+      // un-confirms would keep every session it already had.
+      lockedAt: true,
+      emailVerified: true,
       twoFactorEnabled: true,
+      // Read for the account-standing refusal in authenticate, so a member a
+      // reviewer has refused, or whose date of birth is under the minimum,
+      // does not keep every write on the platform. The row is read on every
+      // request already; these cost no extra query.
+      womanVerificationStatus: true,
+      dateOfBirth: true,
     },
   });
 
@@ -106,8 +145,25 @@ async function resolveAuthenticatedUser(token: string) {
   // closes the account here, so a ban never depends on a second write having
   // happened. The wording stays the suspended one: the account's state is not
   // for the refusal to tell.
-  const { bannedAt, ...principal } = user;
-  return { user: { ...principal, isSuspended: user.isSuspended || Boolean(bannedAt) }, sessionId: session.id };
+  const { bannedAt, lockedAt, emailVerified, ...principal } = user;
+  return {
+    user: {
+      ...principal,
+      isSuspended: user.isSuspended || Boolean(bannedAt),
+      isLocked: Boolean(lockedAt),
+      // Only an explicit false: a row that does not say is not read as one.
+      emailUnverified: emailVerified === false,
+    },
+    sessionId: session.id,
+  };
+}
+
+/** The refusal an account that may not hold a session gets, or null when it may. */
+function closedPrincipalRefusal(user: { isSuspended: boolean; isLocked: boolean; emailUnverified: boolean }) {
+  if (user.isSuspended) return ForbiddenError(SUSPENDED_ACCOUNT_MESSAGE);
+  if (user.isLocked) return ForbiddenError(ACCOUNT_LOCKED_MESSAGE);
+  if (user.emailUnverified) return ForbiddenError(EMAIL_NOT_VERIFIED_MESSAGE);
+  return null;
 }
 
 /**
@@ -121,8 +177,9 @@ export type AuthenticatedPrincipal = NonNullable<AuthRequest['user']>;
 
 export async function authenticateSocketToken(token: string): Promise<AuthenticatedPrincipal> {
   const { user, sessionId } = await resolveAuthenticatedUser(token);
-  if (user.isSuspended) {
-    throw ForbiddenError(SUSPENDED_ACCOUNT_MESSAGE);
+  const closed = closedPrincipalRefusal(user);
+  if (closed) {
+    throw closed;
   }
   return {
     id: user.id,
@@ -154,8 +211,9 @@ export const authenticate = async (
 
     const { user, sessionId } = await resolveAuthenticatedUser(token);
 
-    if (user.isSuspended) {
-      throw ForbiddenError(SUSPENDED_ACCOUNT_MESSAGE);
+    const closed = closedPrincipalRefusal(user);
+    if (closed) {
+      throw closed;
     }
 
     req.user = {
@@ -173,6 +231,19 @@ export const authenticate = async (
     const refusal = staffTwoFactorRefusal(req.user);
     if (refusal && !isTwoFactorEnrolmentPath(req.method, req.originalUrl.split('?')[0])) {
       return res.status(403).json(refusal);
+    }
+
+    // The women-only and minimum-age promises, enforced once for every write
+    // rather than route by route. See account-standing.ts for what stays open.
+    const standingRefusal = accountStandingRefusal(user, req.method, req.originalUrl.split('?')[0]);
+    if (standingRefusal) {
+      logger.warn('Account in bad standing refused a write', {
+        userId: user.id,
+        code: standingRefusal.code,
+        method: req.method,
+        path: req.originalUrl.split('?')[0],
+      });
+      return res.status(403).json(standingRefusal);
     }
 
     next();
@@ -201,9 +272,9 @@ export const optionalAuth = async (
       if (token) {
         const { user, sessionId } = await resolveAuthenticatedUser(token);
 
-        // A suspended account reads public surfaces as a stranger would rather
-        // than failing the request outright.
-        if (user && !user.isSuspended) {
+        // A suspended or locked account reads public surfaces as a stranger
+        // would rather than failing the request outright.
+        if (user && !closedPrincipalRefusal(user)) {
           req.user = {
             id: user.id,
             email: user.email,
@@ -257,12 +328,12 @@ function refuseForPlan(res: Response, message: string) {
   return res.status(403).json({ success: false, code: 'PREMIUM_REQUIRED', message });
 }
 
-const hasLiveSubscription = (status: string) => status === 'ACTIVE' || status === 'TRIALING';
-
 /**
- * A paid tier on a subscription that is ACTIVE or TRIALING. The AI router
- * applies the same rule through its own requireAiPremium, which also tells a
- * lapsed member which state her subscription is in.
+ * A paid tier on a subscription that is live: ACTIVE, TRIALING, or past due and
+ * still inside the grace after a failed renewal (utils/subscription-entitlement,
+ * the one rule every plan gate shares). The AI router applies the same rule
+ * through its own requireAiPremium, which also tells a lapsed member which state
+ * her subscription is in.
  */
 export const requirePremium = async (
   req: AuthRequest,
@@ -276,14 +347,14 @@ export const requirePremium = async (
 
     const subscription = await prisma.subscription.findUnique({
       where: { userId: req.user.id },
-      select: { tier: true, status: true },
+      select: { tier: true, status: true, currentPeriodStart: true },
     });
 
     if (!subscription || subscription.tier === 'FREE') {
       return refuseForPlan(res, 'Premium subscription required');
     }
 
-    if (!hasLiveSubscription(subscription.status)) {
+    if (!hasLiveEntitlement(subscription)) {
       return refuseForPlan(res, 'Active subscription required');
     }
 
@@ -306,10 +377,10 @@ export const requireSubscriptionTier = (...tiers: string[]) => {
 
       const subscription = await prisma.subscription.findUnique({
         where: { userId: req.user.id },
-        select: { tier: true, status: true },
+        select: { tier: true, status: true, currentPeriodStart: true },
       });
 
-      if (!subscription || !hasLiveSubscription(subscription.status)) {
+      if (!subscription || !isSubscriptionLive(subscription)) {
         return refuseForPlan(res, 'Active subscription required');
       }
 

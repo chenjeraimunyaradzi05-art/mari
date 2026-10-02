@@ -21,6 +21,9 @@ jest.mock('../../utils/prisma', () => ({
     eventRegistration: { findMany: jest.fn(async () => []), upsert: jest.fn(async () => ({})), delete: jest.fn() },
     eventSave: { upsert: jest.fn(), delete: jest.fn() },
     contentReport: { findMany: jest.fn(async () => []), update: jest.fn(async () => ({})) },
+    // The host's block lists, in both stores: nobody is blocked unless a test says so.
+    userSafetySettings: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
+    dvSafetyProfile: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },
     user: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
     notification: { findMany: jest.fn(async () => []), create: jest.fn(async () => ({})), createMany: jest.fn(async () => ({ count: 1 })) },
     auditLog: { create: jest.fn(async () => ({})) },

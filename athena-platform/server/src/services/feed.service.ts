@@ -5,7 +5,7 @@
 
 import { prisma } from '../utils/prisma';
 import { REPOST_OF_INCLUDE } from './post-decoration.service';
-import { authorAudienceWhere, followingIdsOf } from './audience.service';
+import { authorAudienceWhere, followingIdsOf, visiblePostWhere } from './audience.service';
 import { mutedWordMatcher } from '../utils/muted-words';
 import { cacheGetOrSet, CacheKeys } from '../utils/cache';
 import { logger } from '../utils/logger';
@@ -284,13 +284,8 @@ export async function generateFeed(options: FeedOptions): Promise<{
 
   const blockedAuthorIds = [...new Set(excludeAuthorIds)].filter(Boolean);
 
-  // Build base query
-  let where: any = { isPublic: true, isHidden: false };
-
   // Filter by content type
-  if (type !== 'all') {
-    where.type = type.toUpperCase();
-  }
+  const typeFilter: { type?: string } = type !== 'all' ? { type: type.toUpperCase() } : {};
 
   // Get user context for personalization
   let userContext: any = null;
@@ -309,24 +304,15 @@ export async function generateFeed(options: FeedOptions): Promise<{
     if (userContext) {
       followingIds = userContext.following.map((f: any) => f.followingId);
       followingIds.push(userId); // Include own posts
-
-      // Include private posts from people we follow
-      where = {
-        OR: [
-          { isPublic: true, isHidden: false },
-          { authorId: { in: followingIds }, isHidden: false },
-        ],
-      };
-
-      // Add type filter back
-      if (type !== 'all') {
-        where.AND = [{ type: type.toUpperCase() }];
-      }
     }
   }
 
-  // Connections-only authors reach their followers; private authors nobody.
-  where = { AND: [where, authorAudienceWhere(userId, followingIds)] };
+  // Public posts, and her own whatever their setting, whose author lets her
+  // read them: connections-only authors reach their followers, private authors
+  // nobody. This used to say "include private posts from people we follow" and
+  // did, so every follower was shown a post whose author had unticked "Post
+  // publicly"; every route that opens one post treats that as hers alone.
+  let where: any = { AND: [typeFilter, visiblePostWhere(userId, followingIds)] };
 
   // Blocked in either direction, removed before the ranking rather than after
   // the slice. See excludeAuthorIds on FeedOptions for what the old order of
@@ -377,8 +363,9 @@ export async function generateFeed(options: FeedOptions): Promise<{
       authorId: {
         in: [...new Set([...followingIds, userId])].filter((id) => !blocked.has(id)),
       },
-      isHidden: false,
-      AND: [authorAudienceWhere(userId, followingIds)],
+      // The same rule as the ranked feed above, so a private post of someone she
+      // follows is not the one query that forgot it.
+      AND: [visiblePostWhere(userId, followingIds)],
     };
     if (type !== 'all') inNetworkWhere.type = type.toUpperCase();
 

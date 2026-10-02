@@ -8,6 +8,9 @@ jest.mock('../../utils/prisma', () => ({
     dvSafetyProfile: { findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => null) },
     userSafetySettings: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
     video: { findMany: jest.fn() },
+    // A signed-in feed is decorated with the viewer's likes and saves.
+    videoLike: { findMany: jest.fn(async () => []) },
+    videoSave: { findMany: jest.fn(async () => []) },
     follow: { findMany: jest.fn() },
     userFeedPreferences: { findUnique: jest.fn() },
   },
@@ -36,6 +39,7 @@ jest.mock('../../utils/logger', () => ({
 
 import { app } from '../../index';
 import { prisma as prismaTyped } from '../../utils/prisma';
+import { authorVisibleWhere } from '../../services/audience.service';
 
 const prisma: any = prismaTyped;
 
@@ -164,5 +168,49 @@ describe('GET /api/video/feed', () => {
     await request(app).get('/api/video/feed').expect(500);
 
     expect(prisma.video.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /api/video/feed and a member in Safe Mode', () => {
+  // A reel carries its author's name and picture, so a reel from a member in
+  // Safe Mode named her to every stranger whose feed it reached. Who comes back,
+  // over real rows, is in tests/discreet-members.test.ts; this is the clause.
+  beforeEach(() => {
+    jest.clearAllMocks();
+    authenticatedUserId = null;
+    (prisma.video.findMany as any).mockResolvedValue([]);
+    (prisma.userFeedPreferences.findUnique as any).mockResolvedValue(null);
+  });
+
+  it('keeps her reels out of a signed-out visitor’s For You and Trending', async () => {
+    await request(app).get('/api/video/feed').expect(200);
+    await request(app).get('/api/video/feed?feed=trending').expect(200);
+
+    expect((prisma.video.findMany as any).mock.calls).toHaveLength(2);
+    for (const [args] of (prisma.video.findMany as any).mock.calls) {
+      expect(args.where.AND).toEqual([{ author: authorVisibleWhere(undefined) }]);
+    }
+  });
+
+  it('sends the viewer’s id with it, so herself and her verified followers are let through', async () => {
+    authenticatedUserId = 'user-123';
+
+    await request(app).get('/api/video/feed').expect(200);
+
+    const { where } = (prisma.video.findMany as any).mock.calls[0][0];
+    expect(where.AND).toEqual([{ author: authorVisibleWhere('user-123') }]);
+    // The block clause on `author` is the viewer's own and stays beside it.
+    expect(where.author).toEqual({ NOT: { dvSafetyProfile: { is: { blockedUserIds: { has: 'user-123' } } } } });
+  });
+
+  it('keeps the following tab to the authors followed, with the rule on top', async () => {
+    authenticatedUserId = 'user-123';
+    (prisma.follow.findMany as any).mockResolvedValue([{ followingId: 'a1' }]);
+
+    await request(app).get('/api/video/feed?feed=following').expect(200);
+
+    const { where } = (prisma.video.findMany as any).mock.calls[0][0];
+    expect(where.authorId.in).toEqual(['a1']);
+    expect(where.AND).toEqual([{ author: authorVisibleWhere('user-123') }]);
   });
 });

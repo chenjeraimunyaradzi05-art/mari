@@ -6,6 +6,9 @@ jest.mock('../../utils/prisma', () => ({
     housingListing: { findMany: jest.fn(async () => []), findUnique: jest.fn(), update: jest.fn(async () => ({})) },
     housingInquiry: { findUnique: jest.fn(), update: jest.fn(async () => ({})) },
     notification: { create: jest.fn(async () => ({})) },
+    // Read when a notice is written, for the member's "keep notifications vague".
+    dvSafetyProfile: { findUnique: jest.fn(async () => null) },
+    profile: { findUnique: jest.fn(async () => null) },
   },
 }));
 

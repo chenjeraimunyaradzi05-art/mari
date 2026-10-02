@@ -33,7 +33,7 @@ import {
   getAuthorityEscalation,
   updateAuthorityEscalationStatus,
 } from '../services/content-report.service';
-import { getMaintenanceState, setMaintenanceState } from '../services/feature-flags.service';
+import { getMaintenanceState, getPaymentsPause, setMaintenanceState, setPaymentsPause } from '../services/feature-flags.service';
 import { recordAdminAction } from '../services/admin-audit.service';
 import {
   isRecognisedHeldDataType,
@@ -58,6 +58,16 @@ const parseDate = (value: unknown, field: string): Date | undefined => {
     throw new ApiError(400, `${field} must be a valid date`);
   }
   return date;
+};
+
+/** A count of people or records: a whole number from 0, as a number or numeric text. */
+const parseCount = (value: unknown, field: string): number | undefined => {
+  if (value === undefined || value === null || value === '') return undefined;
+  const count = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : Number.NaN;
+  if (!Number.isInteger(count) || count < 0 || count > 1_000_000_000) {
+    throw new ApiError(400, `${field} must be a whole number from 0`);
+  }
+  return count;
 };
 
 const parseStringArray = (value: unknown, field: string): string[] => {
@@ -180,6 +190,9 @@ const isDataCategory = (value: unknown): value is DataCategory =>
  * NDB assessment window for Australia (the default), the 72-hour regulator
  * clock for UK and EU members, or both.
  */
+// validated: title and description must be non-empty text, severity and each data category are
+//   checked against their enums, jurisdictions go through parseJurisdictions, the two counts
+//   through parseCount and the date through parseDate.
 router.post('/breaches', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { title, description, severity, dataCategories, affectedRecords, affectedUsers } = req.body ?? {};
@@ -212,8 +225,8 @@ router.post('/breaches', ...adminOnly, async (req: AuthRequest, res: Response, n
       detectedBy: req.user!.id,
       severity,
       dataCategories: categories as DataCategory[],
-      affectedRecords: affectedRecords === undefined ? undefined : Number(affectedRecords),
-      affectedUsers: affectedUsers === undefined ? undefined : Number(affectedUsers),
+      affectedRecords: parseCount(affectedRecords, 'affectedRecords'),
+      affectedUsers: parseCount(affectedUsers, 'affectedUsers'),
       occurredAt: parseDate(req.body?.occurredAt, 'occurredAt'),
       jurisdictions,
     });
@@ -353,6 +366,8 @@ router.get('/breaches/:id', ...adminOnly, async (req: AuthRequest, res: Response
  * PATCH /admin/breaches/:id
  * Record containment, remediation and root cause as the investigation runs
  */
+// validated: status is checked against BreachStatus (and NOTIFIED is refused), the two action lists
+//   go through parseStringArray.
 router.patch('/breaches/:id', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { status, containmentActions, remediationActions, rootCause } = req.body ?? {};
@@ -417,6 +432,8 @@ router.post('/breaches/:id/ndb-assessment', ...adminOnly, async (req: AuthReques
  * PATCH /admin/breaches/:id/ndb-assessment
  * Record the outcome: whether serious harm is likely, and whether it was averted
  */
+// validated: seriousHarmLikely must be a boolean and reasoning non-empty text; remediedBeforeHarm
+//   is read as === true.
 router.patch('/breaches/:id/ndb-assessment', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { seriousHarmLikely, remediedBeforeHarm, reasoning } = req.body ?? {};
@@ -460,6 +477,9 @@ router.patch('/breaches/:id/ndb-assessment', ...adminOnly, async (req: AuthReque
  *
  * `jurisdiction` picks the path and defaults to the breach's first regime.
  */
+// validated: regulatorName and regulatorEmail must be text (the email must contain @), jurisdiction
+//   one of BREACH_JURISDICTIONS, and an Australian notification carries a statement that
+//   validateNdbStatement checks field by field.
 router.post(
   '/breaches/:id/notify-regulator',
   ...adminOnly,
@@ -532,18 +552,63 @@ router.post(
 );
 
 /**
+ * POST /admin/breaches/:id/notify-users/preview
+ * How the members in a list would be told, before anyone is: how many are
+ * emailed, and how many use Safe Mode or have filed a safety report and are
+ * told in the app only. Reads, sends nothing, writes nothing.
+ */
+// validated: userIds goes through parseStringArray and must not be empty.
+router.post(
+  '/breaches/:id/notify-users/preview',
+  ...adminOnly,
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const userIds = parseStringArray(req.body?.userIds, 'userIds');
+      if (userIds.length === 0) {
+        throw new ApiError(400, 'userIds is required');
+      }
+
+      const breach = await prisma.dataBreach.findUnique({ where: { id: req.params.id }, select: { id: true } });
+      if (!breach) {
+        throw new ApiError(404, 'Breach not found');
+      }
+
+      res.json({ success: true, ...(await breachNotificationService.previewNoticeAudience(userIds)) });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
  * POST /admin/breaches/:id/notify-users
  * Tell the people affected (Privacy Act s 26WL; GDPR Article 34). The breach
  * record holds only a count of affected users, never their ids, so the ids to
  * notify have to be supplied. An Australian breach must also tell them what
  * they can do: the statement's recommended steps, or `recommendedSteps` here.
+ *
+ * Members who use Safe Mode or have filed a safety report are told in the app
+ * and not emailed, because an email can be read by the person they are
+ * protecting themselves from. To email them as well the request must carry
+ * `emailSafetyMembers: true`, `counselConsulted: true` (privacy counsel has
+ * approved the wording and the send) and the `neutralSubject` counsel
+ * approved. `safetyNotificationContent` is the wording for these members when
+ * it should differ from `notificationContent`. See
+ * docs/security/incident-response.md, "Safety-critical addendum".
+ *
+ * The answer says how many were emailed and how many told in the app, and
+ * lists by id the members no notice reached, so the send can be repeated for
+ * them alone.
  */
+// validated: userIds goes through parseStringArray; each text field must be text (neutralSubject at
+//   most 120 characters, safetyNotificationContent 4,000) and each flag a boolean.
 router.post(
   '/breaches/:id/notify-users',
   ...adminOnly,
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
-      const { notificationContent, recommendedSteps } = req.body ?? {};
+      const { notificationContent, recommendedSteps, emailSafetyMembers, counselConsulted, neutralSubject, safetyNotificationContent } =
+        req.body ?? {};
       const userIds = parseStringArray(req.body?.userIds, 'userIds');
 
       if (userIds.length === 0) {
@@ -554,6 +619,16 @@ router.post(
       }
       if (recommendedSteps !== undefined && typeof recommendedSteps !== 'string') {
         throw new ApiError(400, 'recommendedSteps must be a string');
+      }
+      for (const [field, value] of [['emailSafetyMembers', emailSafetyMembers], ['counselConsulted', counselConsulted]] as const) {
+        if (value !== undefined && typeof value !== 'boolean') {
+          throw new ApiError(400, `${field} must be true or false`);
+        }
+      }
+      for (const [field, value, max] of [['neutralSubject', neutralSubject, 120], ['safetyNotificationContent', safetyNotificationContent, 4000]] as const) {
+        if (value !== undefined && (typeof value !== 'string' || value.length > max)) {
+          throw new ApiError(400, `${field} must be text of ${max} characters or fewer`);
+        }
       }
 
       const breach = await prisma.dataBreach.findUnique({ where: { id: req.params.id } });
@@ -567,14 +642,29 @@ router.post(
         );
       }
 
-      await breachNotificationService.notifyAffectedUsers(
+      const outcome = await breachNotificationService.notifyAffectedUsers(
         req.params.id,
         userIds,
         notificationContent.trim(),
-        recommendedSteps?.trim() || undefined
+        recommendedSteps?.trim() || undefined,
+        {
+          emailSafetyMembers: emailSafetyMembers === true,
+          counselConsulted: counselConsulted === true,
+          neutralSubject: neutralSubject?.trim() || undefined,
+          safetyNotificationContent: safetyNotificationContent?.trim() || undefined,
+        }
       );
 
-      res.json({ success: true, requested: userIds.length });
+      logger.warn('Members notified of data breach', {
+        breachId: req.params.id,
+        requested: outcome.requested,
+        emailed: outcome.emailed,
+        inApp: outcome.inApp,
+        notReached: outcome.failedUserIds.length,
+        adminId: req.user?.id,
+      });
+
+      res.json({ success: true, ...outcome });
     } catch (error) {
       next(error);
     }
@@ -722,6 +812,8 @@ async function auditHold(
  * POST /admin/legal-holds
  * Suspend erasure and retention purges for named accounts or data types
  */
+// validated: name and reason must be non-empty text; data types, members and the end date go
+//   through parseHeldDataTypes, resolveHeldMembers and parseHoldEndDate.
 router.post('/legal-holds', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { name, reason, caseReference } = req.body ?? {};
@@ -873,6 +965,8 @@ router.get('/legal-holds/:id', ...adminOnly, async (req: AuthRequest, res: Respo
  * taking a member or a data type out of a hold makes deletions possible again,
  * which is a release, and a release has to say on whose authority and why.
  */
+// validated: data types, members and the end date go through parseHeldDataTypes, resolveHeldMembers
+//   and parseHoldEndDate; at least one change is required.
 router.patch('/legal-holds/:id', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const body = req.body ?? {};
@@ -933,6 +1027,7 @@ router.patch('/legal-holds/:id', ...adminOnly, async (req: AuthRequest, res: Res
  * POST /admin/legal-holds/:id/release
  * Lift a hold so erasure and purges resume for the accounts it covered
  */
+// validated: releaseReason must be non-empty text.
 router.post(
   '/legal-holds/:id/release',
   ...adminOnly,
@@ -1002,6 +1097,7 @@ router.get('/maintenance', ...adminOnly, async (_req: AuthRequest, res: Response
  * Open or close the platform. Called by the launch runbook and by the rollback
  * procedure, both of which post { enabled, message }.
  */
+// validated: enabled must be a boolean, message text if given, endsAt goes through parseDate.
 router.post('/maintenance', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { enabled, message } = req.body ?? {};
@@ -1029,13 +1125,76 @@ router.post('/maintenance', ...adminOnly, async (req: AuthRequest, res: Response
     });
 
     // The log line above is the incident timeline; this row is the durable
-    // record. Closing the platform takes the domestic violence tooling down
-    // with everything else, so who did it has to survive log rotation.
+    // record. Closing the platform shuts out every member for as long as it is
+    // closed (the safety tooling stays open; see middleware/maintenance-gate.ts),
+    // so who did it has to survive log rotation.
     await recordAdminAction(req, 'MAINTENANCE_MODE_CHANGED', {
       resourceType: 'MaintenanceMode',
       enabled: state.enabled,
       message: state.message,
       endsAt: state.endsAt,
+    });
+
+    res.json(state);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============================================================================
+// PAYMENTS PAUSE
+// ============================================================================
+
+/**
+ * GET /admin/payments-pause
+ * Whether new payments are paused, read past the five-second cache so an
+ * operator who just flipped the switch is never shown a stale answer.
+ */
+router.get('/payments-pause', ...adminOnly, async (_req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    res.json(await getPaymentsPause({ fresh: true }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /admin/payments-pause
+ * Pause or resume every new charge, hold, capture, payout and transfer, without a
+ * deploy. Members can still sign in, read and ask for refunds, and the Stripe
+ * webhooks keep recording what Stripe has already done. The incident runbook
+ * (docs/security/incident-response.md) says when to use it.
+ */
+const PAYMENTS_PAUSE_MESSAGE_MAX = 500;
+// validated: enabled must be a boolean and message text of at most 500 characters.
+router.post('/payments-pause', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { enabled, message } = req.body ?? {};
+
+    if (typeof enabled !== 'boolean') {
+      throw new ApiError(400, 'enabled must be a boolean');
+    }
+    if (message !== undefined && message !== null && typeof message !== 'string') {
+      throw new ApiError(400, 'message must be a string');
+    }
+    if (typeof message === 'string' && message.length > PAYMENTS_PAUSE_MESSAGE_MAX) {
+      throw new ApiError(400, `message must be ${PAYMENTS_PAUSE_MESSAGE_MAX} characters or fewer`);
+    }
+
+    const state = await setPaymentsPause({ enabled, message, actorId: req.user?.id ?? null });
+
+    // Warn level on purpose: stopping or restarting every payment is one of the
+    // lines an incident timeline most needs.
+    logger.warn(`Payments ${enabled ? 'PAUSED' : 'RESUMED'}`, {
+      adminId: req.user?.id,
+      message: state.message,
+    });
+
+    // The log is the timeline; this row is the record that survives it.
+    await recordAdminAction(req, 'PAYMENTS_PAUSE_CHANGED', {
+      resourceType: 'PaymentsPause',
+      paused: state.paused,
+      message: state.message,
     });
 
     res.json(state);
@@ -1105,6 +1264,8 @@ router.get(
  * PATCH /admin/moderation/escalations/:id
  * Advance a referral once the authority has receipted or closed it
  */
+// validated: status is checked against ESCALATION_STATUSES, referenceNumber must be non-empty text,
+//   notes is read only when it is text.
 router.patch(
   '/moderation/escalations/:id',
   ...adminOnly,

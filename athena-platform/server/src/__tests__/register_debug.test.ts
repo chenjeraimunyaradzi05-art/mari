@@ -115,8 +115,14 @@ describe('registration flow (mocked prisma)', () => {
       .expect(201);
 
     expect(res.body).toHaveProperty('success', true);
-    expect(res.body?.data?.user?.email).toBe('debug.user@example.com');
-    expect(res.body?.data?.user?.persona).toBe('MID_CAREER');
+    // The reply describes no account (a taken address gets the same body); the
+    // normalised address and the persona are what was written.
+    expect(res.body?.data?.user).toBeUndefined();
+    expect(prisma.user.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ email: 'debug.user@example.com', persona: 'MID_CAREER' }),
+      })
+    );
     expect(res.body?.data?.verificationRequired).toBe(true);
     expect(res.body?.data?.accessToken).toBeUndefined();
     expect(getSetCookieHeader(res)).not.toContain('refreshToken=');

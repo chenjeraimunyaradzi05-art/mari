@@ -6,9 +6,11 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate, AuthRequest, optionalAuth } from '../middleware/auth';
 import * as engagementService from '../services/engagement.service';
+import { viewerContextFor } from '../services/search.service';
 import { logger } from '../utils/logger';
 import { createRateLimiter } from '../middleware/rateLimiter';
 import { bestEffort } from '../utils/best-effort';
+import { clampLimit } from '../utils/pagination';
 
 const router = Router();
 
@@ -113,7 +115,7 @@ router.get('/xp', authenticate, async (req: Request, res: Response, next: NextFu
  */
 router.get('/xp/history', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+    const limit = clampLimit(req.query.limit, 20, 100);
     const history = await engagementService.getXPHistory((req as AuthRequest).user!.id, limit);
     res.json({ history });
   } catch (error) {
@@ -168,6 +170,19 @@ router.post('/streaks/check-in', authenticate, checkInLimiter, async (req: Reque
 // ==========================================
 
 /**
+ * The members on either side of a block with this viewer, for taking them off a
+ * leaderboard. The leaderboard itself is cached and shared by every viewer, so
+ * who it lists cannot depend on one of them; this is the part that does. Read
+ * the way search reads it, in both block stores, and not best-effort: a list
+ * that could not be read must not become a leaderboard that lists the man she
+ * blocked. Nothing for a signed-out visitor, who has blocked no one.
+ */
+async function blockedIdsOf(req: Request): Promise<string[]> {
+  const viewerId = (req as AuthRequest).user?.id;
+  return viewerId ? (await viewerContextFor(viewerId)).blockedIds : [];
+}
+
+/**
  * GET /api/engagement/leaderboard
  * Get leaderboard by type
  */
@@ -175,9 +190,13 @@ router.get('/leaderboard', optionalAuth, async (req: Request, res: Response, nex
   try {
     const type = (req.query.type as 'xp' | 'followers' | 'posts' | 'streak') || 'xp';
     const period = (req.query.period as 'daily' | 'weekly' | 'monthly' | 'alltime') || 'weekly';
-    const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
+    const limit = clampLimit(req.query.limit, 10, 50);
 
-    const leaderboard = await engagementService.getLeaderboard(type, period, limit);
+    const blockedIds = await blockedIdsOf(req);
+    const leaderboard = engagementService.withoutBlockedMembers(
+      await engagementService.getLeaderboard(type, period, limit),
+      blockedIds
+    );
 
     // Add user's rank if authenticated
     let userRank = null;
@@ -210,9 +229,12 @@ router.get('/leaderboard', optionalAuth, async (req: Request, res: Response, nex
 router.get('/leaderboard/xp', optionalAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const period = (req.query.period as 'daily' | 'weekly' | 'monthly' | 'alltime') || 'alltime';
-    const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
+    const limit = clampLimit(req.query.limit, 10, 50);
 
-    const leaderboard = await engagementService.getLeaderboard('xp', period, limit);
+    const leaderboard = engagementService.withoutBlockedMembers(
+      await engagementService.getLeaderboard('xp', period, limit),
+      await blockedIdsOf(req)
+    );
     res.json({ leaderboard, type: 'xp', period });
   } catch (error) {
     next(error);
@@ -226,9 +248,12 @@ router.get('/leaderboard/xp', optionalAuth, async (req: Request, res: Response, 
 router.get('/leaderboard/creators', optionalAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const period = (req.query.period as 'daily' | 'weekly' | 'monthly' | 'alltime') || 'weekly';
-    const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
+    const limit = clampLimit(req.query.limit, 10, 50);
 
-    const leaderboard = await engagementService.getLeaderboard('followers', period, limit);
+    const leaderboard = engagementService.withoutBlockedMembers(
+      await engagementService.getLeaderboard('followers', period, limit),
+      await blockedIdsOf(req)
+    );
     res.json({ leaderboard, type: 'creators', period });
   } catch (error) {
     next(error);

@@ -18,8 +18,17 @@ import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { decoratePosts } from '../services/post-decoration.service';
 import { attachSounds } from '../services/sound.service';
+import { clampLimit } from '../utils/pagination';
+import { authorAudienceWhere, authorVisibleWhere } from '../services/audience.service';
+import { authorScopeFor, publicPostWhere, viewerContextFor } from '../services/search.service';
+import { PUBLIC_AUTHOR_SELECT, maskLegalNamesInResponses } from '../utils/member-display';
 
 const router = Router();
+
+// Every answer from here goes to other members, so a member who is not the reader is
+// named by her public name and her legal first and last name are never sent (see
+// utils/member-display: the pseudonymous display name). The authors of a topic's posts are covered.
+router.use(maskLegalNamesInResponses);
 
 const HASHTAG_PATTERN = /#([\p{L}\p{N}_]{2,64})/gu;
 
@@ -36,7 +45,7 @@ export function hashtagsIn(text: string | null | undefined): string[] {
 
 const AUTHOR_SELECT = {
   author: {
-    select: { id: true, firstName: true, lastName: true, displayName: true, avatar: true, headline: true },
+    select: PUBLIC_AUTHOR_SELECT,
   },
 };
 
@@ -101,10 +110,15 @@ async function readSpan(days: number, now: number): Promise<TaggedItem[]> {
       where: {
         isHidden: false,
         isPublic: true,
-        groupId: null,
         createdAt: { gte: since },
         content: { contains: '#' },
-        ...(after ? { AND: [after] } : {}),
+        // The count is one for everyone, so it is made of what a stranger may
+        // be shown: no group's posts (authorAudienceWhere keeps them out), and
+        // none by a member whose profile is private, connections-only or in
+        // Safe Mode. A tag used only by them would otherwise trend, and be
+        // offered by the composer, on the strength of posts nobody outside
+        // their audience can open.
+        AND: [authorAudienceWhere(), ...(after ? [after] : [])],
       },
       select: { id: true, content: true, createdAt: true },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
@@ -134,6 +148,7 @@ async function readSpan(days: number, now: number): Promise<TaggedItem[]> {
         status: 'PUBLISHED',
         isHidden: false,
         publishedAt: { gte: since },
+        author: authorVisibleWhere(),
         ...(after ? { AND: [after] } : {}),
       },
       select: { id: true, hashtags: true, publishedAt: true },
@@ -250,8 +265,9 @@ async function followedTagsOf(userId: string): Promise<string[]> {
 
 router.get('/trending', async (req, res, next) => {
   try {
-    const days = typeof req.query.days === 'string' ? parseInt(req.query.days, 10) || 7 : 7;
-    const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) || 10 : 10;
+    // Both are bounded: `days` is how far back the counting query reads.
+    const days = clampLimit(req.query.days, 7, 90);
+    const limit = clampLimit(req.query.limit, 10, 50);
     res.json({ success: true, data: await trendingTopics(days, limit), days });
   } catch (error) {
     next(error);
@@ -296,21 +312,39 @@ router.get('/:tag', optionalAuth, async (req: AuthRequest, res, next) => {
     const tag = normalizeTag(req.params.tag);
     if (!tag) throw new ApiError(400, 'A topic needs a name');
 
+    // A topic page is open to anyone, signed in or not, and lists whole posts
+    // and reels with their authors. It asked only "public, not hidden, not in a
+    // group", so a member whose profile is private or connections-only had her
+    // posts listed to strangers, a member in Safe Mode her reels, and a member
+    // the viewer had blocked both. Read before anything is listed, and not
+    // best-effort: a lookup that fails fails the page rather than listing
+    // everyone.
+    const viewer = await viewerContextFor(req.user?.id);
+    const postWhere: Prisma.PostWhereInput = {
+      AND: [publicPostWhere(viewer), { content: { contains: `#${tag}`, mode: 'insensitive' } }],
+    };
+    const reelWhere: Prisma.VideoWhereInput = {
+      status: 'PUBLISHED',
+      isHidden: false,
+      hashtags: { has: tag },
+      ...authorScopeFor(viewer),
+    };
+
     const [posts, videos, postTotal, videoTotal, followers, mine] = await Promise.all([
       prisma.post.findMany({
-        where: { isHidden: false, isPublic: true, groupId: null, content: { contains: `#${tag}`, mode: 'insensitive' } },
+        where: postWhere,
         include: AUTHOR_SELECT,
         orderBy: { createdAt: 'desc' },
         take: 20,
       }),
       prisma.video.findMany({
-        where: { status: 'PUBLISHED', isHidden: false, hashtags: { has: tag } },
+        where: reelWhere,
         include: { author: { select: { id: true, displayName: true, avatar: true } } },
         orderBy: [{ engagementScore: 'desc' }, { publishedAt: 'desc' }],
         take: 12,
       }),
-      prisma.post.count({ where: { isHidden: false, isPublic: true, groupId: null, content: { contains: `#${tag}`, mode: 'insensitive' } } }),
-      prisma.video.count({ where: { status: 'PUBLISHED', isHidden: false, hashtags: { has: tag } } }),
+      prisma.post.count({ where: postWhere }),
+      prisma.video.count({ where: reelWhere }),
       prisma.userFeedPreferences.count({ where: { followedHashtags: { has: tag } } }),
       req.user ? followedTagsOf(req.user.id) : Promise.resolve([] as string[]),
     ]);

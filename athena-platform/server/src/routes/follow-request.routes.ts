@@ -18,24 +18,23 @@ import { authenticate, AuthRequest } from '../middleware/auth';
 import { notifySocial, socialLinks } from '../utils/social-notifications';
 import { checkSocialAchievements } from '../services/engagement.service';
 import { bestEffort } from '../utils/best-effort';
+import { publicName } from '../utils/member-display';
 
 const router = Router();
 
 const REQUESTER_SELECT = {
   requester: {
-    select: { id: true, firstName: true, lastName: true, displayName: true, avatar: true, headline: true },
+    select: { id: true, firstName: true, displayName: true, avatar: true, headline: true },
   },
 };
 
 function requestView(row: {
   id: string;
   createdAt: Date;
-  requester: { id: string; firstName: string | null; lastName: string | null; displayName: string | null; avatar: string | null; headline: string | null };
+  requester: { id: string; firstName: string | null; displayName: string | null; avatar: string | null; headline: string | null };
 }) {
-  const name =
-    row.requester.displayName?.trim() ||
-    [row.requester.firstName, row.requester.lastName].filter(Boolean).join(' ').trim() ||
-    'Member';
+  // Her public name, else her first name alone.
+  const name = publicName(row.requester);
   return {
     id: row.id,
     createdAt: row.createdAt,

@@ -84,9 +84,25 @@ export const CARD_HOLD_DAYS = 7;
  */
 const SECOND_HOLD_MARGIN = 60 * 60 * 1000;
 
-/** Whether an intent is the live processor's, which is the only kind whose hold runs out. */
+/** Whether this is a production deployment, where nothing is ever mocked. */
+function inProduction(): boolean {
+  return process.env.NODE_ENV === 'production';
+}
+
+/**
+ * Whether an intent is the live processor's, which is the only kind whose hold runs out.
+ *
+ * In production an intent that is not a mock is the live processor's whether or
+ * not a key is in the environment this minute. Asking the key made a real hold
+ * read as "not live" on a deployment that had lost it, so its lapse was never
+ * warned about.
+ */
 function isLiveIntent(paymentIntentId: string | null | undefined): paymentIntentId is string {
-  return Boolean(paymentIntentId) && !(paymentIntentId as string).startsWith('pi_mock_') && isStripeConfigured();
+  return (
+    Boolean(paymentIntentId) &&
+    !(paymentIntentId as string).startsWith('pi_mock_') &&
+    (isStripeConfigured() || inProduction())
+  );
 }
 
 /**
@@ -161,10 +177,19 @@ export async function readHoldState(escrow: { paymentIntentId: string | null; st
   // A mock hold has no card step and no webhook behind it: the development
   // processor records the hold the moment it is created, and the page says
   // plainly that nothing has left a card, so there is no later authorisation
-  // to wait for. The same answer is right for a deployment with no key at all,
-  // because that is the only way such a row can exist — createEscrowPayment
-  // refuses with a 503 in production rather than mocking.
-  if (escrow.paymentIntentId.startsWith('pi_mock_') || !isStripeConfigured()) return 'HELD';
+  // to wait for. The same answer is right for a development deployment with no
+  // key at all, because that is the only way such a row can exist —
+  // createEscrowPayment refuses with a 503 in production rather than mocking.
+  //
+  // Not in production. There, a hold nobody can ask the processor about is not
+  // money held: a real pi_ purchase on a deployment that had lost its key read as
+  // HELD, and the seller was told the money was held and to hand the car over,
+  // against a card nobody could confirm was authorised. And a mock id cannot
+  // legitimately exist there, so it is not read as money either. Both wait on the
+  // card step, which is true: the hold is not known to be there.
+  if (escrow.paymentIntentId.startsWith('pi_mock_') || !isStripeConfigured()) {
+    return inProduction() ? 'AWAITING_CARD' : 'HELD';
+  }
 
   // The row says PENDING, which means only that no webhook has moved it yet.
   // The lookup goes through bestEffort because a processor that cannot be

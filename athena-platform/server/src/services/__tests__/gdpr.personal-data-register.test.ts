@@ -16,8 +16,10 @@ jest.mock('../../utils/prisma', () => ({ prisma: {} }));
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
+  INCIDENT_COLUMNS_SHOWN_TO_SUBJECT,
   PERSONAL_DATA_MODELS,
   MODELS_OUTSIDE_PERSONAL_DATA_REGISTER,
+  REPORT_COLUMNS_SHOWN_TO_SUBJECT,
 } from '../gdpr.service';
 
 const schema = readFileSync(join(__dirname, '../../../prisma/schema.prisma'), 'utf8');
@@ -43,7 +45,7 @@ interface SchemaModel {
  * the check stricter.
  */
 const PERSON_ID_COLUMN =
-  /^(userId|.*UserId|memberId|ownerId|senderId|receiverId|recipientId|authorId|hostId|requesterId|requestedById|targetId|clientId|providerId|menteeId|mentorId|buyerId|sellerId|reporterId|reviewerId|reviewedById|createdById|facilitatorId|moderatorId|flaggedById|resolvedById|candidateId|followerId|followingId|friendId|referrerId|referredId|postedById|approvedBy|convertedUserId|inspectorId)$/;
+  /^(userId|.*UserId|memberId|ownerId|senderId|receiverId|recipientId|authorId|hostId|requesterId|requestedById|targetId|clientId|providerId|menteeId|mentorId|buyerId|sellerId|reporterId|reviewerId|reviewedById|createdById|facilitatorId|moderatorId|flaggedById|resolvedById|candidateId|followerId|followingId|friendId|referrerId|referredId|postedById|approvedBy|convertedUserId|inspectorId|agentId)$/;
 
 function parseSchema(): SchemaModel[] {
   const models: SchemaModel[] = [];
@@ -221,5 +223,84 @@ describe('the personal data register against the schema', () => {
     ]) {
       expect(registered.has(delegate)).toBe(true);
     }
+  });
+
+  describe('the people who reported or blocked a member', () => {
+    // An export that handed a reported man the reporter's account id would be the
+    // way he found her: GET /api/users/:id turns an id into a name. The reverse
+    // direction (what a reporter is given back about the people she reported) is
+    // withheld by exportable:false on safetyIncidentsReported.
+
+    it('never exports a row that names its reporter to the member it is about', () => {
+      const exposed = PERSONAL_DATA_MODELS.filter((entry) => entry.exportable !== false)
+        .filter((entry) => byDelegate.get(entry.model)?.fields.includes('reporterId'))
+        // A member is given back her own reports whole: she is the reporter.
+        .filter((entry) => !entry.keys.includes('reporterId'))
+        .filter((entry) => {
+          if (!entry.readable) return true;
+          const shown = entry.readable({ id: 'row', reporterId: 'the-reporter', reportedUserId: 'her', userId: 'her' });
+          return 'reporterId' in shown;
+        })
+        .map((entry) => entry.section);
+
+      expect(exposed).toEqual([]);
+    });
+
+    it('classifies every column of those tables, so a new column is not exported by default', () => {
+      // What a reported member is shown, and what she is not. A column in neither
+      // list fails here until somebody has said which, instead of going out.
+      const withheld: Record<string, string[]> = {
+        contentReport: ['reporterId', 'description', 'evidence', 'reviewerId', 'reviewNotes', 'aiConfidence', 'aiCategory', 'reviewDeadline', 'priority'],
+        safetyIncident: ['reporterId', 'resolvedById', 'metadata'],
+      };
+      const shown: Record<string, readonly string[]> = {
+        contentReport: REPORT_COLUMNS_SHOWN_TO_SUBJECT,
+        safetyIncident: INCIDENT_COLUMNS_SHOWN_TO_SUBJECT,
+      };
+
+      for (const delegate of Object.keys(shown)) {
+        const columns = byDelegate.get(delegate)!.fields;
+        const relations = new Set(['reporter', 'reportedUser']);
+        const scalar = columns.filter((column) => !relations.has(column));
+        expect([...shown[delegate], ...withheld[delegate]].sort()).toEqual([...scalar].sort());
+      }
+    });
+
+    it('does not export a block, which is never announced to the person it is made against', () => {
+      const blocks = PERSONAL_DATA_MODELS.find((entry) => entry.section === 'safetyIncidentsBlocks');
+      const incidents = PERSONAL_DATA_MODELS.find((entry) => entry.section === 'safetyIncidents');
+
+      expect(blocks).toMatchObject({ model: 'safetyIncident', erasure: 'delete', exportable: false });
+      expect(blocks?.where?.('member-1')).toEqual({ userId: 'member-1', type: 'BLOCK' });
+      // And the entry that is exported is the complement, so no row is in both or neither.
+      expect(incidents?.where?.('member-1')).toEqual({ userId: 'member-1', type: { not: 'BLOCK' } });
+    });
+  });
+
+  describe('the places a member listed for rent', () => {
+    // HousingListing.agentId is a bare column with no foreign key to User, which
+    // is how a lister's street address and her note on why a place is safe came
+    // to be in neither her export nor her erasure. The person-id pattern above
+    // now includes agentId, so the "registers every table" test fails on its own
+    // if the entry is dropped; these say what the entries do.
+    it('exports her listings and erases them with her', () => {
+      const listings = PERSONAL_DATA_MODELS.find((entry) => entry.model === 'housingListing');
+      expect(listings).toMatchObject({ section: 'housingListings', keys: ['agentId'], erasure: 'delete' });
+      expect(listings?.exportable).not.toBe(false);
+    });
+
+    it('removes the inquiries other women sent about them first, and never hands those back to the lister', () => {
+      const order = PERSONAL_DATA_MODELS.map((entry) => entry.section);
+      const onHers = PERSONAL_DATA_MODELS.find((entry) => entry.section === 'housingInquiriesOnHerListings');
+
+      expect(onHers).toMatchObject({ model: 'housingInquiry', erasure: 'delete', exportable: false });
+      expect(onHers?.reason).toMatch(/alias/);
+      // Erasure walks the register top to bottom and a listing with an inquiry
+      // still on it cannot be deleted (ON DELETE RESTRICT), so the order matters.
+      expect(order.indexOf('housingInquiriesOnHerListings')).toBeGreaterThanOrEqual(0);
+      expect(order.indexOf('housingInquiriesOnHerListings')).toBeLessThan(order.indexOf('housingListings'));
+      // The filter is the lister's own listings, not the inquiries she herself sent.
+      expect(onHers?.where?.('member-1')).toEqual({ listing: { agentId: 'member-1' } });
+    });
   });
 });

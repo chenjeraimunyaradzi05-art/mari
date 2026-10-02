@@ -498,6 +498,26 @@ describe('Groups routes (Prisma-backed)', () => {
     });
   });
 
+  // The pseudonymous display name: a group post's author is shown by her public name,
+  // and the legal first and last name never leave the server.
+  it('GET /api/groups/:id/posts names each author by her public name and never loads a legal surname', async () => {
+    (prisma.group.findUnique as any).mockResolvedValue({ id: 'g1', privacy: 'PUBLIC', isHidden: false });
+    (prisma.post.findMany as any).mockResolvedValue([
+      { id: 'p1', groupId: 'g1', content: 'one', poll: null, author: { id: 'a', firstName: 'Jane', lastName: 'Doe', displayName: 'Willow Rain', avatar: null, headline: null } },
+      { id: 'p2', groupId: 'g1', content: 'two', poll: null, author: { id: 'b', firstName: 'Bea', lastName: 'Ruiz', displayName: null, avatar: null, headline: null } },
+    ]);
+
+    const res = await request(app).get('/api/groups/g1/posts').set('x-test-auth', '1').expect(200);
+
+    expect(res.body.data.map((post: any) => [post.author.displayName, post.author.firstName, post.author.lastName])).toEqual([
+      ['Willow Rain', 'Willow Rain', ''],
+      ['Bea', 'Bea', ''],
+    ]);
+    expect(JSON.stringify(res.body)).not.toMatch(/Doe|Ruiz|Jane/);
+    const select = (prisma.post.findMany as any).mock.calls[0][0].include.author.select;
+    expect(Object.keys(select)).not.toContain('lastName');
+  });
+
   it('GET /api/groups/:id/posts leaves out posts from anyone on either side of a block', async () => {
     (prisma.group.findUnique as any).mockResolvedValue({ id: 'g1', privacy: 'PUBLIC', isHidden: false });
     // She blocked blocked-1; blocker-2 blocked her.

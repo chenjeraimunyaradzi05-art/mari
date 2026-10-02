@@ -112,6 +112,31 @@ describe('Sounds', () => {
     expect(prisma.audioTrack.create).toHaveBeenCalledTimes(1);
   });
 
+  it('lists a sound under the first name alone when its author has no public name, never her legal surname', async () => {
+    prisma.video.findUnique.mockResolvedValue({
+      id: 'v8',
+      authorId: 'user-2',
+      status: 'PUBLISHED',
+      isHidden: false,
+      videoUrl: 'https://cdn.example.com/v8.mp4',
+      duration: 9,
+      thumbnailUrl: 't8',
+      audioTrackId: null,
+      author: { displayName: null, firstName: 'Mei' },
+    });
+    prisma.audioTrack.findUnique.mockResolvedValueOnce(null);
+    prisma.audioTrack.create.mockImplementation(async ({ data }: any) => ({ ...track('new'), ...data, id: 'new' }));
+    prisma.video.update.mockResolvedValue({});
+
+    await request(app).post('/api/sounds/from-video/v8').set('x-test-user', 'user-1').expect(201);
+
+    const made = prisma.audioTrack.create.mock.calls.at(-1)[0].data;
+    expect(made.title).toBe('Original sound - Mei');
+    expect(made.artist).toBe('Mei');
+    // The author select never asks for the surname at all.
+    expect(Object.keys(prisma.video.findUnique.mock.calls.at(-1)[0].select.author.select)).not.toContain('lastName');
+  });
+
   it('a reel that already plays a sound hands that sound back', async () => {
     prisma.video.findUnique.mockResolvedValue({
       id: 'v3',

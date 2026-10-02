@@ -36,6 +36,23 @@ export const CRISIS_LINES: CrisisLine[] = [
   { key: 'kids-helpline', name: 'Kids Helpline', phone: '1800 55 1800', url: 'https://kidshelpline.com.au', when: '24/7', who: 'Anyone aged 5 to 25' },
 ];
 
+/**
+ * The lines put in front of a woman whose score, words or day suggest she may be
+ * in distress, by key into CRISIS_LINES so that the numbers themselves live in
+ * the list above and nowhere else.
+ *
+ * Emergency leads, then Lifeline and 1800RESPECT, because the compact strip on
+ * the pages shows only the first three and those are the three a woman in
+ * crisis may need first (immediate danger, someone to talk to now, and violence
+ * at home). This used to be CRISIS_LINES.slice(0, 5), which stopped one short of
+ * 1800RESPECT, a line the platform promises wherever it points at help.
+ */
+export const DISTRESS_LINE_KEYS = ['emergency', 'lifeline', '1800respect', 'suicide-call-back', 'beyond-blue', '13yarn'] as const;
+
+export function distressLines(): CrisisLine[] {
+  return DISTRESS_LINE_KEYS.map((key) => CRISIS_LINES.find((line) => line.key === key)).filter((line): line is CrisisLine => Boolean(line));
+}
+
 export interface LibraryItem {
   key: string;
   title: string;

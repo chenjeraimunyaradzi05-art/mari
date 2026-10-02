@@ -14,6 +14,8 @@
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
+import { z } from 'zod';
+import { parseWith } from '../middleware/validate';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
 import { ConsentType, Prisma, Region } from '@prisma/client';
@@ -25,7 +27,7 @@ import {
   REPORTABLE_REASONS,
   runReportIntakeConsequences,
 } from '../services/content-report.service';
-import { reviewReportedContent, type ReportableContent } from '../services/moderation-threshold.service';
+import { reviewReportedContent, type ReportableContent, type ReviewOptions } from '../services/moderation-threshold.service';
 import { handleUserReport } from '../services/safety-score.service';
 import { recordSafetyReport } from '../services/trust.service';
 import { createMemoryThrottle, publicFormLimiter, reportLimiter, SOCIAL_LIMITS } from '../middleware/socialLimits';
@@ -152,8 +154,13 @@ const LEGAL_DOCUMENTS: LegalDocumentEntry[] = [
 const SAFETY_FEATURES = [
   { name: 'Content Reporting', description: 'Report harmful or illegal content', available: true },
   { name: 'User Blocking', description: 'Block users from contacting you', available: true },
-  { name: 'User Muting', description: 'Mute users without blocking them', available: true },
-  { name: 'Content Filtering', description: 'Filter content based on preferences', available: true },
+  // What this is, and no more. A member can ask to see fewer posts and reels
+  // from someone, and the people in her feeds and reels are the only places that
+  // honours; it does not hide a member from her anywhere else, and the member is
+  // not told. This line said "mute users", which a reader takes to cover
+  // everything a block does short of the block.
+  { name: 'Seeing less of someone', description: 'Ask to see fewer posts and reels from a member, without blocking them. They are not told', available: true },
+  { name: 'Muted words', description: 'Hide posts and comments that contain words you choose', available: true },
   { name: 'Safe Mode', description: 'Enhanced privacy for vulnerable users', available: true },
 ];
 
@@ -261,12 +268,27 @@ const REPORT_CONTENT_OWNERS: Record<string, (contentId: string) => Promise<strin
     (await prisma.groupPost.findUnique({ where: { id }, select: { authorId: true } }))?.authorId ?? null,
   JOB: async (id) =>
     (await prisma.job.findUnique({ where: { id }, select: { postedById: true } }))?.postedById ?? null,
+  // A member-hosted event routes to the member who published it. One that is
+  // hidden is not in front of anyone but its host and staff, so a report of it
+  // could not have been made from reading it; and one ATHENA curated has no
+  // host to route to, so it is not reportable here, as it is not in the app.
+  EVENT: async (id) => {
+    const event = await prisma.event.findUnique({ where: { id }, select: { hostUserId: true, isHidden: true } });
+    return event && !event.isHidden ? event.hostUserId : null;
+  },
+  // Only a live listing: a held, let or withdrawn one is not in front of anyone
+  // but its lister and staff, so a report of it could not have been made from
+  // reading it. Routes to the member who listed it.
+  HOUSING_LISTING: async (id) => {
+    const listing = await prisma.housingListing.findUnique({ where: { id }, select: { agentId: true, status: true } });
+    return listing && listing.status === 'ACTIVE' ? listing.agentId : null;
+  },
   PROFILE: async (id) =>
     (await prisma.user.findUnique({ where: { id }, select: { id: true } }))?.id ?? null,
 };
 
 // Reasons that put a report at the front of the queue rather than the back.
-const URGENT_REPORT_REASONS = new Set(['CSAM', 'TERRORISM', 'ILLEGAL', 'SELF_HARM']);
+const URGENT_REPORT_REASONS = new Set(['CSAM', 'TERRORISM', 'ILLEGAL', 'SELF_HARM', 'INTIMATE_IMAGE', 'THREAT']);
 const HIGH_HARM_REPORT_REASONS = new Set(['HARASSMENT', 'HATE_SPEECH', 'FRAUD', 'HARMFUL']);
 
 type SubprocessorDpaStatus = 'SIGNED' | 'EXPIRED' | 'NOT_RECORDED';
@@ -380,10 +402,14 @@ const AUTO_HIDEABLE: Record<string, ReportableContent> = {
   VIDEO: 'video',
 };
 
-async function applyAutoHideThreshold(contentType: string, contentId: string): Promise<void> {
+async function applyAutoHideThreshold(
+  contentType: string,
+  contentId: string,
+  options: ReviewOptions = {}
+): Promise<void> {
   const hideable = AUTO_HIDEABLE[contentType];
   if (!hideable) return;
-  await reviewReportedContent(hideable, contentId);
+  await reviewReportedContent(hideable, contentId, options);
 }
 
 /**
@@ -838,6 +864,9 @@ router.get('/legal-documents', (req: Request, res: Response) => {
  * Deliberately open to people without an account: somebody who has just been
  * targeted may have no way to sign in, and neither Act lets us insist.
  */
+// validated: contentType and reason are checked against the reportable lists, contentId and details
+//   by type and length, the evidence links and contact address by parseEvidenceUrls and
+//   parseContactEmail.
 router.post('/report-content', optionalAuth, reportRateLimit, reportIntakeCeiling, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { contentType, contentId, reason, details, evidenceUrls, contactEmail, isUrgent } = req.body;
@@ -985,7 +1014,12 @@ router.post('/report-content', optionalAuth, reportRateLimit, reportIntakeCeilin
         'compliance.report.safety-score',
         handleUserReport(reportedUserId, reporterId, normalizedReason, String(contentId), normalizedType)
       );
-      await bestEffort('compliance.report.auto-hide', () => applyAutoHideThreshold(normalizedType, String(contentId)));
+      // One signed-in report is enough to hide the content for the reasons that
+      // cannot wait for three (an intimate image, a threat, child abuse material,
+      // terrorism); see moderation-threshold.service.
+      await bestEffort('compliance.report.auto-hide', () =>
+        applyAutoHideThreshold(normalizedType, String(contentId), { reason: normalizedReason.toLowerCase(), ticketId })
+      );
 
       await bestEffort(
         'compliance.report.intake-consequences',
@@ -1035,7 +1069,12 @@ router.post('/report-content', optionalAuth, reportRateLimit, reportIntakeCeilin
     // An anonymous report cannot move a trust score — there is no reporter to
     // weigh — but the auto-hide counts the whole anonymous cohort as one voice,
     // and the alerting and authority referral are the same.
-    await bestEffort('compliance.report.auto-hide', () => applyAutoHideThreshold(normalizedType, String(contentId)));
+    // A report from no account never hides content on its own, whatever it is
+    // about: the form is open to anyone, so it cannot be a way to take things
+    // down. A person looks at it within the critical target instead.
+    await bestEffort('compliance.report.auto-hide', () =>
+      applyAutoHideThreshold(normalizedType, String(contentId), { reason: normalizedReason.toLowerCase(), anonymous: true })
+    );
     await bestEffort(
       'compliance.report.intake-consequences',
       runReportIntakeConsequences({
@@ -1263,9 +1302,19 @@ router.get('/my-region', async (req: AuthRequest, res: Response, next: NextFunct
  * is told it worked, and keeps being served the Australian set. The row is
  * written now and the response reports what the row says.
  */
+// The three free-text fields were saved as typed, trimmed and nothing more: a
+// locale or timezone of any length, any text for a currency. Each is a short
+// code, so each has the length of one.
+const regionPreferencesBody = z.object({
+  region: z.string().trim().max(20).optional().nullable(),
+  locale: z.string().trim().max(35).optional().nullable(),
+  currency: z.string().trim().max(3).optional().nullable(),
+  timezone: z.string().trim().max(64).optional().nullable(),
+});
+
 router.put('/region-preferences', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { region, locale, currency, timezone } = req.body;
+    const { region, locale, currency, timezone } = parseWith(regionPreferencesBody, req.body);
     const userId = req.user!.id;
 
     // Validate region
@@ -1351,19 +1400,19 @@ router.get('/agreements', async (req: AuthRequest, res: Response, next: NextFunc
  * POST /api/compliance/agreements
  * Record legal document agreement acknowledgement
  */
+// Both go into the audit row as text and were not measured: a member could
+// write a kilobyte of her choosing into a record kept as evidence of consent.
+const agreementBody = z.object({
+  documentType: z.string().trim().min(1, 'documentType is required').max(100),
+  documentVersion: z.string().trim().min(1, 'documentVersion is required').max(100),
+});
+
 router.post('/agreements', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { documentType, documentVersion } = req.body;
+    const { documentType, documentVersion } = parseWith(agreementBody, req.body);
     const userId = req.user!.id;
     const userAgent = typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : undefined;
     const requestRegion = typeof req.headers['cf-ipcountry'] === 'string' ? req.headers['cf-ipcountry'] : 'UNKNOWN';
-
-    if (!documentType || !documentVersion) {
-      return res.status(400).json({
-        success: false,
-        error: 'documentType and documentVersion are required',
-      });
-    }
 
     const consentContext = { ipAddress: req.ip, userAgent, region: requestRegion };
 

@@ -181,3 +181,123 @@ export function assertOwnResumeUpload(resumeUrl: string | undefined | null, user
     );
   }
 }
+
+// ---------------------------------------------------------------------------
+// Who may place apprentices
+// ---------------------------------------------------------------------------
+//
+// An apprentice is often a young person in a first job, placed in a workplace
+// ATHENA has never seen. Everything above decides who inside an organisation may
+// act for it; none of it asked whether the organisation should be placing
+// apprentices at all. A listing could be created already OPEN, published, applied
+// to and accepted by an organisation nobody had looked at, because the only
+// organisation check that existed (the verified badge) was not read by anything
+// on the placement path.
+//
+// The rule, in one place: an organisation may place apprentices through ATHENA
+// only while it is verified (Organization.isVerified) AND holds an approved host
+// safety attestation that has not run out (host-safety.service). The routes that
+// open a listing, take an application or confirm a placement all ask it.
+
+/**
+ * The organisation that hosts the apprentice, whose standing decides whether the
+ * placement may go ahead: the host employer when one is named, and otherwise the
+ * RTO, which is then the one an apprentice would be working under. A listing
+ * that names neither has nobody to be checked, and so cannot be opened.
+ */
+export const placementOrganisationId = (listing: { hostEmployerId?: string | null; rtoId?: string | null }): string | null =>
+  listing.hostEmployerId ?? listing.rtoId ?? null;
+
+export interface HostStandingFlags {
+  /** The organisation has been verified by staff (the badge review). */
+  verified: boolean;
+  /** It holds an approved host safety attestation that has not run out. */
+  attested: boolean;
+  /** Both: it may place apprentices through ATHENA. */
+  mayPlace: boolean;
+}
+
+const NO_STANDING: HostStandingFlags = { verified: false, attested: false, mayPlace: false };
+
+/**
+ * What staff are told when they try to open a listing, or confirm a placement,
+ * for an organisation that has not been checked.
+ */
+export const HOST_NOT_CHECKED_FOR_STAFF =
+  'Before apprentices can be placed through ATHENA, your organisation has to be verified and its host safety attestation approved. You can do both from the apprenticeships page of your organisation.';
+
+/** What an applicant is told when the host of a listing has not been checked. */
+export const HOST_NOT_CHECKED_FOR_APPLICANT =
+  'ATHENA has not safety-checked this host yet, so applications through ATHENA are not open for this apprenticeship. You can still read about it, and we will show it as checked once the host has been.';
+
+/**
+ * How each of these organisations stands, in one read. An unknown id is simply
+ * absent from the answer, and every caller treats absent as "not checked": the
+ * question is only ever asked in the direction where a missing answer means no.
+ */
+export async function hostStandings(
+  organizationIds: Array<string | null | undefined>,
+  now: Date = new Date()
+): Promise<Map<string, HostStandingFlags>> {
+  const ids = [...new Set(organizationIds.filter((id): id is string => Boolean(id)))];
+  const out = new Map<string, HostStandingFlags>();
+  if (ids.length === 0) return out;
+
+  const orgs = await prisma.organization.findMany({
+    where: { id: { in: ids } },
+    select: {
+      id: true,
+      isVerified: true,
+      hostSafetyAttestations: {
+        where: { status: 'APPROVED', expiresAt: { gt: now } },
+        select: { id: true },
+        take: 1,
+      },
+    },
+  });
+
+  for (const org of orgs) {
+    const attested = (org.hostSafetyAttestations ?? []).length > 0;
+    out.set(org.id, { verified: Boolean(org.isVerified), attested, mayPlace: Boolean(org.isVerified) && attested });
+  }
+  return out;
+}
+
+/** Whether this organisation may place apprentices through ATHENA right now. */
+export async function hostMayPlaceApprentices(organizationId: string | null | undefined, now: Date = new Date()): Promise<boolean> {
+  if (!organizationId) return false;
+  return (await hostStandings([organizationId], now)).get(organizationId)?.mayPlace === true;
+}
+
+/**
+ * Refuse with a 409 unless the listing's host may place apprentices. `audience`
+ * picks the words: staff are told what to do about it, an applicant is told why
+ * applying is not open yet.
+ */
+export async function assertHostMayPlaceApprentices(
+  listing: { hostEmployerId?: string | null; rtoId?: string | null },
+  audience: 'staff' | 'applicant',
+  now: Date = new Date()
+): Promise<void> {
+  if (await hostMayPlaceApprentices(placementOrganisationId(listing), now)) return;
+  throw new ApiError(409, audience === 'staff' ? HOST_NOT_CHECKED_FOR_STAFF : HOST_NOT_CHECKED_FOR_APPLICANT);
+}
+
+/**
+ * Each listing with whether its host is verified and safety-checked, for the
+ * list, the card and the detail page to say so honestly. A listing whose host has
+ * not been checked is still shown, labelled, not hidden: the seeded catalogue
+ * names training providers nobody here has checked, and an honest label serves a
+ * visitor better than an empty page.
+ */
+export async function withHostStanding<T extends { hostEmployerId?: string | null; rtoId?: string | null }>(
+  items: T[],
+  now: Date = new Date()
+): Promise<Array<T & { hostVerified: boolean; hostSafetyChecked: boolean; hostMayPlace: boolean }>> {
+  const standings = await hostStandings(items.map(placementOrganisationId), now);
+  return items.map((item) => {
+    const id = placementOrganisationId(item);
+    const s = (id && standings.get(id)) || NO_STANDING;
+    return { ...item, hostVerified: s.verified, hostSafetyChecked: s.attested, hostMayPlace: s.mayPlace };
+  });
+}

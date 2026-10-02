@@ -9,8 +9,9 @@ import { aiService } from '../services/ai.service'; // Added import
 import { generateFeed, getVideoFeed, recordPostView } from '../services/feed.service';
 import { assertContentAllowed } from '../services/moderation.service';
 import { logger } from '../utils/logger';
-import { parsePagination, buildPaginationMeta } from '../utils/pagination';
-import { getBlockedRelationshipIds, isBlockedRelationship } from '../utils/safety-store';
+import { invalidateTrendingFeedCache } from '../utils/cache';
+import { clampLimit, clampPage, parsePagination, buildPaginationMeta } from '../utils/pagination';
+import { isBlockedRelationship } from '../utils/safety-store';
 import { notifySocial, socialLinks } from '../utils/social-notifications';
 import {
   CONTENT_LIMITS,
@@ -28,15 +29,27 @@ import {
 } from '../services/post-decoration.service';
 import { parseScheduledFor } from '../services/scheduled-posts.service';
 import { enrichPostLinkPreview } from '../services/link-preview.service';
-import { resolveMentionedUserIds } from '../utils/mentions';
-import { authorAudienceWhere, canViewAuthor, canViewGroupPosts } from '../services/audience.service';
+import { MENTION_LIMIT, resolveMentionedUserIds } from '../utils/mentions';
+import {
+  blockedEitherWayIds,
+  canViewAuthor,
+  canViewGroupPosts,
+  postsShownToWhere,
+  visiblePostWhere,
+} from '../services/audience.service';
 import { mutedWordMatcher } from '../utils/muted-words';
 import { emitToUserRoom, isUserOnline } from '../services/socket.service';
-import { commentLimiter, postLimiter } from '../middleware/socialLimits';
+import { commentLimiter, postLimiter, withinTargetLimit } from '../middleware/socialLimits';
 import { recordPublishedPost } from '../services/engagement.service';
 import { bestEffort } from '../utils/best-effort';
+import { maskLegalNamesInResponses, publicName } from '../utils/member-display';
 
 const router = Router();
+
+// Every answer from here goes to other members, so a member who is not the reader is
+// named by her public name and her legal first and last name are never sent (see
+// utils/member-display: the pseudonymous display name). Authors, commenters and repliers are all covered.
+router.use(maskLegalNamesInResponses);
 
 const POST_TYPES = ['TEXT', 'IMAGE', 'VIDEO', 'ARTICLE', 'JOB_SHARE', 'COURSE_SHARE', 'POLL', 'WIN'];
 const ALT_MAX = 300;
@@ -107,8 +120,12 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
     const algorithmParam = typeof req.query.algorithm === 'string' ? req.query.algorithm : undefined;
 
     // Blocking is symmetric, so the same list keeps both parties out of each
-    // other's feed no matter who pressed block.
-    const blockedIds = req.user ? await getBlockedRelationshipIds(req.user.id) : [];
+    // other's feed no matter who pressed block. It is read from both stores, the
+    // platform-wide list and the DV safety profile's, in both directions: the
+    // mirror between them is best-effort, so a block made from the DV page that
+    // never reached the platform list used to leave this feed showing him, while
+    // search (which read both) did not.
+    const blockedIds = req.user ? await blockedEitherWayIds(req.user.id) : [];
 
     if (tab === 'following' && req.user) {
       const following = await prisma.follow.findMany({
@@ -123,9 +140,11 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
 
       const where: any = {
         authorId: { in: followingIds },
-        isHidden: false,
-        // A private member's posts stay theirs even from followers.
-        AND: [authorAudienceWhere(req.user.id, followingIds)],
+        // Not hidden, public (or her own), and its author within her audience.
+        // A post whose author unticked "Post publicly" is hers alone, even from
+        // her followers: this tab asked only about the author's audience, so a
+        // follower was shown it.
+        AND: [visiblePostWhere(req.user.id, followingIds)],
       };
 
       // Optional content type filter
@@ -141,7 +160,6 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
               select: {
                 id: true,
                 firstName: true,
-                lastName: true,
                 displayName: true,
                 avatar: true,
                 headline: true,
@@ -236,12 +254,11 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
 router.get('/video-feed', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
     const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined;
-    const limitRaw = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : undefined;
-    const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(50, limitRaw!)) : 10;
+    const limit = clampLimit(req.query.limit, 10, 50);
 
     // Blocks go into the query, as on /feed above, so a page is full and the
     // cursor only moves past videos she could have been shown.
-    const blockedIds = req.user ? await getBlockedRelationshipIds(req.user.id) : [];
+    const blockedIds = req.user ? await blockedEitherWayIds(req.user.id) : [];
     const result = await getVideoFeed(req.user?.id, cursor, limit, { excludeAuthorIds: blockedIds });
 
     res.json({
@@ -286,6 +303,12 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
 
     const isAdmin = String(req.user?.role || '').toUpperCase() === 'ADMIN';
 
+    // Read before the thread is, so a blocked member's comments are left out of
+    // the query that takes the first fifty and not out of the fifty afterwards,
+    // which came back short whenever somebody she had blocked had been busy.
+    const blockedIds = req.user && !isAdmin ? await blockedEitherWayIds(req.user.id) : [];
+    const notBlocked = blockedIds.length > 0 ? { authorId: { notIn: blockedIds } } : {};
+
     const post = await prisma.post.findUnique({
       where: { id },
       include: {
@@ -293,7 +316,6 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
           select: {
             id: true,
             firstName: true,
-            lastName: true,
             displayName: true,
             avatar: true,
             headline: true,
@@ -304,25 +326,24 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
           where: {
             parentId: null,
             ...(isAdmin ? {} : { isHidden: false }),
+            ...notBlocked,
           },
           include: {
             author: {
               select: {
                 id: true,
                 firstName: true,
-                lastName: true,
                 displayName: true,
                 avatar: true,
               },
             },
             replies: {
-              where: isAdmin ? undefined : { isHidden: false },
+              where: isAdmin ? undefined : { isHidden: false, ...notBlocked },
               include: {
                 author: {
                   select: {
                     id: true,
                     firstName: true,
-                    lastName: true,
                     displayName: true,
                     avatar: true,
                   },
@@ -370,9 +391,7 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
         .map((c) => ({ ...c, replies: Array.isArray(c.replies) ? c.replies.filter((r) => !muted(r.content)) : c.replies }));
     }
 
-    const blockedAuthorIds = new Set(
-      req.user && !isAdmin ? await getBlockedRelationshipIds(req.user.id) : []
-    );
+    const blockedAuthorIds = new Set(blockedIds);
 
     if (blockedAuthorIds.has(post.authorId)) {
       throw new ApiError(404, 'Post not found');
@@ -471,7 +490,8 @@ router.post(
         throw new ApiError(400, error instanceof Error ? error.message : 'Invalid schedule');
       }
 
-      const mentionedUserIds = (await resolveMentionedUserIds(content)).filter((id) => id !== req.user!.id);
+      const authorId = req.user!.id;
+      const mentionedUserIds = (await resolveMentionedUserIds(content, MENTION_LIMIT, authorId)).filter((id) => id !== authorId);
 
       await assertContentAllowed(content, { kind: 'post', userId: req.user!.id });
 
@@ -504,7 +524,6 @@ router.post(
             select: {
               id: true,
               firstName: true,
-              lastName: true,
               displayName: true,
               avatar: true,
               headline: true,
@@ -522,7 +541,7 @@ router.post(
       if (post.isPublic && !post.isHidden) {
         await indexDocument(IndexNames.POSTS, post.id, {
           content: post.content,
-          authorName: post.author?.displayName || `${post.author?.firstName} ${post.author?.lastName}`,
+          authorName: publicName(post.author),
           type: post.type,
           hasMedia: post.mediaUrls && Array.isArray(post.mediaUrls) && post.mediaUrls.length > 0,
           createdAt: post.createdAt,
@@ -534,7 +553,10 @@ router.post(
         });
       }
 
-      if (!scheduledFor && mentionedUserIds.length > 0) {
+      // A post she keeps to herself is for nobody else to open, so nobody is
+      // told it names them: the link in the notice would lead them to a post
+      // that answers as if it did not exist.
+      if (!scheduledFor && post.isPublic && mentionedUserIds.length > 0) {
         await notifyMentions(req.user!.id, mentionedUserIds, 'post', post.id);
       }
 
@@ -632,7 +654,6 @@ router.post(
             select: {
               id: true,
               firstName: true,
-              lastName: true,
               displayName: true,
               avatar: true,
               headline: true,
@@ -657,7 +678,7 @@ router.post(
 
       await indexDocument(IndexNames.POSTS, post.id, {
         content: post.content,
-        authorName: post.author?.displayName || `${post.author?.firstName} ${post.author?.lastName}`,
+        authorName: publicName(post.author),
         type: post.type,
         hasMedia: Array.isArray(post.mediaUrls) && post.mediaUrls.length > 0,
         createdAt: post.createdAt,
@@ -727,7 +748,10 @@ router.patch(
       if (data.content !== existingPost.content) {
         // The label an edit earns, and the mentions the new words carry.
         data.editedAt = new Date();
-        const mentioned = (await resolveMentionedUserIds(data.content)).filter((userId) => userId !== req.user!.id);
+        // existingPost.authorId is the signed-in member: anyone else was refused above.
+        const mentioned = (await resolveMentionedUserIds(data.content, MENTION_LIMIT, existingPost.authorId)).filter(
+          (userId) => userId !== existingPost.authorId
+        );
         data.mentionedUserIds = mentioned;
         const before = new Set(existingPost.mentionedUserIds ?? []);
         newlyMentioned = mentioned.filter((userId) => !before.has(userId));
@@ -759,8 +783,15 @@ router.patch(
     if (data.content) {
       enrichPostLinkPreview(id, data.content);
     }
-    // A scheduled post tells its mentions when it publishes, not now.
-    if (newlyMentioned.length > 0 && !existingPost.isHidden && !existingPost.scheduledFor) {
+    // The trending list is kept for five minutes and carries whole posts, so a
+    // post she has just made private would go on being served from it, to
+    // everyone, until it expired.
+    if (data.isPublic === false) {
+      await invalidateTrendingFeedCache();
+    }
+    // A scheduled post tells its mentions when it publishes, not now, and a post
+    // she keeps to herself tells nobody: they could not open it.
+    if (newlyMentioned.length > 0 && !existingPost.isHidden && !existingPost.scheduledFor && post.isPublic) {
       await notifyMentions(req.user!.id, newlyMentioned, 'post', id);
     }
 
@@ -810,6 +841,11 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res, next) => {
     // Remove from index
     await deleteDocument(IndexNames.POSTS, id);
 
+    // The trending list is kept for five minutes and carries whole posts, so a
+    // post she has just deleted would be served from it, to everyone, until it
+    // expired. The same reason as making a post private (above).
+    await invalidateTrendingFeedCache();
+
     res.json({
       success: true,
       message: 'Post deleted',
@@ -822,6 +858,7 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res, next) => {
 // ===========================================
 // LIKE POST
 // ===========================================
+// validated: type is read only as text and must be a known reaction, else a plain like.
 router.post('/:id/like', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
@@ -973,6 +1010,14 @@ router.post(
         throw new ApiError(403, 'Comments are off for this post');
       }
 
+      // The per-member limit above lets thirty comments through in five
+      // minutes, which is nothing across a feed and a siege when all thirty are
+      // under one woman's posts. A conversation fits well inside this; a spree
+      // aimed at one member does not. Her own thread is never limited.
+      if (post.authorId !== req.user!.id && !(await withinTargetLimit('comment', req.user!.id, post.authorId))) {
+        throw new ApiError(429, 'You have commented a lot on posts by this member in the last hour. Please give the conversation a rest for a while.');
+      }
+
       await assertContentAllowed(content, { kind: 'comment', userId: req.user!.id });
 
       if (parentId) {
@@ -998,7 +1043,6 @@ router.post(
             select: {
               id: true,
               firstName: true,
-              lastName: true,
               displayName: true,
               avatar: true,
             },
@@ -1040,11 +1084,12 @@ router.post(
         }
       }
 
-      const mentioned = (await resolveMentionedUserIds(content)).filter(
-        (userId) => userId !== req.user!.id && userId !== post.authorId
+      const commenterId = req.user!.id;
+      const mentioned = (await resolveMentionedUserIds(content, MENTION_LIMIT, commenterId)).filter(
+        (userId) => userId !== commenterId && userId !== post.authorId
       );
       if (mentioned.length > 0) {
-        await notifyMentions(req.user!.id, mentioned, 'comment', id);
+        await notifyMentions(commenterId, mentioned, 'comment', id);
       }
 
       res.status(201).json({
@@ -1103,8 +1148,8 @@ router.delete('/:postId/comments/:commentId', authenticate, async (req: AuthRequ
 router.get('/user/:userId', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
     const { userId } = req.params;
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 20;
+    const page = clampPage(req.query.page);
+    const limit = clampLimit(req.query.limit, 20, 100);
 
     // Group posts stay on their group's page, not the profile.
     const where: any = { authorId: userId, groupId: null };
@@ -1141,7 +1186,6 @@ router.get('/user/:userId', optionalAuth, async (req: AuthRequest, res, next) =>
             select: {
               id: true,
               firstName: true,
-              lastName: true,
               displayName: true,
               avatar: true,
               headline: true,
@@ -1207,10 +1251,17 @@ async function loadVisiblePost(id: string, userId: string) {
 router.get('/me/saved', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const collection = typeof req.query.collectionId === 'string' ? req.query.collectionId : '';
+    const viewerId = req.user!.id;
     const saves = await prisma.postSave.findMany({
       where: {
-        userId: req.user!.id,
+        userId: viewerId,
         ...(collection === 'none' ? { collectionId: null } : collection ? { collectionId: collection } : {}),
+        // A post she saved stays in her list only while she may still be shown
+        // it: one made private or hidden since, or whose author has since
+        // blocked her, gone into Safe Mode or closed her profile, drops out
+        // rather than her list going on carrying that member's words, name and
+        // picture to the person she closed her profile to.
+        post: await postsShownToWhere(viewerId),
       },
       orderBy: { createdAt: 'desc' },
       include: {
@@ -1228,7 +1279,7 @@ router.get('/me/saved', authenticate, async (req: AuthRequest, res, next) => {
     const collectionByPost = new Map(saves.map((save) => [save.postId, save.collectionId ?? null]));
     const decorated = await decoratePosts(
       saves.map((save) => save.post),
-      req.user!.id
+      viewerId
     );
     res.json({
       success: true,
@@ -1239,6 +1290,7 @@ router.get('/me/saved', authenticate, async (req: AuthRequest, res, next) => {
   }
 });
 
+// validated: collectionId is read only as text and must be one of her own collections.
 router.post('/:id/save', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;

@@ -21,6 +21,19 @@
  *                              also says it can come back "when it can be
  *                              scoped to newly written code", which is what
  *                              this is.
+ *   hand-rolled-page-limits    `parseInt(req.query.limit)`, or Number() or
+ *                              parseFloat() of it, with no ceiling around it.
+ *                              The page size reaches `take`, so `?limit=1000000`
+ *                              asks the database for a million rows and
+ *                              `?limit=-5` reads from the end. On a platform
+ *                              whose directories and profiles are readable
+ *                              without an account, every unclamped limit is a
+ *                              way to take a whole table in one request. The
+ *                              shared helpers in utils/pagination.ts
+ *                              (clampLimit, parsePagination) are the way to
+ *                              read a limit; a read that sits inside Math.min,
+ *                              Math.max or a clamp-named function already has a
+ *                              bound and is not counted.
  *   unvalidated-route-handlers Handlers in a *.routes.ts file that imports
  *                              neither zod nor express-validator, and so checks
  *                              its input, if at all, with hand-written ifs.
@@ -57,6 +70,7 @@ const METRICS = {
   'req-user-assertions': 'req.user! non-null assertions',
   'any-types': '`any` written as a type',
   'unvalidated-route-handlers': 'route handlers in files that import neither zod nor express-validator',
+  'hand-rolled-page-limits': 'page sizes read from the query string with no ceiling (use clampLimit)',
 };
 
 const VALIDATORS = new Set(['zod', 'express-validator']);
@@ -65,6 +79,42 @@ const HTTP_VERBS = new Set(['get', 'post', 'put', 'patch', 'delete', 'all']);
 // named `adminRouter` or the app itself would count too. A cache or an HTTP
 // client with a .get('/...') of its own is not a route and is not counted.
 const ROUTER_NAME = /^(router|app|[A-Za-z]+Router)$/;
+
+// What reads a number out of text. A page size that goes through one of these
+// and nothing else is whatever the caller typed.
+const NUMBER_READERS = new Set(['parseInt', 'parseFloat', 'Number', 'Number.parseInt', 'Number.parseFloat']);
+// `req.query.limit`, `query.limit`, `req.query['limit']`, and the same for the
+// other names a page size goes by; or, for a route that destructured its query,
+// the bare name (`parseInt(limit as string)`).
+const QUERY_PAGE_SIZE = /\bquery(?:\.|\s*\[\s*['"])(?:limit|pageSize|per_?page)\b/;
+const BARE_PAGE_SIZE = /^(?:limit|pageSize)(?:\s+as\s+[\w.]+)?$/;
+// A call that puts a bound on whatever is inside it.
+const BOUNDING_CALL = /^(?:Math\.min|Math\.max|(?:\w+\.)?(?:clamp\w*|bound\w*|parseLimit|parsePaging|parsePagination))$/;
+
+function readsPageSize(node) {
+  const callee = node.expression.getText();
+  if (!NUMBER_READERS.has(callee)) return false;
+  const [first] = node.arguments;
+  if (!first) return false;
+  const text = first.getText().trim();
+  return QUERY_PAGE_SIZE.test(text) || BARE_PAGE_SIZE.test(text);
+}
+
+/** Whether the read sits inside Math.min, Math.max or a clamp, within the same expression. */
+function isBounded(node) {
+  for (let parent = node.parent; parent; parent = parent.parent) {
+    if (ts.isCallExpression(parent) && BOUNDING_CALL.test(parent.expression.getText())) return true;
+    if (
+      ts.isVariableDeclaration(parent) ||
+      ts.isExpressionStatement(parent) ||
+      ts.isReturnStatement(parent) ||
+      ts.isBlock(parent)
+    ) {
+      return false;
+    }
+  }
+  return false;
+}
 
 function isTestFile(relativePath) {
   return relativePath.split('/').includes('__tests__') || /\.test\.ts$/.test(relativePath);
@@ -87,11 +137,22 @@ function sourceFiles(dir) {
  */
 function countDebt(fileName, text) {
   const sourceFile = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  const counts = { 'req-user-assertions': 0, 'any-types': 0, 'unvalidated-route-handlers': 0 };
+  const counts = {
+    'req-user-assertions': 0,
+    'any-types': 0,
+    'unvalidated-route-handlers': 0,
+    'hand-rolled-page-limits': 0,
+  };
+  const isRouteFile = /\.routes\.ts$/.test(fileName);
   let routeHandlers = 0;
   let validated = false;
 
   const visit = (node) => {
+    // Only in a route file, where a query string arrives: a service that is
+    // handed a `limit` has been given it by something that read it.
+    if (isRouteFile && ts.isCallExpression(node) && readsPageSize(node) && !isBounded(node)) {
+      counts['hand-rolled-page-limits'] += 1;
+    }
     if (ts.isNonNullExpression(node)) {
       const inner = node.expression;
       if (

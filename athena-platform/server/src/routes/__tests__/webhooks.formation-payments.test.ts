@@ -325,6 +325,9 @@ describe('Stripe webhooks: accelerator enrollment payments', () => {
       cohortId: 'cohort-1',
       status: 'PENDING',
       paymentStatus: 'PENDING',
+      // Written by createAcceleratorEnrollmentPayment before the client secret
+      // went out: the webhook only believes the intent the enrolment started.
+      paymentId: 'pi_accel',
       cohort: { id: 'cohort-1', priceAud: 2500 },
     });
 
@@ -362,6 +365,7 @@ describe('Stripe webhooks: accelerator enrollment payments', () => {
       cohortId: 'cohort-1',
       status: 'PENDING',
       paymentStatus: 'PENDING',
+      paymentId: 'pi_accel_short',
       cohort: { id: 'cohort-1', priceAud: 2500 },
     });
 
@@ -426,6 +430,7 @@ describe('Stripe webhooks: accelerator enrollment payments', () => {
       userId: 'user-1',
       status: 'PENDING',
       paymentStatus: 'PENDING',
+      paymentId: 'pi_accel_failed',
       cohort: { id: 'cohort-1', priceAud: 2500 },
     });
 
@@ -447,5 +452,142 @@ describe('Stripe webhooks: accelerator enrollment payments', () => {
 
     expect(enrollment.paymentStatus).toBe('FAILED');
     expect(enrollment.status).toBe('PENDING');
+  });
+
+  // The webhook used to believe the intent's own metadata about which place it
+  // paid for and what that place cost. A payment of one dollar whose metadata
+  // named an expensive place and quoted one dollar marked that place paid.
+  describe('an intent the enrolment did not start is not believed', () => {
+    const intentEvent = (id: string, amountCents: number, metadata: Record<string, string>) => ({
+      id: `evt_${id}`,
+      type: 'payment_intent.succeeded',
+      data: {
+        object: {
+          id,
+          status: 'succeeded',
+          amount: amountCents,
+          amount_received: amountCents,
+          currency: 'aud',
+          metadata: { type: 'accelerator_enrollment', enrollmentId: 'enr-forged', ...metadata },
+        },
+      },
+    });
+
+    it('does not mark a place paid on a dollar that quotes its own price', async () => {
+      const enrollment = stubEnrollment({
+        id: 'enr-forged',
+        userId: 'user-1',
+        status: 'PENDING',
+        paymentStatus: 'PENDING',
+        paymentId: 'pi_real_intent',
+        cohort: { id: 'cohort-1', priceAud: 2500 },
+      });
+
+      // Somebody else's intent, created by some other route with chosen
+      // metadata: it names the enrolment and quotes 100 cents, so 100 cents
+      // would have been enough.
+      getStripeClient().webhooks.constructEvent.mockReturnValue(
+        intentEvent('pi_forged', 100, { amountCents: '100' })
+      );
+
+      await sendEvent(createTestApp()).expect(200);
+
+      expect(enrollment.paymentStatus).toBe('PENDING');
+      expect(enrollment.status).toBe('PENDING');
+      expect(enrollment.paymentId).toBe('pi_real_intent');
+      expect(prisma.acceleratorEnrollment.update).not.toHaveBeenCalled();
+    });
+
+    it('does not mark a place paid by a full-price payment that belongs to another intent', async () => {
+      const enrollment = stubEnrollment({
+        id: 'enr-forged',
+        userId: 'user-1',
+        status: 'PENDING',
+        paymentStatus: 'PENDING',
+        paymentId: null,
+        cohort: { id: 'cohort-1', priceAud: 2500 },
+      });
+
+      getStripeClient().webhooks.constructEvent.mockReturnValue(
+        intentEvent('pi_stranger', 250000, { amountCents: '250000', userId: 'user-1' })
+      );
+
+      await sendEvent(createTestApp()).expect(200);
+
+      expect(enrollment.paymentStatus).toBe('PENDING');
+      expect(prisma.acceleratorEnrollment.update).not.toHaveBeenCalled();
+    });
+
+    it('does not apply an intent whose metadata names a different member', async () => {
+      const enrollment = stubEnrollment({
+        id: 'enr-forged',
+        userId: 'user-1',
+        status: 'PENDING',
+        paymentStatus: 'PENDING',
+        paymentId: 'pi_mine',
+        cohort: { id: 'cohort-1', priceAud: 2500 },
+      });
+
+      getStripeClient().webhooks.constructEvent.mockReturnValue(
+        intentEvent('pi_mine', 250000, { amountCents: '250000', userId: 'someone-else' })
+      );
+
+      await sendEvent(createTestApp()).expect(200);
+
+      expect(enrollment.paymentStatus).toBe('PENDING');
+      expect(prisma.acceleratorEnrollment.update).not.toHaveBeenCalled();
+    });
+
+    it('still refuses the enrolment\'s own intent when it was paid short of the quote', async () => {
+      const enrollment = stubEnrollment({
+        id: 'enr-forged',
+        userId: 'user-1',
+        status: 'PENDING',
+        paymentStatus: 'PENDING',
+        paymentId: 'pi_recorded',
+        cohort: { id: 'cohort-1', priceAud: 2500 },
+      });
+
+      // The server quoted the full price on its own intent, and only 5000 cents
+      // arrived.
+      getStripeClient().webhooks.constructEvent.mockReturnValue(
+        intentEvent('pi_recorded', 5000, { amountCents: '250000', userId: 'user-1' })
+      );
+
+      await sendEvent(createTestApp()).expect(200);
+
+      expect(enrollment.paymentStatus).toBe('PENDING');
+      expect(prisma.acceleratorEnrollment.update).not.toHaveBeenCalled();
+    });
+
+    it('does not let a cancelled earlier intent mark the live one failed', async () => {
+      const enrollment = stubEnrollment({
+        id: 'enr-forged',
+        userId: 'user-1',
+        status: 'PENDING',
+        paymentStatus: 'PENDING',
+        paymentId: 'pi_live',
+        cohort: { id: 'cohort-1', priceAud: 2500 },
+      });
+
+      getStripeClient().webhooks.constructEvent.mockReturnValue({
+        id: 'evt_old_cancel',
+        type: 'payment_intent.canceled',
+        data: {
+          object: {
+            id: 'pi_old',
+            status: 'canceled',
+            amount: 250000,
+            currency: 'aud',
+            metadata: { type: 'accelerator_enrollment', enrollmentId: 'enr-forged' },
+          },
+        },
+      });
+
+      await sendEvent(createTestApp()).expect(200);
+
+      expect(enrollment.paymentStatus).toBe('PENDING');
+      expect(enrollment.paymentId).toBe('pi_live');
+    });
   });
 });

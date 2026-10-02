@@ -5,7 +5,7 @@ import { prisma } from '../utils/prisma';
 import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
 import { httpUrl } from '../utils/http-url';
-import { buildPaginationMeta } from '../utils/pagination';
+import { buildPaginationMeta, clampLimit } from '../utils/pagination';
 import { BUILT_IN_DV_SERVICES } from '../services/dv-safe.service';
 import {
   compileImpactReport,
@@ -18,6 +18,8 @@ import {
   type CompileScope,
 } from '../services/impact-reports.service';
 import { recordStaffAction } from '../services/staff-record.service';
+import { logger } from '../utils/logger';
+import { planColumnValue, presentSafetyPlan } from '../utils/safety-plan-seal';
 
 const router = Router();
 
@@ -71,8 +73,7 @@ const PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 100;
 
 function listPage(query: Request['query']) {
-  const requestedLimit = Number.parseInt(text(query.limit) ?? '', 10);
-  const limit = Number.isFinite(requestedLimit) && requestedLimit > 0 ? Math.min(requestedLimit, MAX_PAGE_SIZE) : PAGE_SIZE;
+  const limit = clampLimit(query.limit, PAGE_SIZE, MAX_PAGE_SIZE);
   const requestedPage = Number.parseInt(text(query.page) ?? '', 10);
   const page = Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1;
   return { page, limit, skip: (page - 1) * limit };
@@ -579,10 +580,14 @@ router.get('/dv-services', async (req: Request, res: Response, next: NextFunctio
 });
 
 // ===========================================
-// SAFETY PLAN (private to her; stored as written, not encrypted at rest)
+// SAFETY PLAN (private to her; sealed at rest under DV_ENCRYPTION_KEY)
 // ===========================================
 
 // GET /api/impact/safety-plan - Get user's safety plan
+//
+// Every part is opened here and nowhere else, so a sealed string never leaves
+// the server. encryptedAtRest and unreadableParts say how her own row is kept,
+// which is what the page words its promise from.
 router.get('/safety-plan', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
@@ -591,7 +596,7 @@ router.get('/safety-plan', authenticate, async (req: AuthRequest, res: Response,
       where: { userId },
     });
 
-    res.json({ success: true, data: safetyPlan });
+    res.json({ success: true, data: safetyPlan ? presentSafetyPlan(safetyPlan) : null });
   } catch (error) {
     next(error);
   }
@@ -614,24 +619,22 @@ const safetyPlanSchema = z.object({
   legalContacts: planLines,
 });
 
-/** A list for a Json column: null clears it, absent leaves it alone. */
-const planValue = (lines: string[] | null | undefined) =>
-  lines === undefined ? undefined : lines === null ? Prisma.JsonNull : lines;
-
 // POST /api/impact/safety-plan - Create/update safety plan
 router.post('/safety-plan', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
     const plan = parse(safetyPlanSchema, req.body);
 
+    // A part she sent is sealed before it is written; one she left out is
+    // left as it is, and one she emptied is cleared. See planColumnValue.
     const fields = {
-      emergencyContacts: planValue(plan.emergencyContacts),
-      safeLocations: planValue(plan.safeLocations),
-      warningTriggers: planValue(plan.warningTriggers),
-      exitStrategies: planValue(plan.exitStrategies),
-      importantDocs: planValue(plan.importantDocs),
-      financialPlan: planValue(plan.financialPlan),
-      legalContacts: planValue(plan.legalContacts),
+      emergencyContacts: planColumnValue(plan.emergencyContacts),
+      safeLocations: planColumnValue(plan.safeLocations),
+      warningTriggers: planColumnValue(plan.warningTriggers),
+      exitStrategies: planColumnValue(plan.exitStrategies),
+      importantDocs: planColumnValue(plan.importantDocs),
+      financialPlan: planColumnValue(plan.financialPlan),
+      legalContacts: planColumnValue(plan.legalContacts),
     };
 
     const safetyPlan = await prisma.safetyPlan.upsert({
@@ -640,7 +643,26 @@ router.post('/safety-plan', authenticate, async (req: AuthRequest, res: Response
       update: { ...fields, lastReviewedAt: new Date() },
     });
 
-    res.json({ success: true, data: safetyPlan });
+    res.json({ success: true, data: presentSafetyPlan(safetyPlan) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// DELETE /api/impact/safety-plan - Delete the whole plan
+//
+// Emptying every box and saving leaves a row behind that says she once made a
+// plan. This removes the row. Only the fact is logged, never a word of it, and
+// no audit row is written: none of AuditAction's values fits, and a record
+// kept for years saying she had a plan is the thing she is asking to be rid of.
+router.delete('/safety-plan', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user!.id;
+
+    const { count } = await prisma.safetyPlan.deleteMany({ where: { userId } });
+    logger.info('Safety plan deleted', { userId, hadPlan: count > 0 });
+
+    res.json({ success: true, data: { deleted: count > 0 } });
   } catch (error) {
     next(error);
   }

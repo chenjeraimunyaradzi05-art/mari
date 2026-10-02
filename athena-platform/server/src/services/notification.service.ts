@@ -6,12 +6,14 @@
 
 import { sendNotification as sendSocketNotification } from './socket.service';
 import { sendEmail } from './email.service';
+import { escapeHtml } from '../utils/escape-html';
 import { logger } from '../utils/logger';
 import { prisma } from '../utils/prisma';
 import { NotificationType } from '@prisma/client';
 import { i18nService, SupportedLocale } from './i18n.service';
 import { getLocaleForUser } from '../utils/region';
 import { pushToUser } from './push.service';
+import { wantsVagueNotifications } from './dv-safe.service';
 
 export type NotificationChannel = 'in-app' | 'email' | 'push' | 'sms';
 
@@ -52,6 +54,42 @@ const PREFERENCE_MAPPING: Partial<Record<NotificationType, string>> = {
   COMMENT: 'mentions',
   FOLLOW: 'mentions',
 };
+
+/**
+ * The email a notification becomes when nobody wrote it a template of its own.
+ *
+ * Every notification that has no `emailTemplate` goes out as this, and its
+ * title and message are most often a sentence with another member's name in it
+ * ("Ana liked your post", "a new message from ..."). They were interpolated as
+ * they came, so a first name that was `<a href="https://elsewhere">` arrived
+ * as a live link in a message sent from ATHENA's own address, the version of a
+ * phishing mail that a spam filter has learnt to trust. Everything that varies
+ * is escaped here, in the one place the markup is built, so a caller cannot
+ * forget to.
+ */
+export function fallbackEmailHtml(input: { title: string; message?: string; url: string }): string {
+  return `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2>${escapeHtml(input.title)}</h2>
+          <p>${escapeHtml(input.message || '')}</p>
+          <a href="${escapeHtml(input.url)}" style="display:inline-block; padding: 10px 20px; background: #7c3aed; color: white; text-decoration: none; border-radius: 5px;">View details</a>
+        </div>
+      `;
+}
+
+/**
+ * What an email says when its reader has asked for vague notifications.
+ *
+ * The subject is the part shown on a lock screen, in a notification shade and
+ * in an inbox preview, and the body is what a person sees who opens the message
+ * on a shared computer, so neither carries any of the notification's words and
+ * neither names its topic.
+ */
+export const VAGUE_EMAIL = {
+  subject: 'New update on ATHENA',
+  message: 'You have a new update. Open ATHENA to view it.',
+  link: '/dashboard/notifications',
+} as const;
 
 export class NotificationService {
   /**
@@ -273,16 +311,31 @@ export class NotificationService {
   private async sendEmailSafely(email: string, options: DispatchOptions) {
     try {
       const { title, message, emailTemplate } = options;
-      
+
+      // A member who has asked for vague notifications gets the same swap here
+      // that her phone gets in push.service: a woman whose partner reads her
+      // lock screen is read at the inbox too. Nothing of the original goes
+      // out — not the subject, not the template, and not the deep link, which
+      // would name the topic by its address.
+      if (await wantsVagueNotifications(options.userId)) {
+        await sendEmail({
+          to: email,
+          subject: VAGUE_EMAIL.subject,
+          html: fallbackEmailHtml({
+            title: VAGUE_EMAIL.subject,
+            message: VAGUE_EMAIL.message,
+            url: `${process.env.CLIENT_URL || ''}${VAGUE_EMAIL.link}`,
+          }),
+          text: VAGUE_EMAIL.message,
+        });
+        return;
+      }
+
       // Use provided template or generic fallback
       const subject = emailTemplate?.subject || title;
-      const html = emailTemplate?.html || `
-        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2>${title}</h2>
-          <p>${message || ''}</p>
-          <a href="${process.env.CLIENT_URL || ''}${options.link || '#'}" style="display:inline-block; padding: 10px 20px; background: #7c3aed; color: white; text-decoration: none; border-radius: 5px;">View details</a>
-        </div>
-      `;
+      const html =
+        emailTemplate?.html ||
+        fallbackEmailHtml({ title, message, url: `${process.env.CLIENT_URL || ''}${options.link || '#'}` });
 
       await sendEmail({
         to: email,

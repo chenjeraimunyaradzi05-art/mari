@@ -17,7 +17,7 @@ import { Router } from 'express';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
-import { isBlockedRelationship } from '../utils/safety-store';
+import { isBlockedEitherWay } from '../services/audience.service';
 import { normalizeOptionalUserText, normalizeSafeUrl, normalizeUserText } from '../utils/contentSafety';
 
 const router = Router();
@@ -123,7 +123,7 @@ router.get('/archive', authenticate, async (req: AuthRequest, res, next) => {
 router.get('/user/:userId', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
     const { userId } = req.params;
-    if (req.user && req.user.id !== userId && (await isBlockedRelationship(req.user.id, userId))) {
+    if (req.user && req.user.id !== userId && (await isBlockedEitherWay(req.user.id, userId))) {
       res.json({ success: true, data: [] });
       return;
     }
@@ -138,6 +138,8 @@ router.get('/user/:userId', optionalAuth, async (req: AuthRequest, res, next) =>
   }
 });
 
+// validated: title goes through normalizeUserText with TITLE_MAX; statusIds must be an array and
+//   each is looked up among her own stories.
 router.post('/', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const userId = req.user!.id;
@@ -177,6 +179,8 @@ router.post('/', authenticate, async (req: AuthRequest, res, next) => {
   }
 });
 
+// validated: title goes through normalizeUserText with TITLE_MAX and coverUrl through
+//   normalizeSafeUrl.
 router.patch('/:id', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const existing = await loadOwnHighlight(req.params.id, req.user!.id);
@@ -210,6 +214,7 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res, next) => {
   }
 });
 
+// validated: statusId is read only as text and must be one of her own stories.
 router.post('/:id/items', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const highlight = await loadOwnHighlight(req.params.id, req.user!.id);

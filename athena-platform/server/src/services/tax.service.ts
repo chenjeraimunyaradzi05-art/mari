@@ -125,6 +125,27 @@ export async function listTaxReturns(params: { organizationId?: string; userId: 
   });
 }
 
+/**
+ * A return in an organisation's name may be changed only by the member who
+ * filed it, and only while she is still a member. The return carries the id of
+ * whoever created it, and that never changes, so ownership alone meant a person
+ * who left the business (or was removed from it) could go on editing,
+ * submitting and deleting its draft returns for as long as they stayed drafts.
+ * A personal return is its owner's alone, as before.
+ */
+async function assertCanChangeReturn(
+  record: { userId: string | null; organizationId: string | null },
+  userId: string,
+  verb: string
+): Promise<void> {
+  if (record.userId !== userId) {
+    throw new ApiError(403, `Not authorized to ${verb} this tax return`);
+  }
+  if (record.organizationId) {
+    await assertOrgMembership(record.organizationId, userId);
+  }
+}
+
 export async function createTaxReturn(data: {
   organizationId?: string;
   userId?: string;
@@ -194,10 +215,7 @@ export async function updateTaxReturn(id: string, userId: string, data: {
 }) {
   const record = await prisma.taxReturn.findUnique({ where: { id } });
   if (!record) throw new ApiError(404, 'Tax return not found');
-  // Verify ownership
-  if (record.userId !== userId) {
-    throw new ApiError(403, 'Not authorized to update this tax return');
-  }
+  await assertCanChangeReturn(record, userId, 'update');
   if (record.status !== 'DRAFT') {
     throw new ApiError(400, 'Only draft returns can be edited');
   }
@@ -241,10 +259,7 @@ export async function updateTaxReturn(id: string, userId: string, data: {
 export async function submitTaxReturn(id: string, userId: string) {
   const record = await prisma.taxReturn.findUnique({ where: { id } });
   if (!record) throw new ApiError(404, 'Tax return not found');
-  // Verify ownership
-  if (record.userId !== userId) {
-    throw new ApiError(403, 'Not authorized to submit this tax return');
-  }
+  await assertCanChangeReturn(record, userId, 'submit');
 
   if (record.status !== 'DRAFT') {
     throw new ApiError(400, 'Only draft returns can be submitted');
@@ -265,10 +280,7 @@ export async function deleteTaxRate(id: string) {
 export async function deleteTaxReturn(id: string, userId: string) {
   const record = await prisma.taxReturn.findUnique({ where: { id } });
   if (!record) throw new ApiError(404, 'Tax return not found');
-  // Verify ownership
-  if (record.userId !== userId) {
-    throw new ApiError(403, 'Not authorized to delete this tax return');
-  }
+  await assertCanChangeReturn(record, userId, 'delete');
   if (record.status !== 'DRAFT') {
     throw new ApiError(400, 'Only draft returns can be deleted');
   }

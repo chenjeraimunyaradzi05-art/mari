@@ -3,6 +3,8 @@ import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { aiLimiter } from '../middleware/rateLimiter';
+import { z } from 'zod';
+import { parseWith } from '../middleware/validate';
 import { aiService } from '../services/ai.service';
 import { checkAiBudget } from '../services/ai-budget.service';
 import {
@@ -16,6 +18,8 @@ import {
   type FlaggedChatCrisis,
 } from '../services/ai-safety.service';
 import { checkRateLimit, getRateLimitStatus } from '../utils/cache';
+import { chatAllowanceFor, hasPaidEntitlement } from '../services/entitlements.service';
+import type { SubscriptionStanding as SubscriptionStandingRow } from '../utils/subscription-entitlement';
 
 /**
  * The free-tier chat window, measured in this process as well as in Redis.
@@ -72,39 +76,14 @@ export function resetLocalChatWindows(): void {
   localChatWindows.clear();
 }
 
-function quotaFromEnv(
-  windowName: string,
-  maxName: string,
-  defaults: { windowSeconds: number; maxRequests: number }
-): { windowSeconds: number; maxRequests: number } {
-  const windowSeconds = Number.parseInt(process.env[windowName] || String(defaults.windowSeconds), 10);
-  const maxRequests = Number.parseInt(process.env[maxName] || String(defaults.maxRequests), 10);
-
-  return {
-    windowSeconds: Number.isFinite(windowSeconds) && windowSeconds > 0 ? windowSeconds : defaults.windowSeconds,
-    maxRequests: Number.isFinite(maxRequests) && maxRequests > 0 ? maxRequests : defaults.maxRequests,
-  };
-}
-
-function getFreeChatQuotaConfig() {
-  return quotaFromEnv('AI_CHAT_FREE_WINDOW_SECONDS', 'AI_CHAT_FREE_MAX_REQUESTS', {
-    windowSeconds: 24 * 60 * 60,
-    maxRequests: 20,
-  });
-}
-
 /**
- * Premium chat had no period quota at all: the quota block ran only when the
- * tier was FREE, so a paying account's one ceiling was aiLimiter's ten a minute
- * — fourteen thousand completions a day — and /chat/usage told her she was
- * "unlimited". Premium now buys a much larger window rather than none, and the
- * daily token budget in ai-budget.service sits behind both.
+ * The chat window for a member who is, or is not, on a live paid membership.
+ * The numbers live in services/entitlements.service, beside everything else a
+ * plan buys, so the pricing page can print what this enforces.
  */
-function getPremiumChatQuotaConfig() {
-  return quotaFromEnv('AI_CHAT_PREMIUM_WINDOW_SECONDS', 'AI_CHAT_PREMIUM_MAX_REQUESTS', {
-    windowSeconds: 24 * 60 * 60,
-    maxRequests: 200,
-  });
+function chatQuotaFor(premium: boolean): { windowSeconds: number; maxRequests: number } {
+  const { messages, windowSeconds } = chatAllowanceFor(premium);
+  return { windowSeconds, maxRequests: messages };
 }
 
 /** The chat window as every chat response reports it, whichever tier she is on. */
@@ -116,18 +95,16 @@ type ChatUsage = { limit: number; remaining: number; resetIn: number; windowSeco
  * The one rule, used by the gate on every premium route, by GET /access that
  * the web app asks before it draws a premium page, and by the chat to pick a
  * quota — so the page, the route and the quota cannot disagree about who has
- * paid. It is the rule requirePremium in middleware/auth applied: a tier other
- * than FREE, and a subscription that is ACTIVE or TRIALING. A lapsed or
- * past-due Premium is not Premium, whatever tier the row still names.
+ * paid. It is hasPaidEntitlement in services/entitlements.service, the same
+ * rule requirePremium in middleware/auth applies: a tier other than FREE, and a
+ * subscription that is ACTIVE or TRIALING, or past due and still inside the
+ * grace after a failed renewal. A lapsed Premium, or one past due beyond the
+ * grace, is not Premium, whatever tier the row still names.
  */
-type SubscriptionStanding = { tier: string; status: string } | null | undefined;
+type SubscriptionStanding = SubscriptionStandingRow | null | undefined;
 
 export function hasActivePremium(subscription: SubscriptionStanding): boolean {
-  return Boolean(
-    subscription &&
-      subscription.tier !== 'FREE' &&
-      (subscription.status === 'ACTIVE' || subscription.status === 'TRIALING')
-  );
+  return hasPaidEntitlement(subscription);
 }
 
 /**
@@ -144,7 +121,7 @@ async function requireAiPremium(req: AuthRequest, res: Response, next: NextFunct
   try {
     const subscription = await prisma.subscription.findUnique({
       where: { userId: req.user!.id },
-      select: { tier: true, status: true },
+      select: { tier: true, status: true, currentPeriodStart: true },
     });
 
     if (hasActivePremium(subscription)) return next();
@@ -224,7 +201,7 @@ router.get('/access', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const subscription = await prisma.subscription.findUnique({
       where: { userId: req.user!.id },
-      select: { tier: true, status: true },
+      select: { tier: true, status: true, currentPeriodStart: true },
     });
 
     res.json({
@@ -433,18 +410,31 @@ async function opportunityRadarHandler(req: AuthRequest, res: Response, next: Ne
 }
 
 router.get('/opportunity-radar', authenticate, requireAiPremium, aiLimiter, opportunityRadarHandler);
+// validated: filters are read as a number and two flags and used only to narrow her own matches;
+//   nothing is stored.
 router.post('/opportunity-radar', authenticate, requireAiPremium, aiLimiter, opportunityRadarHandler);
 
 // ===========================================
 // RESUME OPTIMIZER
 // ===========================================
+// What the model is sent is what the account is billed for, and these fields had
+// no ceiling but the request body's: a member (or a script on her key) could
+// paste a megabyte into any of them. Each is capped at what a person writes.
+const AI_LONG_TEXT = 60_000; // a long CV is about ten thousand characters
+const resumeOptimizerBody = z.object({
+  resumeText: z.string().max(AI_LONG_TEXT).optional(),
+  resume: z.string().max(AI_LONG_TEXT).optional(),
+  targetJobId: z.string().trim().max(100).nullable().optional(),
+  jobDescription: z.string().max(AI_LONG_TEXT).nullable().optional(),
+});
+
 router.post('/resume-optimizer', authenticate, requireAiPremium, aiLimiter, aiBudgetGate, async (req: AuthRequest, res, next) => {
   try {
     // Both resume screens have always posted `resume` and a pasted
     // `jobDescription`; this handler read `resumeText` and `targetJobId`, so
     // every submission failed validation and the feature never ran end to end.
     // Both spellings are accepted, and a pasted description is used directly.
-    const { resumeText, resume, targetJobId, jobDescription: pastedDescription } = req.body;
+    const { resumeText, resume, targetJobId, jobDescription: pastedDescription } = parseWith(resumeOptimizerBody, req.body);
     const resumeBody = resumeText || resume;
 
     if (!resumeBody || typeof resumeBody !== 'string') {
@@ -497,16 +487,19 @@ router.post('/resume-optimizer', authenticate, requireAiPremium, aiLimiter, aiBu
 // four fixed sentences keyed only by interview type, whatever role she had
 // entered, beside a hub card promising "questions tailored to your target
 // role"; the role form is what makes that true.
+const interviewCoachBody = z.object({
+  jobId: z.string().trim().max(100).nullable().optional(),
+  questionType: z.string().trim().max(100).optional(),
+  interviewType: z.string().trim().max(100).optional(),
+  jobRole: z.string().trim().max(200).optional(),
+});
+
 router.post('/interview-coach', authenticate, requireAiPremium, aiLimiter, aiBudgetGate, async (req: AuthRequest, res, next) => {
   try {
-    const { jobId } = req.body;
-    const questionType =
-      typeof req.body.questionType === 'string'
-        ? req.body.questionType
-        : typeof req.body.interviewType === 'string'
-          ? req.body.interviewType
-          : 'mixed';
-    const jobRole = typeof req.body.jobRole === 'string' ? req.body.jobRole.trim().slice(0, 200) : '';
+    const input = parseWith(interviewCoachBody, req.body);
+    const { jobId } = input;
+    const questionType = input.questionType ?? input.interviewType ?? 'mixed';
+    const jobRole = input.jobRole ?? '';
 
     let description: string;
     let jobTitle: string;
@@ -546,11 +539,19 @@ router.post('/interview-coach', authenticate, requireAiPremium, aiLimiter, aiBud
   }
 });
 
+const interviewFeedbackBody = z.object({
+  question: z.string().max(4000).optional(),
+  answer: z.string().max(20_000).optional(),
+  jobRole: z.string().trim().max(200).optional(),
+  interviewType: z.string().trim().max(100).optional(),
+  difficulty: z.string().trim().max(50).optional(),
+});
+
 router.post('/interview-coach/feedback', authenticate, requireAiPremium, aiLimiter, aiBudgetGate, async (req: AuthRequest, res, next) => {
   try {
-    const { question, answer, jobRole, interviewType, difficulty } = req.body;
+    const { question, answer, jobRole, interviewType, difficulty } = parseWith(interviewFeedbackBody, req.body);
 
-    if (!question || !answer || typeof question !== 'string' || typeof answer !== 'string') {
+    if (!question || !answer) {
       throw new ApiError(400, 'Question and answer are required');
     }
 
@@ -631,6 +632,8 @@ ${user.education.map(e => `- ${e.degree} in ${e.fieldOfStudy || 'N/A'} from ${e.
 // The GET above derives everything from the stored profile. The career-path page
 // asks the user for a current role, a target role, and years of experience, so
 // this variant plans against the goal they typed rather than only their history.
+// validated: currentRole and targetRole are read only as text and cut to 200 characters in the
+//   prompt; yearsExperience is parsed to a whole number or null.
 router.post('/career-path', authenticate, requireAiPremium, aiLimiter, aiBudgetGate, async (req: AuthRequest, res, next) => {
   try {
     const currentRole = typeof req.body.currentRole === 'string' ? req.body.currentRole.trim() : '';
@@ -684,13 +687,22 @@ Skills: ${user.skills.map((s) => `${s.skill.name} (${s.level})`).join(', ') || '
 // ===========================================
 // CONTENT GENERATOR (For Creators)
 // ===========================================
+const contentGeneratorBody = z.object({
+  contentType: z.string().trim().max(50).optional(),
+  type: z.string().trim().max(50).optional(),
+  topic: z.string().trim().max(500).optional(),
+  tone: z.string().trim().max(50).optional(),
+  platform: z.string().trim().max(50).optional(),
+  context: z.string().max(5000).optional(),
+});
+
 router.post('/content-generator', authenticate, requireAiPremium, aiLimiter, aiBudgetGate, async (req: AuthRequest, res, next) => {
   try {
     // The generator screen has always sent `type`, `tone` and `context`; this
     // handler read `contentType` and passed only the topic on, so every choice
     // on that screen except the topic was quietly discarded. Both spellings
     // are accepted so no caller breaks.
-    const { contentType, type, topic, tone, platform, context } = req.body;
+    const { contentType, type, topic, tone, platform, context } = parseWith(contentGeneratorBody, req.body);
     const kind = contentType || type;
 
     if (!topic) {
@@ -721,6 +733,14 @@ router.post('/content-generator', authenticate, requireAiPremium, aiLimiter, aiB
 // ===========================================
 // BUSINESS IDEA VALIDATOR (For Entrepreneurs)
 // ===========================================
+const ideaValidatorBody = z.object({
+  idea: z.string().max(5000).optional(),
+  targetMarket: z.string().max(1000).optional(),
+  problemSolved: z.string().max(3000).optional(),
+  problem: z.string().max(3000).optional(),
+  category: z.string().trim().max(100).optional(),
+});
+
 router.post('/idea-validator', authenticate, requireAiPremium, aiLimiter, aiBudgetGate, async (req: AuthRequest, res, next) => {
   try {
     // The validator screen has always sent `category`, which this handler
@@ -729,9 +749,9 @@ router.post('/idea-validator', authenticate, requireAiPremium, aiLimiter, aiBudg
     // one thing the member did choose never reached the model. Both are now
     // accepted, and `problem` is taken as well because that is what the field
     // is called on the screen.
-    const { idea, targetMarket, problemSolved, problem, category } = req.body;
+    const { idea, targetMarket, problemSolved, problem, category } = parseWith(ideaValidatorBody, req.body);
 
-    if (!idea || typeof idea !== 'string' || !idea.trim()) {
+    if (!idea || !idea.trim()) {
       throw new ApiError(400, 'Business idea is required');
     }
 
@@ -775,7 +795,7 @@ router.get('/chat/usage', authenticate, async (req: AuthRequest, res, next) => {
     // premium answer used to be `unlimited: true` with no usage at all, which
     // was never true: the per-minute limiter always applied, and now there is
     // a daily window as well.
-    const { windowSeconds, maxRequests } = premium ? getPremiumChatQuotaConfig() : getFreeChatQuotaConfig();
+    const { windowSeconds, maxRequests } = chatQuotaFor(premium);
     const shared = await getRateLimitStatus(`ai:chat:${req.user!.id}`, maxRequests, windowSeconds);
     // Whichever window has less left is the one she will actually hit, so it is
     // the one to report. Reading the local window never consumes from it.
@@ -796,7 +816,7 @@ router.get('/chat/usage', authenticate, async (req: AuthRequest, res, next) => {
         },
         // What ATHENA Pro would give her, so the upgrade offer can name a
         // number rather than promise "unlimited".
-        premiumLimit: premium ? null : getPremiumChatQuotaConfig().maxRequests,
+        premiumLimit: premium ? null : chatQuotaFor(true).maxRequests,
         timestamp: new Date(),
       },
     });
@@ -824,6 +844,8 @@ const chatLimiter = (req: AuthRequest, res: Response, next: NextFunction) => {
   return aiLimiter(req, res, next);
 };
 
+// validated: message must be text of 1 to 4,000 characters and context a list of at most 40 role
+//   and content turns, each of bounded length.
 router.post('/chat', authenticate, chatLimiter, async (req: AuthRequest, res, next) => {
   try {
     const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
@@ -860,9 +882,7 @@ router.post('/chat', authenticate, chatLimiter, async (req: AuthRequest, res, ne
     });
 
     const premium = hasActivePremium(user?.subscription);
-    const { windowSeconds: effectiveWindowSeconds, maxRequests: effectiveMaxRequests } = premium
-      ? getPremiumChatQuotaConfig()
-      : getFreeChatQuotaConfig();
+    const { windowSeconds: effectiveWindowSeconds, maxRequests: effectiveMaxRequests } = chatQuotaFor(premium);
 
     // Both windows are consumed and both must allow. The shared one is the
     // real quota; the local one is what is left of it when Redis is not

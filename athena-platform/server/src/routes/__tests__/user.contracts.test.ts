@@ -98,6 +98,60 @@ describe('User contract tests', () => {
     expect(res.body.data).toEqual(expect.objectContaining({ yearsExperience: 5 }));
   });
 
+  describe('PATCH /api/users/me, the public name', () => {
+    const saved = (displayName: string | null) => ({ id: 'user-123', email: 'user@athena.com', firstName: 'Jane', lastName: 'Doe', displayName, avatar: null, isPublic: true });
+
+    it('saves a pseudonym as the public name, tidied, and leaves the legal name alone', async () => {
+      prismaAny.user.update.mockResolvedValue(saved('Willow Rain'));
+
+      const res = await request(app).patch('/api/users/me').send({ displayName: '   Willow    Rain ' }).expect(200);
+
+      expect(prismaAny.user.update.mock.calls[0][0].data).toEqual({ displayName: 'Willow Rain' });
+      // She reads her own record whole: the legal name is hers to see and to correct.
+      expect(res.body.data).toMatchObject({ displayName: 'Willow Rain', firstName: 'Jane', lastName: 'Doe' });
+    });
+
+    it('clears the public name when she sends an empty one, by storing her first name, so every surface calls her by it', async () => {
+      prismaAny.user.findUnique.mockResolvedValue({ firstName: 'Jane' });
+      prismaAny.user.update.mockResolvedValue(saved('Jane'));
+
+      await request(app).patch('/api/users/me').send({ displayName: '' }).expect(200);
+
+      // Not null: reels, channels, live chat and group chat read displayName alone and would print her blank.
+      expect(prismaAny.user.update.mock.calls[0][0].data).toEqual({ displayName: 'Jane' });
+    });
+
+    it('uses the first name she is changing in the same request when she clears the public name', async () => {
+      prismaAny.user.update.mockResolvedValue(saved('Janet'));
+
+      await request(app).patch('/api/users/me').send({ firstName: ' Janet ', displayName: '   ' }).expect(200);
+
+      expect(prismaAny.user.update.mock.calls[0][0].data).toEqual({ firstName: 'Janet', displayName: 'Janet' });
+    });
+
+    it.each([
+      ['an email address', 'jane.doe@example.com'],
+      ['a phone number', '0412 345 678'],
+      ['a web address', 'www.willow.com'],
+      ['a name that claims to be staff', 'ATHENA Moderator'],
+      ['one letter', 'W'],
+    ])('refuses %s, and writes nothing', async (_what, displayName) => {
+      const res = await request(app).patch('/api/users/me').send({ displayName }).expect(400);
+
+      expect(res.body?.message || res.body?.error || '').toMatch(/name|email|phone|web|staff/i);
+      expect(prismaAny.user.update).not.toHaveBeenCalled();
+    });
+
+    it('does not let the legal name be changed by way of the public one', async () => {
+      prismaAny.user.update.mockResolvedValue(saved('Willow'));
+
+      await request(app).patch('/api/users/me').send({ displayName: 'Willow' }).expect(200);
+
+      const data = prismaAny.user.update.mock.calls[0][0].data;
+      expect(Object.keys(data)).toEqual(['displayName']);
+    });
+  });
+
   it('POST /api/users/me/skills requires skillName', async () => {
     const res = await request(app)
       .post('/api/users/me/skills')

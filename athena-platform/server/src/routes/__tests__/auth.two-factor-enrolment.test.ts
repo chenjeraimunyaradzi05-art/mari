@@ -214,6 +214,64 @@ describe('POST /api/auth/2fa/enable', () => {
     await request(app).post('/api/auth/2fa/enable').send({}).expect(400);
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
+
+  // A session on its own must not be enough to put somebody's authenticator on
+  // her account: whoever held a stolen token could enrol their own phone, keep
+  // the ten recovery codes it hands back, and leave the owner unable to sign in.
+  describe('on an account that has a password', () => {
+    const withPassword = { id: 'her', passwordHash: 'hashed:correct horse battery staple', twoFactorSecret: `sealed:${SECRET}` };
+
+    beforeEach(() => {
+      prisma.user.findUnique.mockResolvedValue(withPassword);
+    });
+
+    it('wants the password as well as the code, and turns nothing on without it', async () => {
+      const res = await request(app).post('/api/auth/2fa/enable').send({ code: currentCode() }).expect(400);
+
+      expect(res.body.message).toBe('Current password is required');
+      expect(prisma.user.update).not.toHaveBeenCalled();
+      // The code was not even looked at, so it is still good for when she sends both.
+      expect(claimStep).not.toHaveBeenCalled();
+    });
+
+    it('refuses a wrong password with a 403, counts it, and spends no code', async () => {
+      // A 403 and not a 401: the clients answer a 401 by refreshing and sending the
+      // request again, which counted one wrong password twice.
+      const res = await request(app)
+        .post('/api/auth/2fa/enable')
+        .send({ code: currentCode(), currentPassword: 'not the password' })
+        .expect(403);
+
+      expect(res.body.message).toBe('Current password is incorrect');
+      expect(prisma.user.update).not.toHaveBeenCalled();
+      expect(claimStep).not.toHaveBeenCalled();
+    });
+
+    it('turns it on for the right password and a real code', async () => {
+      const res = await request(app)
+        .post('/api/auth/2fa/enable')
+        .send({ code: currentCode(), currentPassword: 'correct horse battery staple' })
+        .expect(200);
+
+      expect(res.body.data.enabled).toBe(true);
+      expect(res.body.data.recoveryCodes).toHaveLength(10);
+    });
+
+    it('still refuses a wrong code behind the right password', async () => {
+      await request(app)
+        .post('/api/auth/2fa/enable')
+        .send({ code: '000000', currentPassword: 'correct horse battery staple' })
+        .expect(400);
+
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+  });
+
+  it('asks an account with no password (Google or Facebook only) for nothing it does not have', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: 'her', passwordHash: null, twoFactorSecret: `sealed:${SECRET}` });
+
+    await request(app).post('/api/auth/2fa/enable').send({ code: currentCode() }).expect(200);
+  });
 });
 
 describe('POST /api/auth/2fa/disable', () => {
@@ -233,13 +291,15 @@ describe('POST /api/auth/2fa/disable', () => {
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
-  it('refuses the wrong password with 401 and changes nothing', async () => {
+  it('refuses the wrong password with 403 and changes nothing', async () => {
     prisma.user.findUnique.mockResolvedValue(enrolled);
 
+    // A 403 and not a 401: the clients answer a 401 by refreshing the session and
+    // sending the request again, which counted one mistyped password twice.
     await request(app)
       .post('/api/auth/2fa/disable')
       .send({ currentPassword: 'not it', code: currentCode() })
-      .expect(401);
+      .expect(403);
 
     expect(prisma.user.update).not.toHaveBeenCalled();
   });

@@ -26,7 +26,9 @@ describe('The request id a caller may hand us', () => {
     expect(kept.headers['x-request-id']).toBe('trace-42');
 
     const minted = await request(app).get('/').set('X-Request-Id', 'not an id at all').expect(200);
-    expect(minted.body.id).toMatch(/^[0-9a-f-]{36}$/);
+    // A version 4 UUID, which is what crypto.randomUUID makes and what the uuid
+    // package this replaced made: log lines and the X-Request-Id header carry it.
+    expect(minted.body.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(minted.headers['x-request-id']).toBe(minted.body.id);
   });
 });

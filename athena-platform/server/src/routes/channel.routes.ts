@@ -4,6 +4,8 @@ import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { emitToChannel } from '../services/socket.service';
+import { blockedEitherWayIds } from '../services/audience.service';
+import { logger } from '../utils/logger';
 import { assertContentAllowed } from '../services/moderation.service';
 import {
   CONTENT_LIMITS,
@@ -21,6 +23,21 @@ import {
 import { messageLimiter, postLimiter, reactionLimiter } from '../middleware/socialLimits';
 
 const router = Router();
+
+/**
+ * The members on either side of a block with this viewer, in both stores, for a
+ * route that lists a channel's members or messages. Nobody signed out has
+ * blocked anyone. Not best-effort: a lookup that fails fails the request, since
+ * an empty list standing in for one that could not be read is how he comes back.
+ */
+async function blockedFrom(viewerId: string | undefined): Promise<string[]> {
+  return viewerId ? blockedEitherWayIds(viewerId) : [];
+}
+
+/** The clause that leaves a blocked member's messages out of a channel query. */
+function fromNoOneBlocked(blocked: string[]): { authorId?: { notIn: string[] } } {
+  return blocked.length > 0 ? { authorId: { notIn: blocked } } : {};
+}
 
 function parseLimit(value: unknown, fallback = 20, max = 50): number {
   const parsed = typeof value === 'string' ? parseInt(value, 10) : NaN;
@@ -218,8 +235,9 @@ router.get('/discover', optionalAuth, async (req: AuthRequest, res, next) => {
 // ===========================================
 router.get('/unread', authenticate, async (req: AuthRequest, res, next) => {
   try {
+    const viewerId = req.user!.id;
     const memberships = await prisma.channelMember.findMany({
-      where: { userId: req.user!.id },
+      where: { userId: viewerId },
       select: { channelId: true, lastReadAt: true, joinedAt: true },
     });
 
@@ -227,11 +245,16 @@ router.get('/unread', authenticate, async (req: AuthRequest, res, next) => {
     // each membership contributes its own (channelId, since) pair to a single
     // OR. A member who has never opened the channel is measured from when they
     // joined, so they do not inherit the channel's entire backlog as unread.
+    //
+    // Counted over what she can read: a reply from someone on either side of a
+    // block with her is not in the list, so it is not in the number either, which
+    // would otherwise tell her that the person she blocked had just written.
+    const blocked = memberships.length ? await blockedFrom(viewerId) : [];
     const counts = memberships.length
       ? await prisma.channelMessage.groupBy({
           by: ['channelId'],
           where: {
-            authorId: { not: req.user!.id },
+            authorId: { not: viewerId, ...(blocked.length > 0 ? { notIn: blocked } : {}) },
             OR: memberships.map((m) => ({
               channelId: m.channelId,
               createdAt: { gt: m.lastReadAt ?? m.joinedAt },
@@ -511,8 +534,12 @@ router.get('/:id/members', optionalAuth, async (req: AuthRequest, res, next) => 
     const { id } = req.params;
     await requireChannelAccess(id, req.user?.id);
 
+    // Nobody on either side of a block with her is on the list: it names every
+    // member with a picture and an id, and the id is the key to everything else
+    // about her.
+    const blocked = await blockedFrom(req.user?.id);
     const members = await prisma.channelMember.findMany({
-      where: { channelId: id },
+      where: { channelId: id, ...(blocked.length > 0 ? { userId: { notIn: blocked } } : {}) },
       orderBy: { joinedAt: 'asc' },
       include: {
         user: { select: { id: true, displayName: true, avatar: true, headline: true } },
@@ -615,8 +642,9 @@ router.get('/:id/pinned', optionalAuth, async (req: AuthRequest, res, next) => {
     const { id } = req.params;
     await requireChannelAccess(id, req.user?.id);
 
+    const blocked = await blockedFrom(req.user?.id);
     const messages = await prisma.channelMessage.findMany({
-      where: { channelId: id, isPinned: true },
+      where: { channelId: id, isPinned: true, ...fromNoOneBlocked(blocked) },
       orderBy: { createdAt: 'desc' },
       include: { author: { select: { id: true, displayName: true, avatar: true } } },
     });
@@ -645,8 +673,9 @@ router.get('/:id/search', optionalAuth, async (req: AuthRequest, res, next) => {
     }
 
     const limit = parseLimit(req.query.limit, 20, 50);
+    const blocked = await blockedFrom(req.user?.id);
     const messages = await prisma.channelMessage.findMany({
-      where: { channelId: id, content: { contains: query, mode: 'insensitive' } },
+      where: { channelId: id, content: { contains: query, mode: 'insensitive' }, ...fromNoOneBlocked(blocked) },
       orderBy: { createdAt: 'desc' },
       take: limit,
       include: { author: { select: { id: true, displayName: true, avatar: true } } },
@@ -687,16 +716,27 @@ router.post('/:id/read', authenticate, async (req: AuthRequest, res, next) => {
 // Clients with a live socket should emit `channels:typing` directly. This REST
 // entry point exists for callers that only speak HTTP; both land in the same
 // channel room.
+// validated: the only field read is stopped, as === true.
 router.post('/:id/typing', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
-    await requireChannelAccess(id, req.user!.id);
+    const typistId = req.user!.id;
+    await requireChannelAccess(id, typistId);
 
     const stopped = req.body?.stopped === true;
-    emitToChannel(id, stopped ? 'channels:user_stopped_typing' : 'channels:user_typing', {
-      channelId: id,
-      userId: req.user!.id,
-    });
+    // Not to a member on either side of a block with her, as for her replies.
+    // The notice is a nicety: if the block lists cannot be read none is sent.
+    try {
+      const exceptUserIds = await blockedEitherWayIds(typistId);
+      emitToChannel(
+        id,
+        stopped ? 'channels:user_stopped_typing' : 'channels:user_typing',
+        { channelId: id, userId: typistId },
+        { exceptUserIds }
+      );
+    } catch (error) {
+      logger.warn('Typing notice not sent: the block lists could not be read', { channelId: id, error });
+    }
 
     res.json({ success: true });
   } catch (error) {
@@ -730,18 +770,27 @@ router.get('/:id/messages', optionalAuth, async (req: AuthRequest, res, next) =>
       }
     }
 
+    // A block ends contact, and a channel's replies are contact with everyone
+    // subscribed. Left out in the query, so a page is full and the total is the
+    // number she can read; the reactions of someone she blocked are left off the
+    // messages she can.
+    const blocked = await blockedFrom(req.user?.id);
+    const readable = { channelId: id, ...fromNoOneBlocked(blocked) };
     const [messages, total] = await Promise.all([
       prisma.channelMessage.findMany({
-        where: { channelId: id },
+        where: readable,
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
         include: {
           author: { select: { id: true, displayName: true, avatar: true } },
-          reactions: { select: { emoji: true, userId: true } },
+          reactions: {
+            where: blocked.length > 0 ? { userId: { notIn: blocked } } : undefined,
+            select: { emoji: true, userId: true },
+          },
         },
       }),
-      prisma.channelMessage.count({ where: { channelId: id } }),
+      prisma.channelMessage.count({ where: readable }),
     ]);
 
     // The client renders one chip per emoji with a count and whether the viewer
@@ -849,8 +898,16 @@ router.post(
         data: { messageCount: { increment: 1 } },
       });
 
-      // Everyone else in the room sees it without waiting for their next poll.
-      emitToChannel(id, 'channels:message', { channelId: id, message });
+      // Everyone else in the room sees it without waiting for their next poll,
+      // except the members on either side of a block with the sender. If the
+      // block lists cannot be read nothing is pushed rather than everything: the
+      // message is stored, and the list she reads applies the same rule.
+      try {
+        const exceptUserIds = await blockedEitherWayIds(message.authorId);
+        emitToChannel(id, 'channels:message', { channelId: id, message }, { exceptUserIds });
+      } catch (error) {
+        logger.warn('Channel message not pushed: the block lists of the sender could not be read', { channelId: id, error });
+      }
 
       res.status(201).json({ success: true, data: message });
     } catch (error) {
@@ -968,19 +1025,31 @@ router.post(
       }
 
       const { channelId, messageId } = req.params;
-      await loadChannelMessage(channelId, messageId, req.user!.id);
+      const reactorId = req.user!.id;
+      // A reaction is a mark left in the channel, and it adds to the count every
+      // member sees on the message. Nothing asked whether she may be in the
+      // channel at all, so anyone signed in who held a private channel's message
+      // id could react to it; the same rule as reading it now applies.
+      await requireChannelAccess(channelId, reactorId);
+      const { message: target } = await loadChannelMessage(channelId, messageId, reactorId);
+      // And not to the words of someone on either side of a block with her: she
+      // is not shown them, so a reaction under them is contact she was not meant
+      // to be able to make. The same answer as a message that is not there.
+      if (target.authorId !== reactorId && (await blockedEitherWayIds(reactorId)).includes(target.authorId)) {
+        throw new ApiError(404, 'Message not found');
+      }
 
       const emoji = String(req.body.emoji).trim();
 
       // The unique constraint makes this idempotent: reacting twice with the
       // same emoji is a no-op rather than a duplicate row or an error.
       const existing = await prisma.channelMessageReaction.findUnique({
-        where: { messageId_userId_emoji: { messageId, userId: req.user!.id, emoji } },
+        where: { messageId_userId_emoji: { messageId, userId: reactorId, emoji } },
       });
 
       if (!existing) {
         await prisma.channelMessageReaction.create({
-          data: { messageId, userId: req.user!.id, emoji },
+          data: { messageId, userId: reactorId, emoji },
         });
         await prisma.channelMessage.update({
           where: { id: messageId },

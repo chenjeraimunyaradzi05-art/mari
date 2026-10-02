@@ -8,7 +8,14 @@ import { PostType, type Prisma } from '@prisma/client';
 import { cacheGetOrSet, CacheKeys } from '../utils/cache';
 import { getOpenSearchClient, IndexNames } from '../utils/opensearch';
 import { logger } from '../utils/logger';
-import { authorAudienceWhere, followingIdsOf } from './audience.service';
+import {
+  authorAudienceWhere,
+  authorVisibleWhere,
+  followingIdsOf,
+  mayBeShownToWhere,
+  notPrivateProfileWhere,
+  seesOnlyTheCard,
+} from './audience.service';
 import { getBlockedRelationshipIds } from '../utils/safety-store';
 
 // ==========================================
@@ -227,17 +234,125 @@ export async function viewerContextFor(viewerId?: string): Promise<ViewerContext
  * The block clause covers the direction the id list cannot: a member who
  * blocked the viewer from her DV safety page before that block reached the
  * platform-wide store.
+ *
+ * A member in Safe Mode is left out as well, whichever page she turned it on
+ * from: the Safety Centre's switch writes only Profile.isSafeMode and does not
+ * touch hide-from-search, so a woman who used it was told she was protected
+ * and went on being found by name. Her verified connections may still find
+ * her (see mayBeShownToWhere in audience.service.ts); everyone else may not.
+ *
+ * An account whose address nobody has confirmed is left out too. It cannot
+ * sign in, post or message (sign-in refuses it until the emailed link is
+ * followed), but the row exists from the moment of sign-up, and with only
+ * `isActive` to go on, a name typed into the registration form (anyone's)
+ * appeared in people search, suggestions and mentions before the person it
+ * named had proved the address was hers. She appears when she confirms it.
+ * GET /users/:id answers 404 for the same accounts (user.routes.ts).
+ *
+ * A member whose User.isPublic is false is left out of every list that offers
+ * members by name, for everyone but herself. The profile route answers "this
+ * profile is private" for her to everyone else, the follow route refuses her,
+ * and the search index drops her on the same flag; the database lists (search,
+ * suggestions, the mentor directory, cold-start) did not ask, so a profile its
+ * owner had closed was still offered by name, with her picture and headline.
  */
 export function hiddenMemberWhere(viewer: ViewerContext): Prisma.UserWhereInput {
   const conditions: Prisma.UserWhereInput[] = [
+    { emailVerified: true },
     { NOT: { dvSafetyProfile: { is: { hideFromSearch: true } } } },
     { NOT: { profile: { is: { hideFromSearch: true } } } },
+    mayBeShownToWhere(viewer.viewerId),
+    viewer.viewerId ? { OR: [{ isPublic: true }, { id: viewer.viewerId }] } : { isPublic: true },
   ];
   if (viewer.viewerId) {
     conditions.push({ NOT: { dvSafetyProfile: { is: { blockedUserIds: { has: viewer.viewerId } } } } });
   }
   if (viewer.blockedIds.length > 0) {
     conditions.push({ id: { notIn: viewer.blockedIds } });
+  }
+  return { AND: conditions };
+}
+
+/**
+ * Who people search may offer by name: everyone hiddenMemberWhere leaves (which
+ * includes a profile its owner has closed with isPublic), less the members whose
+ * profile visibility is private.
+ *
+ * A private profile is a closed door: GET /users/:id answers nobody but her, and
+ * nothing of hers surfaces in a feed. Search was the window left open, because it
+ * asked only the hide-from-search question and not the profile-visibility one, so
+ * a member who had set herself to private still appeared by name, with her
+ * picture, headline and bio, to anyone who typed the name. Suggestions, the
+ * leaderboards and the creator directory already leave her out
+ * (notPrivateProfileWhere); this is the same rule for the search box.
+ */
+export function searchableMemberWhere(viewer: ViewerContext): Prisma.UserWhereInput {
+  return { AND: [hiddenMemberWhere(viewer), notPrivateProfileWhere] };
+}
+
+/** What a list of a member's posts or reels is narrowed by: the same two keys on either model. */
+export interface AuthorScope {
+  authorId?: { notIn: string[] };
+  author: Prisma.UserWhereInput;
+}
+
+/**
+ * The clause that keeps an author out of the lists of anyone who may not see
+ * her: either side of a block with the viewer, in both stores, and a member in
+ * Safe Mode for everyone who is not herself or her verified connection, and a
+ * member whose profile is private (or connections-only, for a viewer who does
+ * not follow her), whose posts and reels are not for a list that is not her own
+ * page: authorVisibleWhere, the audience rule the post feeds apply.
+ *
+ * It is the one answer for every list that carries a post's or a reel's author
+ * and is not a feed (the reels' trending, category, per-author and saved lists,
+ * a sound's page, a topic's reels, the saved posts), so that a list added later
+ * is not the one that forgot. A signed-out viewer has blocked nobody but is
+ * still a stranger to a discreet member. Not best-effort: if the block lists
+ * cannot be read the request fails, because an empty list standing in for one
+ * that could not be read is how he comes back.
+ */
+export async function visibleAuthorWhere(viewerId: string | undefined): Promise<AuthorScope> {
+  return authorScopeFor(viewerId ? await viewerContextFor(viewerId) : { blockedIds: [], followingIds: [] });
+}
+
+/**
+ * visibleAuthorWhere for a caller that has already gathered the viewer's
+ * context (a search, a topic page) and should not read the block lists twice.
+ */
+export function authorScopeFor(viewer: ViewerContext): AuthorScope {
+  const { viewerId } = viewer;
+  const shown = authorVisibleWhere(viewerId);
+  if (!viewerId) return { author: shown };
+  return {
+    ...(viewer.blockedIds.length > 0 ? { authorId: { notIn: viewer.blockedIds } } : {}),
+    author: { AND: [{ NOT: { dvSafetyProfile: { is: { blockedUserIds: { has: viewerId } } } } }, shown] },
+  };
+}
+
+/**
+ * The posts a viewer may be shown in a public list that is not a feed: not
+ * hidden, public (her own private posts are not a topic's or a repost list's
+ * business), written outside any group, by an author inside the viewer's
+ * audience, and not across a block in either store and either direction.
+ *
+ * These are the same clauses searchPosts applies, kept in one place for the
+ * pages that list posts by something other than a keyword: a topic, a post's
+ * reposts. They each carried only "public, not hidden, not in a group", so a
+ * post by a member whose profile is private or connections-only, or by one the
+ * viewer had blocked, was listed to anyone who opened the page, signed out
+ * included.
+ */
+export function publicPostWhere(viewer: ViewerContext): Prisma.PostWhereInput {
+  const conditions: Prisma.PostWhereInput[] = [
+    { isHidden: false, isPublic: true },
+    // Supplies groupId: null as well, so a group's conversation stays on the
+    // group's page.
+    authorAudienceWhere(viewer.viewerId, viewer.followingIds),
+  ];
+  if (viewer.blockedIds.length > 0) conditions.push({ authorId: { notIn: viewer.blockedIds } });
+  if (viewer.viewerId) {
+    conditions.push({ NOT: { author: { dvSafetyProfile: { is: { blockedUserIds: { has: viewer.viewerId } } } } } });
   }
   return { AND: conditions };
 }
@@ -261,6 +376,13 @@ const ALL_KINDS: SearchKind[] = ['users', 'posts', 'jobs', 'courses', 'videos', 
  * from the database until something indexes them.
  */
 const OPENSEARCH_INDEXED_KINDS = new Set<SearchKind>(['users', 'posts', 'jobs']);
+
+/**
+ * How many results deep any search reads, in the engine. The database path takes
+ * at most 50 rows a kind, so a page past the fifth is empty there; the engine
+ * has no such floor, and "page 99999" is a request for a very large offset.
+ */
+const SEARCH_DEPTH = 500;
 
 /** The OpenSearch index a kind lives in. Only ever asked for an indexed kind. */
 function indexForKind(kind: SearchKind): string {
@@ -293,7 +415,7 @@ async function searchDatabase(
     posts: () => searchPosts(keywords, filters, viewer),
     jobs: () => searchJobs(keywords, filters, persona),
     courses: () => searchCourses(keywords, filters),
-    videos: () => searchVideos(keywords, filters),
+    videos: () => searchVideos(keywords, filters, viewer),
     mentors: () => searchMentors(keywords, filters, viewer, persona),
   };
   const batches = await Promise.all(kinds.map((kind) => searchers[kind]()));
@@ -416,6 +538,14 @@ async function searchUsers(
   viewer: ViewerContext,
   persona?: string
 ): Promise<SearchResult[]> {
+  // A visitor with no account is shown the card, as on the profile itself (see
+  // anonymousProfileDetail in audience.service): a name, a picture and a
+  // headline, found by name and headline. Searching bios and skills would let
+  // her ask the directory questions about people it will not show her ("who
+  // has written about a divorce, a diagnosis, a town"), and the bio is more than
+  // the card carries. A signed-in member searches all of it, as before.
+  const cardOnly = seesOnlyTheCard(viewer.viewerId);
+
   const users = await prisma.user.findMany({
     // The safety filter is ANDed into the query rather than applied to the
     // rows afterwards. Filtering after `take: 50` would silently shorten the
@@ -428,15 +558,19 @@ async function searchUsers(
           OR: [
             ...keywords.flatMap((kw) => [
               { displayName: { contains: kw, mode: 'insensitive' as const } },
-              { bio: { contains: kw, mode: 'insensitive' as const } },
+              ...(cardOnly ? [] : [{ bio: { contains: kw, mode: 'insensitive' as const } }]),
               { headline: { contains: kw, mode: 'insensitive' as const } },
             ]),
-            { skills: { some: { skill: { name: { in: keywords, mode: 'insensitive' } } } } },
+            ...(cardOnly ? [] : [{ skills: { some: { skill: { name: { in: keywords, mode: 'insensitive' as const } } } } }]),
           ],
-          ...(filters?.role && { role: filters.role as any }),
+          // A visitor with no account is not offered the staff, or the mentors, by
+          // role: the card does not say what a member's role is (it is left out of
+          // the profile, below), and a filter that narrows the directory to
+          // "moderators" would list who they are to anyone with a script.
+          ...(!cardOnly && filters?.role && { role: filters.role as any }),
           ...(filters?.verified && { isVerified: true }),
         },
-        hiddenMemberWhere(viewer),
+        searchableMemberWhere(viewer),
       ],
     },
     // Selected explicitly rather than `include`. A bare `include` asks Postgres
@@ -460,7 +594,8 @@ async function searchUsers(
   });
 
   return users.map((user) => {
-    const searchableText = [user.displayName, user.bio, user.headline].filter(Boolean).join(' ');
+    // The bio is read for ranking and for the snippet only by a signed-in viewer.
+    const searchableText = [user.displayName, cardOnly ? null : user.bio, user.headline].filter(Boolean).join(' ');
     const popularity = (user as any)._count?.followers || 0 + ((user as any)._count?.posts || 0) * 2;
 
     // Persona boost
@@ -478,11 +613,12 @@ async function searchUsers(
       id: user.id,
       score,
       title: user.displayName || 'User',
-      content: user.headline || user.bio || '',
+      content: user.headline || (cardOnly ? '' : user.bio) || '',
       highlight: highlightMatch(searchableText, keywords),
       metadata: {
         avatar: user.avatar,
-        role: user.role,
+        // Not part of the card: the profile page leaves it out for a visitor too.
+        role: cardOnly ? undefined : user.role,
         followers: (user as any)._count?.followers || 0,
         isVerified: user.isVerified,
         createdAt: user.createdAt,
@@ -692,12 +828,26 @@ async function searchCourses(
 
 async function searchVideos(
   keywords: string[],
-  _filters: SearchOptions['filters']
+  _filters: SearchOptions['filters'],
+  viewer: ViewerContext
 ): Promise<SearchResult[]> {
   const videos = await prisma.video.findMany({
     where: {
       status: 'PUBLISHED',
       isHidden: false,
+      // A reel in the results carries its author's name and picture, so it is
+      // held to the rule every other list of reels is: not across a block, in
+      // either store and either direction, not a member in Safe Mode for anyone
+      // who is not her verified connection, and not a member whose profile is
+      // private or connections-only to someone outside it. This search took no
+      // viewer at all, so a blocked account's reels came up for the woman who
+      // blocked him by typing a word from the caption.
+      //
+      // Not hiddenMemberWhere: "hide me from search" is the promise that her
+      // profile does not come up when people search by name, and the safety page
+      // says no more than that. Post search does not apply it to her posts
+      // either, and a reel is found by what it says.
+      ...authorScopeFor(viewer),
       OR: [
         ...keywords.flatMap((kw) => {
           // A "#welding" query is a tag lookup. Reel hashtags are stored
@@ -773,7 +923,7 @@ async function searchMentors(
               ]),
             ],
           },
-          hiddenMemberWhere(viewer),
+          searchableMemberWhere(viewer),
         ],
       },
     },
@@ -1249,10 +1399,10 @@ async function allowedOpenSearchHits(hits: any[], viewer: ViewerContext): Promis
 
   const [users, mentors, posts] = await Promise.all([
     userIds.length
-      ? prisma.user.findMany({ where: { AND: [{ id: { in: userIds }, isActive: true }, hiddenMemberWhere(viewer)] }, select: { id: true } })
+      ? prisma.user.findMany({ where: { AND: [{ id: { in: userIds }, isActive: true }, searchableMemberWhere(viewer)] }, select: { id: true } })
       : Promise.resolve([]),
     mentorIds.length
-      ? prisma.mentorProfile.findMany({ where: { id: { in: mentorIds }, user: hiddenMemberWhere(viewer) }, select: { id: true } })
+      ? prisma.mentorProfile.findMany({ where: { id: { in: mentorIds }, user: searchableMemberWhere(viewer) }, select: { id: true } })
       : Promise.resolve([]),
     postIds.length ? prisma.post.findMany({ where: { AND: postConditions }, select: { id: true } }) : Promise.resolve([]),
   ]);
@@ -1277,25 +1427,39 @@ async function searchWithOpenSearch(
   viewer: ViewerContext,
   indices: string[]
 ): Promise<SearchResponse> {
-  const { query, page = 1, limit = 20 } = options;
-  const from = (page - 1) * limit;
+  const { query } = options;
+  // No page is read past SEARCH_DEPTH rows. The database path never reaches
+  // that far (it takes 50 a kind), and an engine asked for `from: 4,990,000`
+  // either errors or does a great deal of work to answer nobody.
+  const limit = Math.max(1, Math.min(options.limit ?? 20, SEARCH_DEPTH));
+  const page = Math.max(1, options.page ?? 1);
+  const offset = (page - 1) * limit;
+  // A page that starts at or past the depth is an empty page, not the last
+  // readable one again: pulling `from` back to fit would hand a client that keeps
+  // asking for the next page the same results over and over. The engine is still
+  // asked (for no rows) so that `total` stays the real count. A page that
+  // straddles the depth is cut short rather than shifted, for the same reason.
+  const beyondDepth = offset >= SEARCH_DEPTH;
+  const from = beyondDepth ? 0 : offset;
+  const size = beyondDepth ? 0 : Math.min(limit, SEARCH_DEPTH - offset);
+  // A visitor with no account is shown the card, so she does not search the
+  // bio or the skills either (see searchUsers).
+  const cardOnly = seesOnlyTheCard(viewer.viewerId);
 
   const body = {
     from,
-    size: limit,
+    size,
     query: {
       multi_match: {
         query,
-        fields: ['title^3', 'displayName^3', 'description', 'content', 'bio', 'skills'],
+        fields: cardOnly
+          ? ['title^3', 'displayName^3', 'description', 'content', 'headline']
+          : ['title^3', 'displayName^3', 'description', 'content', 'bio', 'skills'],
         fuzziness: 'AUTO',
       },
     },
     highlight: {
-      fields: {
-        description: {},
-        content: {},
-        bio: {},
-      },
+      fields: cardOnly ? { description: {}, content: {} } : { description: {}, content: {}, bio: {} },
     },
   };
 
@@ -1312,21 +1476,45 @@ async function searchWithOpenSearch(
   // asked not to be found.
   const total = Math.max(0, response.body.hits.total.value - (rawHits.length - hits.length));
 
-  const results: SearchResult[] = hits.map((hit: any) => ({
-    type: mapIndexToType(hit._index),
-    id: hit._id,
-    score: hit._score,
-    title: hit._source.title || hit._source.displayName,
-    content: hit._source.description || hit._source.content || hit._source.bio,
-    highlight: hit.highlight ? Object.values(hit.highlight).join(' ... ') : undefined,
-    metadata: hit._source,
-  }));
+  const results: SearchResult[] = hits.map((hit: any) => {
+    const type = mapIndexToType(hit._index);
+    if (cardOnly && type === 'user') {
+      // The indexed member document is the whole of what the indexer wrote
+      // (bio, skills, place); a visitor with no account is shown the card.
+      const source = hit._source ?? {};
+      return {
+        type,
+        id: hit._id,
+        score: hit._score,
+        title: source.displayName || source.title,
+        content: source.headline || '',
+        highlight: hit.highlight ? Object.values(hit.highlight).join(' ... ') : undefined,
+        metadata: {
+          avatar: source.avatar,
+          followers: source.followers,
+          isVerified: source.isVerified,
+          createdAt: source.createdAt,
+        },
+      };
+    }
+    return {
+      type,
+      id: hit._id,
+      score: hit._score,
+      title: hit._source.title || hit._source.displayName,
+      content: hit._source.description || hit._source.content || hit._source.bio,
+      highlight: hit.highlight ? Object.values(hit.highlight).join(' ... ') : undefined,
+      metadata: hit._source,
+    };
+  });
 
   return {
     results,
     total,
     page,
-    totalPages: Math.ceil(total / limit),
+    // Only the pages that can be read: a count of pages past the depth would have
+    // a client ask for pages that are always empty.
+    totalPages: Math.min(Math.ceil(total / limit), Math.ceil(SEARCH_DEPTH / limit)),
     query,
   };
 }

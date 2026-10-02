@@ -9,8 +9,11 @@
  * seed is idempotent - running it repeatedly updates the same rows instead of
  * creating duplicates.
  *
- * Authors are taken from users already in the database. Run the base seed
- * (`npm run db:seed`) first so there are users to attribute content to.
+ * Authors are taken from users already in the database. Run the demo seed
+ * (`npm run db:seed:demo`, on a local or throwaway database) first so there are
+ * users to attribute content to. This seed is for development and demos only:
+ * it puts sample posts under whichever members exist, so it is never run
+ * against production.
  */
 
 import { PrismaClient, PostType, VideoStatus, VideoType } from '@prisma/client';
@@ -322,7 +325,7 @@ export async function seedContent(
 
   if (authors.length === 0) {
     throw new Error(
-      'Cannot seed content: no users exist. Run the base seed (npm run db:seed) first.'
+      'Cannot seed content: no users exist. Run the demo seed (npm run db:seed:demo) first.'
     );
   }
 

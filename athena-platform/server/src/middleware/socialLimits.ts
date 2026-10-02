@@ -4,12 +4,16 @@
  * platform as intended; a wall for a script or a harassment spree. Keyed by
  * the signed-in member, so a shared office network is never penalised.
  *
- * Built on the sliding-window limiter, which allows everything when Redis is
- * not configured (local development and tests).
+ * Built on the sliding-window limiter, which counts in Redis and, while Redis
+ * is unreachable, in each API process instead (so a flood is still slowed, per
+ * instance). These limiters stand down only when no REDIS_URL is set at all,
+ * which production cannot be (the API will not boot without one): local
+ * development and tests, where there is nothing to count against and a test
+ * run must never wait on a connection attempt.
  */
 
 import type { Request } from 'express';
-import { createRateLimiter } from './rateLimiter';
+import { createRateLimiter, slidingWindowRateLimit } from './rateLimiter';
 import type { AuthRequest } from './auth';
 
 const MINUTE = 60 * 1000;
@@ -66,6 +70,50 @@ export const reactionLimiter = limiter('reaction', SOCIAL_LIMITS.reaction.max, S
 export const reportLimiter = limiter('report', SOCIAL_LIMITS.report.max, SOCIAL_LIMITS.report.windowMs);
 export const messageLimiter = limiter('message', SOCIAL_LIMITS.message.max, SOCIAL_LIMITS.message.windowMs);
 export const liveChatLimiter = limiter('live-chat', SOCIAL_LIMITS.liveChat.max, SOCIAL_LIMITS.liveChat.windowMs);
+
+/**
+ * Ceilings on how often one member may reach the same other member.
+ *
+ * Every limit above counts what an account does to everybody, and all of them
+ * are comfortable for a harassment campaign aimed at one person: thirty
+ * comments in five minutes is a lot across a feed and nothing when every one is
+ * under the same woman's posts, and sixty follows in ten minutes lets one
+ * account follow, unfollow and follow her again all afternoon, each time
+ * ringing her phone. These are keyed by the pair, so an account that spreads
+ * itself thin is untouched and one that fixes on a single person is stopped.
+ *
+ *   follow   starting to follow, or asking to, the same member
+ *   comment  comments under the same member's posts
+ *   mention  @-mentions of the same member
+ *   notice   anything else that would ring the same member's bell (likes,
+ *            reposts, replies), so a spree of small things is as bounded as a
+ *            spree of large ones
+ *
+ * Generous for people who know each other: five follows in an hour is more
+ * than anyone presses by accident, and twelve comments is a conversation.
+ */
+export const TARGET_LIMITS = {
+  follow: { max: 5, windowMs: HOUR },
+  comment: { max: 12, windowMs: HOUR },
+  mention: { max: 5, windowMs: HOUR },
+  notice: { max: 30, windowMs: HOUR },
+} as const;
+
+export type TargetedKind = keyof typeof TARGET_LIMITS;
+
+/**
+ * Counts one more thing `actorId` is doing to `targetId` and says whether it is
+ * still within the ceiling for its kind. Shares the sliding window, and the
+ * Redis-or-in-process fallback, with the per-member limiters; and like them it
+ * stands down when there is no Redis to count against (local development and
+ * tests), so a test run never waits on a connection attempt.
+ */
+export async function withinTargetLimit(kind: TargetedKind, actorId: string, targetId: string): Promise<boolean> {
+  if (inactive()) return true;
+  const { max, windowMs } = TARGET_LIMITS[kind];
+  const { allowed } = await slidingWindowRateLimit(`social:target:${kind}:${actorId}:${targetId}`, windowMs, max);
+  return allowed;
+}
 
 /**
  * Public, unauthenticated forms (a referee's reference form) are keyed by the

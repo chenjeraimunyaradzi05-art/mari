@@ -16,6 +16,17 @@ import {
   resolveConnectedAccountId,
 } from './stripe-connect.service';
 import { recordFailure } from '../utils/ops-metrics';
+import { bestEffort } from '../utils/best-effort';
+import { isBlockedRelationship } from '../utils/safety-store';
+import { CREATOR_TERMS_VERSION } from '../config/creator-terms';
+import { assertPaymentsOpen } from './feature-flags.service';
+import {
+  CREATOR_REVENUE_SHARE_PERCENT,
+  MINIMUM_PAYOUT_AUD,
+  PRICE_CURRENCY,
+  centsForGiftPoints,
+  giftPointsForCents,
+} from '../config/price-book';
 
 // getStripe() is called at each use rather than once into a module constant.
 // Capturing it at import time froze whatever client could be built the moment
@@ -68,25 +79,25 @@ export const CREATOR_TIERS: CreatorTier[] = [
   {
     name: 'Emerging',
     minFollowers: 0,
-    revShare: 70,
+    revShare: CREATOR_REVENUE_SHARE_PERCENT.Emerging,
     benefits: ['Basic analytics', 'Gift receiving'],
   },
   {
     name: 'Rising',
     minFollowers: 1000,
-    revShare: 75,
+    revShare: CREATOR_REVENUE_SHARE_PERCENT.Rising,
     benefits: ['Advanced analytics', 'Priority support', 'Custom profile badge'],
   },
   {
     name: 'Established',
     minFollowers: 10000,
-    revShare: 80,
+    revShare: CREATOR_REVENUE_SHARE_PERCENT.Established,
     benefits: ['Creator fund eligibility', 'Featured placement', 'Early access features'],
   },
   {
     name: 'Partner',
     minFollowers: 50000,
-    revShare: 85,
+    revShare: CREATOR_REVENUE_SHARE_PERCENT.Partner,
     benefits: ['Dedicated account manager', 'Brand partnerships', 'Custom monetization'],
   },
 ];
@@ -104,42 +115,32 @@ export const GIFT_TYPES = {
   TROPHY: { id: 'trophy', name: 'Trophy', value: 100, icon: '🏆', description: 'Champion content!' },
 };
 
-// 1 gift point = 0.01 units of local currency
-const GIFT_POINT_VALUE = 0.01;
+// A gift point is worth one cent of Australian dollars: see the price book for
+// why it is held in whole cents and why it is Australian dollars only.
 
-/** The smallest payout the platform will send, in the creator's currency. */
-const MINIMUM_PAYOUT = 50;
+/** The smallest payout the platform will send, in Australian dollars. */
+const MINIMUM_PAYOUT = MINIMUM_PAYOUT_AUD;
 
 /** The same minimum expressed in the points the balance is actually held in. */
-const MINIMUM_PAYOUT_POINTS = Math.round(MINIMUM_PAYOUT / GIFT_POINT_VALUE);
+const MINIMUM_PAYOUT_POINTS = giftPointsForCents(MINIMUM_PAYOUT * 100);
 
 /** Statuses a payout can still move out of. Anything else is settled history. */
 const OPEN_PAYOUT_STATUSES = ['PENDING', 'PROCESSING'];
 
-const SUPPORTED_GIFT_CURRENCIES = new Set([
-  'AUD',
-  'USD',
-  'SGD',
-  'PHP',
-  'IDR',
-  'THB',
-  'VND',
-  'MYR',
-  'AED',
-  'SAR',
-  'ZAR',
-  'EGP',
-]);
-
-async function resolveUserCurrency(userId: string): Promise<string> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { preferredCurrency: true, region: true },
-  });
-
-  const currency = (user?.preferredCurrency || 'AUD').toUpperCase();
-  return SUPPORTED_GIFT_CURRENCIES.has(currency) ? currency : 'AUD';
-}
+/**
+ * Gift points are bought and cashed out in Australian dollars, whatever
+ * currency a member has chosen for her own display.
+ *
+ * Both sides used to follow `User.preferredCurrency`, which a member sets
+ * herself to any of twelve currencies. A point was a hundredth of whichever one
+ * the buyer picked and a creator was paid one for one in the one she picked, so
+ * a buyer on VND or IDR could pay a few Australian dollars for points that a
+ * creator on AUD withdrew as tens or hundreds of times that, out of ATHENA's own
+ * Stripe balance. Nothing converted between the two. One currency removes the
+ * whole class: what is charged, what is credited and what is paid out are all
+ * Australian dollars.
+ */
+const GIFT_CURRENCY = PRICE_CURRENCY;
 
 // ==========================================
 // CREATOR PROFILE MANAGEMENT
@@ -167,6 +168,20 @@ export async function getCreatorProfile(userId: string) {
 
   if (!creator) return null;
 
+  // Why a withdrawal is paused is a note for ATHENA's team: it names a card
+  // dispute by its Stripe id, and a creator is not told whose payment it was.
+  // That withdrawals are paused is the creator's to know, and is still here.
+  const { payoutHoldReason: _staffNote, ...profile } = creator;
+
+  // Whether she has accepted the Creator Terms Addendum as it stands. A creator
+  // who enabled creator mode before the addendum existed has accepted nothing and
+  // is asked at her next withdrawal; the screen reads this to say so.
+  const creatorTerms = {
+    version: CREATOR_TERMS_VERSION,
+    accepted: creator.creatorTermsVersion === CREATOR_TERMS_VERSION,
+    acceptedAt: creator.creatorTermsAcceptedAt,
+  };
+
   // Calculate engagement rate
   const posts = creator.user.posts;
   const totalViews = posts.reduce((sum, p) => sum + p.viewCount, 0);
@@ -174,14 +189,22 @@ export async function getCreatorProfile(userId: string) {
   const engagementRate = totalViews > 0 ? (totalLikes / totalViews) * 100 : 0;
 
   return {
-    ...creator,
+    ...profile,
+    creatorTerms,
     followerCount: creator.user.followers.length,
     engagementRate: Math.round(engagementRate * 100) / 100,
     tier: getCreatorTier(creator.user.followers.length),
   };
 }
 
-export async function enableCreatorMode(userId: string, stripeAccountId?: string) {
+/**
+ * Turns creator mode on. `acceptedTermsVersion` is the version of the Creator
+ * Terms Addendum she accepted in this same request, and is recorded on the
+ * profile as it is created: no profile exists without it, so the only creators
+ * with no acceptance on record are the ones who enabled creator mode before the
+ * addendum did.
+ */
+export async function enableCreatorMode(userId: string, stripeAccountId?: string, acceptedTermsVersion?: string) {
   // Check if already a creator
   const existing = await prisma.creatorProfile.findUnique({
     where: { userId },
@@ -233,6 +256,9 @@ export async function enableCreatorMode(userId: string, stripeAccountId?: string
       userId,
       stripeAccountId: accountId,
       isMonetized: connectState?.stripeConnectStatus === 'ACTIVE',
+      ...(acceptedTermsVersion
+        ? { creatorTermsVersion: acceptedTermsVersion, creatorTermsAcceptedAt: new Date() }
+        : {}),
     },
   });
 
@@ -245,6 +271,28 @@ export async function enableCreatorMode(userId: string, stripeAccountId?: string
   logger.info('Creator mode enabled', { userId, stripeAccountId: accountId });
 
   return creatorProfile;
+}
+
+/**
+ * Records that an existing creator has accepted the Creator Terms Addendum, as
+ * shown to her. Only the current version can be accepted: a page left open on an
+ * old one does not accept the new text by mistake.
+ */
+export async function acceptCreatorTerms(userId: string, version: string) {
+  if (version !== CREATOR_TERMS_VERSION) {
+    throw new ApiError(409, 'The Creator Terms Addendum has changed since you opened it. Please reload it and read the current version.');
+  }
+
+  const accepted = await prisma.creatorProfile.updateMany({
+    where: { userId },
+    data: { creatorTermsVersion: version, creatorTermsAcceptedAt: new Date() },
+  });
+  if (accepted.count === 0) {
+    throw new ApiError(404, 'Turn on creator mode first. Accepting the addendum is part of that.');
+  }
+
+  logger.info('Creator Terms Addendum accepted', { userId, version });
+  return { version, accepted: true, acceptedAt: new Date() };
 }
 
 /**
@@ -299,6 +347,24 @@ export async function sendGift(
 
   if (!receiverProfile || !receiverProfile.isMonetized) {
     throw new Error('Receiver is not a monetized creator');
+  }
+
+  // Good standing is the creator's to keep, and a gift is money that she is later
+  // paid. A suspended or banned creator is not signed in, so she cannot withdraw,
+  // yet she went on accruing gifts and a pending payout that left as a real
+  // transfer the day she was reinstated, from supporters who could not know. A
+  // gift also does not cross a block: it names its sender to the creator, and a
+  // member who blocked her, or whom she blocked, must not be able to reach her
+  // with one. Both are read before any points move, so a refusal costs nothing.
+  const standing = await prisma.user.findUnique({
+    where: { id: receiverId },
+    select: { isSuspended: true, bannedAt: true },
+  });
+  if (!standing || standing.isSuspended || standing.bannedAt) {
+    throw new ApiError(409, 'This creator is not able to receive gifts right now.');
+  }
+  if (await isBlockedRelationship(senderId, receiverId)) {
+    throw new ApiError(403, 'You cannot send a gift to this creator.');
   }
 
   // An early exit so an obviously empty balance does not do the work below. It
@@ -385,18 +451,29 @@ export async function sendGift(
 }
 
 export async function purchaseGiftBalance(userId: string, amount: number) {
-  const currency = await resolveUserCurrency(userId);
-  const giftPoints = Math.floor(amount / GIFT_POINT_VALUE);
+  // Nothing new is charged while payments are paused.
+  await assertPaymentsOpen();
+
+  // Rounded once, to whole cents, and everything below is worked out from that
+  // integer. `amount * 100` sent a fractional number of cents to Stripe for an
+  // amount like 5.555, and the points were floored from the dollar figure
+  // rather than from what was charged.
+  const amountCents = Math.round(Number(amount) * 100);
+  if (!Number.isInteger(amountCents) || amountCents <= 0) {
+    throw new ApiError(400, 'Invalid amount');
+  }
+
+  const giftPoints = giftPointsForCents(amountCents);
 
   // Create Stripe payment intent
   const paymentIntent = await getStripe().paymentIntents.create({
-    amount: amount * 100, // Convert to cents
-    currency: currency.toLowerCase(),
+    amount: amountCents,
+    currency: GIFT_CURRENCY.toLowerCase(),
     metadata: {
       userId,
       type: 'gift_balance_purchase',
       giftPoints: giftPoints.toString(),
-      currency,
+      currency: GIFT_CURRENCY,
     },
   });
 
@@ -405,12 +482,24 @@ export async function purchaseGiftBalance(userId: string, amount: number) {
     // without picking the id back out of the secret string.
     paymentIntentId: paymentIntent.id,
     clientSecret: paymentIntent.client_secret,
-    amount,
+    amount: amountCents / 100,
     giftPoints,
-    currency,
+    currency: GIFT_CURRENCY,
   };
 }
 
+/**
+ * Credits the points a gift-balance payment bought, once.
+ *
+ * The points come from the money received, never from what the intent's
+ * metadata says. Metadata is only a note we wrote when the intent was created,
+ * and the webhook and the confirm route both trust this function with whatever
+ * intent they are handed: a credit read from metadata is a credit anyone who
+ * can get a payment intent created with chosen metadata can write for
+ * themselves. The metadata is kept as a consistency check, and an intent whose
+ * claim does not match its payment, or which was not paid in Australian dollars,
+ * credits nothing and is refused with a 409 so that it is looked at by a person.
+ */
 export async function confirmGiftPurchaseFromPaymentIntent(
   actorUserId: string,
   paymentIntent: Stripe.PaymentIntent
@@ -430,14 +519,43 @@ export async function confirmGiftPurchaseFromPaymentIntent(
     throw new ApiError(400, 'Invalid payment intent');
   }
 
-  const points = parseInt(String(giftPoints || '0'), 10);
-  if (!Number.isFinite(points) || points <= 0) {
-    throw new ApiError(400, 'Invalid gift points');
-  }
-
-  const amountCents = typeof (paymentIntent as any).amount === 'number' ? (paymentIntent as any).amount : 0;
+  // What Stripe actually took. `amount` is what was asked for; on a succeeded
+  // intent the two agree, but only one of them is a receipt.
+  // A real intent always carries amount_received; the fallback is for a payload
+  // that lacks the field, and zero received is zero, not "use the amount asked".
+  const amountCents = paymentIntent.amount_received ?? paymentIntent.amount;
   if (!Number.isFinite(amountCents) || amountCents <= 0) {
     throw new ApiError(400, 'Invalid payment amount');
+  }
+
+  const paidIn = String(paymentIntent.currency ?? '').toLowerCase();
+  if (paidIn !== GIFT_CURRENCY.toLowerCase()) {
+    logger.error('A gift-balance payment was not in Australian dollars and has not been credited', {
+      userId: actorUserId,
+      paymentIntentId,
+      currency: paidIn,
+      amountCents,
+    });
+    throw new ApiError(
+      409,
+      'This payment was not made in Australian dollars, so it has not been turned into gift points. Please contact support and quote the payment reference.'
+    );
+  }
+
+  const points = giftPointsForCents(amountCents);
+  const claimed = parseInt(String(giftPoints || '0'), 10);
+  if (points <= 0 || claimed !== points) {
+    logger.error('A gift-balance payment claims points that do not match what was paid and has not been credited', {
+      userId: actorUserId,
+      paymentIntentId,
+      amountCents,
+      claimedPoints: claimed,
+      pointsForAmount: points,
+    });
+    throw new ApiError(
+      409,
+      'The points on this payment do not match what was paid, so none have been added. Please contact support and quote the payment reference.'
+    );
   }
 
   const result = await prisma.$transaction(async (tx) => {
@@ -470,6 +588,164 @@ export async function confirmGiftPurchaseFromPaymentIntent(
 
   logger.info('Gift balance purchased', { userId: actorUserId, giftPoints: result.giftPoints, paymentIntentId });
   return result;
+}
+
+/**
+ * What taking points back for a refunded or charged-back purchase did.
+ *
+ * `shortfallPoints` is the part that could not be given back because it had already
+ * been spent on gifts: that money is not the member's any more, and it is in somebody
+ * else's creator balance.
+ */
+export interface GiftReversal {
+  userId: string;
+  /** When the points were bought, which is where "spent since" starts. */
+  purchasedAt: Date;
+  tookBackPoints: number;
+  shortfallPoints: number;
+  /** True when there was nothing left to take back: this refund, or more, had already been applied. */
+  alreadyApplied: boolean;
+}
+
+/**
+ * Takes back the points a gift-balance purchase bought, in proportion to the
+ * money that has gone back to the buyer.
+ *
+ * A refund, or a card dispute that was lost, returned the money and left the
+ * points: the member kept the whole of what had been refunded, and could spend
+ * it on gifts that became real creator earnings, paid out as real transfers.
+ *
+ * `returnedCents` is cumulative, as Stripe reports it, so the same refund
+ * delivered twice, or two part refunds delivered out of order, take each point
+ * back once: GiftBalancePurchase.reversedPoints records how many have gone, and
+ * the claim on it is conditional on the figure that was read. A full return takes
+ * every point; a part return takes the whole points that part of the money
+ * bought, rounded down, so that nobody is charged a point for a fraction.
+ *
+ * The balance is debited only as far as it goes. The conditional debit is the
+ * same guard sendGift uses, so a gift being sent at the same moment cannot
+ * push the balance below zero from either side; what is no longer there is
+ * reported as the shortfall instead of being taken as a negative balance.
+ *
+ * Null when the payment was not a gift-balance purchase.
+ */
+export async function reverseGiftPurchase(paymentIntentId: string, returnedCents: number): Promise<GiftReversal | null> {
+  if (!Number.isFinite(returnedCents) || returnedCents <= 0) return null;
+
+  let lastError: unknown;
+  // The balance can move between reading it and debiting it (a gift sent at the
+  // same moment). The attempt is rolled back and made again on the new figure.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const purchase = await tx.giftBalancePurchase.findUnique({ where: { paymentIntentId } });
+        if (!purchase) return null;
+
+        const owed =
+          returnedCents >= purchase.amountCents
+            ? purchase.giftPoints
+            : Math.min(purchase.giftPoints, Math.floor((purchase.giftPoints * returnedCents) / purchase.amountCents));
+        const toTake = owed - purchase.reversedPoints;
+        const applied: GiftReversal = {
+          userId: purchase.userId,
+          purchasedAt: purchase.createdAt,
+          tookBackPoints: 0,
+          shortfallPoints: 0,
+          alreadyApplied: true,
+        };
+        if (toTake <= 0) return applied;
+
+        const claimed = await tx.giftBalancePurchase.updateMany({
+          where: { id: purchase.id, reversedPoints: purchase.reversedPoints },
+          data: { reversedPoints: owed },
+        });
+        // Somebody else took them between our read and this write.
+        if (claimed.count !== 1) return applied;
+
+        const holder = await tx.user.findUnique({ where: { id: purchase.userId }, select: { giftBalance: true } });
+        const takeNow = Math.min(Math.max(holder?.giftBalance ?? 0, 0), toTake);
+        if (takeNow > 0) {
+          const debited = await tx.user.updateMany({
+            where: { id: purchase.userId, giftBalance: { gte: takeNow } },
+            data: { giftBalance: { decrement: takeNow } },
+          });
+          if (debited.count !== 1) throw new Error('The gift balance moved while points were being taken back');
+        }
+
+        return { ...applied, tookBackPoints: takeNow, shortfallPoints: toTake - takeNow, alreadyApplied: false };
+      });
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
+/**
+ * Freezes withdrawals for the creators with these profile ids, and tells each one
+ * that was not already frozen. Returns how many were newly frozen.
+ *
+ * Only requestPayout reads the hold. The balance is not touched, and gifts sent
+ * to the creator keep adding to it.
+ */
+export async function holdCreatorPayouts(profileIds: string[], reason: string): Promise<number> {
+  if (profileIds.length === 0) return 0;
+
+  const unheld = await prisma.creatorProfile.findMany({
+    where: { id: { in: profileIds }, payoutHold: false },
+    select: { id: true, userId: true },
+  });
+  if (unheld.length === 0) return 0;
+
+  await prisma.creatorProfile.updateMany({
+    where: { id: { in: unheld.map((p) => p.id) }, payoutHold: false },
+    data: { payoutHold: true, payoutHoldReason: reason, payoutHeldAt: new Date() },
+  });
+
+  for (const profile of unheld) {
+    await sendNotification({
+      userId: profile.userId,
+      type: 'SYSTEM',
+      title: 'Withdrawals are paused for now',
+      message:
+        'ATHENA is looking into a card payment connected to some of the gifts you were sent, so withdrawals are paused until that is settled. Your balance is safe and keeps growing, and we will write to you when it is open again.',
+      link: '/dashboard/creator',
+    }).catch(() => undefined);
+  }
+
+  return unheld.length;
+}
+
+/**
+ * Lifts the freeze from these profiles, and tells each creator who had one.
+ * Returns how many were lifted. The caller decides which ids are free to go:
+ * a profile held for two disputes is not released by the end of one.
+ */
+export async function releaseCreatorPayouts(profileIds: string[]): Promise<number> {
+  if (profileIds.length === 0) return 0;
+
+  const held = await prisma.creatorProfile.findMany({
+    where: { id: { in: profileIds }, payoutHold: true },
+    select: { id: true, userId: true },
+  });
+  if (held.length === 0) return 0;
+
+  await prisma.creatorProfile.updateMany({
+    where: { id: { in: held.map((p) => p.id) }, payoutHold: true },
+    data: { payoutHold: false, payoutHoldReason: null, payoutHeldAt: null },
+  });
+
+  for (const profile of held) {
+    await sendNotification({
+      userId: profile.userId,
+      type: 'SYSTEM',
+      title: 'Withdrawals are open again',
+      message: 'The check on a payment connected to your gifts is finished, and you can withdraw your balance again.',
+      link: '/dashboard/creator',
+    }).catch(() => undefined);
+  }
+
+  return held.length;
 }
 
 export async function confirmGiftPurchase(actorUserId: string, paymentIntentId: string) {
@@ -809,6 +1085,10 @@ export async function getCreatorAnalytics(userId: string, days = 30) {
  * mark the row FAILED, because a refused transfer must not eat her balance.
  */
 export async function requestPayout(userId: string) {
+  // Asked before anything is claimed, so a paused platform never takes the points
+  // out of a balance for a transfer that is not going out.
+  await assertPaymentsOpen();
+
   const profile = await prisma.creatorProfile.findUnique({
     where: { userId },
   });
@@ -817,8 +1097,23 @@ export async function requestPayout(userId: string) {
     throw new ApiError(404, 'Creator profile not found');
   }
 
+  // A freeze while a card payment connected to the gifts sent is looked at
+  // (see payment-disputes.service). It stops a withdrawal and nothing else: the
+  // balance is untouched and keeps growing, and it can be withdrawn again the
+  // moment the hold is lifted. Said before anything is claimed, so the points
+  // are never taken out of the balance for a transfer that was never going out.
+  if (profile.payoutHold) {
+    throw new ApiError(
+      409,
+      'Withdrawals are paused on your account while ATHENA looks into a card payment connected to some of the gifts you were sent. Your balance is safe and keeps growing, and we will write to you as soon as this is settled.'
+    );
+  }
+
   const points = profile.pendingPayout;
-  const pendingAmount = points * GIFT_POINT_VALUE;
+  // Whole cents first, and the dollar figure is derived from them, so the amount
+  // recorded on the payout row and the amount sent to Stripe are one number.
+  const amountCents = centsForGiftPoints(points);
+  const pendingAmount = amountCents / 100;
 
   if (points < MINIMUM_PAYOUT_POINTS) {
     throw new ApiError(
@@ -832,7 +1127,43 @@ export async function requestPayout(userId: string) {
     throw new ApiError(400, 'Stripe account not connected');
   }
 
-  const currency = await resolveUserCurrency(userId);
+  // Only an account Stripe has verified and switched on for payouts is paid. The
+  // terms promise payouts to a verified account, and until now this asked only
+  // that an account id existed: one that had not finished Stripe's checks was
+  // sent a transfer, refused, and had the balance claimed and put back on every
+  // press of the button. The same happens to an account Stripe has since paused
+  // (the account.updated webhook writes RESTRICTED, and tells her).
+  //
+  // The status is kept by Stripe's events, so one that is not ACTIVE may only be
+  // behind: an account verified a minute ago, or adopted before the status was
+  // written. Stripe is asked once before she is turned away, so a woman who has
+  // finished setting up is not refused on a stale row. If it cannot be asked the
+  // row stands.
+  const readConnectStatus = async () =>
+    (await prisma.user.findUnique({ where: { id: userId }, select: { stripeConnectStatus: true } }))?.stripeConnectStatus ?? null;
+
+  let connectStatus = await readConnectStatus();
+  if (connectStatus !== 'ACTIVE') {
+    await bestEffort('creator.payout.refresh-account', () => refreshConnectedAccount(userId, destination), null);
+    connectStatus = await readConnectStatus();
+  }
+
+  if (connectStatus === 'RESTRICTED' || connectStatus === 'DISABLED') {
+    throw new ApiError(
+      409,
+      'Stripe has paused payouts to your account, so this withdrawal has not been started. Open your earnings page to see what Stripe needs. Your balance is unchanged.'
+    );
+  }
+  if (connectStatus !== 'ACTIVE') {
+    throw new ApiError(
+      409,
+      'Your payout account is not ready yet. Finish setting it up from your earnings page, and then you can withdraw. Your balance is unchanged.'
+    );
+  }
+
+  // Australian dollars, always: the points were bought in them, so they are paid
+  // out in them, whatever currency she has chosen to see her own figures in.
+  const currency = GIFT_CURRENCY;
 
   const payout = await prisma.$transaction(async (tx) => {
     const claimed = await tx.creatorProfile.updateMany({
@@ -840,7 +1171,11 @@ export async function requestPayout(userId: string) {
       // credited between the read above and this line raises the balance, and
       // decrementing takes only what this payout is actually sending, so the
       // new gift survives to the next payout instead of vanishing.
-      where: { userId, pendingPayout: { gte: points } },
+      //
+      // `payoutHold: false` is in the claim as well as in the read above: a card
+      // dispute can open between the two, and a pause that is only checked
+      // before the claim would let this one withdrawal through after it.
+      where: { userId, pendingPayout: { gte: points }, payoutHold: false },
       data: { pendingPayout: { decrement: points } },
     });
 
@@ -857,8 +1192,16 @@ export async function requestPayout(userId: string) {
 
   if (!payout) {
     // Nothing was decremented, so nothing is owed back. Either another request
-    // claimed this balance a moment ago or a gift was reversed underneath it;
-    // in both cases the honest answer is the balance she has now.
+    // claimed this balance a moment ago, a gift was reversed underneath it, or a
+    // pause was put on her withdrawals after the check above; in each case the
+    // honest answer is the one that is true now.
+    const paused = await prisma.creatorProfile.findUnique({ where: { userId }, select: { payoutHold: true } });
+    if (paused?.payoutHold) {
+      throw new ApiError(
+        409,
+        'Withdrawals have just been paused on your account while ATHENA looks into a card payment connected to some of the gifts you were sent. Your balance is unchanged and keeps growing.'
+      );
+    }
     throw new ApiError(
       409,
       'This balance is already being paid out. Check your payout history in a moment.'
@@ -869,7 +1212,7 @@ export async function requestPayout(userId: string) {
   try {
     transfer = await getStripe().transfers.create(
       {
-        amount: Math.floor(pendingAmount * 100), // Convert to cents
+        amount: amountCents,
         currency: currency.toLowerCase(),
         destination,
         metadata: {
@@ -989,7 +1332,7 @@ export async function reverseCreatorPayout(stripeTransferId: string, reason: 'FA
 
   // Back into the unit the balance is actually kept in. The row stores dollars;
   // pendingPayout is whole gift points at a cent each.
-  const points = Math.round(payout.amount / GIFT_POINT_VALUE);
+  const points = giftPointsForCents(Math.round(payout.amount * 100));
   const credited = await creditBackFailedPayout(payout.id, payout.creatorProfile.userId, points);
 
   if (!credited) return false;

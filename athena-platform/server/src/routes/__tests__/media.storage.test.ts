@@ -8,6 +8,8 @@
  */
 
 import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { S3Client } from '@aws-sdk/client-s3';
@@ -34,6 +36,7 @@ jest.mock('../../services/moderation.service', () => ({
 }));
 
 const storedFrom: string[] = [];
+const storedSizes: number[] = [];
 jest.mock('../../utils/media-storage', () => {
   const actual: any = jest.requireActual('../../utils/media-storage');
   return {
@@ -43,6 +46,7 @@ jest.mock('../../utils/media-storage', () => {
       // is being stored.
       storedFrom.push(filePath);
       if (!fs.existsSync(filePath)) throw new Error('the temporary file was gone before it was stored');
+      storedSizes.push(fs.statSync(filePath).size);
       return `https://cdn.example/${key}`;
     }),
   };
@@ -50,33 +54,46 @@ jest.mock('../../utils/media-storage', () => {
 
 import { app } from '../../index';
 import { storeFile as storeFileTyped } from '../../utils/media-storage';
+import { FFMPEG, makeClip, makePhoto } from '../../utils/__tests__/media-fixtures';
 
 const storeFile = storeFileTyped as unknown as jest.Mock;
 
-// An MP4 starts with a box size and "ftyp".
-const MP4 = Buffer.concat([Buffer.from([0x00, 0x00, 0x00, 0x18]), Buffer.from('ftypmp42'), Buffer.alloc(2048)]);
-const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(252)]);
+// Uploads are looked at by ffmpeg and sharp now, so these have to be real files.
+const withFfmpeg = FFMPEG ? it : it.skip;
 const TEXT = Buffer.from('this is not a video at all, just words in a file\n');
 
 const ORIGINAL_ENV = { ...process.env };
 
 describe('a video upload', () => {
+  // Every temporary file the route makes goes into a folder of this test's
+  // own, so "nothing is left behind" is something it can check.
+  let scratch: string;
+  let tmpdirSpy: jest.SpiedFunction<typeof os.tmpdir>;
   beforeEach(() => {
     storedFrom.length = 0;
+    storedSizes.length = 0;
     storeFile.mockClear();
+    scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'athena-storage-test-'));
+    tmpdirSpy = jest.spyOn(os, 'tmpdir').mockReturnValue(scratch);
+  });
+  afterEach(() => {
+    tmpdirSpy.mockRestore();
+    fs.rmSync(scratch, { recursive: true, force: true });
   });
 
-  it('is received to a temporary file, streamed to storage from there, and the file removed', async () => {
+  withFfmpeg('is received to a temporary file, streamed to storage from there, and both files removed', async () => {
     const res = await request(app)
       .post('/api/media/upload/video')
-      .attach('file', MP4, { filename: 'reel.mp4', contentType: 'video/mp4' })
+      .attach('file', makeClip('mp4'), { filename: 'reel.mp4', contentType: 'video/mp4' })
       .expect(200);
 
     expect(res.body.data.url).toMatch(/^https:\/\/cdn\.example\/videos\/u1\/.+\.mp4$/);
-    expect(res.body.data.size).toBe(MP4.length);
     expect(storedFrom).toHaveLength(1);
-    // Removed once the request is done with it.
+    // What is stored is the copy without its tags, and the size says so.
+    expect(res.body.data.size).toBe(storedSizes[0]);
+    // The file received and the clean copy are both removed once the request is done.
     expect(fs.existsSync(storedFrom[0])).toBe(false);
+    expect(fs.readdirSync(scratch)).toEqual([]);
   });
 
   it('still has its bytes checked, read from the start of the temporary file', async () => {
@@ -89,7 +106,7 @@ describe('a video upload', () => {
     expect(storeFile).not.toHaveBeenCalled();
   });
 
-  it('answers 503 when storage fails, and still removes the temporary file', async () => {
+  withFfmpeg('answers 503 when storage fails, and still removes the temporary files', async () => {
     storeFile.mockImplementationOnce(async (_key: unknown, filePath: unknown) => {
       storedFrom.push(String(filePath));
       throw new Error('Media storage is unavailable: the write to S3 failed (AccessDenied)');
@@ -97,11 +114,12 @@ describe('a video upload', () => {
 
     const res = await request(app)
       .post('/api/media/upload/video')
-      .attach('file', MP4, { filename: 'reel.mp4', contentType: 'video/mp4' })
+      .attach('file', makeClip('mp4'), { filename: 'reel.mp4', contentType: 'video/mp4' })
       .expect(503);
 
     expect(res.body.message).toMatch(/Media storage is unavailable/);
     expect(fs.existsSync(storedFrom[0])).toBe(false);
+    expect(fs.readdirSync(scratch)).toEqual([]);
   });
 });
 
@@ -112,6 +130,7 @@ describe('an S3 write that fails in production', () => {
   });
 
   it('is a 503, never a copy on the container disk', async () => {
+    const JPEG = await makePhoto('jpeg');
     process.env.AWS_ACCESS_KEY_ID = 'test';
     process.env.AWS_SECRET_ACCESS_KEY = 'test';
     process.env.NODE_ENV = 'production';
@@ -120,8 +139,6 @@ describe('an S3 write that fails in production', () => {
     });
     const writeFile = jest.spyOn(fs.promises, 'writeFile');
 
-    // A thumbnail is stored as sent, so the test reaches the write without a
-    // real image for sharp to decode.
     const res = await request(app)
       .post('/api/media/upload/thumbnail')
       .attach('file', JPEG, { filename: 'poster.jpg', contentType: 'image/jpeg' });

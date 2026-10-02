@@ -21,10 +21,14 @@ import { logAudit } from '../utils/audit';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireRole } from '../middleware/roles';
+import { reportLimiter } from '../middleware/socialLimits';
 import { logger } from '../utils/logger';
 import { bestEffort } from '../utils/best-effort';
 import { notifyAdmins } from '../services/admin-notify.service';
 import { awardAchievement, getUserAchievements } from '../services/engagement.service';
+import { openReportIntake, runReportIntakeConsequences } from '../services/content-report.service';
+import { handleUserReport } from '../services/safety-score.service';
+import { answerSharedWords, privateCrisisAnswer, screenText } from '../services/wellness/wellness-crisis.service';
 import { encryptJson, decryptJson } from '../services/wellness/health-crypto';
 import { buildBookingIcs, buildCircleIcs } from '../services/wellness/wellness-calendar';
 import { addDays, dayDate, daysBetween, isoDay, localParts, weekStart } from '../services/wellness/wellness-dates';
@@ -32,13 +36,14 @@ import { predictCycle, type PeriodDayLike } from '../services/wellness/cycle.ser
 import { assessK10, buildDoctorReport, buildInsights, entriesToCsv, type ActivityLog, type CheckInLog, type HydrationLog, type SleepLog, type SymptomLog } from '../services/wellness/health-insights.service';
 import { analyseMentalLoad } from '../services/wellness/mental-load.service';
 import { achievementForStreak, celebrate, challengeLeaderboard, goalProgress, goalReviewText, milestoneReached, streakFrom, templateByKey, weekProgress, type GoalData } from '../services/wellness/habits.service';
-import { detectCrisisLanguage, excerpt, isModeratorRole, normaliseWarning, presentAuthor } from '../services/wellness/forum.service';
+import { excerpt, isModeratorRole, normaliseWarning, presentAuthor } from '../services/wellness/forum.service';
+import { blockedEitherWayIds } from '../services/audience.service';
 import { availableSlots, canCancel, nextAvailableDays, normaliseAvailability, slugify, type Availability } from '../services/wellness/practitioners.service';
 import { currentWeek } from '../services/wellness/wellness-reminders.service';
 import { lastVerificationChecks, recheckState, verifiedPractitionerRechecks, RECHECK_AFTER_DAYS, RECHECK_GRACE_DAYS } from '../services/wellness/practitioner-recheck.service';
 import {
   ACTIVITY_TYPES, CIRCLE_TOPICS, CONTENT_WARNINGS, COPING_STRATEGIES, CRISIS_LINES, HABIT_TEMPLATES, K10_OPTIONS, K10_QUESTIONS, LIBRARY, LIBRARY_AS_AT,
-  MENTAL_LOAD_CATEGORIES, MODALITIES, PERIOD_SYMPTOMS, PRACTITIONER_KINDS, SHARE_SCOPES, SPECIALTIES, DELEGATION_TEMPLATES,
+  MENTAL_LOAD_CATEGORIES, MODALITIES, PERIOD_SYMPTOMS, PRACTITIONER_KINDS, SHARE_SCOPES, SPECIALTIES, DELEGATION_TEMPLATES, distressLines,
 } from '../services/wellness/wellness-library';
 
 const router = Router();
@@ -55,6 +60,23 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
 }
 
 const ok = (res: Response, data: unknown, status = 200) => res.status(status).json({ success: true, data });
+
+/**
+ * Everyone on either side of a block with this member, in both places a block can
+ * be written. The forums, the support circles and the challenges are rooms full of
+ * strangers who write about their own lives (a post about a marriage, a check-in
+ * about a hard week) and name themselves to each other, which is exactly where a
+ * woman who has blocked a man least wants him: the surfaces below leave out what
+ * either of them wrote, and refuse to put the two in one small circle. Staff are
+ * not held to it, because they reach every post to moderate it. Not best-effort: a
+ * lookup that fails fails the request, since an empty list standing in for one
+ * that could not be read is how he comes back.
+ */
+const blockedFor = (req: AuthRequest): Promise<string[]> => {
+  const viewer = req.user;
+  if (!viewer || isModeratorRole(viewer.role)) return Promise.resolve([]);
+  return blockedEitherWayIds(viewer.id);
+};
 
 /** Deep paging still has to fit in the integer Prisma sends as `skip`. */
 const MAX_PAGE = 10000;
@@ -171,7 +193,8 @@ async function checkinStreakAward(userId: string, today: string) {
   return streak;
 }
 
-const AUTHOR_SELECT = { id: true, firstName: true, lastName: true, displayName: true, avatar: true, role: true, practitionerProfile: { select: { isVerified: true, kind: true } } } as const;
+// No lastName: another member is called by her public name or her first name alone (utils/member-display), so the legal surname is never loaded for a forum or a circle.
+const AUTHOR_SELECT = { id: true, firstName: true, displayName: true, avatar: true, role: true, practitionerProfile: { select: { isVerified: true, kind: true } } } as const;
 
 // ---------------------------------------------------------------- reference
 
@@ -307,7 +330,9 @@ router.post('/entries', authenticate, async (req: AuthRequest, res: Response, ne
     const settings = await getSettings(req.user!.id);
     const entry = await saveEntry(req.user!.id, input, today, settings.trackers as Record<string, boolean>);
     const streak = input.kind === 'CHECKIN' ? await checkinStreakAward(req.user!.id, today) : null;
-    ok(res, { entry, streak }, 201);
+    // The note on a day's record is hers alone, sealed at rest, so a note that
+    // sounds like crisis gets the lines in the answer and raises nothing.
+    ok(res, { entry, streak, crisis: privateCrisisAnswer(screenText(typeof input.payload.note === 'string' ? input.payload.note : null)) }, 201);
   } catch (error) { next(error); }
 });
 
@@ -359,7 +384,8 @@ router.patch('/entries/:id', authenticate, async (req: AuthRequest, res: Respons
     if (!existing) throw new ApiError(404, 'Entry not found');
     const { payload } = parse(z.object({ payload: z.record(z.unknown()) }), req.body);
     const clean = parse(PAYLOADS[existing.kind as Kind], payload);
-    ok(res, present(await prisma.healthEntry.update({ where: { id: existing.id }, data: { payload: encryptJson(clean) } })));
+    const note = (clean as Record<string, unknown>).note;
+    ok(res, { ...present(await prisma.healthEntry.update({ where: { id: existing.id }, data: { payload: encryptJson(clean) } })), crisis: privateCrisisAnswer(screenText(typeof note === 'string' ? note : null)) });
   } catch (error) { next(error); }
 });
 
@@ -670,7 +696,10 @@ router.get('/mental-load', authenticate, async (req: AuthRequest, res: Response,
     const entries = rows.map((r) => ({ id: r.id, day: isoDay(r.day), category: r.category, task: r.task, minutes: r.minutes, carriedBy: r.carriedBy }));
     const checkins = toCheckins(recent);
     const analysis = analyseMentalLoad(entries, { today, weeks, recentEnergy: checkins.map((c) => c.energy), recentStress: checkins.map((c) => c.stress) });
-    ok(res, { today, entries, analysis, categories: MENTAL_LOAD_CATEGORIES, templates: DELEGATION_TEMPLATES });
+    // The lines ride with the answer so the page can show them beside a burnout
+    // level of "high" (analysis.burnout.level) from the same list every other
+    // wellness page reads, rather than its own copy.
+    ok(res, { today, entries, analysis, categories: MENTAL_LOAD_CATEGORIES, templates: DELEGATION_TEMPLATES, crisisLines: distressLines() });
   } catch (error) { next(error); }
 });
 
@@ -679,7 +708,10 @@ router.post('/mental-load', authenticate, async (req: AuthRequest, res: Response
     const data = parse(z.object({ day: isoDaySchema.optional(), category: z.enum(MENTAL_LOAD_CATEGORIES.map((c) => c.key) as [string, ...string[]]), task: z.string().min(1).max(120), minutes: z.coerce.number().int().min(1).max(1440), carriedBy: z.enum(['ME', 'PARTNER', 'SHARED', 'OTHER']).optional() }), req.body);
     const today = await memberDay(req);
     const row = await prisma.mentalLoadEntry.create({ data: { userId: req.user!.id, day: dayDate(data.day ?? today), category: data.category as never, task: data.task, minutes: data.minutes, carriedBy: (data.carriedBy ?? 'ME') as never } });
-    ok(res, { ...row, day: isoDay(row.day) }, 201);
+    // A task is a line she wrote about her own week, and the page says only she
+    // reads it. If it sounds like crisis she is shown the lines and nobody else
+    // is told: no staff flag from a private record (wellness-crisis.service).
+    ok(res, { ...row, day: isoDay(row.day), crisis: privateCrisisAnswer(screenText(data.task)) }, 201);
   } catch (error) { next(error); }
 });
 
@@ -695,7 +727,7 @@ router.delete('/mental-load/:id', authenticate, async (req: AuthRequest, res: Re
 
 const postSelect = { id: true, forumId: true, authorId: true, isAnonymous: true, title: true, body: true, contentWarning: true, isHidden: true, hiddenReason: true, isPinned: true, isLocked: true, crisisFlagged: true, replyCount: true, supportCount: true, lastReplyAt: true, createdAt: true, updatedAt: true, author: { select: AUTHOR_SELECT }, forum: { select: { slug: true, name: true } } } as const;
 
-function presentPost(p: { id: string; forumId: string; authorId: string; isAnonymous: boolean; title: string; body: string; contentWarning: string | null; isHidden: boolean; hiddenReason: string | null; isPinned: boolean; isLocked: boolean; crisisFlagged: boolean; replyCount: number; supportCount: number; lastReplyAt: Date | null; createdAt: Date; updatedAt: Date; author: { id: string; firstName: string | null; lastName: string | null; displayName: string | null; avatar: string | null; role: string }; forum: { slug: string; name: string } }, viewerId: string, full: boolean, supported: Set<string>) {
+function presentPost(p: { id: string; forumId: string; authorId: string; isAnonymous: boolean; title: string; body: string; contentWarning: string | null; isHidden: boolean; hiddenReason: string | null; isPinned: boolean; isLocked: boolean; crisisFlagged: boolean; replyCount: number; supportCount: number; lastReplyAt: Date | null; createdAt: Date; updatedAt: Date; author: { id: string; firstName: string | null; displayName: string | null; avatar: string | null; role: string }; forum: { slug: string; name: string } }, viewerId: string, full: boolean, supported: Set<string>) {
   return {
     id: p.id, forum: p.forum, title: p.title, body: full ? p.body : excerpt(p.body), contentWarning: p.contentWarning, isHidden: p.isHidden, hiddenReason: p.hiddenReason, isPinned: p.isPinned, isLocked: p.isLocked,
     replyCount: p.replyCount, supportCount: p.supportCount, lastReplyAt: p.lastReplyAt, createdAt: p.createdAt, updatedAt: p.updatedAt,
@@ -707,7 +739,7 @@ router.get('/forums', authenticate, async (_req: AuthRequest, res: Response, nex
   try {
     const forums = await prisma.wellnessForum.findMany({ where: { isActive: true }, orderBy: { sortOrder: 'asc' } });
     const latest = await prisma.wellnessPost.groupBy({ by: ['forumId'], where: { isHidden: false }, _max: { createdAt: true, lastReplyAt: true }, _count: { _all: true } });
-    ok(res, { forums: forums.map((f) => { const l = latest.find((x) => x.forumId === f.id); return { ...f, postCount: l?._count._all ?? 0, lastActivityAt: l?._max.lastReplyAt ?? l?._max.createdAt ?? null }; }), crisisLines: CRISIS_LINES.slice(0, 6), contentWarnings: CONTENT_WARNINGS });
+    ok(res, { forums: forums.map((f) => { const l = latest.find((x) => x.forumId === f.id); return { ...f, postCount: l?._count._all ?? 0, lastActivityAt: l?._max.lastReplyAt ?? l?._max.createdAt ?? null }; }), crisisLines: distressLines(), contentWarnings: CONTENT_WARNINGS });
   } catch (error) { next(error); }
 });
 
@@ -718,14 +750,17 @@ router.get('/forums/:slug', authenticate, async (req: AuthRequest, res: Response
     const page = pageParam(req.query.page, 1, 1, MAX_PAGE);
     const limit = pageParam(req.query.limit, 20, 5, 50);
     const moderator = isModeratorRole(req.user!.role);
-    const where = { forumId: forum.id, ...(moderator ? {} : { OR: [{ isHidden: false }, { authorId: req.user!.id }] }) };
+    // What either side of a block wrote is not in the list, anonymous or not: she
+    // cannot tell whose it was, and does not need to.
+    const blocked = await blockedFor(req);
+    const where = { forumId: forum.id, ...(moderator ? {} : { OR: [{ isHidden: false }, { authorId: req.user!.id }] }), ...(blocked.length > 0 ? { authorId: { notIn: blocked } } : {}) };
     const [posts, total] = await Promise.all([
       prisma.wellnessPost.findMany({ where, orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }], skip: (page - 1) * limit, take: limit, select: postSelect }),
       prisma.wellnessPost.count({ where }),
     ]);
     const supported = new Set((await prisma.wellnessSupport.findMany({ where: { userId: req.user!.id, postId: { in: posts.map((p) => p.id) } }, select: { postId: true } })).map((s) => s.postId));
     const settings = await getSettings(req.user!.id);
-    ok(res, { forum, posts: posts.map((p) => presentPost(p, req.user!.id, false, supported)), page, limit, total, isModerator: moderator, crisisLines: CRISIS_LINES.slice(0, 6), viewer: { hiddenWarnings: settings.hiddenWarnings, anonymousByDefault: settings.anonymousByDefault } });
+    ok(res, { forum, posts: posts.map((p) => presentPost(p, req.user!.id, false, supported)), page, limit, total, isModerator: moderator, crisisLines: distressLines(), viewer: { hiddenWarnings: settings.hiddenWarnings, anonymousByDefault: settings.anonymousByDefault } });
   } catch (error) { next(error); }
 });
 
@@ -737,34 +772,15 @@ router.post('/forums/:slug/posts', authenticate, async (req: AuthRequest, res: R
     if (!forum || !forum.isActive) throw new ApiError(404, 'Forum not found');
     const data = parse(postSchema, req.body);
     const settings = await getSettings(req.user!.id);
-    const crisis = detectCrisisLanguage(`${data.title}\n${data.body}`);
+    const crisis = screenText(data.title, data.body);
     const post = await prisma.wellnessPost.create({ data: { forumId: forum.id, authorId: req.user!.id, isAnonymous: data.isAnonymous ?? settings.anonymousByDefault, title: data.title.trim(), body: data.body.trim(), contentWarning: normaliseWarning(data.contentWarning), crisisFlagged: crisis.flagged }, select: postSelect });
     await prisma.wellnessForum.update({ where: { id: forum.id }, data: { postCount: { increment: 1 } } });
-    if (crisis.flagged) {
-      // Raising the flag used to be the whole of the response. AdminFlag had
-      // no reader anywhere — no route, no page, no worker — so a woman writing
-      // that she wanted to die produced a HIGH-severity row nobody would ever
-      // open. It is now a queue staff work (GET /api/safety/moderation/flags,
-      // shown above the report queue at /admin/moderation), and raising one
-      // tells the admins, the way every other urgent queue here does.
-      //
-      // Still best effort, and still after the post is saved: her post going
-      // up is not allowed to depend on any of this, and a flag that could not
-      // be written has to land in the log rather than disappear.
-      await bestEffort('wellness crisis safety flag', async () => {
-        const flag = await prisma.adminFlag.create({ data: { userId: req.user!.id, type: 'SAFETY_CONCERN', severity: 'HIGH', flaggedById: req.user!.id, reason: 'Language about suicide or self-harm in a wellness forum post; the crisis lines were shown to the author', notes: `Post ${post.id}` } });
-        // Nothing she wrote, and no name, goes into the notification: it lands
-        // in every admin's inbox, while the post and the account sit behind
-        // the staff role in the queue.
-        await notifyAdmins({
-          title: 'A safety concern needs a person now',
-          message: 'A wellness forum post used language about suicide or self-harm. The crisis lines were shown to the author. It is waiting at the top of the safety queue.',
-          link: '/admin/moderation#safety-concerns',
-          data: { flagId: flag.id, flagType: 'SAFETY_CONCERN', severity: 'HIGH' },
-        });
-      });
-    }
-    ok(res, { post: presentPost(post, req.user!.id, true, new Set()), crisis: crisis.flagged ? { flagged: true, message: 'It sounds like things are very hard right now. Your post is up, and these lines are staffed this minute.', lines: CRISIS_LINES.slice(0, 5) } : { flagged: false } }, 201);
+    // Raising the flag, and telling the admins, is wellness-crisis.service. Still
+    // after the post is saved: her post going up is not allowed to depend on any
+    // of it, a flag that could not be written lands in the log, and the answer
+    // says a moderator has been told only when one was.
+    const answer = await answerSharedWords(req.user?.id, crisis, { surface: 'forum post', resourceId: post.id }, 'Your post is up.');
+    ok(res, { post: presentPost(post, req.user!.id, true, new Set()), crisis: answer }, 201);
   } catch (error) { next(error); }
 });
 
@@ -772,10 +788,12 @@ router.get('/forum-posts/:id', authenticate, async (req: AuthRequest, res: Respo
   try {
     const post = await prisma.wellnessPost.findUnique({ where: { id: req.params.id }, select: postSelect });
     const moderator = isModeratorRole(req.user!.role);
-    if (!post || (post.isHidden && !moderator && post.authorId !== req.user!.id)) throw new ApiError(404, 'Post not found');
+    const blocked = await blockedFor(req);
+    // A post by either side of a block is answered as one that is not there, and so are its replies from them.
+    if (!post || (post.isHidden && !moderator && post.authorId !== req.user!.id) || blocked.includes(post.authorId)) throw new ApiError(404, 'Post not found');
     const page = pageParam(req.query.page, 1, 1, MAX_PAGE);
     const limit = pageParam(req.query.limit, 50, 5, 100);
-    const replyWhere: Prisma.WellnessReplyWhereInput = { postId: post.id, ...(moderator ? {} : { OR: [{ isHidden: false }, { authorId: req.user!.id }] }) };
+    const replyWhere: Prisma.WellnessReplyWhereInput = { postId: post.id, ...(moderator ? {} : { OR: [{ isHidden: false }, { authorId: req.user!.id }] }), ...(blocked.length > 0 ? { authorId: { notIn: blocked } } : {}) };
     // A thread that ran for months used to come back whole. replyTotal counts
     // the replies this viewer is allowed to see, so the thread can say how
     // many there are rather than letting replies.length imply that the first
@@ -790,7 +808,7 @@ router.get('/forum-posts/:id', authenticate, async (req: AuthRequest, res: Respo
       post: presentPost(post, req.user!.id, true, new Set(supported ? [post.id] : [])),
       replies: replies.map((r) => ({ id: r.id, body: r.body, isHidden: r.isHidden, isFromModerator: r.isFromModerator, createdAt: r.createdAt, author: presentAuthor(r.author, r.isAnonymous, req.user!.id, r.isFromModerator), canEdit: r.authorId === req.user!.id })),
       replyPage: page, replyLimit: limit, replyTotal,
-      isModerator: moderator, crisisLines: CRISIS_LINES.slice(0, 6), guidelines: post.forum, viewer: { hiddenWarnings: settings.hiddenWarnings, anonymousByDefault: settings.anonymousByDefault },
+      isModerator: moderator, crisisLines: distressLines(), guidelines: post.forum, viewer: { hiddenWarnings: settings.hiddenWarnings, anonymousByDefault: settings.anonymousByDefault },
     });
   } catch (error) { next(error); }
 });
@@ -799,13 +817,22 @@ router.post('/forum-posts/:id/replies', authenticate, async (req: AuthRequest, r
   try {
     const post = await prisma.wellnessPost.findUnique({ where: { id: req.params.id }, select: { id: true, authorId: true, isLocked: true, isHidden: true, title: true, forum: { select: { slug: true } } } });
     if (!post || post.isHidden) throw new ApiError(404, 'Post not found');
+    // A reply under the post of someone across a block is contact with her, and rings her bell.
+    if ((await blockedFor(req)).includes(post.authorId)) throw new ApiError(404, 'Post not found');
     if (post.isLocked) throw new ApiError(400, 'This thread is closed to new replies');
     const data = parse(z.object({ body: z.string().min(2).max(3000), isAnonymous: z.boolean().optional() }), req.body);
     const settings = await getSettings(req.user!.id);
-    const crisis = detectCrisisLanguage(data.body);
     const moderator = isModeratorRole(req.user!.role);
+    // A moderator answering a woman in crisis names the thing (suicide, Lifeline, 13 11 14).
+    // Her reply is not screened: every kind word a moderator wrote in a hard thread would
+    // otherwise raise a HIGH concern about the moderator and ring every admin.
+    const crisis = moderator ? screenText() : screenText(data.body);
     const reply = await prisma.wellnessReply.create({ data: { postId: post.id, authorId: req.user!.id, isAnonymous: moderator ? false : (data.isAnonymous ?? settings.anonymousByDefault), isFromModerator: moderator, body: data.body.trim() }, include: { author: { select: AUTHOR_SELECT } } });
     await prisma.wellnessPost.update({ where: { id: post.id }, data: { replyCount: { increment: 1 }, lastReplyAt: new Date() } });
+    // A reply is read by everyone in the thread, and used to be screened only to
+    // show its author the lines: a woman writing that she could not go on, in
+    // answer to somebody else, was shown a number and raised nothing.
+    const answer = await answerSharedWords(req.user?.id, crisis, { surface: 'forum reply', resourceId: reply.id }, 'Your reply is up.');
     if (post.authorId !== req.user!.id) {
       // Her reply is already written and the thread already shows it, so
       // telling the post's author is an extra that must not turn a saved reply
@@ -815,14 +842,14 @@ router.post('/forum-posts/:id/replies', authenticate, async (req: AuthRequest, r
       // stopped accepting writes could go unnoticed for weeks.
       await bestEffort('notification.wellness-forum-reply', () => prisma.notification.create({ data: { userId: post.authorId, type: 'SYSTEM', title: 'Someone replied in the wellness forum', message: `A reply on "${post.title.slice(0, 60)}".`, link: `/dashboard/wellness/forums/${post.forum.slug}/${post.id}`, data: { kind: 'WELLNESS_REPLY', postId: post.id } } }), null);
     }
-    ok(res, { reply: { id: reply.id, body: reply.body, isHidden: reply.isHidden, isFromModerator: reply.isFromModerator, createdAt: reply.createdAt, author: presentAuthor(reply.author, reply.isAnonymous, req.user!.id, reply.isFromModerator), canEdit: true }, crisis: crisis.flagged ? { flagged: true, lines: CRISIS_LINES.slice(0, 5) } : { flagged: false } }, 201);
+    ok(res, { reply: { id: reply.id, body: reply.body, isHidden: reply.isHidden, isFromModerator: reply.isFromModerator, createdAt: reply.createdAt, author: presentAuthor(reply.author, reply.isAnonymous, req.user!.id, reply.isFromModerator), canEdit: true }, crisis: answer }, 201);
   } catch (error) { next(error); }
 });
 
 router.post('/forum-posts/:id/support', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const post = await prisma.wellnessPost.findUnique({ where: { id: req.params.id }, select: { id: true, isHidden: true } });
-    if (!post || post.isHidden) throw new ApiError(404, 'Post not found');
+    const post = await prisma.wellnessPost.findUnique({ where: { id: req.params.id }, select: { id: true, authorId: true, isHidden: true } });
+    if (!post || post.isHidden || (await blockedFor(req)).includes(post.authorId)) throw new ApiError(404, 'Post not found');
     const existing = await prisma.wellnessSupport.findUnique({ where: { postId_userId: { postId: post.id, userId: req.user!.id } } });
     if (existing) {
       await prisma.wellnessSupport.delete({ where: { id: existing.id } });
@@ -835,14 +862,81 @@ router.post('/forum-posts/:id/support', authenticate, async (req: AuthRequest, r
   } catch (error) { next(error); }
 });
 
-router.post('/forum-posts/:id/report', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+// What a member can report a forum post or reply for. The words on the buttons are
+// the left column; the queue, the alert and the review clock all read the lower-case
+// reasons the report intake knows (content-report.service), the right column.
+// "Not right for this forum" has no reason of its own there and is read as "other".
+const FORUM_REPORT_REASONS = { HARASSMENT: 'harassment', HATE_SPEECH: 'hate_speech', SPAM: 'spam', MISINFORMATION: 'misinformation', INAPPROPRIATE: 'other', SELF_HARM: 'self_harm', OTHER: 'other' } as const;
+const forumReportSchema = z.object({ reason: z.enum(Object.keys(FORUM_REPORT_REASONS) as [keyof typeof FORUM_REPORT_REASONS, ...Array<keyof typeof FORUM_REPORT_REASONS>]), description: z.string().max(1000).optional() });
+
+/**
+ * File a report on a forum post or reply through the same intake as every other
+ * report on the platform (POST /api/safety/reports): a reference she can quote,
+ * a priority, the review clock the Online Safety Act sets, and the alert to
+ * Trust and Safety for what is urgent.
+ *
+ * It used to write the row and nothing else, so a report of a woman writing that
+ * she wanted to die sat in the queue with no priority, no deadline and no alert,
+ * and the form had no way to say so ("self harm" was not a reason at all). The
+ * intake already rates self-harm critical on the 24 hour clock; it is offered now.
+ *
+ * The report is saved before anything that follows, and nothing that follows may
+ * turn it into an error: she would file it again and the queue would hold two.
+ */
+async function fileForumReport(req: AuthRequest, target: { contentType: 'WELLNESS_POST' | 'WELLNESS_REPLY'; contentId: string; reportedUserId: string }, data: z.infer<typeof forumReportSchema>) {
+  const reason = FORUM_REPORT_REASONS[data.reason];
+  // Self-harm is rated critical by the intake, and a report of it is urgent as a
+  // reporter marking it so would be: the shorter of the two review clocks, 24 hours,
+  // where the reason alone would have left it on the 48 hour clock for harmful content.
+  const isUrgent = data.reason === 'SELF_HARM';
+  const intake = openReportIntake({ reason, isUrgent });
+  const report = await prisma.contentReport.create({
+    data: {
+      reporterId: req.user!.id,
+      contentType: target.contentType,
+      contentId: target.contentId,
+      reportedUserId: target.reportedUserId,
+      reason,
+      description: data.description,
+      status: 'PENDING',
+      reviewDeadline: intake.reviewDeadline,
+      priority: intake.priorityLevel,
+      evidence: { ticketId: intake.ticketId, reviewDeadline: intake.reviewDeadline.toISOString(), reviewHours: intake.reviewHours, priority: intake.priority, source: 'WELLNESS_FORUM_REPORT', reportedAs: data.reason },
+    },
+  });
+  // The same signal every other door gives the safety score: one voice per
+  // reporter, capped and decided by a moderator before it weighs in full. A
+  // report made because a woman may be at risk records nothing against her; that
+  // exemption is in handleUserReport.
+  await bestEffort('wellness.report.safety-score', () => handleUserReport(target.reportedUserId, req.user!.id, reason, target.contentId, target.contentType.toLowerCase()));
+  await bestEffort('wellness.report.intake-consequences', () => runReportIntakeConsequences({ ticketId: intake.ticketId, reason, priority: intake.priority, reviewHours: intake.reviewHours, contentType: target.contentType, contentId: target.contentId, description: data.description, isUrgent }));
+  return { id: report.id, status: report.status, reference: intake.ticketId, reviewHours: intake.reviewHours };
+}
+
+// Both report routes sit behind the report limiter every other door into the report
+// queue uses (POST /api/safety/reports): now that a report here alerts Trust and Safety
+// for what is high or critical, an account with no ceiling could ring that alert as
+// often as it liked.
+router.post('/forum-posts/:id/report', authenticate, reportLimiter, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const post = await prisma.wellnessPost.findUnique({ where: { id: req.params.id }, select: { id: true, authorId: true } });
     if (!post) throw new ApiError(404, 'Post not found');
-    const data = parse(z.object({ reason: z.enum(['HARASSMENT', 'HATE_SPEECH', 'SPAM', 'MISINFORMATION', 'INAPPROPRIATE', 'OTHER']), description: z.string().max(1000).optional() }), req.body);
+    const data = parse(forumReportSchema, req.body);
     if (post.authorId === req.user!.id) throw new ApiError(400, 'You can delete your own post instead');
-    const report = await prisma.contentReport.create({ data: { reporterId: req.user!.id, contentType: 'WELLNESS_POST', contentId: post.id, reportedUserId: post.authorId, reason: data.reason, description: data.description } });
-    ok(res, { id: report.id, status: report.status }, 201);
+    ok(res, await fileForumReport(req, { contentType: 'WELLNESS_POST', contentId: post.id, reportedUserId: post.authorId }, data), 201);
+  } catch (error) { next(error); }
+});
+
+// A reply could not be reported at all: the only report route was for posts, so a
+// reply that was cruel, or that told a woman in crisis what she should do, had no
+// button and no queue.
+router.post('/forum-replies/:id/report', authenticate, reportLimiter, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const reply = await prisma.wellnessReply.findUnique({ where: { id: req.params.id }, select: { id: true, authorId: true } });
+    if (!reply) throw new ApiError(404, 'Reply not found');
+    const data = parse(forumReportSchema, req.body);
+    if (reply.authorId === req.user!.id) throw new ApiError(400, 'You can delete your own reply instead');
+    ok(res, await fileForumReport(req, { contentType: 'WELLNESS_REPLY', contentId: reply.id, reportedUserId: reply.authorId }, data), 201);
   } catch (error) { next(error); }
 });
 
@@ -853,11 +947,18 @@ router.patch('/forum-posts/:id', authenticate, async (req: AuthRequest, res: Res
     const moderator = isModeratorRole(req.user!.role);
     const data = parse(z.object({ title: z.string().min(5).max(140).optional(), body: z.string().min(20).max(5000).optional(), contentWarning: z.string().max(40).nullable().optional(), isHidden: z.boolean().optional(), hiddenReason: z.string().max(200).nullable().optional(), isPinned: z.boolean().optional(), isLocked: z.boolean().optional() }), req.body);
     const update: Prisma.WellnessPostUpdateInput = {};
+    // An edit puts new words in front of the thread, so it is screened as the post
+    // was; a post written calm and edited into crisis was never looked at again.
+    let edited = false;
     if (post.authorId === req.user!.id && !post.isLocked) {
-      if (data.title) update.title = data.title.trim();
-      if (data.body) update.body = data.body.trim();
+      if (data.title) { update.title = data.title.trim(); edited = true; }
+      if (data.body) { update.body = data.body.trim(); edited = true; }
       if (data.contentWarning !== undefined) update.contentWarning = normaliseWarning(data.contentWarning);
     }
+    const crisis = edited ? screenText(data.title, data.body) : screenText();
+    // The mark is only ever set here. An edit that takes the words out does not
+    // un-mark a post staff may already have been told about.
+    if (crisis.flagged) update.crisisFlagged = true;
     if (moderator) {
       if (data.isHidden !== undefined) { update.isHidden = data.isHidden; update.hiddenReason = data.isHidden ? (data.hiddenReason ?? 'Removed by a moderator') : null; }
       if (data.isPinned !== undefined) update.isPinned = data.isPinned;
@@ -865,7 +966,8 @@ router.patch('/forum-posts/:id', authenticate, async (req: AuthRequest, res: Res
     }
     if (Object.keys(update).length === 0) throw new ApiError(403, 'Nothing here you can change');
     const updated = await prisma.wellnessPost.update({ where: { id: post.id }, data: update, select: postSelect });
-    ok(res, presentPost(updated, req.user!.id, true, new Set()));
+    const answer = await answerSharedWords(req.user?.id, crisis, { surface: 'forum post edit', resourceId: post.id }, 'Your change is saved.');
+    ok(res, { ...presentPost(updated, req.user!.id, true, new Set()), crisis: answer });
   } catch (error) { next(error); }
 });
 
@@ -898,11 +1000,15 @@ router.patch('/forum-replies/:id', authenticate, async (req: AuthRequest, res: R
     const moderator = isModeratorRole(req.user!.role);
     const data = parse(z.object({ body: z.string().min(2).max(3000).optional(), isHidden: z.boolean().optional() }), req.body);
     const update: Prisma.WellnessReplyUpdateInput = {};
-    if (reply.authorId === req.user!.id && data.body) update.body = data.body.trim();
+    const edited = reply.authorId === req.user!.id && Boolean(data.body);
+    if (edited) update.body = data.body!.trim();
     if (moderator && data.isHidden !== undefined) update.isHidden = data.isHidden;
     if (Object.keys(update).length === 0) throw new ApiError(403, 'Nothing here you can change');
     const updated = await prisma.wellnessReply.update({ where: { id: reply.id }, data: update });
-    ok(res, { id: updated.id, body: updated.body, isHidden: updated.isHidden });
+    // The new words are screened as the reply was.
+    const crisis = edited ? screenText(data.body) : screenText();
+    const answer = await answerSharedWords(req.user?.id, crisis, { surface: 'forum reply edit', resourceId: reply.id }, 'Your change is saved.');
+    ok(res, { id: updated.id, body: updated.body, isHidden: updated.isHidden, crisis: answer });
   } catch (error) { next(error); }
 });
 
@@ -928,7 +1034,7 @@ const circleSchema = z.object({
   startsOn: isoDaySchema, meetingDay: z.coerce.number().int().min(0).max(6), meetingTime: hhmm, format: z.enum(['VIDEO', 'ASYNC', 'IN_PERSON']).optional(), meetingLink: httpUrl(300).nullable().optional(), location: z.string().max(160).nullable().optional(),
 });
 
-function presentCircle(c: { id: string; name: string; topic: string; description: string; facilitatorId: string; capacity: number; weeks: number; startsOn: Date; meetingDay: number; meetingTime: string; format: string; meetingLink: string | null; location: string | null; status: string; isFeatured: boolean; createdAt: Date; facilitator: { id: string; firstName: string | null; lastName: string | null; displayName: string | null; avatar: string | null; role: string }; members: Array<{ userId: string; leftAt: Date | null }> }, viewerId: string, today: string) {
+function presentCircle(c: { id: string; name: string; topic: string; description: string; facilitatorId: string; capacity: number; weeks: number; startsOn: Date; meetingDay: number; meetingTime: string; format: string; meetingLink: string | null; location: string | null; status: string; isFeatured: boolean; createdAt: Date; facilitator: { id: string; firstName: string | null; displayName: string | null; avatar: string | null; role: string }; members: Array<{ userId: string; leftAt: Date | null }> }, viewerId: string, today: string) {
   const active = c.members.filter((m) => !m.leftAt);
   const isMember = active.some((m) => m.userId === viewerId);
   const week = currentWeek(isoDay(c.startsOn), c.weeks, today);
@@ -948,8 +1054,10 @@ router.get('/circles', authenticate, async (req: AuthRequest, res: Response, nex
     const status = typeof req.query.status === 'string' && ['OPEN', 'RUNNING', 'COMPLETED', 'CANCELLED'].includes(req.query.status) ? req.query.status as 'OPEN' : undefined;
     const topic = typeof req.query.topic === 'string' ? req.query.topic : undefined;
     const mine = req.query.mine === 'true';
+    // Not a circle run by someone across a block: its page names its facilitator, and a circle is a handful of people who read each other's check-ins.
+    const blocked = await blockedFor(req);
     const circles = await prisma.wellnessCircle.findMany({
-      where: { ...(status ? { status } : mine ? {} : { status: { in: ['OPEN', 'RUNNING'] } }), ...(topic ? { topic } : {}), ...(mine ? { members: { some: { userId: req.user!.id, leftAt: null } } } : {}) },
+      where: { ...(status ? { status } : mine ? {} : { status: { in: ['OPEN', 'RUNNING'] } }), ...(topic ? { topic } : {}), ...(mine ? { members: { some: { userId: req.user!.id, leftAt: null } } } : {}), ...(blocked.length > 0 ? { facilitatorId: { notIn: blocked } } : {}) },
       orderBy: [{ isFeatured: 'desc' }, { startsOn: 'asc' }], take: 60, include: circleInclude,
     });
     ok(res, { today, circles: circles.map((c) => presentCircle(c, req.user!.id, today)), topics: CIRCLE_TOPICS });
@@ -964,7 +1072,10 @@ router.post('/circles', authenticate, async (req: AuthRequest, res: Response, ne
     const facilitating = await prisma.wellnessCircle.count({ where: { facilitatorId: req.user!.id, status: { in: ['OPEN', 'RUNNING'] } } });
     if (facilitating >= 3) throw new ApiError(400, 'Three running circles is the most one person can facilitate');
     const circle = await prisma.wellnessCircle.create({ data: { name: data.name.trim(), topic: data.topic.trim().toLowerCase(), description: data.description.trim(), facilitatorId: req.user!.id, capacity: data.capacity ?? 6, weeks: data.weeks ?? 8, startsOn: dayDate(data.startsOn), meetingDay: data.meetingDay, meetingTime: data.meetingTime, format: data.format ?? 'VIDEO', meetingLink: data.meetingLink ?? null, location: data.location ?? null, status: daysBetween(data.startsOn, today) >= 0 ? 'RUNNING' : 'OPEN', members: { create: { userId: req.user!.id, role: 'FACILITATOR' } } }, include: circleInclude });
-    ok(res, presentCircle(circle, req.user!.id, today), 201);
+    // The name and description are on the circle's page for anyone who opens it.
+    const crisis = screenText(data.name, data.description);
+    const answer = await answerSharedWords(req.user?.id, crisis, { surface: 'support circle name or description', resourceId: circle.id }, 'Your circle is up.');
+    ok(res, { ...presentCircle(circle, req.user!.id, today), crisis: answer }, 201);
   } catch (error) { next(error); }
 });
 
@@ -972,15 +1083,17 @@ router.get('/circles/:id', authenticate, async (req: AuthRequest, res: Response,
   try {
     const today = await memberDay(req);
     const circle = await prisma.wellnessCircle.findUnique({ where: { id: req.params.id }, include: { ...circleInclude, members: { where: { leftAt: null }, include: { user: { select: AUTHOR_SELECT } } }, checkIns: { orderBy: { createdAt: 'asc' }, include: { user: { select: AUTHOR_SELECT } } } } });
-    if (!circle) throw new ApiError(404, 'Circle not found');
+    const blocked = await blockedFor(req);
+    if (!circle || blocked.includes(circle.facilitatorId)) throw new ApiError(404, 'Circle not found');
     const base = presentCircle({ ...circle, members: circle.members.map((m) => ({ userId: m.userId, leftAt: m.leftAt })) }, req.user!.id, today);
     const strategies = COPING_STRATEGIES.filter((s) => s.topics.includes(circle.topic)).slice(0, 5);
     const schedule = Array.from({ length: circle.weeks }, (_, i) => { const ws = addDays(isoDay(circle.startsOn), i * 7); const offset = (circle.meetingDay - localParts(new Date(`${ws}T12:00:00Z`), 'UTC').weekday + 7) % 7; return { week: i + 1, day: addDays(ws, offset), time: circle.meetingTime }; });
     if (!base.isMember) return ok(res, { ...base, strategies: strategies.length ? strategies : COPING_STRATEGIES.slice(0, 3), schedule, members: [], checkIns: [], myCheckIns: [] });
     ok(res, {
       ...base, strategies: strategies.length ? strategies : COPING_STRATEGIES.slice(0, 3), schedule,
-      members: circle.members.map((m) => ({ ...presentAuthor(m.user, false, req.user!.id), role: m.role, joinedAt: m.joinedAt, continueRequested: m.continueRequested })),
-      checkIns: circle.checkIns.filter((c) => base.currentWeek !== null && c.week === base.currentWeek).map((c) => ({ id: c.id, week: c.week, mood: c.mood, wins: c.wins, blockers: c.blockers, nextStep: c.nextStep, createdAt: c.createdAt, author: presentAuthor(c.user, false, req.user!.id) })),
+      // Neither the people nor the check-ins of anyone across a block with her: a win, a blocker and a next step are written for the others in the circle.
+      members: circle.members.filter((m) => !blocked.includes(m.userId)).map((m) => ({ ...presentAuthor(m.user, false, req.user!.id), role: m.role, joinedAt: m.joinedAt, continueRequested: m.continueRequested })),
+      checkIns: circle.checkIns.filter((c) => !blocked.includes(c.userId)).filter((c) => base.currentWeek !== null && c.week === base.currentWeek).map((c) => ({ id: c.id, week: c.week, mood: c.mood, wins: c.wins, blockers: c.blockers, nextStep: c.nextStep, createdAt: c.createdAt, author: presentAuthor(c.user, false, req.user!.id) })),
       myCheckIns: circle.checkIns.filter((c) => c.userId === req.user!.id).map((c) => ({ id: c.id, week: c.week, mood: c.mood, wins: c.wins, blockers: c.blockers, nextStep: c.nextStep, createdAt: c.createdAt })),
       continueRequests: circle.members.filter((m) => m.continueRequested).length,
     });
@@ -1008,6 +1121,9 @@ router.post('/circles/:id/join', authenticate, async (req: AuthRequest, res: Res
     if (!circle) throw new ApiError(404, 'Circle not found');
     if (circle.status !== 'OPEN' && circle.status !== 'RUNNING') throw new ApiError(400, 'This circle is not taking members');
     const active = circle.members.filter((m) => !m.leftAt);
+    // She is not put in a small circle with someone across a block, whoever started it: she would be reading, and writing for, them. The answer is the one for a circle that is not there.
+    const blocked = await blockedFor(req);
+    if (active.some((m) => blocked.includes(m.userId))) throw new ApiError(404, 'Circle not found');
     if (active.some((m) => m.userId === req.user!.id)) throw new ApiError(400, 'You are already in this circle');
     if (active.length >= circle.capacity) throw new ApiError(400, 'This circle is full. Small on purpose; start another or watch for the next cycle.');
     const joined = await prisma.wellnessCircleMember.count({ where: { userId: req.user!.id, leftAt: null, circle: { status: { in: ['OPEN', 'RUNNING'] } } } });
@@ -1046,7 +1162,13 @@ router.post('/circles/:id/check-ins', authenticate, async (req: AuthRequest, res
     if (!week) throw new ApiError(400, 'This circle is not in a week you can check in for');
     if (week > circle.weeks) throw new ApiError(400, 'That week is past the end of the cycle');
     const checkIn = await prisma.wellnessCircleCheckIn.upsert({ where: { circleId_userId_week: { circleId: circle.id, userId: req.user!.id, week } }, create: { circleId: circle.id, userId: req.user!.id, week, mood: data.mood, wins: data.wins.trim(), blockers: data.blockers.trim(), nextStep: data.nextStep.trim() }, update: { mood: data.mood, wins: data.wins.trim(), blockers: data.blockers.trim(), nextStep: data.nextStep.trim() } });
-    ok(res, checkIn, 201);
+    // A win, a blocker and a next step are read by the others in the circle, and
+    // nothing here had a screen at all. If it sounds like crisis she is shown the
+    // lines and staff are told. Staff cannot open a circle's check-ins, so the flag
+    // carries the phrases that matched and where they were, and the account.
+    const crisis = screenText(data.wins, data.blockers, data.nextStep);
+    const answer = await answerSharedWords(req.user?.id, crisis, { surface: 'support circle check-in', resourceId: checkIn.id }, 'Your check-in is saved.');
+    ok(res, { ...checkIn, crisis: answer }, 201);
   } catch (error) { next(error); }
 });
 
@@ -1068,7 +1190,12 @@ router.patch('/circles/:id', authenticate, async (req: AuthRequest, res: Respons
     const { extendWeeks, isFeatured, ...rest } = data;
     const updated = await prisma.wellnessCircle.update({ where: { id: circle.id }, data: { ...rest, ...(extendWeeks ? { weeks: Math.min(52, circle.weeks + extendWeeks), status: 'RUNNING' } : {}), ...(isFeatured !== undefined && isModeratorRole(req.user!.role) ? { isFeatured } : {}) }, include: circleInclude });
     if (extendWeeks) await prisma.wellnessCircleMember.updateMany({ where: { circleId: circle.id }, data: { continueRequested: false } });
-    ok(res, presentCircle(updated, req.user!.id, await memberDay(req)));
+    // New words in the name or description are on the circle's page, so they are
+    // screened as a new circle's are. Only when her own words changed: a moderator
+    // editing a circle is not the woman who wrote it.
+    const crisis = circle.facilitatorId === req.user?.id ? screenText(data.name, data.description) : screenText();
+    const answer = await answerSharedWords(req.user?.id, crisis, { surface: 'support circle name or description', resourceId: circle.id }, 'Your change is saved.');
+    ok(res, { ...presentCircle(updated, req.user!.id, await memberDay(req)), crisis: answer });
   } catch (error) { next(error); }
 });
 
@@ -1608,7 +1735,7 @@ router.post('/habits/:id/log', authenticate, async (req: AuthRequest, res: Respo
 // --------------------------------------------------------------- challenges
 
 const challengeInclude = { createdBy: { select: AUTHOR_SELECT }, members: { select: { userId: true, habitId: true } } } as const;
-const presentChallenge = (c: { id: string; name: string; description: string; habitTemplateKey: string | null; startsOn: Date; endsOn: Date; isPublic: boolean; createdById: string; createdAt: Date; createdBy: { id: string; firstName: string | null; lastName: string | null; displayName: string | null; avatar: string | null; role: string }; members: Array<{ userId: string; habitId: string | null }> }, viewerId: string, today: string) => ({
+const presentChallenge = (c: { id: string; name: string; description: string; habitTemplateKey: string | null; startsOn: Date; endsOn: Date; isPublic: boolean; createdById: string; createdAt: Date; createdBy: { id: string; firstName: string | null; displayName: string | null; avatar: string | null; role: string }; members: Array<{ userId: string; habitId: string | null }> }, viewerId: string, today: string) => ({
   id: c.id, name: c.name, description: c.description, habitTemplateKey: c.habitTemplateKey, template: c.habitTemplateKey ? templateByKey(c.habitTemplateKey) ?? null : null, startsOn: isoDay(c.startsOn), endsOn: isoDay(c.endsOn), isPublic: c.isPublic, createdAt: c.createdAt,
   createdBy: presentAuthor(c.createdBy, false, viewerId), memberCount: c.members.length, joined: c.members.some((m) => m.userId === viewerId), myHabitId: c.members.find((m) => m.userId === viewerId)?.habitId ?? null, isCreator: c.createdById === viewerId,
   phase: today < isoDay(c.startsOn) ? 'upcoming' : today > isoDay(c.endsOn) ? 'finished' : 'running', daysLeft: Math.max(0, daysBetween(today, isoDay(c.endsOn))),
@@ -1617,7 +1744,9 @@ const presentChallenge = (c: { id: string; name: string; description: string; ha
 router.get('/challenges', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const today = await memberDay(req);
-    const rows = await prisma.wellnessChallenge.findMany({ where: { OR: [{ isPublic: true, endsOn: { gte: dayDate(addDays(today, -1)) } }, { members: { some: { userId: req.user!.id } } }, { createdById: req.user!.id }] }, orderBy: { startsOn: 'asc' }, take: 60, include: challengeInclude });
+    // Not a challenge started by someone across a block: it names its creator.
+    const blocked = await blockedFor(req);
+    const rows = await prisma.wellnessChallenge.findMany({ where: { AND: [{ OR: [{ isPublic: true, endsOn: { gte: dayDate(addDays(today, -1)) } }, { members: { some: { userId: req.user!.id } } }, { createdById: req.user!.id }] }, ...(blocked.length > 0 ? [{ createdById: { notIn: blocked } }] : [])] }, orderBy: { startsOn: 'asc' }, take: 60, include: challengeInclude });
     ok(res, { today, challenges: rows.map((c) => presentChallenge(c, req.user!.id, today)) });
   } catch (error) { next(error); }
 });
@@ -1651,12 +1780,15 @@ router.get('/challenges/:id', authenticate, async (req: AuthRequest, res: Respon
   try {
     const today = await memberDay(req);
     const c = await prisma.wellnessChallenge.findUnique({ where: { id: req.params.id }, include: { ...challengeInclude, members: { include: { user: { select: AUTHOR_SELECT } } } } });
-    if (!c) throw new ApiError(404, 'Challenge not found');
+    const blocked = await blockedFor(req);
+    if (!c || blocked.includes(c.createdById)) throw new ApiError(404, 'Challenge not found');
     const base = presentChallenge({ ...c, members: c.members.map((m) => ({ userId: m.userId, habitId: m.habitId })) }, req.user!.id, today);
     if (!c.isPublic && !base.joined) throw new ApiError(404, 'Challenge not found');
+    // Nobody across a block with her is on the leaderboard: it names every member.
+    const onBoard = c.members.filter((m) => !blocked.includes(m.userId));
     const habitIds = c.members.map((m) => m.habitId).filter((x): x is string => Boolean(x));
     const logs = await prisma.habitLog.findMany({ where: { habitId: { in: habitIds }, done: true, day: { gte: c.startsOn, lte: c.endsOn } }, select: { habitId: true, day: true } });
-    const leaderboard = challengeLeaderboard(c.members.map((m) => ({ userId: m.userId, name: presentAuthor(m.user, false, req.user!.id).name, isYou: m.userId === req.user!.id, doneDays: logs.filter((l) => l.habitId === m.habitId).map((l) => isoDay(l.day)) })), base.startsOn, base.endsOn, today);
+    const leaderboard = challengeLeaderboard(onBoard.map((m) => ({ userId: m.userId, name: presentAuthor(m.user, false, req.user!.id).name, isYou: m.userId === req.user!.id, doneDays: logs.filter((l) => l.habitId === m.habitId).map((l) => isoDay(l.day)) })), base.startsOn, base.endsOn, today);
     ok(res, { ...base, leaderboard });
   } catch (error) { next(error); }
 });
@@ -1665,7 +1797,7 @@ router.post('/challenges/:id/join', authenticate, async (req: AuthRequest, res: 
   try {
     const today = await memberDay(req);
     const c = await prisma.wellnessChallenge.findUnique({ where: { id: req.params.id }, include: challengeInclude });
-    if (!c || !c.isPublic) throw new ApiError(404, 'Challenge not found');
+    if (!c || !c.isPublic || (await blockedFor(req)).includes(c.createdById)) throw new ApiError(404, 'Challenge not found');
     if (isoDay(c.endsOn) < today) throw new ApiError(400, 'This challenge has finished');
     if (c.members.some((m) => m.userId === req.user!.id)) throw new ApiError(400, 'You are already in');
     const data = parse(z.object({ habitId: uuid.optional() }), req.body ?? {});

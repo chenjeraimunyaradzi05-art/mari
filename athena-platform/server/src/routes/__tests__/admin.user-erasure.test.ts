@@ -20,6 +20,14 @@ jest.mock('../../utils/prisma', () => ({
   },
 }));
 
+// Whether a membership could be ended at Stripe is the erasure's own concern and
+// is tested in erasure-billing.service.test.ts; here it either goes through or
+// refuses.
+const endBilling = jest.fn<(userId: string, options?: unknown) => Promise<unknown>>();
+jest.mock('../../services/erasure-billing.service', () => ({
+  endBillingBeforeErasure: (userId: string, options?: unknown) => endBilling(userId, options),
+}));
+
 jest.mock('../../middleware/auth', () => ({
   authenticate: (req: any, _res: any, next: any) => {
     req.user = { id: 'admin-123', role: 'ADMIN', email: 'admin@athena.test' };
@@ -36,6 +44,7 @@ jest.mock('../../utils/logger', () => ({
 }));
 
 import app from '../../index';
+import { ApiError } from '../../middleware/errorHandler';
 import { prisma } from '../../utils/prisma';
 import { gdprService } from '../../services/gdpr.service';
 
@@ -49,6 +58,7 @@ describe('DELETE /api/admin/users/:id', () => {
     jest.clearAllMocks();
     prismaAny.user.update.mockResolvedValue({ id: 'member-1' });
     prismaAny.auditLog.create.mockResolvedValue({ id: 'audit-1' });
+    endBilling.mockResolvedValue({ subscriptionCancelled: false, payoutBalanceFlagged: false });
     erase = jest.spyOn(gdprService, 'eraseAccountByAdmin');
   });
 
@@ -96,5 +106,23 @@ describe('DELETE /api/admin/users/:id', () => {
     expect(email).not.toContain('member-1');
     expect(email).not.toContain('athena.local');
     expect(erase).not.toHaveBeenCalled();
+  });
+
+  it('ends her billing before the soft delete closes the account, since the row and its subscription are kept', async () => {
+    await request(app).delete('/api/admin/users/member-1').expect(200);
+
+    // The payout link is kept by a suspension, so staff are not told it was unlinked.
+    expect(endBilling).toHaveBeenCalledWith('member-1', { unlinksPayoutAccount: false });
+    expect(endBilling.mock.invocationCallOrder[0]).toBeLessThan(prismaAny.user.update.mock.invocationCallOrder[0]);
+  });
+
+  it('leaves the account alone, with a 409, when her billing could not be ended', async () => {
+    endBilling.mockRejectedValue(new ApiError(409, 'We could not end your membership billing just now, so your account has not been deleted.'));
+
+    const res = await request(app).delete('/api/admin/users/member-1');
+
+    expect(res.status).toBe(409);
+    expect(prismaAny.user.update).not.toHaveBeenCalled();
+    expect(prismaAny.auditLog.create).not.toHaveBeenCalled();
   });
 });

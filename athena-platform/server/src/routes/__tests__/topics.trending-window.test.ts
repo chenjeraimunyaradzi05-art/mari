@@ -35,6 +35,7 @@ jest.mock('../../middleware/auth', () => ({
 jest.mock('../../services/post-decoration.service', () => ({ decoratePosts: jest.fn(async (posts: unknown) => posts) }));
 jest.mock('../../services/sound.service', () => ({ attachSounds: jest.fn(async (videos: unknown) => videos) }));
 
+import { authorAudienceWhere, authorVisibleWhere } from '../../services/audience.service';
 import {
   TRENDING_SCAN_BATCH,
   TRENDING_SCAN_SPANS,
@@ -74,13 +75,15 @@ describe('trending topics count the whole window', () => {
     const topics = await trendingTopics(7, 10);
 
     expect(postFindMany).toHaveBeenCalledTimes(2);
-    expect(postFindMany.mock.calls[0][0].where).not.toHaveProperty('AND');
+    // The first page carries only the audience rule; the second adds the place to start from.
+    expect(postFindMany.mock.calls[0][0].where.AND).toEqual([authorAudienceWhere()]);
     // The second page starts after the last row of the first, by date and then
     // by id, written into the where clause rather than as a Prisma cursor.
     expect(postFindMany.mock.calls[1][0]).toMatchObject({
       take: TRENDING_SCAN_BATCH,
       where: {
         AND: [
+          authorAudienceWhere(),
           {
             OR: [{ createdAt: { gt: AT } }, { createdAt: AT, id: { gt: `p-${TRENDING_SCAN_BATCH - 1}` } }],
           },
@@ -113,6 +116,7 @@ describe('trending topics count the whole window', () => {
     expect(videoFindMany.mock.calls[1][0].where.AND).toEqual([
       { OR: [{ publishedAt: { gt: AT } }, { publishedAt: AT, id: { gt: `v-${TRENDING_SCAN_BATCH - 1}` } }] },
     ]);
+    expect(videoFindMany.mock.calls[1][0].where.author).toEqual(authorVisibleWhere());
     expect(topics).toEqual([
       { tag: 'salary', posts: 0, videos: TRENDING_SCAN_BATCH, total: TRENDING_SCAN_BATCH },
       { tag: 'interviews', posts: 0, videos: 1, total: 1 },
@@ -124,10 +128,31 @@ describe('trending topics count the whole window', () => {
     await trendingTopics(7, 10);
 
     const postWhere = postFindMany.mock.calls[0][0].where;
-    expect(postWhere).toMatchObject({ isHidden: false, isPublic: true, groupId: null, content: { contains: '#' } });
+    expect(postWhere).toMatchObject({ isHidden: false, isPublic: true, content: { contains: '#' } });
+    // Outside groups is the audience rule's (it carries groupId: null).
+    expect(authorAudienceWhere()).toMatchObject({ groupId: null });
+    expect(postWhere.AND).toContainEqual(authorAudienceWhere());
     expect(reachOf(postFindMany.mock.calls[0] as [any], before)).toBeCloseTo(7, 3);
 
     expect(videoFindMany.mock.calls[0][0].where).toMatchObject({ status: 'PUBLISHED', isHidden: false });
+  });
+
+  // The count is one for everyone, so it is made of what a stranger may be
+  // shown: a tag used only by members whose profile is private, connections-only
+  // or in Safe Mode would otherwise trend, and be offered by the composer, on
+  // the strength of posts nobody outside their audience can open.
+  it('counts only what a stranger may be shown: not private, connections-only or Safe Mode authors', async () => {
+    await trendingTopics(7, 10);
+
+    const audience = authorAudienceWhere();
+    // Open to no viewer: a public profile or none set, and not discreet.
+    expect(JSON.stringify(audience)).not.toContain('private');
+    expect(JSON.stringify(audience)).not.toContain('connections');
+    expect(JSON.stringify(audience)).toContain('isSafeMode');
+    expect(postFindMany.mock.calls[0][0].where.AND).toContainEqual(audience);
+    expect(videoFindMany.mock.calls[0][0].where.author).toEqual(authorVisibleWhere());
+    expect(JSON.stringify(authorVisibleWhere())).not.toContain('connections');
+    expect(JSON.stringify(authorVisibleWhere())).not.toContain('private');
   });
 
   it('a reel that comes back without a publication date fails the count rather than vanishing from it', async () => {

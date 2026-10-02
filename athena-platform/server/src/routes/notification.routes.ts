@@ -1,12 +1,14 @@
 import { Router } from 'express';
-import { ConsentStatus, ConsentType } from '@prisma/client';
+import { ConsentStatus, ConsentType, type Notification } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { loadedResource, ownedBy, requireResourceAccess } from '../middleware/resource-access';
 import { groupNotifications, type NotificationRow } from '../services/notification-grouping.service';
 import { registerPushToken } from '../services/push.service';
 import { gdprService } from '../services/gdpr.service';
 import { consentService } from '../services/consent.service';
+import { clampLimit, clampPage } from '../utils/pagination';
 
 const router = Router();
 
@@ -40,6 +42,8 @@ function tokenFrom(body: unknown, query: unknown): string | null {
   return token;
 }
 
+// validated: the token must be text of at most 4,096 characters and an Expo token for the expo
+//   provider; provider and platform are read only as text against short lists.
 router.post('/push-token', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const token = tokenFrom(req.body, undefined);
@@ -88,6 +92,8 @@ router.post('/push-token', authenticate, async (req: AuthRequest, res, next) => 
   }
 });
 
+// validated: the token must be text of at most 4,096 characters, and only her own rows with that
+//   token are touched.
 router.delete('/push-token', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const token = tokenFrom(req.body, req.query);
@@ -247,10 +253,12 @@ function consentContext(req: AuthRequest) {
 // ===========================================
 router.get('/', authenticate, async (req: AuthRequest, res, next) => {
   try {
-    const { page = '1', limit = '20', unreadOnly = 'false' } = req.query;
+    const { unreadOnly = 'false' } = req.query;
 
-    const pageNum = parseInt(page as string);
-    const limitNum = parseInt(limit as string);
+    // Clamped: `parseInt(limit)` alone let `?limit=1000000` ask for a million
+    // notifications and `?limit=abc` hand Prisma a NaN.
+    const pageNum = clampPage(req.query.page);
+    const limitNum = clampLimit(req.query.limit, 20, 100);
     const skip = (pageNum - 1) * limitNum;
 
     const where: any = {
@@ -305,6 +313,8 @@ router.get('/', authenticate, async (req: AuthRequest, res, next) => {
 // ===========================================
 // MARK SEVERAL AS READ (a grouped row)
 // ===========================================
+// validated: ids is read only as an array of strings, cut to 200, and only her own unread
+//   notifications are updated.
 router.patch('/read-many', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const ids = Array.isArray(req.body?.ids)
@@ -325,21 +335,16 @@ router.patch('/read-many', authenticate, async (req: AuthRequest, res, next) => 
 // ===========================================
 // MARK NOTIFICATION AS READ
 // ===========================================
-router.patch('/:id/read', authenticate, async (req: AuthRequest, res, next) => {
+// Someone else's notification and one that does not exist both answer 404: a
+// 403 here told a stranger the id was real.
+const ownNotification = requireResourceAccess<Notification>({
+  load: (req) => prisma.notification.findUnique({ where: { id: req.params.id } }),
+  allow: ownedBy('userId'),
+});
+
+router.patch('/:id/read', authenticate, ownNotification, async (req: AuthRequest, res, next) => {
   try {
-    const { id } = req.params;
-
-    const notification = await prisma.notification.findUnique({
-      where: { id },
-    });
-
-    if (!notification) {
-      throw new ApiError(404, 'Notification not found');
-    }
-
-    if (notification.userId !== req.user!.id) {
-      throw new ApiError(403, 'Not authorized');
-    }
+    const { id } = loadedResource<Notification>(req);
 
     const updated = await prisma.notification.update({
       where: { id },
@@ -401,21 +406,9 @@ router.delete('/clear-read', authenticate, async (req: AuthRequest, res, next) =
 // ===========================================
 // DELETE NOTIFICATION
 // ===========================================
-router.delete('/:id', authenticate, async (req: AuthRequest, res, next) => {
+router.delete('/:id', authenticate, ownNotification, async (req: AuthRequest, res, next) => {
   try {
-    const { id } = req.params;
-
-    const notification = await prisma.notification.findUnique({
-      where: { id },
-    });
-
-    if (!notification) {
-      throw new ApiError(404, 'Notification not found');
-    }
-
-    if (notification.userId !== req.user!.id) {
-      throw new ApiError(403, 'Not authorized');
-    }
+    const { id } = loadedResource<Notification>(req);
 
     await prisma.notification.delete({
       where: { id },
@@ -463,6 +456,8 @@ router.get('/preferences', authenticate, async (req: AuthRequest, res, next) => 
 // ===========================================
 // UPDATE NOTIFICATION PREFERENCES
 // ===========================================
+// validated: validatePreferences accepts only the known sections and keys, each a boolean, and
+//   refuses anything else.
 router.patch('/preferences', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const userId = req.user!.id;

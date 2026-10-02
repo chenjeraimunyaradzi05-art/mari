@@ -14,6 +14,8 @@
 
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
+import { notDiscreetMemberWhere } from './audience.service';
+import { publicName } from '../utils/member-display';
 
 export interface SoundSummary {
   id: string;
@@ -124,7 +126,9 @@ export async function getTrendingSounds(options: { period?: TrendingPeriod; limi
   const trackIds = tracks.map((t) => t.id);
   const samples = trackIds.length
     ? await prisma.video.findMany({
-        where: { audioTrackId: { in: trackIds }, status: 'PUBLISHED', isHidden: false },
+        // The sample frames on a trending sound are shown to everyone, signed in
+        // or not, so a member in Safe Mode is not one of the faces on it.
+        where: { audioTrackId: { in: trackIds }, status: 'PUBLISHED', isHidden: false, author: notDiscreetMemberWhere },
         select: { id: true, thumbnailUrl: true, audioTrackId: true },
         orderBy: { publishedAt: 'desc' },
         take: trackIds.length * 3,
@@ -200,7 +204,7 @@ export async function soundFromVideo(videoId: string, requesterId?: string) {
       duration: true,
       thumbnailUrl: true,
       audioTrackId: true,
-      author: { select: { displayName: true, firstName: true, lastName: true } },
+      author: { select: { displayName: true, firstName: true } },
     },
   });
   if (!video || video.isHidden || (video.status !== 'PUBLISHED' && video.authorId !== requesterId)) {
@@ -222,10 +226,10 @@ export async function soundFromVideo(videoId: string, requesterId?: string) {
   });
   if (existing) return existing;
 
-  const authorName =
-    video.author.displayName?.trim() ||
-    [video.author.firstName, video.author.lastName].filter(Boolean).join(' ').trim() ||
-    'ATHENA member';
+  // The sound is listed under this name for everyone, for good: her public name, else her
+  // first name alone. Her legal surname is never read, so a member who has chosen not to
+  // show it is not printed under it on a sound anyone can pick.
+  const authorName = publicName(video.author, 'ATHENA member');
 
   const track = await prisma.audioTrack.create({
     data: {

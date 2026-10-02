@@ -284,7 +284,7 @@ async function resolveCuratorId(): Promise<string> {
   if (!admin) {
     throw new Error('No ADMIN user to attribute curated content to. Run db:seed:admin first.');
   }
-  logger.info(`Attributing curated content to ${admin.email}`);
+  logger.info('Attributing curated content to the admin account', { adminId: admin.id });
   return admin.id;
 }
 

@@ -150,7 +150,7 @@ export async function sendExpoPush(
       });
       if (!response.ok) {
         const text = await response.text().catch(() => '');
-        logger.warn('Expo push request refused', { status: response.status, body: text.slice(0, 200) });
+        logger.warn('Expo push request refused', { status: response.status, providerReply: text.slice(0, 200) });
         failed.push(...batch.map((row) => row.id));
         continue;
       }

@@ -13,14 +13,22 @@ import { getStripe } from '../utils/stripe';
 import { logger } from '../utils/logger';
 import { bestEffort } from '../utils/best-effort';
 import { recordFailure } from '../utils/ops-metrics';
+import { MENTOR_PLATFORM_FEE_RATE, PRICE_CURRENCY, splitFee } from '../config/price-book';
 import {
-  cancelEscrowPayment,
-  captureEscrowPayment,
   createConnectedAccount,
   createEscrowPayment,
-  PLATFORM_ESCROW_ACTOR,
   resolveConnectedAccountId,
 } from './stripe-connect.service';
+import { cancelSessionHold, captureSessionHold, paymentReleaseTimeFor } from './mentor-payment-release.service';
+import { isPaymentsPausedError } from './feature-flags.service';
+import { isBlockedRelationship } from '../utils/safety-store';
+import { MENTOR_BOOKING_HORIZON_DAYS, latestMentorSessionStart } from './escrow-deadline';
+import {
+  isDevelopmentHold,
+  notifyMentorOfRequest,
+  readCardHold,
+  recordSessionAuthorised,
+} from './mentor-session-authorisation.service';
 
 // getStripe() is called at each use rather than once into a module constant.
 // Capturing it at import time froze whatever client could be built the moment
@@ -41,48 +49,54 @@ import {
 // the admins are told, and the session's payment status says FAILED rather than
 // sitting at AUTHORIZED while the session reads COMPLETED.
 
-const MENTOR_PLATFORM_FEE_RATE = 0.2;
+// ATHENA's share of a mentoring session is held in the price book, with every
+// other fee, so the service and the mentor agreement quote one number.
 
 /** The Help & Support page, whose contact card reaches a person on the team. */
 export const MENTEE_SUPPORT_LINK = '/dashboard/settings/help';
 
-const SUPPORTED_SESSION_CURRENCIES = new Set([
-  'AUD',
-  'USD',
-  'SGD',
-  'PHP',
-  'IDR',
-  'THB',
-  'VND',
-  'MYR',
-  'AED',
-  'SAR',
-  'ZAR',
-  'EGP',
-  'GBP',
-  'EUR',
-  'NZD',
-]);
+/**
+ * Mentoring is charged in Australian dollars, whatever currency the mentee has
+ * chosen to see her own figures in.
+ *
+ * A mentor's `hourlyRate` is a bare number with no currency, and every page
+ * shows it as dollars. The session was charged in the mentee's own preferred
+ * currency, one of fifteen, so the same rate of 100 was A$100 to one mentee and
+ * 100 pesos or 100 dong to another: a mentee on PHP or VND paid a fraction of an
+ * hour and the mentor, who is paid out of the same charge, was underpaid by the
+ * difference. Charging in the one currency the rate is quoted in makes the price
+ * on the page the price on the card.
+ */
+const SESSION_CURRENCY = PRICE_CURRENCY;
 
-async function resolveSessionCurrency(userId: string): Promise<string> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { preferredCurrency: true },
-  });
+/** The shortest time a session is billed for, however short the slot booked. */
+const MINIMUM_BILLED_MINUTES = 15;
 
-  const currency = (user?.preferredCurrency || 'AUD').toUpperCase();
-  return SUPPORTED_SESSION_CURRENCIES.has(currency) ? currency : 'AUD';
-}
-
-function calculateSessionAmounts(hourlyRate: number, durationMinutes: number) {
-  const hours = Math.max(0.25, durationMinutes / 60);
-  const sessionAmount = hourlyRate * hours;
-  const platformFee = sessionAmount * MENTOR_PLATFORM_FEE_RATE;
-  const mentorPayout = sessionAmount - platformFee;
+/**
+ * What a session costs, worked out in whole cents, once.
+ *
+ * The amount, the fee and the payout were floats in dollars and each was rounded
+ * on its own when it met Stripe, while the unrounded figures were stored. A
+ * 45-minute session at 33.33 an hour was charged as 25.00 with a 5.00 fee and
+ * recorded as 24.9975, 4.9995 and 19.998, and the earnings statement, which adds
+ * up the stored figures, did not agree with the card or with Stripe. The amount is
+ * rounded to a cent here and the fee is rounded to a cent once from it, the payout
+ * being what is left, so the three always add up and are what Stripe is sent.
+ *
+ * The dollar figures are for the columns that store them; they are the cents
+ * divided by a hundred and carry no more than two decimals.
+ */
+export function calculateSessionAmounts(hourlyRate: number, durationMinutes: number) {
+  const billedMinutes = Math.max(MINIMUM_BILLED_MINUTES, durationMinutes);
+  const amountCents = Math.round((Math.round(hourlyRate * 100) * billedMinutes) / 60);
+  const { feeCents, payoutCents } = splitFee(amountCents, Math.round(MENTOR_PLATFORM_FEE_RATE * 100));
   return {
-    sessionAmount,
-    platformFee,
-    mentorPayout,
+    amountCents,
+    feeCents,
+    payoutCents,
+    sessionAmount: amountCents / 100,
+    platformFee: feeCents / 100,
+    mentorPayout: payoutCents / 100,
   };
 }
 
@@ -151,6 +165,9 @@ const PUBLIC_MENTOR_PROFILE_SELECT = {
       id: true,
       displayName: true,
       avatar: true,
+      // Only an approved identity check sets this. A mentor's own badge is
+      // "reviewed by a person" and is not drawn as verified.
+      isVerified: true,
       headline: true,
       bio: true,
       experience: true,
@@ -163,6 +180,7 @@ type MentorProfileRow = {
   hourlyRate: Prisma.Decimal | null;
   isAvailable: boolean;
   stripeAccountId: string | null;
+  isMonetized: boolean;
 };
 
 /**
@@ -191,7 +209,13 @@ export function mentorAcceptsBookings(profile: MentorProfileRow): boolean {
     return true;
   }
 
-  return Boolean(profile.stripeAccountId);
+  // An account that exists is not an account that can be paid. It is written
+  // the moment it is minted, with Stripe having verified nothing, so a mentor
+  // who had only pressed "Connect payouts" was shown as bookable: a mentee chose
+  // a time, entered her card and was refused at the hold. `isMonetized` is
+  // Stripe's own word that the account can take charges and pay out, kept by
+  // the account.updated webhook, which is what the hold itself is gated on.
+  return Boolean(profile.stripeAccountId) && profile.isMonetized;
 }
 
 /**
@@ -513,6 +537,17 @@ export async function requestSession(
     throw new ApiError(400, 'Cannot request session with yourself');
   }
 
+  // Not across a block, in either direction, and not only for a paid session. The
+  // hold refuses a payment across a block (createEscrowPayment), but a mentor who
+  // charges nothing has no hold, so a woman who had blocked somebody could still
+  // be sent her request, with her name and picture on the mentor's list, and be
+  // told of it by email and push. The answer is the one a mentor who does not
+  // exist gets, so a block is not something the person on the other side can read
+  // off the reply.
+  if (await isBlockedRelationship(menteeId, mentor.userId)) {
+    throw new ApiError(404, 'Mentor not found');
+  }
+
   const durationMinutes = data.durationMinutes || 60;
 
   if (!mentor.isAvailable) {
@@ -539,6 +574,25 @@ export async function requestSession(
 
   const isFreeSession = hourlyRate === 0;
 
+  // A time that has passed cannot be booked. Nothing checked it: the route asked
+  // only that the value be a date, so a session could be requested for last week,
+  // accepted, and marked complete in the same minute, taking the mentee's card
+  // for an hour that was never given.
+  const requestedAt = Date.now();
+  if (Number.isNaN(data.scheduledAt.getTime()) || data.scheduledAt.getTime() <= requestedAt) {
+    throw new ApiError(400, 'Choose a time that has not passed yet');
+  }
+
+  // A paid session is held on the mentee's card from the moment it is requested,
+  // and a hold lasts about a week. Booked further out than that, the hold ran out
+  // before the hour, the capture at completion failed, and the mentor was never
+  // paid for work she had given. The booking is refused now, with the reason,
+  // instead of being taken and quietly failing three weeks later. A free session
+  // holds nothing, so it can be booked as far ahead as the mentor will have it.
+  if (!isFreeSession) {
+    assertStartsWithinHold(data.scheduledAt, { createdAt: new Date(requestedAt) }, 'booking');
+  }
+
   // Only a paid session needs somewhere for the money to land. Requiring a
   // Stripe Express account before a free session could be booked would have
   // made "I will do this for nothing" the one thing the marketplace could not
@@ -550,11 +604,9 @@ export async function requestSession(
     }
   }
 
-  const currency = await resolveSessionCurrency(menteeId);
-  const { sessionAmount, platformFee, mentorPayout } = calculateSessionAmounts(
-    hourlyRate,
-    durationMinutes
-  );
+  const currency = SESSION_CURRENCY;
+  const amounts = calculateSessionAmounts(hourlyRate, durationMinutes);
+  const { sessionAmount, platformFee, mentorPayout } = amounts;
 
   const session = await prisma.mentorSession.create({
     data: {
@@ -579,12 +631,14 @@ export async function requestSession(
   });
 
   if (isFreeSession) {
-    await notifyMentorOfRequest(mentor.userId, session.id, data.scheduledAt, data.note);
+    await notifyMentorOfRequest(session, mentor.userId);
     return { session, paymentIntentClientSecret: null };
   }
 
-  const amountCents = Math.max(1, Math.round(sessionAmount * 100));
-  const feeCents = Math.max(0, Math.round(platformFee * 100));
+  // The cents the session was recorded with, which are the cents the card is
+  // asked for: the rows and Stripe cannot disagree about a cent.
+  const amountCents = Math.max(1, amounts.amountCents);
+  const feeCents = Math.min(amountCents, amounts.feeCents);
 
   // Through the shared escrow path rather than a PaymentIntent of this
   // module's own. Mentoring used to run a private escrow that wrote no
@@ -609,6 +663,9 @@ export async function requestSession(
       sessionType: 'mentor_session',
       platformFeeAmount: feeCents,
       automaticPaymentMethods: true,
+      // One hold per booking: a repeated request for this session (a double tap,
+      // a retry after a timeout) is handed the hold already made, not a second.
+      idempotencyKey: `mentor-hold-${session.id}`,
       metadata: {
         type: 'mentor_session',
         sessionId: session.id,
@@ -634,7 +691,21 @@ export async function requestSession(
     data: { stripePaymentIntentId: hold.paymentIntentId },
   });
 
-  await notifyMentorOfRequest(mentor.userId, session.id, data.scheduledAt, data.note);
+  // The mentor is not told yet. A request nobody has paid for is not one she can
+  // act on, and accepting it used to leave her with a confirmed hour and no money
+  // behind it. She hears of it from the Stripe webhook that says the mentee's card
+  // is held (payment_intent.amount_capturable_updated), and a request whose card
+  // step is never finished is called off by the expiry sweep, so it never reaches
+  // her at all (see mentor-session-authorisation.service).
+  //
+  // The one exception is the development processor, which has no card step and
+  // sends no webhook: its hold is real the moment it is made, so a developer's
+  // machine with no Stripe key still runs the flow end to end. Production never
+  // makes such a hold.
+  if (isDevelopmentHold(hold.paymentIntentId)) {
+    await recordSessionAuthorised({ id: session.id, stripePaymentIntentId: hold.paymentIntentId });
+    await notifyMentorOfRequest(updatedSession, mentor.userId);
+  }
 
   return {
     session: updatedSession,
@@ -643,93 +714,40 @@ export async function requestSession(
 }
 
 /**
- * Tells the mentor a session has been requested. Shared by the paid path,
- * which sends it once the hold is in place, and the free path, which has no
- * hold to wait for.
- */
-async function notifyMentorOfRequest(
-  mentorUserId: string,
-  sessionId: string,
-  scheduledAt: Date,
-  note?: string
-): Promise<void> {
-  await notificationService.notify({
-    userId: mentorUserId,
-    type: 'MENTOR_SESSION',
-    title: 'New Mentorship Request',
-    message: `You have a new mentorship session request for ${scheduledAt.toLocaleDateString()}`,
-    link: `/dashboard/mentors/sessions?session=${sessionId}`,
-    channels: ['in-app', 'email', 'push'],
-    emailTemplate: {
-      subject: 'New Mentorship Request',
-      html: `
-        <h2>New Mentorship Request</h2>
-        <p>You have a new session request for ${scheduledAt.toLocaleString()}.</p>
-        <p><strong>Note from mentee:</strong> ${note || 'No note provided'}</p>
-        <div style="margin: 20px 0;">
-          <a href="${process.env.CLIENT_URL}/dashboard/mentors/sessions?session=${sessionId}" style="background: #7c3aed; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Request</a>
-        </div>
-      `
-    }
-  });
-}
-
-/**
- * Takes the money a finished session has been holding.
+ * Refuses a start time that falls after the hold behind a paid session can still
+ * be taken, less the day its mentor needs to mark the hour complete.
  *
- * Bookings made since mentoring moved onto the shared escrow path have an
- * EscrowPayment row and go through the service, so the ledger row moves with
- * the session. Bookings made before it have a PaymentIntent and no row, and
- * their money is just as real, so they are captured directly — that branch can
- * be dropped once no unfinished session predates the change.
+ * `hold` is the hold the session will be paid from: one made now, for a booking,
+ * or the one it already has, for a session being moved. A move is held to the
+ * hold's real deadline, so it cannot be used to carry a session past the money.
  */
-async function captureSessionHold(paymentIntentId: string): Promise<{ capturedAt: Date }> {
-  const escrow = await prisma.escrowPayment.findUnique({
-    where: { paymentIntentId },
-    select: { status: true, capturedAt: true },
-  });
-
-  if (!escrow) {
-    const captured = await getStripe().paymentIntents.capture(paymentIntentId);
-    if (captured.status !== 'succeeded' && captured.status !== 'processing') {
-      throw new ApiError(502, `Stripe left the session payment in ${captured.status}`);
-    }
-    return { capturedAt: new Date() };
-  }
-
-  if (escrow.status === 'CAPTURED') {
-    // The expiry sweeper takes a hold early when it is about to lapse, so the
-    // money can already be collected by the time the session is marked done.
-    // That is a paid session, not a failed capture.
-    return { capturedAt: escrow.capturedAt ?? new Date() };
-  }
-
-  await captureEscrowPayment(paymentIntentId, PLATFORM_ESCROW_ACTOR);
-  return { capturedAt: new Date() };
-}
-
-/** Releases a cancelled session's hold, on either side of the escrow change. */
-async function cancelSessionHold(paymentIntentId: string): Promise<void> {
-  const escrow = await prisma.escrowPayment.findUnique({
-    where: { paymentIntentId },
-    select: { id: true, status: true },
-  });
-
-  if (!escrow) {
-    await getStripe().paymentIntents.cancel(paymentIntentId);
+function assertStartsWithinHold(
+  scheduledAt: Date,
+  hold: { createdAt: Date; metadata?: unknown },
+  action: 'booking' | 'moving'
+): void {
+  const latest = latestMentorSessionStart(hold);
+  if (scheduledAt.getTime() <= latest.getTime()) {
     return;
   }
 
-  // Already given back — by the expiry sweep, the webhook, or an earlier
-  // attempt at this same cancellation whose session write failed. The escrow
-  // service refuses a second release with a 400, which used to land in the
-  // catch below and be reported as a hold that could not be released, when
-  // the money was already back on her card.
-  if (escrow.status === 'CANCELED' || escrow.status === 'REFUNDED') {
-    return;
+  if (action === 'booking') {
+    throw new ApiError(
+      400,
+      `Paid sessions can be booked up to ${MENTOR_BOOKING_HORIZON_DAYS} days ahead. A card hold lasts about a week, and your mentor is paid once the hour has been given, so a session further out could not be paid for. Choose a nearer time.`
+    );
   }
 
-  await cancelEscrowPayment(paymentIntentId, PLATFORM_ESCROW_ACTOR, 'Session canceled');
+  const day = latest.toLocaleDateString('en-AU', {
+    timeZone: 'Australia/Brisbane',
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
+  throw new ApiError(
+    400,
+    `The hold on the mentee’s card is what pays for this session, and it lasts only until about ${day}, so it cannot be moved later than that. To meet later, cancel this request and have it booked again nearer the time.`
+  );
 }
 
 /**
@@ -868,6 +886,76 @@ function sessionHasEnded(scheduledAt: Date | null, durationMinutes: number, now:
 }
 
 /**
+ * What has to be true before a mentor may accept a paid request: the mentee's
+ * card is really held, and the hold will still be there when the hour has been
+ * given.
+ *
+ * Accepting checked the status and the caller and nothing about the money, so a
+ * mentor could accept a session whose card had never been authorised, and was
+ * then left with a confirmed hour she could not be paid for. The marketplace
+ * refuses to accept a booking until its hold is real (escrowHeld in
+ * skills-marketplace.routes); this is the same rule for a mentoring session.
+ *
+ * The session's own paymentStatus is what the Stripe webhook keeps, and it can be
+ * behind: a webhook that has not landed, or a deployment with none. Stripe is
+ * asked when it says the card is not held, so a hold that is real is never turned
+ * away on a stale row. Stripe not answering is its own reply, because "try again
+ * in a minute" is not "she has not paid".
+ */
+async function assertHoldBeforeConfirming(session: {
+  id: string;
+  sessionAmount: Prisma.Decimal | number | string;
+  paymentStatus: MentorPaymentStatus;
+  stripePaymentIntentId: string | null;
+  scheduledAt: Date | null;
+  createdAt?: Date;
+}): Promise<void> {
+  // A session that costs nothing has no card to hold.
+  if (Number(session.sessionAmount) <= 0) {
+    return;
+  }
+
+  if (session.paymentStatus === 'CANCELED' || session.paymentStatus === 'REFUNDED') {
+    throw new ApiError(409, 'The hold on the mentee’s card has ended, so this request can no longer be accepted. She is welcome to book again.');
+  }
+
+  const paymentIntentId = session.stripePaymentIntentId;
+  if (!paymentIntentId) {
+    throw new ApiError(409, 'No payment has been set up for this request, so it cannot be accepted.');
+  }
+
+  if (session.paymentStatus !== 'AUTHORIZED' && session.paymentStatus !== 'CAPTURED') {
+    const card = await readCardHold(paymentIntentId);
+    if (card === 'unknown') {
+      throw new ApiError(503, 'We could not check the mentee’s payment with our card processor just now. Please try again in a minute.');
+    }
+    if (card === 'not_held') {
+      throw new ApiError(409, 'The mentee has not authorised payment yet, so this request cannot be accepted. You will be told as soon as she has.');
+    }
+    await recordSessionAuthorised({ id: session.id, stripePaymentIntentId: paymentIntentId });
+  }
+
+  // Money already taken does not run out; a hold does. An accepted hour that
+  // starts after the hold is gone could not be paid for, which is what a request
+  // booked before the booking limit existed can be.
+  if (session.paymentStatus === 'CAPTURED' || !session.scheduledAt || paymentIntentId.startsWith('pi_mock_')) {
+    return;
+  }
+
+  const hold = await prisma.escrowPayment.findUnique({
+    where: { paymentIntentId },
+    select: { createdAt: true, metadata: true },
+  });
+  const heldSince = hold?.createdAt ?? session.createdAt;
+  if (heldSince instanceof Date && session.scheduledAt.getTime() > latestMentorSessionStart({ createdAt: heldSince, metadata: hold?.metadata }).getTime()) {
+    throw new ApiError(
+      409,
+      `The hold on the mentee’s card will run out before this session, so it could not be paid for. Decline it and ask her to book a time within the next ${MENTOR_BOOKING_HORIZON_DAYS} days.`
+    );
+  }
+}
+
+/**
  * Update session status (Accept, Reject, Cancel, Complete)
  */
 export async function updateSessionStatus(
@@ -897,6 +985,11 @@ export async function updateSessionStatus(
   if (session.status === 'COMPLETED' || session.status === 'CANCELED') {
     throw new ApiError(400, 'Cannot update finished session');
   }
+  // A session in dispute is not either person's to move: the money is held and
+  // ATHENA's team decides it (see service-disputes.service).
+  if (session.status === 'DISPUTED') {
+    throw new ApiError(409, 'This session is in dispute, so ATHENA’s team will decide it. Neither of you can change it meanwhile.');
+  }
 
   const transition = SESSION_TRANSITIONS[status as keyof typeof SESSION_TRANSITIONS];
   if (!transition) {
@@ -913,6 +1006,10 @@ export async function updateSessionStatus(
 
   const now = new Date();
   const hasEnded = sessionHasEnded(session.scheduledAt, session.durationMinutes, now);
+
+  if (status === 'CONFIRMED') {
+    await assertHoldBeforeConfirming(session);
+  }
 
   if (status === 'COMPLETED' && !hasEnded) {
     // Completing is what captures the card. Before this check a mentor could
@@ -935,6 +1032,9 @@ export async function updateSessionStatus(
 
   let paymentUpdates: Prisma.MentorSessionUpdateInput = {};
   let holdStillInPlace = false;
+  // When the mentee's card is to be charged, if the mentor's word starts a
+  // window in which she can object instead of charging her at once.
+  let confirmationEndsAt: Date | null = null;
 
   // Both branches go through the escrow service rather than calling Stripe
   // directly, so the EscrowPayment row moves with the session instead of being
@@ -970,6 +1070,21 @@ export async function updateSessionStatus(
   }
 
   if (status === 'COMPLETED' && session.stripePaymentIntentId) {
+    // The mentor's word is not the mentee's. When the mentor closes a paid
+    // session the card stays held for SESSION_CONFIRMATION_HOURS, in which the
+    // mentee can say it did not happen; the expiry sweep takes the money after
+    // that (see mentor-payment-release.service). The mentee confirming it herself
+    // needs no window, and neither does a hold too close to lapsing to wait.
+    if (actionBy === 'mentor' && Number(session.sessionAmount) > 0) {
+      const hold = await prisma.escrowPayment.findUnique({
+        where: { paymentIntentId: session.stripePaymentIntentId },
+        select: { status: true, createdAt: true, metadata: true },
+      });
+      confirmationEndsAt = paymentReleaseTimeFor(now, hold);
+    }
+  }
+
+  if (status === 'COMPLETED' && session.stripePaymentIntentId && !confirmationEndsAt) {
     try {
       const { capturedAt } = await captureSessionHold(session.stripePaymentIntentId);
       paymentUpdates = {
@@ -977,22 +1092,35 @@ export async function updateSessionStatus(
         paymentCapturedAt: capturedAt,
       };
     } catch (error) {
-      // This one used to be a bare logger.warn, and it is the failure that
-      // costs a mentor the money for work she has already done: the session
-      // was written COMPLETED, paymentStatus stayed AUTHORIZED, and nothing
-      // anywhere said the capture had failed. A hold booked more than a week
-      // ahead lapses before this runs, so it is not a rare path.
-      paymentUpdates = {
-        paymentStatus: 'FAILED' as MentorPaymentStatus,
-        paymentFailedAt: new Date(),
-      };
-      recordFailure('mentor.session.capture', error);
-      logger.error('Failed to capture mentor session payment; the mentor has not been paid', {
-        sessionId,
-        paymentIntentId: session.stripePaymentIntentId,
-        error: (error as Error).message,
-      });
-      await notifyUncollectedSession(session.mentorProfile.userId, sessionId);
+      if (isPaymentsPausedError(error)) {
+        // Payments are paused, which is not a card that could not be charged. The
+        // session is completed, the money is left held and the payment stays
+        // AUTHORIZED, and it is marked due now so the sweep that collects due
+        // sessions takes it the moment payments reopen. Marking it FAILED, and
+        // telling the mentor a payment needs attention, would be false.
+        paymentUpdates = { paymentReleaseAt: now };
+        logger.warn('A completed mentor session was left uncollected because payments are paused', {
+          sessionId,
+          paymentIntentId: session.stripePaymentIntentId,
+        });
+      } else {
+        // This one used to be a bare logger.warn, and it is the failure that
+        // costs a mentor the money for work she has already done: the session
+        // was written COMPLETED, paymentStatus stayed AUTHORIZED, and nothing
+        // anywhere said the capture had failed. A hold booked more than a week
+        // ahead lapses before this runs, so it is not a rare path.
+        paymentUpdates = {
+          paymentStatus: 'FAILED' as MentorPaymentStatus,
+          paymentFailedAt: new Date(),
+        };
+        recordFailure('mentor.session.capture', error);
+        logger.error('Failed to capture mentor session payment; the mentor has not been paid', {
+          sessionId,
+          paymentIntentId: session.stripePaymentIntentId,
+          error: (error as Error).message,
+        });
+        await notifyUncollectedSession(session.mentorProfile.userId, sessionId);
+      }
     }
   }
 
@@ -1004,33 +1132,41 @@ export async function updateSessionStatus(
   // asked about and cannot explain. The transition rules above have already
   // established that the session was CONFIRMED and that its booked time has
   // passed, so this counts finished hours and nothing else.
-  const [updated] = await prisma.$transaction([
-    prisma.mentorSession.update({
-      where: { id: sessionId },
+  //
+  // Conditional on the status just read, so a mentee's dispute that lands while
+  // this is being worked out is not written over: the session is moved only if it
+  // is still where this call found it.
+  const updated = await prisma.$transaction(async (tx) => {
+    const moved = await tx.mentorSession.updateMany({
+      where: { id: sessionId, status: session.status },
       data: {
         status,
-        ...paymentUpdates,
+        ...(status === 'COMPLETED'
+          ? { completedAt: now, paymentReleaseAt: confirmationEndsAt }
+          : {}),
+        ...(paymentUpdates as Prisma.MentorSessionUpdateManyMutationInput),
       },
-    }),
-    ...(status === 'COMPLETED'
-      ? [
-          prisma.mentorProfile.update({
-            where: { id: session.mentorProfileId },
-            data: { sessionCount: { increment: 1 } },
-          }),
-        ]
-      : []),
-  ]);
+    });
+    if (moved.count !== 1) {
+      throw new ApiError(409, 'This session has just changed. Reload it and try again.');
+    }
+    if (status === 'COMPLETED') {
+      await tx.mentorProfile.update({
+        where: { id: session.mentorProfileId },
+        data: { sessionCount: { increment: 1 } },
+      });
+    }
+    return tx.mentorSession.findUniqueOrThrow({ where: { id: sessionId } });
+  });
 
   if (holdStillInPlace) {
     await notifyUnreleasedHold(session.menteeId, sessionId);
   }
 
-  // When the mentor closes a paid session, the mentee's card is charged at that
-  // moment, and the notice she got said only that her session's status was now
-  // COMPLETED. She is told what was taken, and where to go if the hour did not
-  // happen. (A mentee-side confirmation step before the charge needs somewhere
-  // to record a dispute, which MentorSession does not have yet.)
+  // When the mentor closes a paid session the mentee is told what happens to
+  // her card. Usually that is a window in which she can object, then the charge;
+  // when there is no room for a window the card is charged at that moment, and
+  // she is told what was taken and where to go if the hour did not happen.
   //
   // "Where to go" is the Help & Support page, whose contact card reaches the
   // team. The notice first linked to /dashboard/support, a route with no page
@@ -1042,29 +1178,52 @@ export async function updateSessionStatus(
     status === 'COMPLETED' &&
     paymentUpdates.paymentStatus === 'CAPTURED' &&
     chargedAmount > 0;
+  const menteeHasWindow =
+    actionBy === 'mentor' && status === 'COMPLETED' && confirmationEndsAt !== null && chargedAmount > 0;
 
-  // Send notification to other party. The email carries the same charge
-  // notice as the in-app one: it used to say only that the session "is now
-  // COMPLETED", so a mentee who reads her email rather than the app learnt
-  // from her bank statement that she had been charged, and not from us where
-  // to go if the hour had not happened.
+  // Send notification to other party. The email carries the same notice as the
+  // in-app one: it used to say only that the session "is now COMPLETED", so a
+  // mentee who reads her email rather than the app learnt from her bank
+  // statement that she had been charged, and not from us where to go if the hour
+  // had not happened.
   const recipientId = actionBy === 'mentor' ? session.menteeId : session.mentorProfile.userId;
   const sessionDate = session.scheduledAt?.toLocaleDateString() ?? 'its booked date';
+  const sessionLink = `/dashboard/mentors/sessions?session=${sessionId}`;
   const chargeNotice = `Your mentor marked your session on ${sessionDate} as complete, and ${chargedAmount.toFixed(2)} ${session.currency} was charged to your card. If the session did not take place, contact our team from Help & Support and they will look at a refund with you.`;
+  const windowNotice = confirmationEndsAt
+    ? `Your mentor marked your session on ${sessionDate} as complete. ${chargedAmount.toFixed(2)} ${session.currency} is held on your card and will be charged on ${confirmationEndsAt.toLocaleString('en-AU', { timeZone: 'Australia/Brisbane', weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' })} (Queensland time). If the session did not take place, say so from your sessions page before then: nothing is charged while our team looks at it.`
+    : '';
   await notificationService.notify({
     userId: recipientId,
     type: 'MENTOR_SESSION',
-    title: menteeWasCharged ? 'Your session was marked complete and paid' : 'Session Updated',
-    message: menteeWasCharged ? chargeNotice : `Your mentorship session status has been updated to ${status}`,
-    link: menteeWasCharged ? MENTEE_SUPPORT_LINK : `/dashboard/mentors/sessions?session=${sessionId}`,
+    title: menteeHasWindow
+      ? 'Your mentor marked your session complete'
+      : menteeWasCharged
+        ? 'Your session was marked complete and paid'
+        : 'Session Updated',
+    message: menteeHasWindow
+      ? windowNotice
+      : menteeWasCharged
+        ? chargeNotice
+        : `Your mentorship session status has been updated to ${status}`,
+    link: menteeHasWindow ? sessionLink : menteeWasCharged ? MENTEE_SUPPORT_LINK : sessionLink,
     channels: ['in-app', 'email'], // Less urgent than new request?
-    emailTemplate: menteeWasCharged
+    emailTemplate: menteeHasWindow
+      ? {
+          subject: 'Your mentoring session was marked complete',
+          html: `
+            <h2>Session marked complete</h2>
+            <p>${windowNotice}</p>
+            <p><a href="${process.env.CLIENT_URL}${sessionLink}">Review the session</a> · <a href="${process.env.CLIENT_URL}${MENTEE_SUPPORT_LINK}">Help &amp; Support</a></p>
+          `,
+        }
+      : menteeWasCharged
       ? {
           subject: 'Your mentoring session was completed and charged',
           html: `
             <h2>Session completed</h2>
             <p>${chargeNotice}</p>
-            <p><a href="${process.env.CLIENT_URL}${MENTEE_SUPPORT_LINK}">Help &amp; Support</a> · <a href="${process.env.CLIENT_URL}/dashboard/mentors/sessions?session=${sessionId}">View the session</a></p>
+            <p><a href="${process.env.CLIENT_URL}${MENTEE_SUPPORT_LINK}">Help &amp; Support</a> · <a href="${process.env.CLIENT_URL}${sessionLink}">View the session</a></p>
           `,
         }
       : {
@@ -1076,7 +1235,7 @@ export async function updateSessionStatus(
           html: `
             <h2>Session Update</h2>
             <p>Your session scheduled for ${session.scheduledAt?.toLocaleDateString() ?? 'TBD'} is now <strong>${status}</strong>.</p>
-            <a href="${process.env.CLIENT_URL}/dashboard/mentors/sessions?session=${sessionId}">View Details</a>
+            <a href="${process.env.CLIENT_URL}${sessionLink}">View Details</a>
           `,
         },
   });
@@ -1116,6 +1275,47 @@ export async function rescheduleSession(
 
   const durationMinutes = data.durationMinutes ?? session.durationMinutes;
   const scheduledAt = data.scheduledAt;
+
+  if (Number.isNaN(scheduledAt.getTime()) || scheduledAt.getTime() <= Date.now()) {
+    throw new ApiError(400, 'Choose a time that has not passed yet');
+  }
+
+  // A paid session is priced, and its card held, for the length it was booked at,
+  // and moving it does not reprice it. Either person can move a session, and the
+  // length was taken from the request as it came, so a mentee who booked fifteen
+  // minutes could make it four hours (or a mentor could halve the hour she was
+  // paid for) with no change to what was held or what the mentor is paid. A
+  // session that costs nothing has no price to disagree with.
+  if (Number(session.sessionAmount) > 0 && durationMinutes !== session.durationMinutes) {
+    throw new ApiError(
+      400,
+      `This session was booked and paid for as ${session.durationMinutes} minutes, so its length cannot be changed. You can move it to another time, or cancel it and book the length you want.`
+    );
+  }
+
+  // A paid session is paid from the hold made when it was requested, and moving
+  // it does not renew that hold. The new time has to fall inside what is left of
+  // it: otherwise a session booked inside the limit could be moved past the
+  // money, which is the very thing the limit on booking exists to stop. Money
+  // already taken, a session that costs nothing, and the development processor's
+  // holds, which never run out, have no deadline to respect.
+  const heldIntentId = session.stripePaymentIntentId;
+  if (
+    Number(session.sessionAmount) > 0 &&
+    heldIntentId &&
+    session.paymentStatus !== 'CAPTURED' &&
+    !heldIntentId.startsWith('pi_mock_')
+  ) {
+    const hold = await prisma.escrowPayment.findUnique({
+      where: { paymentIntentId: heldIntentId },
+      select: { createdAt: true, metadata: true },
+    });
+    const heldSince = hold?.createdAt ?? session.createdAt;
+    if (heldSince instanceof Date) {
+      assertStartsWithinHold(scheduledAt, { createdAt: heldSince, metadata: hold?.metadata }, 'moving');
+    }
+  }
+
   const scheduledEnd = new Date(scheduledAt.getTime() + durationMinutes * 60 * 1000);
   const conflictWindowStart = new Date(scheduledAt.getTime() - 240 * 60 * 1000);
 
@@ -1208,7 +1408,16 @@ export async function getSessionPaymentSecret(sessionId: string, menteeId: strin
     throw new ApiError(409, 'This session is finished');
   }
   const base = { paymentStatus: session.paymentStatus, amount: Number(session.sessionAmount), currency: session.currency };
-  if (session.paymentStatus !== 'PENDING') {
+  // A declined card leaves the intent where another card can be tried on it, and
+  // the request stays open for the card step until the expiry sweep calls it off
+  // (mentor-session-authorisation.service). Handing the secret back only while
+  // the status was PENDING meant a mentee whose first card was declined, and who
+  // had closed the form, had no way to pay and watched her request be cancelled.
+  // A FAILED payment on a session past the request stage is a capture that did
+  // not go through, which is not hers to retry with a card.
+  const cardStepOpen =
+    session.paymentStatus === 'PENDING' || (session.paymentStatus === 'FAILED' && session.status === 'REQUESTED');
+  if (!cardStepOpen) {
     return { ...base, clientSecret: null };
   }
   // A session with a mentor who charges nothing has no card to authorise, and
@@ -1232,17 +1441,26 @@ export async function getUserSessions(
   role: 'mentor' | 'mentee'
 ) {
   if (role === 'mentor') {
-    return prisma.mentorSession.findMany({
+    return asTheMembersSee(await prisma.mentorSession.findMany({
       where: {
         mentorProfile: { userId },
+        // A paid request is hers to answer once the mentee's card is held, and not
+        // before: until then it is the mentee's unfinished payment, not a request,
+        // and showing it let a mentor accept an hour with no money behind it. It
+        // appears, with its notification, when the authorisation lands.
+        NOT: {
+          status: 'REQUESTED',
+          paymentStatus: { in: ['PENDING', 'FAILED'] },
+          sessionAmount: { gt: 0 },
+        },
       },
       include: {
         mentee: { select: { id: true, displayName: true, avatar: true } },
       },
       orderBy: { scheduledAt: 'desc' },
-    });
+    }));
   } else {
-    return prisma.mentorSession.findMany({
+    return asTheMembersSee(await prisma.mentorSession.findMany({
       where: {
         menteeId: userId,
       },
@@ -1254,6 +1472,35 @@ export async function getUserSessions(
         },
       },
       orderBy: { scheduledAt: 'desc' },
-    });
+    }));
   }
+}
+
+/**
+ * Sessions as the two people in them see them.
+ *
+ * Who on the team decided a dispute stays with the team, and each session says
+ * whether the mentee's bank has also disputed its payment (a chargeback, which
+ * is separate from the mentee telling ATHENA the session did not happen), so
+ * neither person is left to wonder why a paid session is not being paid on. One
+ * lookup for the whole list. A lookup that fails says nothing rather than
+ * failing the list.
+ */
+async function asTheMembersSee<T extends { stripePaymentIntentId: string | null; disputeResolvedById: string | null }>(
+  sessions: T[]
+) {
+  const intents = sessions.map((s) => s.stripePaymentIntentId).filter((id): id is string => Boolean(id));
+  const open = intents.length
+    ? await bestEffort(
+        'mentor.card-dispute-lookup',
+        () => prisma.paymentDispute.findMany({ where: { paymentIntentId: { in: intents }, outcome: 'OPEN' }, select: { paymentIntentId: true } }),
+        []
+      )
+    : [];
+  const disputed = new Set(open.map((d) => d.paymentIntentId));
+
+  return sessions.map(({ disputeResolvedById: _staff, ...session }) => ({
+    ...session,
+    cardDisputeOpen: Boolean(session.stripePaymentIntentId && disputed.has(session.stripePaymentIntentId)),
+  }));
 }

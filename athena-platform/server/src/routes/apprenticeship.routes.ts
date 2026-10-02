@@ -9,12 +9,14 @@ import {
   ACCEPTED_MEMBER_WHERE,
   HIRING_MEMBER_WHERE,
   POSTING_MEMBER_WHERE,
+  assertHostMayPlaceApprentices,
   assertOwnResumeUpload,
   hiringStaff,
   hiringStaffUserIds,
+  withHostStanding,
 } from '../services/hiring-access.service';
 import { bestEffort } from '../utils/best-effort';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 
 const router = Router();
 
@@ -35,7 +37,7 @@ function slugify(value: string): string {
 async function uniqueSlug(base: string): Promise<string> {
   const existing = await prisma.apprenticeship.findUnique({ where: { slug: base } });
   if (!existing) return base;
-  return `${base}-${uuidv4().slice(0, 6)}`;
+  return `${base}-${randomUUID().slice(0, 6)}`;
 }
 
 type StaffUser = { id: string; role: string };
@@ -232,7 +234,9 @@ router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
 
     res.json({
       success: true,
-      data: await withBookmarkState(items, req.user?.id),
+      // Each listing says whether its host has been verified and safety-checked
+      // (see hiring-access.service). One that has not is shown, labelled, not hidden.
+      data: await withHostStanding(await withBookmarkState(items, req.user?.id)),
       pagination: {
         page,
         limit,
@@ -275,7 +279,7 @@ router.get('/mine', authenticate, async (req: AuthRequest, res, next) => {
       },
     });
 
-    res.json({ success: true, data: items });
+    res.json({ success: true, data: await withHostStanding(items) });
   } catch (error) {
     next(error);
   }
@@ -300,7 +304,7 @@ router.get('/featured', optionalAuth, async (req: AuthRequest, res, next) => {
       },
     });
 
-    res.json({ success: true, data: await withBookmarkState(apprenticeships, req.user?.id) });
+    res.json({ success: true, data: await withHostStanding(await withBookmarkState(apprenticeships, req.user?.id)) });
   } catch (error) {
     next(error);
   }
@@ -417,7 +421,7 @@ router.get('/recommended', authenticate, async (req: AuthRequest, res, next) => 
       results = [...results, ...filler];
     }
 
-    res.json({ success: true, data: results, personalized: preferences.length > 0 });
+    res.json({ success: true, data: await withHostStanding(results), personalized: preferences.length > 0 });
   } catch (error) {
     next(error);
   }
@@ -441,7 +445,7 @@ router.get('/bookmarked', authenticate, async (req: AuthRequest, res, next) => {
       },
     });
 
-    res.json({ success: true, data: bookmarks.map((b) => b.apprenticeship) });
+    res.json({ success: true, data: await withHostStanding(bookmarks.map((b) => b.apprenticeship)) });
   } catch (error) {
     next(error);
   }
@@ -505,8 +509,9 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
     // receive applications for says so before she writes a cover letter,
     // rather than after. See listingHasHiringStaff.
     const acceptsApplications = await listingHasHiringStaff(apprenticeship);
+    const [withStanding] = await withHostStanding([apprenticeship]);
 
-    res.json({ success: true, data: { ...apprenticeship, acceptsApplications } });
+    res.json({ success: true, data: { ...withStanding, acceptsApplications } });
   } catch (error) {
     next(error);
   }
@@ -582,7 +587,10 @@ router.post(
           positions: req.body.positions,
           startDate: req.body.startDate ? new Date(req.body.startDate) : undefined,
           applicationDeadline: req.body.applicationDeadline ? new Date(req.body.applicationDeadline) : undefined,
-          status: req.body.status || 'DRAFT',
+          // Always a draft. This used to take the status from the body, so a
+          // listing could be created already OPEN and skip the one door that
+          // checks the host (POST /:id/publish).
+          status: 'DRAFT',
         },
       });
 
@@ -631,6 +639,12 @@ router.patch(
         throw new ApiError(404, 'Apprenticeship not found');
       }
 
+      // Opening a listing is publishing it by another door, so it asks the same
+      // question: has the host been checked.
+      if (req.body.status === 'OPEN') {
+        await assertHostMayPlaceApprentices(existing, 'staff');
+      }
+
       const updated = await prisma.apprenticeship.update({
         where: { id },
         data: {
@@ -671,6 +685,10 @@ router.post('/:id/publish', authenticate, async (req: AuthRequest, res, next) =>
     if (!existing) {
       throw new ApiError(404, 'Apprenticeship not found');
     }
+
+    // The door a listing goes live through, so the one that checks the host:
+    // verified, with an approved host safety attestation that has not run out.
+    await assertHostMayPlaceApprentices(existing, 'staff');
 
     const updated = await prisma.apprenticeship.update({
       where: { id },
@@ -786,6 +804,12 @@ router.post(
       if (apprenticeship.status !== 'OPEN') {
         throw new ApiError(400, 'Apprenticeship is not open');
       }
+
+      // A listing that was open before the host check existed, or whose host's
+      // attestation has since run out, stays visible but takes no applications
+      // until the host has been checked: an applicant should not be placed with a
+      // workplace ATHENA has not looked at.
+      await assertHostMayPlaceApprentices(apprenticeship, 'applicant');
 
       const orgIds = [apprenticeship.rtoId, apprenticeship.hostEmployerId].filter(
         (orgId): orgId is string => Boolean(orgId)
@@ -1017,6 +1041,13 @@ router.patch(
       }
       if (application.status === status) {
         return res.json({ success: true, data: application, message: 'No change' });
+      }
+
+      // An offer and a confirmed placement are the two promises that put an
+      // apprentice in a workplace, so both need the host to have been checked.
+      // Moving an application along, or turning one down, does not.
+      if (status === 'OFFERED' || status === 'ACCEPTED') {
+        await assertHostMayPlaceApprentices(apprenticeship, 'staff');
       }
 
       // Seats are claimed before the decision is recorded, and claimed with a

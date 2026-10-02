@@ -19,6 +19,7 @@ jest.mock('../../utils/logger', () => ({
 
 import { requirePremium, requireSubscriptionTier } from '../auth';
 import { errorHandler } from '../errorHandler';
+import { PAST_DUE_GRACE_DAYS } from '../../config/price-book';
 
 function appAs(role: string | null) {
   const app = express();
@@ -54,6 +55,23 @@ describe('requirePremium', () => {
     await request(appAs('USER')).get('/premium').expect(200);
   });
 
+  // A card Stripe could not charge on the renewal date is PAST_DUE at once, and
+  // Stripe tries again for days. The tools stay on for the grace and then pause.
+  describe('a renewal whose payment failed', () => {
+    const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    it('keeps the paid tools on while Stripe is still trying the card', async () => {
+      subscriptionFindUnique.mockResolvedValue({ tier: 'PRO', status: 'PAST_DUE', currentPeriodStart: daysAgo(PAST_DUE_GRACE_DAYS - 1) });
+      await request(appAs('USER')).get('/premium').expect(200);
+    });
+
+    it('pauses them once the grace has gone by, and says the subscription is the reason', async () => {
+      subscriptionFindUnique.mockResolvedValue({ tier: 'PRO', status: 'PAST_DUE', currentPeriodStart: daysAgo(PAST_DUE_GRACE_DAYS + 1) });
+      const res = await request(appAs('USER')).get('/premium').expect(403);
+      expect(res.body).toMatchObject({ code: 'PREMIUM_REQUIRED', message: 'Active subscription required' });
+    });
+  });
+
   it('still answers 401 when nobody is signed in', async () => {
     await request(appAs(null)).get('/premium').expect(401);
   });
@@ -72,5 +90,13 @@ describe('requireSubscriptionTier', () => {
 
     subscriptionFindUnique.mockResolvedValue({ tier: 'PRO', status: 'ACTIVE' });
     await request(appAs('USER')).get('/pro').expect(200);
+  });
+
+  it('applies the same grace to a past-due member of the named tier', async () => {
+    subscriptionFindUnique.mockResolvedValue({ tier: 'PRO', status: 'PAST_DUE', currentPeriodStart: new Date(Date.now() - 24 * 60 * 60 * 1000) });
+    await request(appAs('USER')).get('/pro').expect(200);
+
+    subscriptionFindUnique.mockResolvedValue({ tier: 'PRO', status: 'PAST_DUE', currentPeriodStart: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) });
+    await request(appAs('USER')).get('/pro').expect(403);
   });
 });

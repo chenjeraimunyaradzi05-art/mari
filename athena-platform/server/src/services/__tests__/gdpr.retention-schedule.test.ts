@@ -23,7 +23,13 @@ jest.mock('../../utils/prisma', () => ({
       updateMany: jest.fn(async () => ({ count: 0 })),
     },
     $executeRaw: jest.fn(async () => 0),
+    $queryRaw: jest.fn(async () => []),
   },
+}));
+
+// The identity job asks Stripe to redact through this; nothing here reaches it.
+jest.mock('../identity-verification.service', () => ({
+  redactIdentitySession: jest.fn(async () => true),
 }));
 
 jest.mock('../../utils/queue', () => ({
@@ -87,6 +93,19 @@ describe('The published retention schedule is the one the purge runs', () => {
     expect(published('audit_logs').anonymizeInstead).toBe(true);
   });
 
+  it('photo ID check details: the name and document type go the published number of days after the decision', async () => {
+    const now = Date.now();
+    await dataRetentionService.purgeIdentityVerificationDetails();
+
+    const values = prisma.$executeRaw.mock.calls[0].slice(1) as unknown[];
+    const cutoff = values.find((value): value is Date => value instanceof Date);
+    expect(cutoff).toBeDefined();
+    expect(daysBefore(cutoff!, now)).toBe(published('identity_verification_details').retentionDays);
+    // Nothing is anonymised in place here: the details are removed, and the
+    // schedule says so rather than claiming otherwise.
+    expect(published('identity_verification_details').anonymizeInstead).toBe(false);
+  });
+
   it('erased accounts: the remainder goes the published number of days after the erasure completed', async () => {
     const now = Date.now();
     await dataRetentionService.purgeSoftDeletedUsers();
@@ -119,6 +138,7 @@ describe('The published retention schedule is the one the purge runs', () => {
         'data_export_links',
         'direct_messages',
         'erased_accounts',
+        'identity_verification_details',
         'read_notifications',
         'sessions',
         'verification_links',

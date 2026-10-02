@@ -53,6 +53,12 @@ jest.mock('../../utils/stripe', () => ({
   isStripeConfigured: jest.fn(() => false),
 }));
 
+// What it does is tested in mentor-session-authorisation.service.test.ts; here
+// only that the sweep runs it, reports it, and survives its failing.
+jest.mock('../mentor-session-authorisation.service', () => ({
+  cancelUnpaidMentorRequests: jest.fn(async () => ({ authorised: 0, cancelled: 0, deferred: 0 })),
+}));
+
 // Started alongside the sweep; nothing here is about it.
 jest.mock('../stripe-reconciliation.service', () => ({
   startStripeReconciler: jest.fn(),
@@ -61,8 +67,10 @@ jest.mock('../stripe-reconciliation.service', () => ({
 
 import { prisma } from '../../utils/prisma';
 import { logger } from '../../utils/logger';
+import { ApiError } from '../../middleware/errorHandler';
 import { isStripeConfigured } from '../../utils/stripe';
 import * as stripeConnect from '../stripe-connect.service';
+import { cancelUnpaidMentorRequests } from '../mentor-session-authorisation.service';
 import { runEscrowExpirySweep } from '../escrow-expiry.service';
 
 const prismaAny: any = prisma;
@@ -141,6 +149,25 @@ describe('Escrow holds approaching the end of their authorisation', () => {
     expect(result.failed).toBe(1);
     expect(result.captured).toBe(0);
     expect(errorMock).toHaveBeenCalled();
+  });
+
+  it('does not count a capture refused because payments are paused as a failure, and leaves the hold for the next sweep', async () => {
+    process.env.ESCROW_CAPTURE_BEFORE_EXPIRY = 'true';
+    prismaAny.escrowPayment.findMany.mockResolvedValue([hold()]);
+    captureMock.mockRejectedValueOnce(new ApiError(503, 'Payments are paused.', { code: 'PAYMENTS_PAUSED' }));
+
+    const result = await runEscrowExpirySweep(NOW);
+
+    // A pause is a decision an admin made, not a card that was declined: raising
+    // the failure alarm for it would be false, and would go on being false every
+    // sweep until the pause was lifted.
+    expect(result.failed).toBe(0);
+    expect(result.captured).toBe(0);
+    expect(errorMock).not.toHaveBeenCalledWith('Could not capture an escrow hold before expiry', expect.anything());
+    expect(warnMock).toHaveBeenCalledWith(
+      'An escrow hold was left uncaptured because payments are paused',
+      expect.objectContaining({ escrowId: 'escrow-1' })
+    );
   });
 
   it('does not try to capture a hold with no payment intent behind it', async () => {
@@ -367,8 +394,9 @@ describe('Asking the buyer to release a hold before it lapses', () => {
       .filter((d: any) => d.userId === 'buyer-1');
 
   it('asks her once, with a link to the order she releases it from and the day it expires', async () => {
+    // Delivered: the work is in her hands, so what she is asked to do is release it.
     prismaAny.escrowPayment.findMany.mockResolvedValue([
-      hold({ sessionType: 'service_order', serviceOrder: { id: 'order-7' } }),
+      hold({ sessionType: 'service_order', serviceOrder: { id: 'order-7', status: 'DELIVERED' } }),
     ]);
 
     const result = await runEscrowExpirySweep(NOW);
@@ -818,5 +846,42 @@ describe('Legacy mentor sessions are given their escrow rows', () => {
     await runEscrowExpirySweep(NOW);
 
     expect(adoptMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('Paid mentoring requests whose card step was never finished', () => {
+  const unpaidMock = cancelUnpaidMentorRequests as jest.Mock;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    delete process.env.ESCROW_CAPTURE_BEFORE_EXPIRY;
+    prismaAny.escrowPayment.findMany.mockResolvedValue([]);
+    // An earlier describe leaves legacy sessions behind, which the sweep would warn about.
+    prismaAny.mentorSession.findMany.mockResolvedValue([]);
+  });
+
+  it('is called off by the sweep, and the count is reported', async () => {
+    unpaidMock.mockResolvedValueOnce({ authorised: 1, cancelled: 2, deferred: 0 });
+
+    const result = await runEscrowExpirySweep(NOW);
+
+    expect(unpaidMock).toHaveBeenCalledWith(NOW);
+    expect(result.unpaidSessionsCancelled).toBe(2);
+    expect(result.unpaidSessionsAuthorised).toBe(1);
+  });
+
+  it('does not stop the rest of the sweep when it fails: the holds are on a clock too', async () => {
+    unpaidMock.mockRejectedValueOnce(new Error('the database blinked'));
+    prismaAny.escrowPayment.findMany.mockResolvedValue([hold()]);
+
+    const result = await runEscrowExpirySweep(NOW);
+
+    expect(result.unpaidSessionsCancelled).toBe(0);
+    expect(errorMock).toHaveBeenCalledWith(
+      'Could not look for mentoring requests whose payment was never authorised',
+      expect.objectContaining({ error: 'the database blinked' })
+    );
+    // The hold close to lapsing was still looked at.
+    expect(result.expiringSoon).toBe(1);
   });
 });

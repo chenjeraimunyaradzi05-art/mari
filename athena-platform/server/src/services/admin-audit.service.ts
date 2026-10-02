@@ -58,6 +58,7 @@ const ADMIN_AUDIT_ACTIONS = {
   FEATURE_FLAG_UPDATED: CONFIG,
   FEATURE_FLAG_DELETED: CONFIG,
   MAINTENANCE_MODE_CHANGED: CONFIG,
+  PAYMENTS_PAUSE_CHANGED: CONFIG,
   // Marketing and go-to-market
   MARKETING_CAMPAIGN_CREATED: CONTENT,
   MARKETING_CAMPAIGN_UPDATED: CONTENT,
@@ -144,6 +145,12 @@ const ADMIN_AUDIT_ACTIONS = {
   CAR_PURCHASE_CANCELLED_BY_ADMIN: CONTENT,
   CAR_PURCHASE_DISPUTE_RESOLVED: CONTENT,
   CAR_INSPECTION_UPDATED_BY_ADMIN: CONTENT,
+  // Money held for a mentoring session or a marketplace order that a member says
+  // was not delivered: the staff decision to release it to the provider or give
+  // it back to the buyer. Filed with the car-purchase dispute decision, which is
+  // the same kind of act.
+  MENTOR_SESSION_DISPUTE_RESOLVED: CONTENT,
+  SERVICE_ORDER_DISPUTE_RESOLVED: CONTENT,
   // Member-facing queues
   FEEDBACK_UPDATED: CONTENT,
   // A data-subject request taken, handed on, noted or closed by staff
@@ -157,6 +164,9 @@ const ADMIN_AUDIT_ACTIONS = {
   // Safety: a concern about a member closed, or a safety report upheld or
   // dismissed. Filed under the safety verb rather than a staff-content one,
   // because these move a member's safety score and are what an appeal answers.
+  // A live stream a moderator took down, put back after an appeal. The taking
+  // down is filed as MODERATION_SUSPEND by the route that does it.
+  LIVESTREAM_SUSPENSION_LIFTED: CONTENT,
   SAFETY_FLAG_RESOLVED: SAFETY,
   SAFETY_REPORT_UPHELD: SAFETY,
   SAFETY_REPORT_DISMISSED: SAFETY,
@@ -166,6 +176,11 @@ const ADMIN_AUDIT_ACTIONS = {
   SEED_ADMIN_ACCOUNT_CREATED: CONFIG,
   SEED_ADMIN_PASSWORD_ROTATED: CONFIG,
   SEED_CONTENT_RUN: CONFIG,
+  // A member's two-factor sign-in removed by an administrator because she lost
+  // both the authenticator and the recovery codes. Filed under the user-update
+  // verb, like the other changes staff make to an account; the verb in
+  // metadata is what says which, and it carries the reason that was given.
+  USER_TWO_FACTOR_RESET: AuditAction.ADMIN_USER_UPDATE,
 } as const satisfies Record<string, AuditAction>;
 
 /**

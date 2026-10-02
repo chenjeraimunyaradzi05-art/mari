@@ -25,6 +25,7 @@ import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest, requireRole } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
 import { sendEmail } from '../utils/email';
+import { escapeHtml } from '../utils/escape-html';
 import { logger } from '../utils/logger';
 import { bestEffort } from '../utils/best-effort';
 import { recordAdminAction, type AdminAuditAction } from '../services/admin-audit.service';
@@ -83,7 +84,9 @@ async function tellMember(userId: string, subject: string, line: string, link: s
     to: user.email,
     subject,
     text: `${greeting}\n\n${line}\n\nSee the details: ${base}${link}\n\nATHENA`,
-    html: `<p>${greeting}</p><p>${line}</p><p><a href="${base}${link}">See the details</a></p><p>ATHENA</p>`,
+    // Her first name and the reviewer's note are typed text: escaped, so a "<" in
+    // either is printed and not read as a tag.
+    html: `<p>${escapeHtml(greeting)}</p><p>${escapeHtml(line)}</p><p><a href="${base}${link}">See the details</a></p><p>ATHENA</p>`,
   });
 }
 

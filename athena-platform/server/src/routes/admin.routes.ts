@@ -14,6 +14,8 @@ import {
   EventFormat,
 } from '@prisma/client';
 import { z } from 'zod';
+import { audMoneyOrZero } from '../utils/schemas';
+import { isHttpUrl } from '../utils/http-url';
 import { ApiError } from '../middleware/errorHandler';
 import {
   DEADLINE_SORT_WINDOW,
@@ -29,6 +31,12 @@ import {
   stampMissingReviewClocks,
 } from '../services/content-report.service';
 import { gdprService } from '../services/gdpr.service';
+import { endBillingBeforeErasure } from '../services/erasure-billing.service';
+import { resetTwoFactor } from '../services/two-factor-reset.service';
+import { sessionService } from '../services/session.service';
+import { reportContextFrom } from '../services/report-context.service';
+import { liftStreamSuspension, listStreamsForStaff, suspendStream } from '../services/livestream.service';
+import { cancelMembershipAtStripe, refundLatestMembershipPayment } from '../services/membership-admin.service';
 import { consentService } from '../services/consent.service';
 // Every audit row on this router is written after the change it records has
 // committed, so it goes through auditAfterCommit: a failed insert must not turn
@@ -42,6 +50,7 @@ import {
 import { bestEffort } from '../utils/best-effort';
 import { logger } from '../utils/logger';
 import { sendEmail } from '../utils/email';
+import { escapeHtml } from '../utils/escape-html';
 import crypto from 'crypto';
 
 const router = Router();
@@ -72,6 +81,23 @@ const adminSubscriptionPatchSchema = z
     tier: z.nativeEnum(SubscriptionTier).optional(),
     status: z.nativeEnum(SubscriptionStatus).optional(),
     periodEnd: z.coerce.date().optional(),
+  })
+  .strict();
+
+// Ending a paid membership, and giving a payment back, are done at Stripe and are
+// written down with the reason. A cancel is at the end of the period unless staff
+// say otherwise, which is what the member's own cancel does and what the Terms
+// promise.
+const adminMembershipCancelSchema = z
+  .object({
+    mode: z.enum(['period_end', 'now']).default('period_end'),
+    reason: z.string().trim().max(500).optional(),
+  })
+  .strict();
+
+const adminMembershipRefundSchema = z
+  .object({
+    reason: z.string().trim().min(3, 'Say why the payment is being refunded').max(500),
   })
   .strict();
 
@@ -308,6 +334,8 @@ router.get('/users', async (req: AuthRequest, res: Response, next: NextFunction)
           persona: true,
           emailVerified: true,
           isSuspended: true,
+          // Whether there is a second factor to reset; never the seed or the codes.
+          twoFactorEnabled: true,
           createdAt: true,
           lastLoginAt: true,
           ...SUSPENSION_COLUMNS,
@@ -563,6 +591,8 @@ router.get('/users/:id', async (req: AuthRequest, res: Response, next: NextFunct
  * PATCH /admin/users/:id
  * Update user (role, suspension, verification)
  */
+// validated: role is checked against UserRole; isBanned, isSuspended and emailVerified must be
+//   booleans; each reason must be text and is cut to 1,000 characters.
 router.patch('/users/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -570,7 +600,7 @@ router.patch('/users/:id', async (req: AuthRequest, res: Response, next: NextFun
 
     const existing = await prisma.user.findUnique({
       where: { id },
-      select: { id: true, isSuspended: true, bannedAt: true },
+      select: { id: true, role: true, isSuspended: true, bannedAt: true },
     });
     if (!existing) {
       throw new ApiError(404, 'User not found');
@@ -663,10 +693,32 @@ router.patch('/users/:id', async (req: AuthRequest, res: Response, next: NextFun
     }
 
     // Banning goes through the same path a report decision does, so the account
-    // is marked banned and the address is barred from registering again.
+    // is marked banned, the address is barred from registering again, and her
+    // sessions end (banAccount does that last part itself).
     let banIdentityRecorded: boolean | undefined;
     if (banning && reason) {
       banIdentityRecorded = await banAccount(id, { moderatorId: req.user!.id, reason, reportId: null });
+    }
+
+    // A suspension or a change of role ends her sessions too. The REST API
+    // already refuses the account on its next request, because both are read
+    // from the database each time, but the session rows stayed live and a
+    // socket authenticates only once, at the handshake, so the connections she
+    // already had open went on working. Revoking announces it, and every socket
+    // on those sessions is closed. A new role is picked up the same way: she
+    // signs in again and is what she now is. Best effort, because the change
+    // itself has already been made and is what the API enforces.
+    const sessionsEndFor = banning
+      ? null
+      : updateData.isSuspended === true
+        ? 'suspended'
+        : role !== undefined && role !== existing.role
+          ? 'role-changed'
+          : null;
+    if (sessionsEndFor) {
+      await bestEffort(`end the sessions of ${id} after ${sessionsEndFor}`, () =>
+        sessionService.revokeAllUserSessions(id, { reason: sessionsEndFor })
+      );
     }
 
     const user = await prisma.user.findUniqueOrThrow({
@@ -723,6 +775,7 @@ router.patch('/users/:id', async (req: AuthRequest, res: Response, next: NextFun
  * member behind or died on a foreign key halfway. It now runs the same erasure
  * the member's own right-to-be-forgotten runs, and refuses on the same terms.
  */
+// validated: the only input is the hard query flag, read as === 'true'.
 router.delete('/users/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -784,6 +837,14 @@ router.delete('/users/:id', async (req: AuthRequest, res: Response, next: NextFu
       });
     }
 
+    // A closed account must stop being billed too: the row below is kept, with
+    // its Stripe subscription, so without this the card is charged for a member
+    // nobody can sign in as. Refused (409) with nothing changed if Stripe cannot
+    // be asked, exactly as the hard erasure is.
+    // The payout account is not unlinked by a suspension, so staff are not told
+    // about money in it as if it were.
+    await endBillingBeforeErasure(id, { unlinksPayoutAccount: false });
+
     // Soft delete - suspend and anonymize. The lock says why, like every other
     // lock, so the member list does not show a suspended shell with no reason.
     await prisma.user.update({
@@ -799,6 +860,12 @@ router.delete('/users/:id', async (req: AuthRequest, res: Response, next: NextFu
       },
     });
 
+    // An account that has been removed has nothing to hold a connection open
+    // for: end its sessions and close the sockets on them.
+    await bestEffort(`end the sessions of ${id} after the account was deleted`, () =>
+      sessionService.revokeAllUserSessions(id, { reason: 'account-deleted' })
+    );
+
     await auditAfterCommit({
       action: 'ADMIN_USER_DELETE',
       actorUserId: req.user?.id ?? null,
@@ -809,6 +876,57 @@ router.delete('/users/:id', async (req: AuthRequest, res: Response, next: NextFu
     });
 
     res.json({ success: true, message: 'User suspended and anonymized' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /admin/users/:id/two-factor/reset
+ *
+ * Takes two-factor sign-in off an account whose owner has lost both the
+ * authenticator and the recovery codes. It is the only way back for her, so it
+ * is narrow: administrators only (a moderator never reaches this prefix), never
+ * on the administrator's own account, and the password is not touched, so whoever
+ * asked still has to know it. Every session on the account is ended, the member
+ * is told in the app and by email, and when the account is staff the other
+ * administrators are told as well. See services/two-factor-reset.service.ts, and
+ * docs/runbooks/TWO-FACTOR-RESET.md for the proof of identity staff must see
+ * first and the reason they are asked to write down.
+ *
+ * `identityChecked` has to be the literal true: the call is the administrator
+ * saying she has done what the runbook asks, and it is recorded beside the
+ * reason.
+ */
+const twoFactorResetSchema = z
+  .object({
+    reason: z.string().trim().min(10, 'Say what you checked and why, in at least a sentence').max(500),
+    identityChecked: z.literal(true, { errorMap: () => ({ message: 'Confirm that you checked who is asking, as the runbook says' }) }),
+  })
+  .strict();
+
+router.post('/users/:id/two-factor/reset', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { reason } = parseOr400(twoFactorResetSchema, req.body);
+
+    const result = await resetTwoFactor({ targetUserId: req.params.id, actorId: req.user!.id });
+
+    await recordAdminAction(req, 'USER_TWO_FACTOR_RESET', {
+      resourceType: 'User',
+      resourceId: result.userId,
+      targetUserId: result.userId,
+      reason,
+      identityChecked: true,
+      targetWasStaff: result.targetWasStaff,
+      recoveryCodesCleared: result.recoveryCodesCleared,
+      memberEmailed: result.emailSent,
+    });
+
+    res.json({
+      success: true,
+      message: 'Two-factor sign-in removed. The member has been signed out everywhere and told.',
+      data: { targetWasStaff: result.targetWasStaff, memberEmailed: result.emailSent },
+    });
   } catch (error) {
     next(error);
   }
@@ -884,10 +1002,17 @@ router.get('/content/posts', async (req: AuthRequest, res: Response, next: NextF
  * PATCH /admin/content/posts/:id
  * Moderate a post (hide, delete, clear reports)
  */
+// `action` is checked by the switch below (anything else is a 400) and `reason`
+// goes into the audit row and the log, so it is text and kept to a length.
+const postModerationBody = z.object({
+  action: z.string().max(40),
+  reason: z.string().trim().max(1000).nullable().optional(),
+});
+
 router.patch('/content/posts/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    const { action, reason } = req.body;
+    const { action, reason } = parseOr400(postModerationBody, req.body ?? {});
 
     let result;
 
@@ -1276,7 +1401,13 @@ router.get('/moderation/reports/:id', async (req: AuthRequest, res: Response, ne
       take: 20,
     });
 
-    res.json({ report: { ...report, ...reportClock({ ...report, evidence }) }, relatedReports });
+    // What the report kept of the thing it is about: the reported message with
+    // the lines before it, the live-chat line or the stream, the group. Only
+    // those copies leave the evidence column, never the rest of it.
+    res.json({
+      report: { ...report, ...reportClock({ ...report, evidence }), context: reportContextFrom(evidence) },
+      relatedReports,
+    });
   } catch (error) {
     next(error);
   }
@@ -1286,6 +1417,7 @@ router.get('/moderation/reports/:id', async (req: AuthRequest, res: Response, ne
  * POST /admin/moderation/reports/:id/claim
  * Take ownership of a report so two moderators do not work the same case
  */
+// validated: release is read for truthiness only and nothing else of the body is read.
 router.post('/moderation/reports/:id/claim', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -1326,6 +1458,7 @@ router.post('/moderation/reports/:id/claim', async (req: AuthRequest, res: Respo
  * POST /admin/moderation/reports/:id/action
  * Decide a report and enforce the decision
  */
+// validated: action must be in MODERATION_ACTIONS and notes text of at most 2,000 characters.
 router.post('/moderation/reports/:id/action', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -1386,6 +1519,93 @@ router.post('/moderation/reports/:id/action', async (req: AuthRequest, res: Resp
 });
 
 // ============================================================================
+// LIVE STREAMS
+// ============================================================================
+//
+// A host can end her own stream, and until these a moderator who had decided a
+// stream broke the rules had no way to stop the broadcast: the report decision
+// 'remove' now does it for a reported stream, and this is the direct way in for
+// one nobody has reported yet. Under /moderation so moderators reach it, as they
+// do the queue; every change is audited against the host.
+
+const liveSuspendSchema = z
+  .object({ reason: z.string().trim().min(1, 'Say why the stream was ended').max(500) })
+  .strict();
+
+/**
+ * GET /admin/moderation/livestreams
+ * What is live now, or with ?suspended=true what has been taken down. Never the
+ * stream key, the ingest URL or the playback URL.
+ */
+router.get('/moderation/livestreams', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const suspended = req.query.suspended === 'true';
+    const { limit } = parseOr400(listPagingSchema, { limit: req.query.limit });
+    res.json({ streams: await listStreamsForStaff({ suspended, limit }) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /admin/moderation/livestreams/:id/suspend
+ * End a stream for good: the room is told, the host is told it was staff, it
+ * cannot be restarted or listed, and its ingest key is refused.
+ */
+router.post('/moderation/livestreams/:id/suspend', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { reason } = parseOr400(liveSuspendSchema, req.body);
+    const staffId = req.user?.id;
+    if (!staffId) throw new ApiError(401, 'Authentication required');
+    const result = await suspendStream(req.params.id, staffId, reason);
+
+    // A second moderator suspending the same stream changes nothing and so
+    // writes nothing: the row says who did it first.
+    if (result.changed) {
+      await auditAfterCommit({
+        action: AuditAction.MODERATION_SUSPEND,
+        actorUserId: req.user?.id ?? null,
+        targetUserId: result.hostId,
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent') || undefined,
+        metadata: {
+          resourceType: 'LiveStream',
+          resourceId: result.id,
+          moderationAction: 'suspend_livestream',
+          reason,
+        },
+      });
+      logger.info('Live stream suspended', { streamId: result.id, adminId: req.user?.id });
+    }
+
+    res.json({ success: true, data: { id: result.id, suspended: true, changed: result.changed } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /admin/moderation/livestreams/:id/lift
+ * Undo a suspension, for a decision reversed on appeal. The stream stays ended:
+ * what comes back is that it is listed and open again, and its key may push.
+ */
+router.post('/moderation/livestreams/:id/lift', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const result = await liftStreamSuspension(req.params.id);
+    if (result.changed) {
+      await recordAdminAction(req, 'LIVESTREAM_SUSPENSION_LIFTED', {
+        resourceType: 'LiveStream',
+        resourceId: result.id,
+        targetUserId: result.hostId,
+      });
+    }
+    res.json({ success: true, data: { id: result.id, suspended: false, changed: result.changed } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============================================================================
 // ANONYMOUS REPORT QUEUE
 // ============================================================================
 
@@ -1406,15 +1626,18 @@ router.post('/moderation/reports/:id/action', async (req: AuthRequest, res: Resp
  */
 router.get('/moderation/anonymous-reports', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { page = '1', limit = '20', status, contentType, reason } = req.query;
+    const { status, contentType, reason } = req.query;
     const normalizedStatus = String(status || '').toUpperCase();
+    // The same page and limit rules as every other queue here (a limit of 100 at
+    // most); this one parsed them with parseInt and passed whatever came out.
+    const { page, limit } = parsePaging({ page: req.query.page, limit: req.query.limit ?? '20' });
 
     const result = await listAnonymousReports({
       status: normalizedStatus === 'PENDING' || normalizedStatus === 'ACTIONED' ? normalizedStatus : undefined,
       contentType: contentType ? String(contentType) : undefined,
       reason: reason ? String(reason) : undefined,
-      page: parseInt(String(page), 10),
-      limit: parseInt(String(limit), 10),
+      page,
+      limit,
     });
 
     res.json(result);
@@ -1454,6 +1677,7 @@ router.get('/moderation/anonymous-reports/:id', async (req: AuthRequest, res: Re
  * POST /admin/moderation/anonymous-reports/:id/action
  * Decide an anonymous report and enforce the decision
  */
+// validated: action must be in MODERATION_ACTIONS and notes text of at most 2,000 characters.
 router.post('/moderation/anonymous-reports/:id/action', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { action, notes } = req.body ?? {};
@@ -2195,6 +2419,21 @@ router.patch('/subscriptions/:id', async (req: AuthRequest, res: Response, next:
     const { id } = req.params;
     const { tier, status, periodEnd } = parseOr400(adminSubscriptionPatchSchema, req.body);
 
+    // Ending a membership that Stripe is billing, on ATHENA's row alone, ends
+    // nothing: the member goes on being charged and the next customer.subscription
+    // event writes her plan straight back. It is refused, with the way to do it.
+    // A membership with no Stripe subscription behind it (one staff granted) is
+    // ended here as before.
+    if (status === 'CANCELED' || tier === 'FREE') {
+      const current = await prisma.subscription.findUnique({ where: { id }, select: { stripeSubscriptionId: true } });
+      if (current?.stripeSubscriptionId) {
+        throw new ApiError(
+          409,
+          'This membership is billed through Stripe, so editing it here would not stop the billing, and the next update from Stripe would put it back. Use "Cancel at Stripe" instead.'
+        );
+      }
+    }
+
     const updateData: any = {};
 
     if (tier !== undefined) {
@@ -2231,16 +2470,98 @@ router.patch('/subscriptions/:id', async (req: AuthRequest, res: Response, next:
 });
 
 /**
+ * POST /admin/subscriptions/:id/cancel
+ * End a paid membership at Stripe: at the end of the period she has paid for
+ * (the default), or now.
+ */
+router.post('/subscriptions/:id/cancel', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { mode, reason } = parseOr400(adminMembershipCancelSchema, req.body ?? {});
+    // Ending it outright is a bigger step than letting it run out, and is
+    // written down with a reason.
+    if (mode === 'now' && !reason) {
+      throw new ApiError(400, 'Say why the membership is being ended now');
+    }
+
+    const result = await cancelMembershipAtStripe(req.params.id, mode);
+
+    await auditAfterCommit({
+      action: 'ADMIN_SUBSCRIPTION_UPDATE',
+      actorUserId: req.user?.id ?? null,
+      targetUserId: result.userId,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent') || undefined,
+      metadata: {
+        adminAction: 'SUBSCRIPTION_CANCELLED_AT_STRIPE',
+        subscriptionId: result.subscriptionId,
+        mode: result.mode,
+        reason: reason ?? null,
+        endsAt: result.endsAt,
+        alreadyEnded: result.alreadyEnded,
+      },
+    });
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /admin/subscriptions/:id/refund
+ * Give back the latest payment for a membership, through Stripe, and credit the
+ * ATHENA invoice for it. The thirty-day guarantee on the pricing page and in the
+ * Terms is done with this.
+ */
+router.post('/subscriptions/:id/refund', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { reason } = parseOr400(adminMembershipRefundSchema, req.body ?? {});
+
+    const result = await refundLatestMembershipPayment(req.params.id, reason);
+
+    await auditAfterCommit({
+      action: 'ADMIN_SUBSCRIPTION_UPDATE',
+      actorUserId: req.user?.id ?? null,
+      targetUserId: result.userId,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent') || undefined,
+      metadata: {
+        adminAction: 'SUBSCRIPTION_PAYMENT_REFUNDED',
+        subscriptionId: result.subscriptionId,
+        stripeInvoiceId: result.stripeInvoiceId,
+        refundId: result.refundId,
+        amount: result.amount,
+        currency: result.currency,
+        invoiceNumber: result.invoiceNumber,
+        outcome: result.status,
+        reason,
+      },
+    });
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * POST /admin/subscriptions/grant
  * Grant a subscription to a user
  */
+// A paid plan given without a payment, so it is read the strictest way here. The
+// tier went to Prisma as typed (a word that is not a plan was a 500), and
+// `durationDays` was added to a date as it arrived: "30" as text made the end
+// date a string concatenation, and a negative or enormous number made it a date
+// in the past or in the year 275,760.
+const grantSubscriptionSchema = z.object({
+  userId: z.string().trim().min(1, 'userId is required').max(100),
+  tier: z.nativeEnum(SubscriptionTier),
+  durationDays: z.coerce.number().int().min(1).max(3650).default(30),
+}).strict();
+
 router.post('/subscriptions/grant', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { userId, tier, durationDays = 30 } = req.body;
-
-    if (!userId || !tier) {
-      return res.status(400).json({ error: 'userId and tier are required' });
-    }
+    const { userId, tier, durationDays } = parseOr400(grantSubscriptionSchema, req.body);
 
     const periodEnd = new Date();
     periodEnd.setDate(periodEnd.getDate() + durationDays);
@@ -2360,6 +2681,7 @@ router.post('/invite-codes', async (req: AuthRequest, res: Response, next: NextF
  * PATCH /admin/invite-codes/:id
  * Update invite code (activate/deactivate)
  */
+// validated: isActive must be a boolean.
 router.patch('/invite-codes/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -2623,12 +2945,18 @@ router.get('/groups', async (req: AuthRequest, res: Response, next: NextFunction
 /**
  * POST /admin/groups
  */
+// The lengths a member's own group is held to (routes/group.routes.ts), so a group
+// made here can be edited there: both used to be any length.
+const adminGroupFields = z.object({
+  name: z.string().trim().max(100).optional(),
+  description: z.string().trim().max(2000).optional(),
+  createdById: z.string().trim().min(1).max(100).optional(),
+});
+
 router.post('/groups', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
-    const description = typeof req.body?.description === 'string' ? req.body.description.trim() : '';
+    const { name = '', description = '', createdById = req.user!.id } = parseOr400(adminGroupFields, req.body ?? {});
     const privacy = normalizeGroupPrivacy(req.body?.privacy ?? 'public') ?? 'PUBLIC';
-    const createdById = typeof req.body?.createdById === 'string' ? req.body.createdById : req.user!.id;
 
     if (!name || name.length < 3) return res.status(400).json({ error: 'Group name is required' });
     if (!description) return res.status(400).json({ error: 'Group description is required' });
@@ -2686,8 +3014,9 @@ router.patch('/groups/:id', async (req: AuthRequest, res: Response, next: NextFu
     if (!existing) return res.status(404).json({ error: 'Group not found' });
 
     const data: any = {};
-    if (typeof req.body?.name === 'string') data.name = req.body.name.trim();
-    if (typeof req.body?.description === 'string') data.description = req.body.description.trim();
+    const fields = parseOr400(adminGroupFields, req.body ?? {});
+    if (fields.name !== undefined) data.name = fields.name;
+    if (fields.description !== undefined) data.description = fields.description;
     if (req.body?.privacy !== undefined) {
       const p = normalizeGroupPrivacy(req.body.privacy);
       if (!p) return res.status(400).json({ error: 'Invalid privacy' });
@@ -2739,6 +3068,7 @@ router.delete('/groups/:id', async (req: AuthRequest, res: Response, next: NextF
  * PATCH /admin/groups/:id/members/:userId
  * Set member role (admin/moderator/member)
  */
+// validated: role goes through normalizeGroupRole, which accepts only admin, moderator or member.
 router.patch('/groups/:id/members/:userId', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id: groupId, userId } = req.params;
@@ -2908,11 +3238,43 @@ router.get('/events', async (req: AuthRequest, res: Response, next: NextFunction
   }
 });
 
+// The two write routes for an event that the console no longer uses for its content
+// (it edits through PATCH /api/events/:id, and uses these only for the pin, feature
+// and hide switches). They read each field by type, and measured none of them: a
+// description of any length, a link that was not one, and `host.name` as an object
+// all went to Prisma as they were. Each is the kind of value, and the length, the
+// member's own route allows (routes/event.routes.ts parseEventInput).
+const eventLink = z
+  .string()
+  .trim()
+  .max(2048)
+  .refine((value) => value === '' || value.startsWith('/') || isHttpUrl(value), 'must be a web address');
+const adminEventFields = z.object({
+  title: z.string().max(200).optional(),
+  description: z.string().max(20_000).optional(),
+  image: eventLink.optional(),
+  location: z.string().max(300).nullable().optional(),
+  link: eventLink.nullable().optional(),
+  hostName: z.string().max(200).optional(),
+  hostTitle: z.string().max(200).optional(),
+  hostAvatar: eventLink.optional(),
+  host: z
+    .object({
+      name: z.string().max(200).optional(),
+      title: z.string().max(200).optional(),
+      avatar: eventLink.optional(),
+    })
+    .nullable()
+    .optional(),
+  tags: z.array(z.unknown()).max(50).optional(),
+});
+
 /**
  * POST /admin/events
  */
 router.post('/events', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    parseOr400(adminEventFields, req.body ?? {});
     const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
     const description = typeof req.body?.description === 'string' ? req.body.description.trim() : '';
     const type = normalizeEventType(req.body?.type);
@@ -2999,6 +3361,7 @@ router.post('/events', async (req: AuthRequest, res: Response, next: NextFunctio
 router.patch('/events/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
+    parseOr400(adminEventFields, req.body ?? {});
     const existing = await prisma.event.findUnique({ where: { id }, select: { id: true, startTime: true, endTime: true } });
     if (!existing) return res.status(404).json({ error: 'Event not found' });
 
@@ -3114,7 +3477,9 @@ async function tellApplicant(userId: string, subject: string, line: string, link
     to: user.email,
     subject,
     text: `${greeting}\n\n${line}\n\nSee the details: ${base}${link}\n\nATHENA`,
-    html: `<p>${greeting}</p><p>${line}</p><p><a href="${base}${link}">See the details</a></p><p>ATHENA</p>`,
+    // Her first name and the reviewer's note are typed text: escaped, so a "<" in
+    // either is printed and not read as a tag.
+    html: `<p>${escapeHtml(greeting)}</p><p>${escapeHtml(line)}</p><p><a href="${base}${link}">See the details</a></p><p>ATHENA</p>`,
   });
 }
 
@@ -3138,12 +3503,22 @@ router.get('/grants/applications', async (req: AuthRequest, res: Response, next:
   }
 });
 
+// An award is money going to a named member. The amount was `Number(x)` kept if
+// finite, so a negative or a trillion was recorded and told to her; the notes
+// were cut to length silently, which the form could not know.
+const optionalAmount = z.preprocess(
+  (value) => (value === '' || value === null ? undefined : value),
+  audMoneyOrZero(1_000_000_000).optional()
+);
+const grantDecisionBody = z.object({
+  status: z.string().refine((value) => GRANT_DECISIONS.includes(value), 'Unknown decision'),
+  amountAwarded: optionalAmount,
+  notes: z.string().max(2000).optional(),
+});
+
 router.patch('/grants/applications/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { status, amountAwarded, notes } = req.body as { status?: string; amountAwarded?: number | string; notes?: string };
-    if (!status || !GRANT_DECISIONS.includes(status)) {
-      throw new ApiError(400, 'Unknown decision');
-    }
+    const { status, amountAwarded, notes } = parseOr400(grantDecisionBody, req.body ?? {});
     const application = await prisma.grantApplication.findUnique({
       where: { id: req.params.id },
       include: { grant: { select: { name: true } } },
@@ -3155,12 +3530,12 @@ router.patch('/grants/applications/:id', async (req: AuthRequest, res: Response,
       throw new ApiError(400, 'This application has not been submitted');
     }
 
-    const amount = status === 'AWARDED' && amountAwarded !== undefined && amountAwarded !== '' ? Number(amountAwarded) : undefined;
+    const amount = status === 'AWARDED' ? amountAwarded : undefined;
     const updated = await prisma.grantApplication.update({
       where: { id: application.id },
       data: {
         status: status as any,
-        ...(notes !== undefined ? { notes: String(notes).slice(0, 2000) } : {}),
+        ...(notes !== undefined ? { notes } : {}),
         ...(amount !== undefined && Number.isFinite(amount) ? { amountAwarded: amount } : {}),
         ...(status === 'AWARDED' || status === 'REJECTED' ? { resultAt: new Date() } : {}),
       },
@@ -3214,12 +3589,32 @@ router.get('/insurance/applications', async (req: AuthRequest, res: Response, ne
   }
 });
 
+// `Number(v)` of a premium typed as "abc" was NaN, which Prisma refuses with a
+// 500, and `new Date("tomorrow")` was an invalid date that did the same.
+const optionalDay = z.preprocess(
+  (value) => (value === '' || value === null ? undefined : value),
+  z
+    .string()
+    .max(40)
+    .refine((value) => !Number.isNaN(new Date(value).getTime()), 'must be a real date')
+    .optional()
+);
+const insuranceDecisionBody = z.object({
+  status: z.string().refine((value) => INSURANCE_DECISIONS.includes(value), 'Unknown decision'),
+  premiumQuoted: optionalAmount,
+  coverageAmount: optionalAmount,
+  policyNumber: z.string().trim().max(100).optional(),
+  startDate: optionalDay,
+  endDate: optionalDay,
+  note: z.string().trim().max(2000).optional(),
+});
+
 router.patch('/insurance/applications/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { status, premiumQuoted, coverageAmount, policyNumber, startDate, endDate, note } = req.body as Record<string, unknown>;
-    if (typeof status !== 'string' || !INSURANCE_DECISIONS.includes(status)) {
-      throw new ApiError(400, 'Unknown decision');
-    }
+    const { status, premiumQuoted, coverageAmount, policyNumber, startDate, endDate, note } = parseOr400(
+      insuranceDecisionBody,
+      req.body ?? {}
+    );
     const application = await prisma.insuranceApplication.findUnique({
       where: { id: req.params.id },
       include: { product: { select: { name: true, provider: true } } },

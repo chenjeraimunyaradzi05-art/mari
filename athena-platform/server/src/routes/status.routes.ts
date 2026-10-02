@@ -14,7 +14,7 @@ import { requireAdultAccount, requireWomanMember } from '../middleware/account-g
 import { ApiError } from '../middleware/errorHandler';
 import { prisma } from '../utils/prisma';
 import { normalizeOptionalUserText, normalizeSafeUrl } from '../utils/contentSafety';
-import { getBlockedRelationshipIds, isBlockedRelationship } from '../utils/safety-store';
+import { blockedEitherWayIds, isBlockedEitherWay } from '../services/audience.service';
 import { assertContentAllowed } from '../services/moderation.service';
 import { deleteStoriesWithMedia } from '../services/story-expiry.service';
 // Posting a story had no ceiling of its own, so the only thing standing
@@ -22,6 +22,7 @@ import { deleteStoriesWithMedia } from '../services/story-expiry.service';
 // limit. A story is a post to everyone who follows you, so it counts against
 // the same ceiling posts do.
 import { postLimiter } from '../middleware/socialLimits';
+import { publicName } from '../utils/member-display';
 
 const router = Router();
 
@@ -51,8 +52,9 @@ function normalizeStoryType(value: unknown): StoryType {
   return value === 'video' ? 'video' : 'image';
 }
 
-function displayNameOf(user: { displayName?: string | null; firstName?: string | null; lastName?: string | null } | null | undefined) {
-  return user?.displayName?.trim() || [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim() || 'Member';
+// Her public name, else her first name alone: a story and its viewer list are read by other members.
+function displayNameOf(user: { displayName?: string | null; firstName?: string | null } | null | undefined) {
+  return publicName(user);
 }
 
 function storyView(story: {
@@ -96,7 +98,8 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
     // this list, and the story ring did not, so a woman's blocked ex still saw
     // her face at the top of his feed every morning. Blocking is symmetric,
     // so the one list drops her stories from his feed and his from hers.
-    const blockedIds = viewerId ? await getBlockedRelationshipIds(viewerId) : [];
+    // Both lists a block can be written to (the Safety Centre's and the DV safety page's).
+    const blockedIds = viewerId ? await blockedEitherWayIds(viewerId) : [];
 
     // The newest STORY_FEED_CAP stories, put back into the order they were
     // posted. This took the first 500 oldest-first, so once more than that
@@ -113,7 +116,7 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
         ...(blockedIds.length ? { userId: { notIn: blockedIds } } : {}),
       },
       include: {
-        user: { select: { id: true, displayName: true, firstName: true, lastName: true, avatar: true } },
+        user: { select: { id: true, displayName: true, firstName: true, avatar: true } },
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: STORY_FEED_CAP,
@@ -171,6 +174,9 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
 // Posting a story is publishing to the network, so it carries both gates.
 // Viewing one does not: a member who has not yet given her date of birth can
 // still read, she just cannot broadcast.
+// validated: type goes through normalizeStoryType, mediaUrl through normalizeSafeUrl, caption
+//   through normalizeOptionalUserText with CAPTION_MAX and then moderation, audience is read as
+//   close_friends or everyone.
 router.post('/', authenticate, requireWomanMember, requireAdultAccount, postLimiter, async (req: AuthRequest, res, next) => {
   try {
     const type: StoryType = normalizeStoryType(req.body?.type);
@@ -226,7 +232,7 @@ router.post('/:id/view', authenticate, async (req: AuthRequest, res, next) => {
     // 404 rather than 403: a refusal that named the reason would confirm to
     // the person she blocked that the story exists and that she posted it,
     // which is the piece of information the block was meant to withhold.
-    if (await isBlockedRelationship(req.user!.id, story.userId)) throw new ApiError(404, 'Story not found');
+    if (await isBlockedEitherWay(req.user!.id, story.userId)) throw new ApiError(404, 'Story not found');
 
     // Authors watching their own story are not an audience.
     if (story.userId === req.user!.id) {
@@ -270,11 +276,11 @@ router.get('/:id/viewers', authenticate, async (req: AuthRequest, res, next) => 
     // requests and close-friends rows, and leaves StatusView alone. Without
     // this, a man she blocked this morning stays on her viewer list until the
     // story expires tonight.
-    const blockedIds = await getBlockedRelationshipIds(req.user!.id);
+    const blockedIds = await blockedEitherWayIds(req.user!.id);
 
     const views = await prisma.statusView.findMany({
       where: { statusId: story.id, ...(blockedIds.length ? { userId: { notIn: blockedIds } } : {}) },
-      include: { user: { select: { id: true, displayName: true, firstName: true, lastName: true, avatar: true } } },
+      include: { user: { select: { id: true, displayName: true, firstName: true, avatar: true } } },
       orderBy: { viewedAt: 'desc' },
       take: 100,
     });

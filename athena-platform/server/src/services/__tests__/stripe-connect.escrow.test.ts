@@ -18,9 +18,16 @@ jest.mock('../../utils/prisma', () => ({
       updateMany: jest.fn(async () => ({ count: 1 })),
       findMany: jest.fn(async () => []),
       groupBy: jest.fn(async () => []),
+      // How many holds this buyer has had recorded in the last hour.
+      count: jest.fn(async () => 0),
     },
+    // No card dispute is open on a payment unless a test says one is.
+    paymentDispute: { findFirst: jest.fn(async () => null) },
   },
 }));
+
+// Nobody has blocked anybody unless a test says so.
+jest.mock('../../utils/safety-store', () => ({ isBlockedRelationship: jest.fn(async () => false) }));
 
 jest.mock('../../utils/logger', () => ({
   logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
@@ -45,6 +52,7 @@ jest.mock('../../utils/stripe', () => ({
 }));
 
 import { prisma as prismaTyped } from '../../utils/prisma';
+import { isBlockedRelationship } from '../../utils/safety-store';
 import {
   createEscrowPayment,
   captureEscrowPayment,
@@ -111,6 +119,129 @@ describe('Creating a hold', () => {
     expect(stripe.paymentIntents.cancel).toHaveBeenCalledWith('pi_new');
   });
 
+  // A caller with a row to derive a key from, a mentor booking for one, gets one
+  // hold however many times the request arrives. One without keeps the SDK's own
+  // per-request key and sends no second argument, as it always did.
+  it('sends the caller\'s idempotency key to Stripe, and none when it has none', async () => {
+    sellerIsReady();
+    stripe.paymentIntents.create.mockResolvedValue({ id: 'pi_new', client_secret: 'pi_new_secret' });
+    prisma.escrowPayment.create.mockResolvedValue({ id: 'escrow-1' });
+    const input = {
+      buyerId: BUYER.id,
+      sellerId: SELLER.id,
+      amount: 25000,
+      currency: 'aud',
+      description: 'Mentor session',
+    };
+
+    await createEscrowPayment({ ...input, idempotencyKey: 'mentor-hold-sess-9' });
+    expect((stripe.paymentIntents.create.mock.calls[0] as any[])[1]).toEqual({ idempotencyKey: 'mentor-hold-sess-9' });
+
+    jest.clearAllMocks();
+    sellerIsReady();
+    stripe.paymentIntents.create.mockResolvedValue({ id: 'pi_new2', client_secret: 'pi_new2_secret' });
+    prisma.escrowPayment.create.mockResolvedValue({ id: 'escrow-2' });
+    await createEscrowPayment(input);
+    expect(stripe.paymentIntents.create.mock.calls[0]).toHaveLength(1);
+  });
+
+  // Two requests with one key are handed the same intent by Stripe; the second
+  // one's insert is refused because the first has recorded it. Cancelling "the
+  // orphan" there would cancel the live hold the first request's buyer is paying
+  // into, so it is returned as the row it is.
+  it('hands a second request with the same key the hold the first recorded, and does not cancel it', async () => {
+    sellerIsReady();
+    stripe.paymentIntents.create.mockResolvedValue({ id: 'pi_same', client_secret: 'pi_same_secret' });
+    prisma.escrowPayment.create.mockRejectedValue(Object.assign(new Error('Unique constraint failed'), { code: 'P2002' }));
+    prisma.escrowPayment.findUnique.mockResolvedValue({
+      id: 'escrow-first',
+      buyerId: BUYER.id,
+      sellerId: SELLER.id,
+      amount: 25000,
+      platformFee: 2500,
+    });
+
+    const hold = await createEscrowPayment({
+      buyerId: BUYER.id,
+      sellerId: SELLER.id,
+      amount: 25000,
+      currency: 'aud',
+      description: 'Logo design',
+      idempotencyKey: 'order-renew-esc-old-0',
+    });
+
+    expect(hold).toMatchObject({ escrowId: 'escrow-first', paymentIntentId: 'pi_same', clientSecret: 'pi_same_secret' });
+    expect(stripe.paymentIntents.cancel).not.toHaveBeenCalled();
+  });
+
+  it('still cancels the hold when the row that already has its id belongs to somebody else', async () => {
+    sellerIsReady();
+    stripe.paymentIntents.create.mockResolvedValue({ id: 'pi_same', client_secret: 'pi_same_secret' });
+    prisma.escrowPayment.create.mockRejectedValue(Object.assign(new Error('Unique constraint failed'), { code: 'P2002' }));
+    prisma.escrowPayment.findUnique.mockResolvedValue({
+      id: 'escrow-other',
+      buyerId: 'someone-else',
+      sellerId: SELLER.id,
+      amount: 25000,
+      platformFee: 2500,
+    });
+    stripe.paymentIntents.cancel.mockResolvedValue({ id: 'pi_same', status: 'canceled' });
+
+    await expect(
+      createEscrowPayment({
+        buyerId: BUYER.id,
+        sellerId: SELLER.id,
+        amount: 25000,
+        currency: 'aud',
+        description: 'Logo design',
+        idempotencyKey: 'order-renew-esc-old-0',
+      })
+    ).rejects.toThrow('Failed to create payment');
+    expect(stripe.paymentIntents.cancel).toHaveBeenCalledWith('pi_same');
+  });
+
+  // However a hold is asked for, one buyer cannot have an unbounded run of them
+  // recorded in an hour: card testing starts a hold for each card.
+  it('refuses a buyer who already has the most holds an hour allows, before asking Stripe for anything', async () => {
+    sellerIsReady();
+    prisma.escrowPayment.count.mockResolvedValueOnce(15);
+
+    await expect(
+      createEscrowPayment({ buyerId: BUYER.id, sellerId: SELLER.id, amount: 25000, currency: 'aud', description: 'Mentor session' })
+    ).rejects.toMatchObject({ statusCode: 429 });
+
+    expect(stripe.paymentIntents.create).not.toHaveBeenCalled();
+    expect(prisma.escrowPayment.count.mock.calls[0][0].where.buyerId).toBe(BUYER.id);
+  });
+
+  // Where the account and the card are eligible the network can grant longer than
+  // the usual week; 'if_available' never fails a payment where they are not. Off
+  // until the owner has checked it with Stripe.
+  it('asks for an extended authorisation only when that has been switched on', async () => {
+    const input = { buyerId: BUYER.id, sellerId: SELLER.id, amount: 25000, currency: 'aud', description: 'Logo design' };
+    const params = () => (stripe.paymentIntents.create.mock.calls[0] as any[])[0];
+    const hold = async () => {
+      sellerIsReady();
+      stripe.paymentIntents.create.mockResolvedValue({ id: 'pi_new', client_secret: 'pi_new_secret' });
+      prisma.escrowPayment.create.mockResolvedValue({ id: 'escrow-1' });
+      await createEscrowPayment(input);
+    };
+
+    delete process.env.ESCROW_REQUEST_EXTENDED_AUTHORISATION;
+    await hold();
+    expect(params().payment_method_options).toBeUndefined();
+
+    jest.clearAllMocks();
+    process.env.ESCROW_REQUEST_EXTENDED_AUTHORISATION = 'true';
+    try {
+      await hold();
+      expect(params().payment_method_options).toEqual({ card: { request_extended_authorization: 'if_available' } });
+      expect(params().capture_method).toBe('manual');
+    } finally {
+      delete process.env.ESCROW_REQUEST_EXTENDED_AUTHORISATION;
+    }
+  });
+
   it('refuses a seller whose payout account is not verified, before asking Stripe for anything', async () => {
     prisma.user.findUnique.mockResolvedValue({
       stripeConnectAccountId: 'acct_seller',
@@ -129,6 +260,36 @@ describe('Creating a hold', () => {
       })
     ).rejects.toThrow('Seller payment account is not fully verified');
 
+    expect(stripe.paymentIntents.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses a seller staff have suspended or banned, before asking Stripe for anything', async () => {
+    // Her sign-in is refused, so she could not deliver or be reached about the
+    // payment, and the hold would sit on the buyer's card until it lapsed.
+    for (const standing of [{ isSuspended: true, bannedAt: null }, { isSuspended: false, bannedAt: new Date() }]) {
+      prisma.user.findUnique.mockResolvedValue({
+        stripeConnectAccountId: 'acct_seller',
+        stripeConnectStatus: 'ACTIVE',
+        ...standing,
+      });
+
+      await expect(
+        createEscrowPayment({ buyerId: BUYER.id, sellerId: SELLER.id, amount: 25000, currency: 'aud', description: 'Mentor session' })
+      ).rejects.toMatchObject({ statusCode: 409 });
+    }
+
+    expect(stripe.paymentIntents.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses a payment across a block, in either direction, before asking Stripe for anything', async () => {
+    sellerIsReady();
+    (isBlockedRelationship as jest.Mock).mockResolvedValueOnce(true);
+
+    await expect(
+      createEscrowPayment({ buyerId: BUYER.id, sellerId: SELLER.id, amount: 25000, currency: 'aud', description: 'Mentor session' })
+    ).rejects.toMatchObject({ statusCode: 403 });
+
+    expect(isBlockedRelationship).toHaveBeenCalledWith(BUYER.id, SELLER.id);
     expect(stripe.paymentIntents.create).not.toHaveBeenCalled();
   });
 });
@@ -295,6 +456,42 @@ describe('Giving a hold back', () => {
       expect.objectContaining({ payment_intent: 'pi_1', reverse_transfer: true, refund_application_fee: true }),
       { idempotencyKey: 'escrow-refund-escrow-1' }
     );
+  });
+
+  it('will not refund a payment the buyer’s bank is disputing, even for the platform', async () => {
+    // A refund on top of an open chargeback can return the money twice, and a
+    // dispute does not reverse the seller's transfer either way: the team settles
+    // the dispute at Stripe first.
+    prisma.escrowPayment.findUnique.mockResolvedValue(escrowRow({ status: 'CAPTURED' }));
+    stripe.paymentIntents.retrieve.mockResolvedValue({
+      id: 'pi_1',
+      status: 'succeeded',
+      latest_charge: { id: 'ch_1', refunded: false },
+    });
+    prisma.paymentDispute.findFirst.mockResolvedValueOnce({ stripeDisputeId: 'dp_1', evidenceDueBy: null });
+
+    await expect(cancelEscrowPayment('pi_1', PLATFORM_ESCROW_ACTOR, 'dispute upheld')).rejects.toMatchObject({
+      statusCode: 409,
+      message: expect.stringContaining('dp_1'),
+    });
+
+    expect(prisma.paymentDispute.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { paymentIntentId: 'pi_1', outcome: 'OPEN' } })
+    );
+    expect(stripe.refunds.create).not.toHaveBeenCalled();
+    expect(prisma.escrowPayment.update).not.toHaveBeenCalled();
+  });
+
+  it('does not look for a card dispute when all it is giving back is a hold', async () => {
+    prisma.escrowPayment.findUnique.mockResolvedValue(escrowRow({ status: 'AUTHORIZED' }));
+    stripe.paymentIntents.retrieve.mockResolvedValue({ id: 'pi_1', status: 'requires_capture' });
+    stripe.paymentIntents.cancel.mockResolvedValue({});
+    prisma.escrowPayment.update.mockResolvedValue({});
+
+    await cancelEscrowPayment('pi_1', PLATFORM_ESCROW_ACTOR, 'called off');
+
+    expect(prisma.paymentDispute.findFirst).not.toHaveBeenCalled();
+    expect(stripe.paymentIntents.cancel).toHaveBeenCalledWith('pi_1');
   });
 
   it('repairs the row instead of refunding a charge Stripe has already given back', async () => {

@@ -110,6 +110,8 @@ router.patch('/transactions/:id', authenticate, async (req: AuthRequest, res: Re
 });
 
 // POST /api/banking/transactions/post-all
+// validated: accountId is read only when it is a non-empty string, and the service scopes it to her
+//   own accounts.
 router.post('/transactions/post-all', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const accountId = typeof req.body?.accountId === 'string' && req.body.accountId ? req.body.accountId : undefined;

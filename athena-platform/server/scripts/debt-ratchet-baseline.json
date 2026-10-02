@@ -75,7 +75,6 @@
     "src/middleware/rateLimiter.ts": 3,
     "src/middleware/responseTime.ts": 1,
     "src/middleware/roles.ts": 3,
-    "src/middleware/subscription.ts": 4,
     "src/routes/admin-catalogue.routes.ts": 10,
     "src/routes/admin-marketing.routes.ts": 13,
     "src/routes/admin.routes.ts": 23,
@@ -184,5 +183,10 @@
     "src/routes/topic.routes.ts": 6,
     "src/routes/trust.routes.ts": 1,
     "src/routes/webhook.routes.ts": 1
+  },
+  "hand-rolled-page-limits": {
+    "src/routes/appeal.routes.ts": 1,
+    "src/routes/safety.routes.ts": 2,
+    "src/routes/verification.routes.ts": 1
   }
 }

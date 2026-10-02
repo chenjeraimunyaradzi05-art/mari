@@ -428,6 +428,8 @@ router.post('/applications', authenticate, applicationValidators, async (req: Au
 // owns; every other transition belongs to the provider route below. The notes
 // are hers throughout — they are the field the member page lets her keep her
 // own record in.
+// validated: status goes through parseEducationApplicationStatus and only WITHDRAWN is accepted
+//   from the applicant; notes must be text of at most 2,000 characters.
 router.patch('/applications/:id', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
@@ -488,6 +490,8 @@ router.patch('/applications/:id', authenticate, async (req: AuthRequest, res, ne
 // applications and the outcomes panel counts them by status, but nothing on
 // the server could move one, so every status shown there was written by the
 // applicant herself. This is the write the dashboard was built against.
+// validated: status goes through parseEducationApplicationStatus and must be IN_REVIEW, ACCEPTED or
+//   REJECTED.
 router.patch(
   '/providers/:organizationId/applications/:applicationId',
   authenticate,

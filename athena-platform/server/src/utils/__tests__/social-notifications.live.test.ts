@@ -31,6 +31,10 @@ jest.mock('../../services/push.service', () => ({ pushToUser }));
 const emitToUserRoom = jest.fn();
 jest.mock('../../services/socket.service', () => ({ emitToUserRoom }));
 
+// Nobody is blocked here; the block rule has its own suite
+// (social-notifications.block.test.ts).
+jest.mock('../../services/audience.service', () => ({ isBlockedEitherWay: jest.fn(async () => false) }));
+
 import { notifySocial } from '../social-notifications';
 
 const comment = {

@@ -21,9 +21,10 @@
  */
 
 import { Response, NextFunction } from 'express';
-import type { WomanVerificationStatus } from '@prisma/client';
+import { Prisma, type WomanVerificationStatus } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { PLATFORM_MINIMUM_AGE } from '../config/region.config';
+import { CREATOR_TERMS_PATH, CREATOR_TERMS_VERSION } from '../config/creator-terms';
 import { AuthRequest } from './auth';
 import { logger } from '../utils/logger';
 
@@ -52,8 +53,8 @@ export const AGE_GATE_UNDERAGE_MESSAGE =
 export const DATE_OF_BIRTH_REFUSAL = 'Please enter your date of birth. ATHENA accounts are for adults.';
 
 /** Where the member goes to satisfy each gate; the client reads these off the refusal. */
-const WOMAN_GATE_SETUP = '/dashboard/settings/profile';
-const AGE_GATE_SETUP = '/dashboard/settings/profile';
+export const WOMAN_GATE_SETUP = '/dashboard/settings/profile';
+export const AGE_GATE_SETUP = '/dashboard/settings/profile';
 
 // ------------------------------------------------------------------- age
 
@@ -114,6 +115,28 @@ export type WomanGateState = {
  */
 export const WOMAN_GATE_PURPOSE = 'WOMAN_GATE';
 
+/**
+ * Selects the VerificationBadge rows that belong to the women-only gate, and,
+ * under `NOT`, every other badge.
+ *
+ * The second use is why this is not just `purpose = WOMAN_GATE`. In SQL a
+ * comparison with a missing value is neither true nor false, and `NOT` of it is
+ * neither either, so `NOT: { metadata: { path: ['purpose'], equals: ... } }`
+ * matches only badges that have a purpose that is not this one. Every ordinary
+ * badge has no purpose (its metadata is empty, or holds an organisation or a
+ * note), so that filter matched none of them: the reviewer's queue came back
+ * empty, a member's approved identity badge was not seen as one, and a retry did
+ * not find the pending badge it was meant to reuse. The test for "has a purpose"
+ * sits in front of the comparison so that the whole condition is false, not
+ * unknown, when there is none, and `NOT` of false is true.
+ */
+export const WOMAN_GATE_BADGE_WHERE = {
+  AND: [
+    { metadata: { path: ['purpose'], not: Prisma.DbNull } },
+    { metadata: { path: ['purpose'], equals: WOMAN_GATE_PURPOSE } },
+  ],
+} satisfies Prisma.VerificationBadgeWhereInput;
+
 export type WomanGateEvidence = {
   provider: 'stripe_identity' | 'manual';
   sessionId: string | null;
@@ -122,6 +145,14 @@ export type WomanGateEvidence = {
   /** The legal name on the document, so the reviewer has something to compare. */
   documentName: string | null;
   documentType: string | null;
+  /**
+   * Set when the document's own date of birth did not clear the age check, so
+   * the reviewer sees it beside the evidence instead of finding out from the
+   * account later. 'BELOW_MINIMUM_AGE' is a document that says she is under
+   * the platform minimum; 'IMPLAUSIBLE_DATE' is a date no living adult could
+   * have, which is a misread more often than a person.
+   */
+  documentAgeFlag: 'BELOW_MINIMUM_AGE' | 'IMPLAUSIBLE_DATE' | null;
   /** The member's own account of why she is asking, on the manual path. */
   statement: string | null;
   evidenceUrl: string | null;
@@ -153,6 +184,10 @@ export function readWomanGateEvidence(metadata: unknown): WomanGateEvidence | nu
     documentCheckPassedAt: str(meta.documentCheckPassedAt),
     documentName: str(meta.documentName),
     documentType: str(meta.documentType),
+    documentAgeFlag:
+      meta.documentAgeFlag === 'BELOW_MINIMUM_AGE' || meta.documentAgeFlag === 'IMPLAUSIBLE_DATE'
+        ? meta.documentAgeFlag
+        : null,
     statement: str(meta.statement),
     evidenceUrl: str(meta.evidenceUrl),
     submittedAt: str(meta.submittedAt),
@@ -293,6 +328,65 @@ export const requireAdultAccount = async (req: AuthRequest, res: Response, next:
     }
 
     return next();
+  } catch (error) {
+    return next(error);
+  }
+};
+
+// ----------------------------------------------------------- creator terms
+
+/** Sent to a creator who has not accepted the current Creator Terms Addendum. */
+export const CREATOR_TERMS_REQUIRED_MESSAGE =
+  'Please read and accept the Creator Terms Addendum before you are paid. It takes a minute, and your earnings are safe while you do.';
+
+export interface CreatorTermsRefusal {
+  error: string;
+  code: 'CREATOR_TERMS_REQUIRED';
+  /** The version she would be accepting, so the page can show it. */
+  version: string;
+  setup: string;
+}
+
+/**
+ * Null when this member may be paid as a creator as far as the addendum goes;
+ * otherwise the body of the 403.
+ *
+ * A member with no creator profile yet is let through: she is about to enable
+ * creator mode, and that request carries the acceptance and records it in the
+ * same write as the profile, so no profile is ever created without one. What this
+ * catches is a creator whose profile has none or an old version: every creator
+ * who enabled creator mode before the addendum existed, and every creator when it
+ * is next rewritten. She is asked at her next withdrawal, not treated as having
+ * agreed. A failure to read her profile is thrown, never read as "allowed".
+ */
+export async function creatorTermsRefusal(userId: string): Promise<CreatorTermsRefusal | null> {
+  const profile = await prisma.creatorProfile.findUnique({
+    where: { userId },
+    select: { creatorTermsVersion: true },
+  });
+  if (!profile || profile.creatorTermsVersion === CREATOR_TERMS_VERSION) return null;
+
+  logger.warn('A creator who has not accepted the current Creator Terms Addendum was refused', {
+    userId,
+    accepted: profile.creatorTermsVersion ?? null,
+  });
+  return {
+    error: CREATOR_TERMS_REQUIRED_MESSAGE,
+    code: 'CREATOR_TERMS_REQUIRED',
+    version: CREATOR_TERMS_VERSION,
+    setup: CREATOR_TERMS_PATH,
+  };
+}
+
+/** Refuses a creator who has not accepted the current Creator Terms Addendum. See creatorTermsRefusal. */
+export const requireCreatorTerms = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  try {
+    const refusal = await creatorTermsRefusal(req.user.id);
+    return refusal ? res.status(403).json(refusal) : next();
   } catch (error) {
     return next(error);
   }

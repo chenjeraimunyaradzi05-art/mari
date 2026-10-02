@@ -49,9 +49,12 @@ describe('recordAdminAction', () => {
   it.each([
     ['FEATURE_FLAG_UPDATED', 'ADMIN_CONFIG_UPDATE'],
     ['MAINTENANCE_MODE_CHANGED', 'ADMIN_CONFIG_UPDATE'],
+    ['PAYMENTS_PAUSE_CHANGED', 'ADMIN_CONFIG_UPDATE'],
     ['DV_SERVICE_UPDATED', 'ADMIN_CONTENT_UPDATE'],
     ['ACCELERATOR_ENROLLMENT_REVOKED', 'ADMIN_CONTENT_UPDATE'],
     ['CAR_PURCHASE_DISPUTE_RESOLVED', 'ADMIN_CONTENT_UPDATE'],
+    ['MENTOR_SESSION_DISPUTE_RESOLVED', 'ADMIN_CONTENT_UPDATE'],
+    ['SERVICE_ORDER_DISPUTE_RESOLVED', 'ADMIN_CONTENT_UPDATE'],
     ['SAFETY_REPORT_UPHELD', 'SAFETY_REPORT_DECIDED'],
   ] as const)('files %s under %s and keeps the verb in metadata', async (verb, filedUnder) => {
     await recordAdminAction(staffRequest(), verb, { resourceType: 'Thing', resourceId: 'thing-1' });

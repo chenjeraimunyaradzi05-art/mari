@@ -17,6 +17,10 @@ jest.mock('../../utils/prisma', () => ({
       create: jest.fn(),
       deleteMany: jest.fn(),
     },
+    channelMember: { findUnique: jest.fn(async () => null) },
+    // A reaction is not made under the words of someone across a block, in either store.
+    userSafetySettings: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
+    dvSafetyProfile: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
   },
 }));
 
@@ -206,6 +210,40 @@ describe('Channel message edit / delete / pin / reactions', () => {
         .post('/api/channels/c1/messages/m1/reactions')
         .send({ emoji: '👍' })
         .expect(201);
+
+      expect(prisma.channelMessageReaction.create).not.toHaveBeenCalled();
+      expect(prisma.channelMessage.update).not.toHaveBeenCalled();
+    });
+
+    it('is refused to someone who may not be in a private channel, and nothing is stored', async () => {
+      (prisma.channel.findUnique as any).mockResolvedValue({ id: 'c1', ownerId: OTHER, isPublic: false, allowReplies: true });
+      (prisma.channelMember.findUnique as any).mockResolvedValue(null);
+      mockMessage(OTHER);
+
+      await request(app).post('/api/channels/c1/messages/m1/reactions').send({ emoji: '👍' }).expect(403);
+
+      expect(prisma.channelMessageReaction.create).not.toHaveBeenCalled();
+      expect(prisma.channelMessage.update).not.toHaveBeenCalled();
+    });
+
+    it('is allowed to a member of a private channel', async () => {
+      (prisma.channel.findUnique as any).mockResolvedValue({ id: 'c1', ownerId: OTHER, isPublic: false, allowReplies: true });
+      (prisma.channelMember.findUnique as any).mockResolvedValue({ id: 'cm1' });
+      mockMessage(OTHER);
+      (prisma.channelMessageReaction.findUnique as any).mockResolvedValue(null);
+      (prisma.channelMessageReaction.create as any).mockResolvedValue({ id: 'r1' });
+
+      await request(app).post('/api/channels/c1/messages/m1/reactions').send({ emoji: '👍' }).expect(201);
+
+      expect(prisma.channelMessageReaction.create).toHaveBeenCalled();
+    });
+
+    it('is not made under the words of a member on either side of a block, as if the message were not there', async () => {
+      mockChannel(OTHER);
+      mockMessage('blocked-author');
+      (prisma.dvSafetyProfile.findUnique as any).mockResolvedValueOnce({ blockedUserIds: ['blocked-author'] });
+
+      await request(app).post('/api/channels/c1/messages/m1/reactions').send({ emoji: '👍' }).expect(404);
 
       expect(prisma.channelMessageReaction.create).not.toHaveBeenCalled();
       expect(prisma.channelMessage.update).not.toHaveBeenCalled();

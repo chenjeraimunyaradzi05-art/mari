@@ -49,7 +49,7 @@ jest.mock('../../../utils/logger', () => ({
   redactSensitive: (v: unknown) => v,
 }));
 
-import { CARD_HOLD_DAYS, holdHasEnded, holdLapsesAt, recheckLiveHold, settlePurchaseHold } from '../purchase-escrow.service';
+import { CARD_HOLD_DAYS, holdHasEnded, holdLapsesAt, readHoldState, recheckLiveHold, settlePurchaseHold } from '../purchase-escrow.service';
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -147,5 +147,82 @@ describe('the hold behind a purchase', () => {
     await settlePurchaseHold('p1', NOW);
     expect(store.notifications).toEqual([]);
     expect(store.purchaseUpdates).toEqual([]);
+  });
+});
+
+/**
+ * A hold nobody can ask the processor about is not money held, in production.
+ *
+ * readHoldState answered HELD for a purchase whose processor could not be asked
+ * (no key in the environment) and for a mock id, on the reasoning that only a
+ * development machine can have either. In production that reasoning is the
+ * hazard: a deployment that lost its key read a real pi_ purchase as held, and the
+ * seller was told the money was held and to hand the car over, against a card
+ * nobody could confirm was authorised.
+ */
+describe('a hold the processor cannot be asked about', () => {
+  const env = process.env as Record<string, string | undefined>;
+  const originalNodeEnv = env.NODE_ENV;
+
+  afterEach(() => {
+    env.NODE_ENV = originalNodeEnv;
+  });
+
+  const pending = (paymentIntentId: string) => ({ paymentIntentId, status: 'PENDING' });
+
+  it('waits on the card step in production with no key, rather than reading a real intent as money held', async () => {
+    env.NODE_ENV = 'production';
+    live = false;
+
+    expect(await readHoldState(pending('pi_real'))).toBe('AWAITING_CARD');
+    expect(retrieve).not.toHaveBeenCalled();
+  });
+
+  it('does not read a mock id as money in production either, where none can exist', async () => {
+    env.NODE_ENV = 'production';
+    live = true;
+
+    expect(await readHoldState(pending('pi_mock_1'))).toBe('AWAITING_CARD');
+  });
+
+  it('still reads a hold the row already calls real as held, and one it calls over as gone', async () => {
+    env.NODE_ENV = 'production';
+    live = false;
+
+    expect(await readHoldState({ paymentIntentId: 'pi_real', status: 'AUTHORIZED' })).toBe('HELD');
+    expect(await readHoldState({ paymentIntentId: 'pi_real', status: 'CANCELED' })).toBe('GONE');
+  });
+
+  it('keeps the development flow: with no key outside production a hold is as held as it will ever be', async () => {
+    env.NODE_ENV = 'development';
+    live = false;
+
+    expect(await readHoldState(pending('pi_real'))).toBe('HELD');
+    expect(await readHoldState(pending('pi_mock_1'))).toBe('HELD');
+  });
+
+  it('does not tell the seller the money is held, or promote the purchase, in production with no key', async () => {
+    env.NODE_ENV = 'production';
+    live = false;
+    store.purchase = {
+      id: 'p1', status: 'ACCEPTED', sellerId: 'seller', offerAmount: 18000, agreedAmount: 18000, paidAt: null,
+      escrow: { id: 'e1', status: 'PENDING', paymentIntentId: 'pi_real', createdAt: new Date(NOW.getTime() - 10 * 60 * 1000) },
+      listing: { title: '2019 Mazda CX-5 Maxx' },
+    };
+
+    expect(await settlePurchaseHold('p1', NOW)).toEqual({ state: 'AWAITING_CARD', status: 'ACCEPTED' });
+
+    expect(store.purchaseUpdates).toEqual([]);
+    expect(store.notifications).toEqual([]);
+  });
+
+  it('still warns about a real hold’s lapse in production when the key has gone, which a missing key does not change', () => {
+    env.NODE_ENV = 'production';
+    live = false;
+    const paidAt = new Date(NOW.getTime() - 2 * DAY);
+
+    expect(holdLapsesAt({ paidAt, escrow: { status: 'AUTHORIZED', paymentIntentId: 'pi_real' } })?.getTime()).toBe(paidAt.getTime() + 7 * DAY);
+    // A mock id never has a lapse.
+    expect(holdLapsesAt({ paidAt, escrow: { status: 'AUTHORIZED', paymentIntentId: 'pi_mock_1' } })).toBeNull();
   });
 });

@@ -10,6 +10,7 @@
 export { sendEmail, sendVerificationEmail, sendPasswordResetEmail, sendWelcomeEmail } from '../utils/email';
 
 import { sendEmail as sendEmailCore } from '../utils/email';
+import { escapeHtml } from '../utils/escape-html';
 
 interface EmailTemplate {
   subject: string;
@@ -20,17 +21,50 @@ interface EmailTemplate {
 /**
  * Escapes HTML special characters to prevent XSS in email templates.
  *
- * Exported so every email built from text a member or a provider wrote — an
+ * Re-exported so every email built from text a member or a provider wrote — an
  * appeal decision note, a course or event title — escapes it the same way,
  * rather than each sender writing its own copy or, as some did, none at all.
+ * The function itself is in utils/escape-html.ts, which has no imports.
  */
-export function escapeHtml(unsafe: string): string {
-  return unsafe
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
+export { escapeHtml };
+
+/**
+ * A copy of `data` with every string in it, however deep, escaped for HTML.
+ *
+ * What the templates below are rendered from. They interpolate `${data.x}`
+ * straight into markup, and most of those values are text somebody typed: a
+ * member's first name (which only has control characters stripped at sign-up,
+ * so `<a href=...>` is a name), a mentor's, a course title, an application
+ * message. In an email that is a link or an image sent from ATHENA's own
+ * address, which is the version of phishing a spam filter trusts. Escaping at
+ * each `${...}` meant each one had to be remembered, and three of the twelve
+ * templates did: so the markup is rendered from this copy instead, and a new
+ * template cannot forget. A URL is escaped too, which is right inside an
+ * attribute: `&` becomes `&amp;`, and the browser reads it back as `&`.
+ */
+export function forHtml<T>(data: T): T {
+  if (typeof data === 'string') return escapeHtml(data) as unknown as T;
+  if (Array.isArray(data)) return data.map((item) => forHtml(item)) as unknown as T;
+  // Only a plain object is walked. A Date or any other object with a meaning of
+  // its own would come out of Object.fromEntries as `{}` and print as
+  // "[object Object]" where a time belonged.
+  if (data !== null && typeof data === 'object') {
+    const prototype = Object.getPrototypeOf(data);
+    if (prototype !== Object.prototype && prototype !== null) return data;
+    return Object.fromEntries(Object.entries(data).map(([key, value]) => [key, forHtml(value)])) as T;
+  }
+  return data;
+}
+
+/**
+ * One message from one template: the markup from the escaped copy of the data,
+ * and the subject and the plain-text part from the data as it came. A text
+ * reader would otherwise be shown `Ana &amp; Co`, and a subject line is not
+ * HTML at all. The template runs twice; it only builds strings.
+ */
+function render<T extends object>(template: (data: T) => EmailTemplate, data: T): EmailTemplate {
+  const plain = template(data);
+  return { subject: plain.subject, html: template(forHtml(data)).html, text: plain.text };
 }
 
 const DEFAULT_CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
@@ -46,11 +80,13 @@ const DEFAULT_CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
  */
 const NOTIFICATION_PREFERENCES_URL = `${DEFAULT_CLIENT_URL}/dashboard/settings/notifications`;
 
-// Email templates
-const templates = {
+// Email templates, as written: each interpolates its data straight into the
+// markup, which is only safe because of how they are used. Nothing calls these
+// directly. `templates` below wraps every one in render(), so what comes out
+// has its markup built from the escaped copy of the data, and a template added
+// here is covered without anyone having to remember.
+const rawTemplates = {
   welcome: (data: { firstName: string; referralCode?: string }): EmailTemplate => {
-    const safeFirstName = escapeHtml(data.firstName);
-    const safeReferralCode = data.referralCode ? escapeHtml(data.referralCode) : '';
     return {
     subject: 'Welcome to ATHENA - Your Journey Begins! 🚀',
     html: `
@@ -67,7 +103,7 @@ const templates = {
           <p style="color: #666; margin: 5px 0;">The Life Operating System for Women</p>
         </div>
         
-        <h2 style="color: #1f2937;">Welcome, ${safeFirstName}! 👋</h2>
+        <h2 style="color: #1f2937;">Welcome, ${data.firstName}! 👋</h2>
         
         <p>We're thrilled to have you join ATHENA - where ambitious women connect, grow, and thrive together.</p>
         
@@ -85,9 +121,9 @@ const templates = {
           <li>🤖 Use AI tools to optimize your career</li>
         </ul>
         
-        ${safeReferralCode ? `
+        ${data.referralCode ? `
         <div style="background: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0;">
-          <p style="margin: 0; font-weight: 600;">Your Referral Code: <span style="color: #7c3aed; font-size: 18px;">${safeReferralCode}</span></p>
+          <p style="margin: 0; font-weight: 600;">Your Referral Code: <span style="color: #7c3aed; font-size: 18px;">${data.referralCode}</span></p>
           <p style="margin: 5px 0 0 0; font-size: 14px; color: #666;">Share with friends - you both get 100 credits when they sign up!</p>
         </div>
         ` : ''}
@@ -552,8 +588,6 @@ Unsubscribe: ${NOTIFICATION_PREFERENCES_URL}
     confirmUrl: string;
     expiresInHours: number;
   }): EmailTemplate => {
-    const safeFirstName = escapeHtml(data.firstName);
-    const safeNewEmail = escapeHtml(data.newEmail);
     return {
       subject: 'Confirm your new ATHENA sign-in address',
       html: `
@@ -565,8 +599,8 @@ Unsubscribe: ${NOTIFICATION_PREFERENCES_URL}
           <h1 style="color: #7c3aed; margin: 0;">ATHENA</h1>
         </div>
         <h2 style="color: #1f2937;">Confirm your new address</h2>
-        <p>Hi ${safeFirstName},</p>
-        <p>You asked us to correct the email address on your ATHENA account to <strong>${safeNewEmail}</strong>. Nothing has changed yet.</p>
+        <p>Hi ${data.firstName},</p>
+        <p>You asked us to correct the email address on your ATHENA account to <strong>${data.newEmail}</strong>. Nothing has changed yet.</p>
         <p>Opening the link below confirms that you can read this inbox, and makes it the address you sign in with.</p>
         <div style="text-align: center; margin: 30px 0;">
           <a href="${data.confirmUrl}" style="display: inline-block; background: #7c3aed; color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: 600;">Confirm this address</a>
@@ -600,8 +634,6 @@ The link works for ${data.expiresInHours} hours. If you did not ask for this, ig
     /** A mailbox when one is published, otherwise the privacy centre address. */
     supportContact: string;
   }): EmailTemplate => {
-    const safeFirstName = escapeHtml(data.firstName);
-    const safeNewEmail = escapeHtml(data.newEmail);
     return {
       subject: 'Someone asked to change your ATHENA sign-in address',
       html: `
@@ -613,9 +645,9 @@ The link works for ${data.expiresInHours} hours. If you did not ask for this, ig
           <h1 style="color: #7c3aed; margin: 0;">ATHENA</h1>
         </div>
         <h2 style="color: #1f2937;">A change was requested on your account</h2>
-        <p>Hi ${safeFirstName},</p>
-        <p>We received a request to change the sign-in address on your ATHENA account to <strong>${safeNewEmail}</strong>. It will not take effect until somebody opens the confirmation link we sent to that address.</p>
-        <p><strong>If this was not you</strong>, change your password now and tell us at ${escapeHtml(data.supportContact)}. We can stop the change.</p>
+        <p>Hi ${data.firstName},</p>
+        <p>We received a request to change the sign-in address on your ATHENA account to <strong>${data.newEmail}</strong>. It will not take effect until somebody opens the confirmation link we sent to that address.</p>
+        <p><strong>If this was not you</strong>, change your password now and tell us at ${data.supportContact}. We can stop the change.</p>
         <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
         <p style="font-size: 12px; color: #999; text-align: center;">© ${new Date().getFullYear()} ATHENA</p>
       </body>
@@ -630,6 +662,17 @@ If this was not you, change your password now and tell us at ${data.supportConta
   },
 };
 
+/** Every template in rawTemplates, rendered with its markup escaped by construction. */
+const templates = Object.fromEntries(
+  Object.entries(rawTemplates).map(([name, template]) => [
+    name,
+    (data: object) => render(template as (data: object) => EmailTemplate, data),
+  ])
+) as unknown as typeof rawTemplates;
+
+/** The rendered templates, exported so the escaping can be tested on all of them and not only on the ones with a sender. */
+export { templates as emailTemplates };
+
 /**
  * Email service class - uses consolidated sendEmailCore from utils/email
  */
@@ -639,7 +682,9 @@ export const emailService = {
    */
   async sendEmail(options: { to: string; subject: string; template?: string; data?: Record<string, any>; html?: string; text?: string }): Promise<boolean> {
     // In production, would use template engine to render template with data
-    const html = options.html || `<p>${JSON.stringify(options.data)}</p>`;
+    // The data is whatever the caller had, names and job titles among it, so it
+    // is escaped before it goes into markup. A caller that passes `html` owns it.
+    const html = options.html || `<p>${escapeHtml(JSON.stringify(options.data ?? {}))}</p>`;
     const text = options.text || JSON.stringify(options.data);
     
     return sendEmailCore({

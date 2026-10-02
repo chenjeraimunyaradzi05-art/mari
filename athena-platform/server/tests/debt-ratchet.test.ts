@@ -79,6 +79,65 @@ describe('check-debt-ratchet', () => {
       const source = `router.get('/', handler);`;
       expect(ratchet.countDebt('src/services/not-a-route.ts', source)['unvalidated-route-handlers']).toBe(0);
     });
+
+    describe('page sizes read with no ceiling', () => {
+      const unbounded = (source: string, file = 'src/routes/list.routes.ts') =>
+        (ratchet.countDebt(file, source) as unknown as Record<string, number>)['hand-rolled-page-limits'];
+
+      it('counts the reads that took a whole table in one request', () => {
+        const source = `
+          const a = parseInt(req.query.limit as string) || 20;
+          const b = parseInt(req.query.limit as string, 10);
+          const c = Number(req.query.limit ?? 50);
+          const d = Number.parseInt(String(req.query.limit ?? '50'), 10);
+          const e = parseFloat(query.limit);
+          const f = parseInt(req.query['limit'] as string);
+          const g = parseInt(req.query.pageSize as string);
+        `;
+        expect(unbounded(source)).toBe(7);
+      });
+
+      it('counts a route that destructured its query and parsed the bare name', () => {
+        const source = `
+          const { q, limit = '20' } = req.query;
+          const n = parseInt(limit as string);
+        `;
+        expect(unbounded(source)).toBe(1);
+      });
+
+      it('does not count a read that has a bound around it in the same expression', () => {
+        const source = `
+          const a = Math.min(parseInt(req.query.limit as string) || 20, 100);
+          const b = Math.min(Math.max(1, parseInt(req.query.limit as string, 10) || 20), 100);
+          const c = clampLimit(Number(req.query.limit), 20, 100);
+          const d = parseLimit(parseInt(req.query.limit as string), 20, 50);
+        `;
+        expect(unbounded(source)).toBe(0);
+      });
+
+      it('does not count the shared helper, or a limit that is not read from a query', () => {
+        const source = `
+          const a = clampLimit(req.query.limit, 20, 100);
+          const { page, limit } = parsePagination(req.query);
+          const total = parseInt(req.body.limit as string);
+          const radix = parseInt(req.query.page as string);
+        `;
+        expect(unbounded(source)).toBe(0);
+      });
+
+      it('counts them only in a route file: a service is handed a limit, it does not read a query', () => {
+        const source = `const a = parseInt(req.query.limit as string);`;
+        expect(unbounded(source, 'src/services/some.service.ts')).toBe(0);
+      });
+
+      it('ignores a mention in a comment or a string', () => {
+        const source = `
+          // parseInt(req.query.limit) || 20 was how it used to be read
+          const note = 'parseInt(req.query.limit)';
+        `;
+        expect(unbounded(source)).toBe(0);
+      });
+    });
   });
 
   describe('compare', () => {

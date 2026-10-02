@@ -5,19 +5,22 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 // profile, pausing it, the directory's order, the hours a mentor is offered on,
 // and what happens to the mentee's money when a cancellation cannot release it.
 
-jest.mock('../src/utils/prisma', () => ({
-  prisma: {
+jest.mock('../src/utils/prisma', () => {
+  const prisma: any = {
     mentorProfile: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn(), upsert: jest.fn(), update: jest.fn() },
-    mentorSession: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn() },
+    mentorSession: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn(), updateMany: jest.fn(), findUniqueOrThrow: jest.fn() },
     user: { findUnique: jest.fn(), findMany: jest.fn(), updateMany: jest.fn(), update: jest.fn() },
     escrowPayment: { findUnique: jest.fn() },
     notification: { create: jest.fn() },
     follow: { findMany: jest.fn() },
     dvSafetyProfile: { findUnique: jest.fn() },
     userSafetySettings: { findUnique: jest.fn(), findMany: jest.fn() },
-    $transaction: jest.fn(async (ops: any) => Promise.all(ops)),
-  },
-}));
+    // Both forms: updating a session moves it inside an interactive transaction,
+    // which is handed the same client; the array form is still run as a batch.
+    $transaction: jest.fn(async (work: any) => (typeof work === 'function' ? work(prisma) : Promise.all(work))),
+  };
+  return { prisma };
+});
 
 jest.mock('../src/services/stripe-connect.service', () => ({
   ...(jest.requireActual('../src/services/stripe-connect.service') as object),
@@ -37,6 +40,8 @@ jest.mock('../src/middleware/account-gates', () => ({
   ...(jest.requireActual('../src/middleware/account-gates') as object),
   womanGateState: jest.fn(async () => ({})),
   isWomanVerified: jest.fn(() => true),
+  // The age gate reads the member from the database; these members are adults.
+  requireAdultAccount: (_req: any, _res: any, next: any) => next(),
 }));
 
 jest.mock('../src/middleware/auth', () => ({
@@ -236,7 +241,14 @@ describe('Cancelling a session whose hold cannot be released', () => {
       sessionAmount: 100,
       currency: 'AUD',
     });
-    prisma.mentorSession.update.mockImplementation(async ({ data }: any) => ({ id: 's1', ...data }));
+    // A session is moved only if it is still where it was read (updateMany), and
+    // is then read back; the read-back is what the route answers with.
+    let moved: Record<string, unknown> = {};
+    prisma.mentorSession.updateMany.mockImplementation(async ({ data }: any) => {
+      moved = data;
+      return { count: 1 };
+    });
+    prisma.mentorSession.findUniqueOrThrow.mockImplementation(async () => ({ id: 's1', ...moved }));
     prisma.user.findMany.mockResolvedValue([{ id: 'admin-1' }]);
     prisma.notification.create.mockResolvedValue({});
     notify.mockResolvedValue(undefined);
@@ -252,7 +264,7 @@ describe('Cancelling a session whose hold cannot be released', () => {
       .send({ status: 'CANCELED' })
       .expect(200);
 
-    const written = prisma.mentorSession.update.mock.calls[0][0].data;
+    const written = prisma.mentorSession.updateMany.mock.calls[0][0].data;
     expect(written.status).toBe('CANCELED');
     // The money has not moved, so the record does not say it has.
     expect(written.paymentStatus).toBeUndefined();
@@ -272,7 +284,7 @@ describe('Cancelling a session whose hold cannot be released', () => {
     await request(app).patch('/api/mentors/sessions/s1/status').set(as('mentee-1')).send({ status: 'CANCELED' }).expect(200);
 
     expect(stripeConnect.cancelEscrowPayment).not.toHaveBeenCalled();
-    expect(prisma.mentorSession.update.mock.calls[0][0].data.paymentStatus).toBe('CANCELED');
+    expect(prisma.mentorSession.updateMany.mock.calls[0][0].data.paymentStatus).toBe('CANCELED');
     expect(prisma.notification.create).not.toHaveBeenCalled();
   });
 });
@@ -295,7 +307,8 @@ describe('A mentor closing a paid session', () => {
       sessionAmount: 120,
       currency: 'AUD',
     });
-    prisma.mentorSession.update.mockImplementation(async ({ data }: any) => ({ id: 's2', ...data }));
+    prisma.mentorSession.updateMany.mockResolvedValue({ count: 1 });
+    prisma.mentorSession.findUniqueOrThrow.mockResolvedValue({ id: 's2', status: 'COMPLETED' });
     prisma.mentorProfile.update.mockResolvedValue({});
     prisma.escrowPayment.findUnique.mockResolvedValue({ status: 'AUTHORIZED', capturedAt: null });
     (stripeConnect.captureEscrowPayment as jest.Mock).mockResolvedValue({ status: 'succeeded', amountCaptured: 12000 } as never);

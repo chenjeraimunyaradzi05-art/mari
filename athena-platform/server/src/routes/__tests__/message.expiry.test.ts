@@ -9,6 +9,8 @@ jest.mock('../../utils/prisma', () => ({
     messageReaction: { findUnique: jest.fn(), create: jest.fn(), deleteMany: jest.fn() },
     user: { findUnique: jest.fn() },
     userSafetySettings: { findMany: jest.fn() },
+    // The DV safety page's own block list, the second place a block can be written: nobody is blocked there unless a test says so.
+    dvSafetyProfile: { findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
     $transaction: jest.fn(),
   },
 }));

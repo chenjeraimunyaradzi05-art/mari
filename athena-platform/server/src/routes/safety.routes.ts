@@ -12,13 +12,13 @@ import { evaluateSafetyScore } from '../services/moderation.service';
 import {
   calculateSafetyScore,
   getSafetyStatus,
-  handleUserBlock,
   handleUserReport,
   verifyReport,
 } from '../services/safety-score.service';
-import { recordSafetyReport, recordUserBlock } from '../services/trust.service';
+import { recordSafetyReport } from '../services/trust.service';
 import { prisma } from '../utils/prisma';
-import { blockUser, listBlockedUsers, unblockUser } from '../utils/safety-store';
+import { listBlockedUsers } from '../utils/safety-store';
+import { applyBlock, liftBlock } from '../services/block.service';
 import { reviewReportedContent } from '../services/moderation-threshold.service';
 import { reportLimiter } from '../middleware/socialLimits';
 import {
@@ -28,10 +28,47 @@ import {
   type ReportPriority,
 } from '../services/content-report.service';
 import { withdrawPresence } from '../services/presence.service';
+import { DEFAULT_MESSAGE_AUDIENCE } from '../services/message-permissions.service';
+import {
+  captureGroupReport,
+  captureLiveMessageReport,
+  captureLiveStreamReport,
+  captureMessageReport,
+} from '../services/report-context.service';
+import { reviewUnwantedContact } from '../services/unwanted-contact.service';
 
 const router = Router();
 
-type ReportTargetType = 'post' | 'comment' | 'video' | 'user' | 'message' | 'channel' | 'event' | 'other';
+type ReportTargetType =
+  | 'post'
+  | 'comment'
+  | 'video'
+  | 'user'
+  | 'message'
+  | 'group_message'
+  | 'channel'
+  | 'event'
+  | 'group'
+  | 'livestream'
+  | 'live_message'
+  | 'housing_listing'
+  | 'other';
+
+const REPORT_TARGET_TYPES: ReportTargetType[] = [
+  'post',
+  'comment',
+  'video',
+  'user',
+  'message',
+  'group_message',
+  'channel',
+  'event',
+  'group',
+  'livestream',
+  'live_message',
+  'housing_listing',
+  'other',
+];
 
 // ContentReport speaks the moderation queue's vocabulary; the Safety Center
 // speaks the reporter's. Translate on the way out so a reporter still sees
@@ -93,13 +130,21 @@ async function resolveReportedUserId(
       const video = await prisma.video.findUnique({ where: { id: targetId }, select: { authorId: true } });
       return video?.authorId ?? null;
     }
-    case 'message': {
-      const message = await prisma.message.findUnique({ where: { id: targetId }, select: { senderId: true } });
-      return message?.senderId ?? null;
-    }
+    // 'message', 'group', 'livestream' and 'live_message' are not resolved here:
+    // each also needs the reporter checked against the thing and a copy of it
+    // kept, so they go through report-context.service, which names the account
+    // as part of the same read.
     case 'channel': {
       const channel = await prisma.channel.findUnique({ where: { id: targetId }, select: { ownerId: true } });
       return channel?.ownerId ?? null;
+    }
+    // A housing listing routes to the member who listed it. Only a live listing
+    // is reportable: a held, let or withdrawn one is not in front of anyone but
+    // its lister and staff, so a report of it would be one nobody could have
+    // read the listing to make.
+    case 'housing_listing': {
+      const listing = await prisma.housingListing.findUnique({ where: { id: targetId }, select: { agentId: true, status: true } });
+      return listing && listing.status === 'ACTIVE' ? listing.agentId : null;
     }
     default:
       return null;
@@ -128,6 +173,7 @@ const safetyCheckLimiter = createRateLimiter({
     res.status(429).json({ success: false, message: 'Too many checks for now. Please try again in a few minutes.' }),
 });
 
+// validated: content must be non-empty text of at most CONTENT_LIMITS.post characters.
 router.post('/', authenticate, safetyCheckLimiter, async (req: AuthRequest, res, next) => {
   try {
     const { content } = req.body ?? {};
@@ -202,7 +248,7 @@ router.post(
   authenticate,
   reportLimiter,
   [
-    body('targetType').notEmpty().isIn(['post', 'comment', 'video', 'user', 'message', 'channel', 'event', 'other']),
+    body('targetType').notEmpty().isIn(REPORT_TARGET_TYPES),
     body('reason').custom(isReportableReason).withMessage('Choose one of the reasons on the report form'),
     body('targetId').optional().isString(),
     body('details').optional().isString().isLength({ max: 5000 }),
@@ -214,16 +260,48 @@ router.post(
         throw new ApiError(400, errors.array()[0].msg);
       }
 
-      const { targetType, targetId, details } = req.body as {
+      const { targetType: askedType, targetId, details } = req.body as {
         targetType: ReportTargetType;
         targetId?: string;
         details?: string;
       };
+      // A group chat's messages are the same rows as a direct thread's, and the
+      // capture below tells the two apart by where the reporter stands, so the
+      // report is filed as a message either way. The name exists so a client can
+      // say which kind it is reporting.
+      const targetType: ReportTargetType = askedType === 'group_message' ? 'message' : askedType;
       // The feed sends OTHER, the dialogs send lower case; the queue and the
       // score read one spelling.
       const reason = String(req.body.reason).trim().toLowerCase();
 
-      const reportedUserId = await resolveReportedUserId(targetType, targetId);
+      // What the report keeps of the thing it is about, beside the ticket in
+      // the evidence. A message, a live-chat line or a stream can be unsent,
+      // swept, deleted by its host or removed by the very decision this report
+      // asks for, so the words are copied now. The same read checks the
+      // reporter is entitled to report it at all.
+      const reporterId = req.user?.id;
+      if (!reporterId) throw new ApiError(401, 'Authentication required');
+      let reportedUserId: string | null;
+      let evidenceContext: Record<string, unknown> = {};
+      if (targetType === 'message' && targetId) {
+        const captured = await captureMessageReport(reporterId, targetId);
+        reportedUserId = captured.reportedUserId;
+        evidenceContext = { messageContext: captured.context };
+      } else if (targetType === 'live_message' && targetId) {
+        const captured = await captureLiveMessageReport(reporterId, targetId);
+        reportedUserId = captured.reportedUserId;
+        evidenceContext = { liveContext: captured.context };
+      } else if (targetType === 'livestream' && targetId) {
+        const captured = await captureLiveStreamReport(reporterId, targetId);
+        reportedUserId = captured.reportedUserId;
+        evidenceContext = { liveContext: captured.context };
+      } else if (targetType === 'group' && targetId) {
+        const captured = await captureGroupReport(reporterId, targetId);
+        reportedUserId = captured.reportedUserId;
+        evidenceContext = { groupContext: captured.context };
+      } else {
+        reportedUserId = await resolveReportedUserId(targetType, targetId);
+      }
 
       // A report the moderation queue cannot route is worse than no report, so
       // say so instead of accepting it into a void.
@@ -270,6 +348,7 @@ router.post(
             reviewHours: intake.reviewHours,
             priority: intake.priority,
             source: 'IN_APP_REPORT',
+            ...evidenceContext,
           },
         },
       });
@@ -283,9 +362,20 @@ router.post(
         'safety.report.safety-score',
         handleUserReport(reportedUserId, req.user!.id, reason, targetId, targetType)
       );
-      // Enough different reporters take the content down while it is reviewed.
+      // A report of somebody's messages is one of the three things that, in
+      // number, put an account in front of a moderator; reviewUnwantedContact
+      // never throws.
+      if (targetType === 'message' || targetType === 'user') {
+        await reviewUnwantedContact(reportedUserId);
+      }
+      // Enough different reporters take the content down while it is reviewed,
+      // and for the few reasons that cannot wait for three (an intimate image,
+      // a threat, child abuse material, terrorism) one signed-in report does.
       if ((targetType === 'post' || targetType === 'comment' || targetType === 'video') && targetId) {
-        await bestEffort('safety.report.auto-hide', reviewReportedContent(targetType, targetId));
+        await bestEffort(
+          'safety.report.auto-hide',
+          reviewReportedContent(targetType, targetId, { reason, ticketId: intake.ticketId })
+        );
       }
       await bestEffort(
         'safety.report.intake-consequences',
@@ -372,12 +462,11 @@ router.post(
         throw new ApiError(404, 'User not found');
       }
 
-      const { created } = await blockUser(req.user!.id, blockedUserId);
-
-      if (created) {
-        await recordUserBlock(blockedUserId);
-        await handleUserBlock(blockedUserId, req.user!.id);
-      }
+      // The block, and what it counts towards, are one act for every door that
+      // can block (services/block.service). What follows the block cannot fail
+      // it: it used to, and a block that was in place was reported to her as
+      // one that was not.
+      const { created } = await applyBlock(req.user!.id, blockedUserId, { source: 'safety-centre' });
 
       const [block] = (await listBlockedUsers(req.user!.id)).filter(
         (entry) => entry.blockedUserId === blockedUserId
@@ -393,7 +482,7 @@ router.post(
 router.delete('/blocks/:blockedUserId', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { blockedUserId } = req.params;
-    await unblockUser(req.user!.id, blockedUserId);
+    await liftBlock(req.user!.id, blockedUserId);
 
     res.json({ success: true });
   } catch (error) {
@@ -409,14 +498,26 @@ const PROFILE_VISIBILITIES = ['public', 'connections', 'private'] as const;
 
 // Defaults mirror the UserSafetySettings model, so a user who has never saved
 // reads the same values the database would give them on first write.
+//
+// Only the switches something enforces are here. The model also carries
+// filterOffensiveContent, hideLastSeen and enableSafetyAlerts, which were
+// stored, read back and shown, and read by nothing else: messages are screened
+// the same way for every recipient whatever filterOffensiveContent said, no
+// last-seen time is served to anyone for hideLastSeen to hide, and no alert
+// listened to enableSafetyAlerts. A switch that looks like protection and is
+// not is worse than no switch, so the API no longer serves them or takes them.
+// The columns are left in the table, reserved, so that no migration is needed
+// and a restore comparison (utils/restore-safety-diff) still reads what was
+// there; a caller that still sends one is ignored, not refused.
+//
+// allowMessagesFrom is what message-permissions.service answers for a member
+// with no row, so the page shows what the server will do and a row made by an
+// unrelated save does not quietly narrow who may write to her.
 const SAFETY_PREFERENCE_DEFAULTS = {
-  allowMessagesFrom: 'connections',
-  filterOffensiveContent: true,
+  allowMessagesFrom: DEFAULT_MESSAGE_AUDIENCE as string,
   hideReadReceipts: false,
   profileVisibility: 'public',
   hideOnlineStatus: false,
-  hideLastSeen: false,
-  enableSafetyAlerts: true,
 };
 
 router.get('/settings', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -435,12 +536,9 @@ router.get('/settings', authenticate, async (req: AuthRequest, res: Response, ne
       where: { userId: req.user!.id },
       select: {
         allowMessagesFrom: true,
-        filterOffensiveContent: true,
         hideReadReceipts: true,
         profileVisibility: true,
         hideOnlineStatus: true,
-        hideLastSeen: true,
-        enableSafetyAlerts: true,
       },
     });
 
@@ -450,8 +548,14 @@ router.get('/settings', authenticate, async (req: AuthRequest, res: Response, ne
         allowMessages: user?.allowMessages ?? true,
         isSafeMode: profile?.isSafeMode ?? false,
         hideFromSearch: profile?.hideFromSearch ?? false,
-        ...SAFETY_PREFERENCE_DEFAULTS,
-        ...(preferences ?? {}),
+        // Named, not spread: what the row holds beyond these keys (the reserved
+        // columns) is not hers to be shown as a setting.
+        ...Object.fromEntries(
+          (Object.keys(SAFETY_PREFERENCE_DEFAULTS) as Array<keyof typeof SAFETY_PREFERENCE_DEFAULTS>).map((key) => [
+            key,
+            preferences?.[key] ?? SAFETY_PREFERENCE_DEFAULTS[key],
+          ])
+        ),
       },
     });
   } catch (error) {
@@ -467,12 +571,9 @@ router.patch(
     body('isSafeMode').optional().isBoolean(),
     body('hideFromSearch').optional().isBoolean(),
     body('allowMessagesFrom').optional().isIn(MESSAGE_AUDIENCES),
-    body('filterOffensiveContent').optional().isBoolean(),
     body('hideReadReceipts').optional().isBoolean(),
     body('profileVisibility').optional().isIn(PROFILE_VISIBILITIES),
     body('hideOnlineStatus').optional().isBoolean(),
-    body('hideLastSeen').optional().isBoolean(),
-    body('enableSafetyAlerts').optional().isBoolean(),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
@@ -503,6 +604,23 @@ router.patch(
             hideFromSearch: typeof hideFromSearch === 'boolean' ? hideFromSearch : false,
           },
         });
+      }
+
+      // The DV page keeps a copy of these three switches and reads it back to her
+      // (routes/dv-safe.routes, services/dv-safe.service). Search and Safe Mode
+      // read that copy as well as this one, so a member who turned Safe Mode
+      // off here would still be treated as in it, and one who opened her
+      // messages here would be told on the DV page that they were closed. Only
+      // a copy that already exists is updated: this is not a way of making one,
+      // since having a DV profile is something she asks for there.
+      const dvCopy = {
+        ...(typeof allowMessages === 'boolean' ? { allowMessages } : {}),
+        ...(typeof isSafeMode === 'boolean' ? { isSafeMode } : {}),
+        ...(typeof hideFromSearch === 'boolean' ? { hideFromSearch } : {}),
+      };
+      const memberId = req.user?.id;
+      if (memberId && Object.keys(dvCopy).length > 0) {
+        await prisma.dvSafetyProfile.updateMany({ where: { userId: memberId }, data: dvCopy });
       }
 
       // Only the keys the caller actually sent are written, so a page that owns

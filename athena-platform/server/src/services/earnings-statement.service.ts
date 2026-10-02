@@ -20,8 +20,12 @@
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { minorUnitScale } from './stripe-connect.service';
+import { isGstRegistered } from './invoice.service';
 
 const QUEENSLAND_OFFSET_MS = 10 * 60 * 60 * 1000;
+
+/** GST is one eleventh of a GST-inclusive price: 10 per cent on top of the rest. */
+const GST_FRACTION_DENOMINATOR = 11;
 
 /** A row as the statement and the CSV carry it. Amounts in minor units of `currency`. */
 export interface StatementLine {
@@ -33,9 +37,21 @@ export interface StatementLine {
   currency: string;
   gross: number;
   fee: number;
+  /**
+   * The GST inside `fee`, one eleventh of it, once ATHENA is registered for GST
+   * and the payment was in Australian dollars; zero before that. ATHENA's fee is
+   * quoted as the whole of what it keeps, so it includes the GST, the way an
+   * Australian price does. Informational: the statement is not a tax invoice.
+   */
+  feeGst: number;
   net: number;
   /** RELEASED, or REFUNDED when the buyer was refunded after the release. */
   status: 'RELEASED' | 'REFUNDED';
+  /**
+   * How much of `gross` has been given back to the buyer so far. A sale
+   * refunded in part is still RELEASED, so this is what says it was.
+   */
+  refunded: number;
 }
 
 export interface StatementTotals {
@@ -44,6 +60,8 @@ export interface StatementTotals {
   count: number;
   gross: number;
   fee: number;
+  /** The GST inside `fee`. See StatementLine. */
+  feeGst: number;
   net: number;
   /** Released and later refunded to the buyer; not in the figures above. */
   refundedCount: number;
@@ -60,6 +78,12 @@ export interface EarningsStatement {
   generatedAt: string;
   lines: StatementLine[];
   totals: StatementTotals[];
+  /**
+   * Whether ATHENA is registered for GST today. When it is, each line and total
+   * carries the GST inside the fee, and the CSV gains a column for it. Before
+   * that the figures are left as they were, with no GST column to explain.
+   */
+  gstRegistered: boolean;
   /** The financial years she has anything in, newest first, always including the current one. */
   availableYears: number[];
 }
@@ -87,6 +111,8 @@ export function financialYearLabel(financialYear: number): string {
 const KIND_LABELS: Record<string, string> = {
   mentor_session: 'Mentor session',
   service_order: 'Marketplace order',
+  service_booking: 'Marketplace booking',
+  custom_request: 'Marketplace request',
   vehicle_purchase: 'Car sale',
   car_service: 'Workshop job',
   vehicle_inspection: 'Vehicle inspection',
@@ -146,6 +172,7 @@ export async function getEarningsStatement(
         description: true,
         sessionType: true,
         capturedAt: true,
+        refundedAmount: true,
       },
     }),
     availableFinancialYears(userId, now),
@@ -159,19 +186,27 @@ export async function getEarningsStatement(
     currency: row.currency.toUpperCase(),
     gross: row.amount,
     fee: row.platformFee,
+    // Asked of the day the money was released, not of today: ATHENA's registration
+    // starts on a day, and a payment released before it carried no GST in its fee.
+    feeGst:
+      row.currency.toUpperCase() === 'AUD' && isGstRegistered(row.capturedAt as Date)
+        ? Math.round(row.platformFee / GST_FRACTION_DENOMINATOR)
+        : 0,
     net: row.amount - row.platformFee,
     status: row.status === 'REFUNDED' ? 'REFUNDED' : 'RELEASED',
+    refunded: row.refundedAmount ?? 0,
   }));
 
   const byCurrency = new Map<string, StatementTotals>();
   for (const line of lines) {
     const totals =
       byCurrency.get(line.currency) ??
-      { currency: line.currency, count: 0, gross: 0, fee: 0, net: 0, refundedCount: 0, refundedNet: 0 };
+      { currency: line.currency, count: 0, gross: 0, fee: 0, feeGst: 0, net: 0, refundedCount: 0, refundedNet: 0 };
     if (line.status === 'RELEASED') {
       totals.count += 1;
       totals.gross += line.gross;
       totals.fee += line.fee;
+      totals.feeGst += line.feeGst;
       totals.net += line.net;
     } else {
       totals.refundedCount += 1;
@@ -188,6 +223,7 @@ export async function getEarningsStatement(
     generatedAt: now.toISOString(),
     lines,
     totals: [...byCurrency.values()].sort((a, b) => b.net - a.net),
+    gstRegistered: isGstRegistered(now),
     availableYears,
   };
 }
@@ -225,6 +261,7 @@ export function statementToCsv(statement: EarningsStatement): string {
     'Currency',
     'Paid by buyer',
     'ATHENA fee',
+    ...(statement.gstRegistered ? ['GST in ATHENA fee'] : []),
     'Paid to you',
     'Status',
   ];
@@ -238,8 +275,13 @@ export function statementToCsv(statement: EarningsStatement): string {
       line.currency,
       decimal(line.gross, line.currency),
       decimal(line.fee, line.currency),
+      ...(statement.gstRegistered ? [decimal(line.feeGst, line.currency)] : []),
       decimal(line.net, line.currency),
-      line.status === 'REFUNDED' ? 'Refunded to the buyer after release' : 'Released',
+      line.status === 'REFUNDED'
+        ? 'Refunded to the buyer after release'
+        : line.refunded > 0
+          ? `Released; ${decimal(line.refunded, line.currency)} of it refunded to the buyer`
+          : 'Released',
     ]
       .map(cell)
       .join(',')
@@ -250,10 +292,11 @@ export function statementToCsv(statement: EarningsStatement): string {
       'Total',
       '',
       '',
-      `${t.count} payment(s) released and not refunded`,
+      `${t.count} payment(s) released and not refunded in full`,
       t.currency,
       decimal(t.gross, t.currency),
       decimal(t.fee, t.currency),
+      ...(statement.gstRegistered ? [decimal(t.feeGst, t.currency)] : []),
       decimal(t.net, t.currency),
       t.refundedCount > 0 ? `${t.refundedCount} refunded after release, not included` : '',
     ]
@@ -264,6 +307,9 @@ export function statementToCsv(statement: EarningsStatement): string {
   const notes = [
     `ATHENA earnings statement, financial year ${statement.label}. Generated ${statement.generatedAt}.`,
     'A record of payments ATHENA released to you through Stripe, from ATHENA\'s escrow records. It is not a tax invoice and not tax advice.',
+    ...(statement.gstRegistered
+      ? ['ATHENA is registered for GST. The GST in ATHENA fee column is one eleventh of the fee, which is quoted as the whole of what ATHENA keeps. Ask your accountant how it applies to you.']
+      : []),
     'Your Stripe dashboard is the record of what reached your bank. Ask a registered tax agent or the ATO how to report this income.',
   ].map(note => cell(note));
 

@@ -3,6 +3,8 @@ import { prisma } from '../utils/prisma';
 import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
 import { hiddenMemberWhere, viewerContextFor } from '../services/search.service';
 import crypto from 'crypto';
+import { z } from 'zod';
+import { parseWith } from '../middleware/validate';
 
 const router = Router();
 
@@ -206,14 +208,17 @@ router.get('/validate/:code', async (req, res: Response, next: NextFunction) => 
  * Track a new referral when a user signs up with a code
  * Requires authentication - uses the authenticated user's ID
  */
+const trackBody = z.object({
+  referralCode: z.string().trim().min(1, 'referralCode is required').max(40),
+  source: z.string().trim().max(50).nullable().optional(),
+});
+
 router.post('/track', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { referralCode, source } = req.body;
+    // `referralCode.toUpperCase()` below threw for anything that was not text,
+    // and `source` was stored at any length.
+    const { referralCode, source } = parseWith(trackBody, req.body);
     const newUserId = req.user!.id; // Use authenticated user's ID, not from body
-
-    if (!referralCode) {
-      return res.status(400).json({ error: 'referralCode is required' });
-    }
 
     // Find referrer
     const referrer = await prisma.user.findUnique({

@@ -4,6 +4,7 @@ import multer from 'multer';
 import { ZodError } from 'zod';
 import { logger } from '../utils/logger';
 import { captureException } from '../utils/sentry';
+import { loggablePath } from '../utils/request-path';
 import { ERROR_KEYS, i18nService, SupportedLocale } from '../services/i18n.service';
 
 export interface AppError extends Error {
@@ -111,6 +112,12 @@ export function normalizeErrorBodies(_req: Request, res: Response, next: NextFun
   next();
 }
 
+/** The code an ApiError was raised with, when it is a plain upper-case token. */
+function codeOf(err: AppError): string | undefined {
+  const code = (err as { details?: { code?: unknown } }).details?.code;
+  return typeof code === 'string' && /^[A-Z][A-Z0-9_]{1,63}$/.test(code) ? code : undefined;
+}
+
 export const errorHandler = (
   err: AppError,
   req: Request,
@@ -154,7 +161,7 @@ export const errorHandler = (
     requestId,
     statusCode,
     method: req.method,
-    path: req.path,
+    path: loggablePath(req),
     ...(statusCode >= 500 ? { stack: err.stack } : {}),
   });
 
@@ -168,11 +175,18 @@ export const errorHandler = (
   // Sentry, like a quiet night.
   //
   // Every failure of ours is reported from here now, with the request id that
-  // ties it to the log line above. The body, the query string and the headers
-  // are not attached: they can carry a member's messages, her address or her
-  // safety plan, and Sentry is a third party.
+  // ties it to the log line above. This call hands over those four fields and
+  // nothing else, but the SDK does not stop there: its HTTP integration
+  // attaches the incoming request to the event on its own, body included, and
+  // for a while that was what a 500 on a safe-chat message sent to a third
+  // party (the message and the PIN with it). The body, the query string, the
+  // cookies and every header but a short allow-list are therefore refused at
+  // the source and stripped again before the event leaves (initSentry and
+  // scrubEvent in utils/sentry.ts, tested in utils/__tests__/sentry.test.ts),
+  // because they can carry a member's messages, her address or her safety
+  // plan, and Sentry is a third party.
   if (reportsToSentry(statusCode, operational)) {
-    captureException(err, { requestId, statusCode, method: req.method, path: req.path });
+    captureException(err, { requestId, statusCode, method: req.method, path: loggablePath(req) });
   }
 
   const hasDebugAccess = debugHeaderMatches(req.headers['x-debug-auth'], process.env.DEBUG_SECRET);
@@ -192,6 +206,11 @@ export const errorHandler = (
     // both names means neither guess is wrong. See normalizeErrorBodies below
     // for the other direction.
     error: message,
+    // The machine-readable reason, for an error that was raised with one
+    // (new ApiError(503, '...', { code: 'PAYMENTS_PAUSED' })). The code was always
+    // kept on the error and never sent, so a page could not tell a paused
+    // payment from any other 503 without matching on the sentence.
+    ...(codeOf(err) && { code: codeOf(err) }),
     i18nKey,
     ...(err.i18nParams && { i18nParams: err.i18nParams }),
     ...(requestId && { requestId }),
