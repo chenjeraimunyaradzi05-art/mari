@@ -11,7 +11,11 @@ export interface ChatMessageReply {
 export interface ChatMessageAttachment {
   id: string;
   type: 'image' | 'video' | 'audio' | 'file';
-  url: string;
+  // A link, on a message from before chat files were private. A file sent
+  // since carries only its key; a link is minted for whoever may open it when
+  // it is shown (lib/chat-attachments).
+  url?: string;
+  key?: string;
   name?: string;
   size?: number;
   mimeType?: string;
@@ -99,7 +103,8 @@ export function toChatMessage(raw: any, viewerId?: string): ChatMessage {
       ? attachments.map((attachment: any, index: number) => ({
           id: attachment.key || attachment.url || `${raw.id}-${index}`,
           type: attachmentType(attachment?.contentType),
-          url: attachment.url,
+          url: typeof attachment.url === 'string' ? attachment.url : undefined,
+          key: typeof attachment.key === 'string' ? attachment.key : undefined,
           name: attachment.name,
           size: attachment.size,
           mimeType: attachment.contentType,

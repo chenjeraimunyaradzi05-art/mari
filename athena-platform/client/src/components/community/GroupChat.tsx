@@ -38,8 +38,9 @@ type ChatMessage = {
 };
 
 // The same picker the direct-message thread offers: pictures, clips and
-// voice notes, which the media service serves publicly to the room. Other
-// files would land in a private folder the rest of the room cannot open.
+// voice notes. A file goes to this room's own private folder, where only its
+// members can open it, through a link the API mints for each of them
+// (lib/chat-attachments); it used to be served publicly to anyone with the link.
 const ATTACHMENT_ACCEPT = 'image/*,video/*,audio/*';
 const MAX_ATTACHMENTS = 4;
 
@@ -108,7 +109,7 @@ export function GroupChat({ groupId, canModerate }: { groupId: string; canModera
   const [held, setHeld] = useState<Held>({ groupId, messages: [], hasEarlier: null });
   const endRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const uploadAttachment = useUploadChatAttachment();
+  const uploadAttachment = useUploadChatAttachment({ groupId });
 
   const latest = useQuery({
     queryKey: ['group-chat', groupId],

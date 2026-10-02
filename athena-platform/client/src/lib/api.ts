@@ -838,6 +838,23 @@ export const mediaApi = {
     });
   },
 
+  // A file for a conversation or a group room. It is stored under that
+  // thread's own private folder and opened only by the people in it, through a
+  // short-lived link the server mints for each of them (lib/chat-attachments).
+  // Who it is for travels in the query, because the server decides whether she
+  // may send there before it reads a byte; a clip says so too (video=1), since
+  // its ceiling, and whether it is received to memory or to disk, are decided
+  // the same way.
+  uploadChatFile: (file: File, target: { conversationId: string } | { groupId: string }) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const params: Record<string, string> = { ...target, ...(file.type.startsWith('video/') ? { video: '1' } : {}) };
+    return uploadClient.post('/media/upload/chat', formData, {
+      params,
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+
   uploadResume: (file: File) => {
     const formData = new FormData();
     formData.append('resume', file);

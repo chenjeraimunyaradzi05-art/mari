@@ -1291,11 +1291,15 @@ export function useMessages(conversationId: string) {
 // What the send endpoint accepts alongside the text — an already-uploaded file,
 // described by the URL the media service handed back.
 export interface OutgoingAttachment {
-  url: string;
+  /** Where the file now lives, under the conversation's own folder (lib/chat-attachments). Never a link. */
+  key: string;
   name?: string;
   contentType?: string;
   size?: number;
 }
+
+/** Which conversation a file is for. It decides who may ever open it, so it is said before the file goes up. */
+export type ChatUploadTarget = { conversationId: string } | { groupId: string };
 
 export function useSendMessage() {
   const queryClient = useQueryClient();
@@ -1366,22 +1370,20 @@ export function useToggleMessageReaction() {
   });
 }
 
-// Chat attachments ride the shared media pipeline, which only serves the
-// `posts` and `videos` folders publicly — a recipient cannot read anything we
-// put in the private folders, so those types are refused at the picker.
-export function useUploadChatAttachment() {
+// A file sent in a conversation goes to that conversation's own private
+// folder, and the message carries its key: it is opened only by the people in
+// the thread, through a link the API mints for each of them when the message is
+// shown (lib/chat-attachments). It used to go up as a post picture or a reel,
+// to a public link with no audience, no expiry and no deletion, and the server
+// no longer accepts a link on a message at all.
+export function useUploadChatAttachment(target: ChatUploadTarget) {
   return useMutation({
     mutationFn: async (file: File): Promise<OutgoingAttachment> => {
-      const uploadType = file.type.startsWith('video/')
-        ? 'video'
-        : file.type.startsWith('audio/')
-          ? 'audio'
-          : 'post';
-      const response = await mediaApi.upload(uploadType, file);
+      const response = await mediaApi.uploadChatFile(file, target);
       const uploaded = response.data.data;
 
       return {
-        url: uploaded.url,
+        key: uploaded.key,
         name: file.name,
         contentType: uploaded.contentType,
         size: uploaded.size,

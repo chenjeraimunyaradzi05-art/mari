@@ -78,6 +78,24 @@ describe('mediaApi uploads', () => {
     expect(proxyClient().post).not.toHaveBeenCalled();
   });
 
+  it('sends a chat file to the conversation it is for, and says when it is a clip', async () => {
+    const picture = new File(['RIFF'], 'kitchen.webp', { type: 'image/webp' });
+    const clip = new File(['....'], 'clip.mp4', { type: 'video/mp4' });
+
+    await mediaApi.uploadChatFile(picture, { conversationId: 'conv-1' });
+    await mediaApi.uploadChatFile(clip, { groupId: 'group-1' });
+
+    const [forPicture, forClip] = uploadClient().post.mock.calls;
+    expect(forPicture[0]).toBe('/media/upload/chat');
+    expect((forPicture[1] as FormData).get('file')).toBe(picture);
+    // Who the file is for travels in the query, read before a byte of it is.
+    expect(forPicture[2]).toMatchObject({ params: { conversationId: 'conv-1' } });
+    expect((forPicture[2] as { params: Record<string, string> }).params).not.toHaveProperty('video');
+    // A clip is received differently, so it says so up front.
+    expect(forClip[2]).toMatchObject({ params: { groupId: 'group-1', video: '1' } });
+    expect(proxyClient().post).not.toHaveBeenCalled();
+  });
+
   it('leaves small calls on the proxy, where the session cookie lives', async () => {
     await mediaApi.downloadUrl('resumes/u1/cv.pdf');
 

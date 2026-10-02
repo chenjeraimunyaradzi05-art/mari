@@ -54,15 +54,16 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ReportDialog } from '@/components/safety/ReportDialog';
-import { safeHref } from '@/lib/safe-href';
+import { MessageAttachment } from '@/components/social/MessageAttachment';
 import { blockMemberFromThread } from './member-safety';
 
 interface ChatWindowProps {
   conversationId: string;
 }
 
-// The media pipeline only serves images and video publicly; anything else would
-// upload fine and then 403 for the person we sent it to.
+// Pictures and clips from the picker, voice notes from the recorder. A file goes
+// to this conversation's own private folder, where only the two people in it
+// can open it (lib/chat-attachments); it used to go up as a public post picture.
 const ATTACHMENT_ACCEPT = 'image/*,video/*';
 const MAX_ATTACHMENTS = 4;
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '🎉', '🙏'];
@@ -86,7 +87,7 @@ function timeUntil(iso: string): string {
 export default function ChatWindow({ conversationId }: ChatWindowProps) {
   const { data: apiMessages, isLoading } = useMessages(conversationId);
   const sendMessageMutation = useSendMessage();
-  const uploadAttachment = useUploadChatAttachment();
+  const uploadAttachment = useUploadChatAttachment({ conversationId });
   const toggleReaction = useToggleMessageReaction();
   const { user } = useAuthStore();
   const { isOnline } = usePresenceStore();
@@ -834,43 +835,9 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
   );
 }
 
-function MessageAttachment({ attachment }: { attachment: NonNullable<StoreMessage['attachments']>[number] }) {
-  if (attachment.type === 'image') {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element -- user uploads come from the media CDN, which is not in the image config
-      <img
-        src={attachment.url}
-        alt={attachment.name || 'Attachment'}
-        className="max-h-64 w-full rounded-md object-cover"
-      />
-    );
-  }
-
-  if (attachment.type === 'video') {
-    return <video src={attachment.url} controls className="max-h-64 w-full rounded-md" />;
-  }
-
-  if (attachment.type === 'audio') {
-    return (
-      <div className="flex items-center gap-2">
-        <Mic className="h-4 w-4 flex-shrink-0 opacity-70" aria-hidden />
-        <audio src={attachment.url} controls preload="metadata" className="h-9 w-56 max-w-full" aria-label="Voice note" />
-      </div>
-    );
-  }
-
-  return (
-    <a
-      href={safeHref(attachment.url)}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="flex items-center gap-2 text-sm underline"
-    >
-      <FileText className="w-4 h-4" />
-      {attachment.name || 'Attachment'}
-    </a>
-  );
-}
+// A file on a message is drawn by the renderer the group room shares
+// (components/social/MessageAttachment), which mints a link for a file in the
+// private chat folder and shows an older public link as it was.
 
 // Only the sender sees these, and each one reflects something the server
 // actually told us — never an assumption that a message was read.
