@@ -20,8 +20,12 @@ function VerifyEmailContent() {
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
   
-  const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
+  const [status, setStatus] = useState<'loading' | 'success' | 'choose-password' | 'error'>('loading');
   const [message, setMessage] = useState('');
+  // The one-time link to choose a password, when the server hands one back:
+  // an address registered twice before anyone confirmed it has had its password
+  // withdrawn, and the person who proved the inbox chooses it now.
+  const [setPasswordToken, setSetPasswordToken] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token) {
@@ -33,6 +37,12 @@ function VerifyEmailContent() {
     const verifyEmail = async () => {
       try {
         const response = await api.get(`/auth/verify-email?token=${token}`);
+        const handed = response.data?.data;
+        if (handed?.passwordSetupRequired === true && typeof handed.setPasswordToken === 'string' && handed.setPasswordToken) {
+          setSetPasswordToken(handed.setPasswordToken);
+          setStatus('choose-password');
+          return;
+        }
         setStatus('success');
         setMessage(response.data.message || 'Email verified successfully!');
       } catch (error: any) {
@@ -80,6 +90,30 @@ function VerifyEmailContent() {
               </p>
               <Link href="/login" className="btn-primary w-full block text-center">
                 Continue to Login
+              </Link>
+            </>
+          )}
+
+          {status === 'choose-password' && setPasswordToken && (
+            <>
+              <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                <CheckCircle className="w-10 h-10 text-green-600 dark:text-green-400" />
+              </div>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
+                Email confirmed
+              </h1>
+              <p className="text-slate-600 dark:text-slate-400 mb-2">
+                This address was registered more than once before it was confirmed, so for your safety the
+                account has no password yet.
+              </p>
+              <p className="text-slate-600 dark:text-slate-400 mb-6">
+                Choose the password you will sign in with to finish. The link below works once, for an hour.
+              </p>
+              <Link
+                href={`/reset-password?token=${encodeURIComponent(setPasswordToken)}&setup=1`}
+                className="btn-primary w-full block text-center"
+              >
+                Choose your password
               </Link>
             </>
           )}

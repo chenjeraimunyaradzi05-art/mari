@@ -4,18 +4,24 @@
  * Whoever registered an address first used to hold it, and held its password
  * too: a typo left an account nobody could confirm, and somebody's registration
  * of an address that was not theirs meant the real owner, clicking the link we
- * then sent, confirmed an account whose password was somebody else's. A new
- * registration for such an address now starts the account over, but only when
- * nothing has ever been done with it, and only after a grace period, because
- * the same rule in the wrong place is an account takeover.
+ * then sent, confirmed an account whose password was somebody else's. Keeping
+ * the second registration's password instead would only have turned it round:
+ * whoever registered her address an hour after her would have held it. So a
+ * second registration for an unconfirmed address withdraws the password, and
+ * whoever clicks the confirmation link, having proved the inbox, chooses it
+ * then, from a one-time link the verify route hands the page.
  *
- * What this pins is the line between the two:
+ * What this pins is the line between the cases:
  *  - an account nobody has confirmed, signed in to, or linked a provider to,
- *    that has waited more than an hour, is rewritten with the new password,
+ *    that has waited more than an hour, is started over: no password, the new
  *    names and date of birth, and the owner of the inbox is mailed a fresh link;
- *  - everything else (a young account, one that has been used, one that is
- *    suspended or banned, one that is confirmed) is left exactly as it is;
- *  - whichever happens, the reply is the one every address gets.
+ *  - the same account younger than an hour keeps its names but loses its
+ *    password, and is mailed a fresh link;
+ *  - an account that has been used, or is suspended, banned or confirmed, is
+ *    left exactly as it is;
+ *  - whichever happens, the reply is the one every address gets;
+ *  - confirming an address whose password was withdrawn answers with a link
+ *    to choose one, and confirming any other address does not.
  */
 
 import request from 'supertest';
@@ -31,7 +37,10 @@ jest.mock('../../utils/prisma', () => ({
     verificationToken: {
       create: jest.fn(async () => ({ id: 'token-1', createdAt: new Date() })),
       deleteMany: jest.fn(async () => ({ count: 0 })),
+      findFirst: jest.fn(async () => null),
+      delete: jest.fn(async () => ({})),
     },
+    referral: { findFirst: jest.fn(async () => null) },
     session: { deleteMany: jest.fn(async () => ({ count: 0 })) },
     auditLog: { create: jest.fn(async () => ({})) },
     notification: { createMany: jest.fn(async () => ({ count: 0 })) },
@@ -151,7 +160,8 @@ describe('an unconfirmed account that has waited out the grace period', () => {
     expect(where.createdAt.lte).toBeInstanceOf(Date);
     expect(Date.now() - where.createdAt.lte.getTime()).toBeGreaterThanOrEqual(HOUR - 1000);
     expect(data).toMatchObject({
-      passwordHash: `hashed:${registration.password}`,
+      // Neither person's password: the one who clicks the link chooses it.
+      passwordHash: null,
       firstName: 'Newcomer',
       lastName: 'Registrant',
       displayName: 'Newcomer Registrant',
@@ -198,25 +208,51 @@ describe('an unconfirmed account that has waited out the grace period', () => {
   });
 });
 
-describe('an account that must not be started over', () => {
-  it('is not, while it is younger than the grace period, but its owner is still sent a link', async () => {
+describe('an unconfirmed account younger than the grace period', () => {
+  it('keeps its names but loses its password, and its owner is still sent a link', async () => {
     prisma.user.findUnique.mockResolvedValue(waitingAccount({ createdAt: new Date(Date.now() - 10 * 60 * 1000) }));
 
     await register().expect(201);
 
-    expect(prisma.user.updateMany).not.toHaveBeenCalled();
+    // Two people have typed a password for this address and the link cannot
+    // tell which will click it, so neither is kept. Nothing else changes: the
+    // account is probably the same person's, still being confirmed.
+    expect(prisma.user.updateMany).toHaveBeenCalledTimes(1);
+    const { where, data } = prisma.user.updateMany.mock.calls[0][0];
+    expect(data).toEqual({ passwordHash: null });
+    expect(where).toMatchObject({
+      id: 'user-waiting',
+      emailVerified: false,
+      googleId: null,
+      facebookId: null,
+      lastLoginAt: null,
+      isSuspended: false,
+      bannedAt: null,
+    });
+    expect(where.createdAt).toBeUndefined();
     expect(prisma.session.deleteMany).not.toHaveBeenCalled();
     await waitForCall(sendVerification);
     expect(sendVerification.mock.calls[0][1]).toBe('Original');
   });
 
+  it('is treated as young when its creation time is unknown', async () => {
+    prisma.user.findUnique.mockResolvedValue(waitingAccount({ createdAt: undefined }));
+
+    await register().expect(201);
+
+    expect(prisma.user.updateMany).toHaveBeenCalledTimes(1);
+    expect(prisma.user.updateMany.mock.calls[0][0].data).toEqual({ passwordHash: null });
+    expect(prisma.session.deleteMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('an account that must not be touched', () => {
   it.each([
     ['one that has been signed in to', { lastLoginAt: new Date() }],
     ['one with a Google sign-in on it', { googleId: 'google-sub-1' }],
     ['one with a Facebook sign-in on it', { facebookId: 'fb-1' }],
     ['a suspended one', { isSuspended: true }],
     ['a banned one', { bannedAt: new Date() }],
-    ['one whose creation time is unknown', { createdAt: undefined }],
   ])('is not, for %s', async (_label, overrides) => {
     prisma.user.findUnique.mockResolvedValue(waitingAccount(overrides));
 
@@ -238,5 +274,94 @@ describe('an account that must not be started over', () => {
     await waitForCall(sendAccountExists);
     expect(sendAccountExists).toHaveBeenCalledWith(OWNER_ADDRESS, 'Confirmed');
     expect(sendVerification).not.toHaveBeenCalled();
+  });
+});
+
+describe('confirming the address afterwards', () => {
+  const RAW_LINK = 'a'.repeat(64);
+
+  /** The confirmation link's row, with the account as the verify route reads it. */
+  function linkFor(user: Record<string, unknown>) {
+    return {
+      id: 'link-1',
+      userId: 'user-waiting',
+      type: 'EMAIL_VERIFICATION',
+      expiresAt: new Date(Date.now() + HOUR),
+      user: {
+        id: 'user-waiting',
+        email: OWNER_ADDRESS,
+        firstName: 'Owner',
+        googleId: null,
+        facebookId: null,
+        ...user,
+      },
+    };
+  }
+
+  function verify() {
+    return request(app).post('/api/auth/verify-email').send({ token: RAW_LINK });
+  }
+
+  it('hands whoever holds the link a one-time link to choose the password, when it was withdrawn', async () => {
+    prisma.verificationToken.findFirst.mockResolvedValue(linkFor({ passwordHash: null }));
+    prisma.verificationToken.create.mockResolvedValue({ id: 'reset-1' });
+
+    const res = await verify().expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.message).toMatch(/choose the password/i);
+    expect(res.body.data.passwordSetupRequired).toBe(true);
+    const handed = res.body.data.setPasswordToken as string;
+    expect(handed).toMatch(/^[0-9a-f]{64}$/);
+
+    // The address is confirmed, as any link confirms it.
+    expect(prisma.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'user-waiting' }, data: expect.objectContaining({ emailVerified: true }) })
+    );
+
+    // The link is the same kind a forgotten password gets, stored hashed like
+    // every emailed token, good for an hour, and the only live one.
+    const created = prisma.verificationToken.create.mock.calls.find(
+      (call: any[]) => call[0]?.data?.type === 'PASSWORD_RESET'
+    );
+    expect(created).toBeDefined();
+    expect(created[0].data.userId).toBe('user-waiting');
+    expect(created[0].data.token).not.toBe(handed);
+    expect(created[0].data.token).toMatch(/^[0-9a-f]{64}$/);
+    const lifetime = created[0].data.expiresAt.getTime() - Date.now();
+    expect(lifetime).toBeGreaterThan(55 * 60 * 1000);
+    expect(lifetime).toBeLessThanOrEqual(60 * 60 * 1000);
+    expect(prisma.verificationToken.deleteMany).toHaveBeenCalledWith({
+      where: { userId: 'user-waiting', type: 'PASSWORD_RESET', id: { not: 'reset-1' } },
+    });
+  });
+
+  it('answers as it always has for an address whose password was never withdrawn', async () => {
+    prisma.verificationToken.findFirst.mockResolvedValue(linkFor({ passwordHash: 'hashed:hers' }));
+
+    const res = await verify().expect(200);
+
+    expect(res.body).toEqual({ success: true, message: 'Email verified successfully! Welcome to ATHENA.' });
+    expect(prisma.verificationToken.create).not.toHaveBeenCalled();
+  });
+
+  it('offers no password to an account that signs in with Google or Facebook', async () => {
+    prisma.verificationToken.findFirst.mockResolvedValue(linkFor({ passwordHash: null, googleId: 'google-sub-1' }));
+
+    const res = await verify().expect(200);
+
+    expect(res.body.data).toBeUndefined();
+    expect(prisma.verificationToken.create).not.toHaveBeenCalled();
+  });
+
+  it('does not read a row that was never asked for the column as one with no password', async () => {
+    const link = linkFor({});
+    delete (link.user as Record<string, unknown>).passwordHash;
+    prisma.verificationToken.findFirst.mockResolvedValue(link);
+
+    const res = await verify().expect(200);
+
+    expect(res.body.data).toBeUndefined();
+    expect(prisma.verificationToken.create).not.toHaveBeenCalled();
   });
 });

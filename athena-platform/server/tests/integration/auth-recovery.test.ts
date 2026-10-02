@@ -385,11 +385,20 @@ describeIntegration('account recovery', () => {
 
       // One live link: the one just sent. Whoever holds the first has lost it.
       await request(app).post('/api/auth/verify-email').send({ token: firstToken }).expect(400);
-      await request(app).post('/api/auth/verify-email').send({ token: lastVerificationToken() }).expect(200);
+      const confirmed = await request(app).post('/api/auth/verify-email').send({ token: lastVerificationToken() }).expect(200);
 
-      // The password is still the first person's: a second registration
-      // changed nothing about the account.
-      await request(app).post('/api/auth/login').send({ email: EMAIL, password: PASSWORD }).expect(200);
+      // Two people typed a password for this address and the link could not
+      // tell which of them would click it, so neither password opens the
+      // account. Whoever did click has proved the inbox and chooses one now,
+      // from the one-time link the reply hands the page.
+      await request(app).post('/api/auth/login').send({ email: EMAIL, password: PASSWORD }).expect(401);
+      await request(app).post('/api/auth/login').send({ email: EMAIL, password: 'AnotherPassw0rd!26' }).expect(401);
+      expect(confirmed.body.data.passwordSetupRequired).toBe(true);
+      await request(app)
+        .post('/api/auth/reset-password')
+        .send({ token: confirmed.body.data.setPasswordToken, password: NEW_PASSWORD })
+        .expect(200);
+      await request(app).post('/api/auth/login').send({ email: EMAIL, password: NEW_PASSWORD }).expect(200);
     });
 
     it('answers 503 with a code when the confirmation email cannot be sent, and the account it made can be finished by resending', async () => {
@@ -448,16 +457,31 @@ describeIntegration('account recovery', () => {
         'the second confirmation email to be handed to the provider'
       );
 
-      // One account, now hers: her password and her name.
+      // One account, now hers: her name, and no password until she chooses one.
       expect(await prisma.user.count({ where: { email: EMAIL } })).toBe(1);
       const row = await prisma.user.findUniqueOrThrow({ where: { email: EMAIL } });
       expect(row.firstName).toBe('Real');
+      expect(row.passwordHash).toBeNull();
       expect(mockSendVerificationEmail.mock.calls[1][1]).toBe('Real');
 
-      await request(app).post('/api/auth/verify-email').send({ token: lastVerificationToken() }).expect(200);
-      await request(app).post('/api/auth/login').send({ email: EMAIL, password: NEW_PASSWORD }).expect(200);
-      // The password the first person chose no longer opens it.
+      const confirmed = await request(app).post('/api/auth/verify-email').send({ token: lastVerificationToken() }).expect(200);
+      // Neither the first person's password nor the one she typed opens it: had
+      // hers been kept, somebody registering her address an hour after her
+      // would have held it instead. She chooses one from the link the reply
+      // hands the page, having proved the inbox.
       await request(app).post('/api/auth/login').send({ email: EMAIL, password: PASSWORD }).expect(401);
+      await request(app).post('/api/auth/login').send({ email: EMAIL, password: NEW_PASSWORD }).expect(401);
+      expect(confirmed.body.data.passwordSetupRequired).toBe(true);
+      await request(app)
+        .post('/api/auth/reset-password')
+        .send({ token: confirmed.body.data.setPasswordToken, password: NEW_PASSWORD })
+        .expect(200);
+      await request(app).post('/api/auth/login').send({ email: EMAIL, password: NEW_PASSWORD }).expect(200);
+      // And the link to choose it is spent.
+      await request(app)
+        .post('/api/auth/reset-password')
+        .send({ token: confirmed.body.data.setPasswordToken, password: PASSWORD })
+        .expect(400);
     });
   });
 

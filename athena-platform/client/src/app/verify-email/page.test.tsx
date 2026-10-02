@@ -36,6 +36,38 @@ describe('the verify-email page', () => {
     expect(screen.getByRole('link', { name: 'Continue to Login' })).toHaveAttribute('href', '/login');
   });
 
+  it('sends her to choose a password when the server says the address had its password withdrawn', async () => {
+    // An address registered twice before anyone confirmed it: neither typed
+    // password is kept, and whoever proved the inbox chooses one from the
+    // one-time link the server hands back.
+    const handed = 'd'.repeat(64);
+    mockGet.mockResolvedValue({
+      data: {
+        message: 'Your email is confirmed. Choose the password you will sign in with to finish.',
+        data: { passwordSetupRequired: true, setPasswordToken: handed },
+      },
+    });
+    render(<VerifyEmailPage />);
+
+    await waitFor(() => expect(screen.getByText('Email confirmed')).toBeInTheDocument());
+
+    expect(screen.getByRole('link', { name: 'Choose your password' })).toHaveAttribute(
+      'href',
+      `/reset-password?token=${handed}&setup=1`
+    );
+    // Not the ordinary success, which would send her to sign in with a password she does not have.
+    expect(screen.queryByRole('link', { name: 'Continue to Login' })).not.toBeInTheDocument();
+    expect(document.body.textContent).toMatch(/no password yet/i);
+  });
+
+  it('ignores a reply that says the password must be chosen but hands no link to do it with', async () => {
+    mockGet.mockResolvedValue({ data: { message: 'Email verified successfully!', data: { passwordSetupRequired: true } } });
+    render(<VerifyEmailPage />);
+
+    await waitFor(() => expect(screen.getByText(/Email Verified/)).toBeInTheDocument());
+    expect(screen.getByRole('link', { name: 'Continue to Login' })).toBeInTheDocument();
+  });
+
   it('offers a new link, for the address she types, when the link has expired', async () => {
     mockGet.mockRejectedValue({ response: { data: { message: 'Invalid or expired verification token' } } });
     mockPost.mockResolvedValue({ data: { success: true } });

@@ -874,41 +874,54 @@ type RegistrationDetails = {
 };
 
 /**
- * Whether a registration may take over the account behind this address: only
- * one that was never confirmed, never signed in, has no social sign-in on it
- * and is not under a suspension or a ban, and that has been waiting for more
- * than the grace period. A missing creation time says nothing, so it is not
- * enough.
+ * Whether a second registration may touch the account behind this address at
+ * all: only one that was never confirmed, never signed in and has no social
+ * sign-in on it, and that is not under a suspension or a ban. A confirmed
+ * account is its owner's and nothing about it changes.
+ */
+function mayContest(account: TakenAddressAccount): boolean {
+  if (account.emailVerified) return false;
+  return !(account.googleId || account.facebookId || account.lastLoginAt || account.isSuspended || account.bannedAt);
+}
+
+/**
+ * Whether, on top of that, the names and date of birth in the registration
+ * replace the ones the account was made with: only once it has been waiting
+ * for more than the grace period. A missing creation time says nothing, so it
+ * is not enough.
  */
 function mayStartOver(account: TakenAddressAccount): boolean {
-  if (account.emailVerified) return false;
+  if (!mayContest(account)) return false;
   if (!(account.createdAt instanceof Date)) return false;
-  if (account.googleId || account.facebookId || account.lastLoginAt || account.isSuspended || account.bannedAt) {
-    return false;
-  }
   return Date.now() - account.createdAt.getTime() >= UNCONFIRMED_ACCOUNT_GRACE_MS;
 }
 
 /**
- * A registration for an address that already has an account. Nothing about
- * the account changes: the password in the form is hashed and thrown away,
- * and the owner is told by email, after the reply has gone.
+ * A registration for an address that already has an account.
+ *
+ * For a confirmed account nothing changes: the password in the form is hashed
+ * and thrown away, and the owner is told by email, after the reply has gone.
  *
  * An account whose address was never confirmed is sent a fresh confirmation
  * link instead, the same thing the resend route does, because that is what
  * whoever is typing it needs, and an address that nobody has proved is not
- * yet anyone's to be told about.
+ * yet anyone's to be told about. Its password is withdrawn as well. Two people
+ * have now typed a password for one address, and the link we send cannot tell
+ * which of them will click it: whoever registered an address first used to
+ * hold its password, so the real owner, finding the account already there and
+ * clicking the link we then sent, confirmed an account that opened with
+ * somebody else's password. And the other way round was no better: had the
+ * second registration's password been kept, somebody registering her address
+ * an hour after her would have held it instead. So neither is kept. Whoever
+ * clicks the link has proved the inbox, and chooses the password then
+ * (handleVerifyEmailToken hands the page a one-time link for it).
  *
- * If that account is more than an hour old it is started over as well: the
- * password, names and date of birth in this registration replace the ones it
- * was made with. Without that, whoever registered an address first held it, and
- * held the password too. A typo left an account nobody could confirm, and
- * somebody's registration of an address that was not theirs meant that the real
- * owner, finding the account already there and clicking the link we then sent,
- * confirmed an account whose password was somebody else's. Starting over
- * means the password belongs to whoever last proved they hold the inbox by
- * using what is sent to it. The creation time moves to now, so the new
- * registrant also gets a full grace period before anyone can do the same to her.
+ * If the account is more than an hour old its names and date of birth are
+ * started over with this registration's as well, so that a typo, or somebody's
+ * registration of an address that was not theirs, does not sit on the address
+ * for good. Within the hour they are left alone: the account is probably the
+ * same person's, still being confirmed. The creation time moves to now with a
+ * restart, so the new registrant also gets a full grace period.
  */
 async function answerRegistrationForTakenAddress(
   res: Response,
@@ -918,14 +931,15 @@ async function answerRegistrationForTakenAddress(
   // The refusal a new address would meet for a bad invite code, so a wrong
   // code is a 400 for every address and says nothing about this one.
   await findUsableInviteCode(details.inviteCode);
-  // The same hashing a new account costs.
-  const passwordHash = await hashPassword(details.password);
+  // The same hashing a new account costs; the result is not kept (see above).
+  await hashPassword(details.password);
 
   let account = existing;
-  if (mayStartOver(existing)) {
+  if (mayContest(existing)) {
+    const startOver = mayStartOver(existing);
     // Conditions repeated in the write itself, so an account confirmed or
     // signed in to between the read above and this write is left alone.
-    const restarted = await prisma.user.updateMany({
+    const contested = await prisma.user.updateMany({
       where: {
         id: existing.id,
         emailVerified: false,
@@ -934,26 +948,36 @@ async function answerRegistrationForTakenAddress(
         lastLoginAt: null,
         isSuspended: false,
         bannedAt: null,
-        createdAt: { lte: new Date(Date.now() - UNCONFIRMED_ACCOUNT_GRACE_MS) },
+        ...(startOver ? { createdAt: { lte: new Date(Date.now() - UNCONFIRMED_ACCOUNT_GRACE_MS) } } : {}),
       },
       data: {
-        passwordHash,
-        firstName: details.firstName,
-        lastName: details.lastName,
-        displayName: `${details.firstName} ${details.lastName}`,
-        persona: details.persona,
-        dateOfBirth: details.dateOfBirth,
-        womanSelfAttested: true,
-        createdAt: new Date(),
+        passwordHash: null,
+        ...(startOver
+          ? {
+              firstName: details.firstName,
+              lastName: details.lastName,
+              displayName: `${details.firstName} ${details.lastName}`,
+              persona: details.persona,
+              dateOfBirth: details.dateOfBirth,
+              womanSelfAttested: true,
+              createdAt: new Date(),
+            }
+          : {}),
       },
     });
-    if (restarted.count > 0) {
-      // Nothing should be signed in to an unconfirmed account; this makes sure.
-      await prisma.session.deleteMany({ where: { userId: existing.id } });
-      logger.info('An unconfirmed account was started over by a new registration for its address', {
-        userId: existing.id,
-      });
-      account = { ...existing, firstName: details.firstName };
+    if (contested.count > 0) {
+      if (startOver) {
+        // Nothing should be signed in to an unconfirmed account; this makes sure.
+        await prisma.session.deleteMany({ where: { userId: existing.id } });
+        logger.info('An unconfirmed account was started over by a new registration for its address', {
+          userId: existing.id,
+        });
+        account = { ...existing, firstName: details.firstName };
+      } else {
+        logger.info('A second registration for an unconfirmed address withdrew its password', {
+          userId: existing.id,
+        });
+      }
     }
   }
 
@@ -1129,6 +1153,18 @@ async function handleVerifyEmailToken(
     throw new ApiError(400, 'Invalid or expired verification token');
   }
 
+  // An address that was registered twice before anyone confirmed it has had
+  // its password withdrawn (see answerRegistrationForTakenAddress): two people
+  // typed one, and this link could not tell which of them would click it. The
+  // person who did holds the inbox, which is the proof a forgotten password
+  // takes, so she gets the same one-time link a reset gets, handed to the page
+  // in front of her rather than mailed, and chooses the password now. Only
+  // `null`: a row that was not asked for the column is not read as one with
+  // none. An account that signs in with Google or Facebook has no password to
+  // choose.
+  const { user } = verificationToken;
+  const passwordToChoose = user.passwordHash === null && !user.googleId && !user.facebookId;
+
   await prisma.user.update({
     where: { id: verificationToken.userId },
     data: {
@@ -1140,6 +1176,24 @@ async function handleVerifyEmailToken(
   await prisma.verificationToken.delete({
     where: { id: verificationToken.id },
   });
+
+  let setPasswordToken: string | null = null;
+  if (passwordToChoose) {
+    setPasswordToken = generateSecureToken();
+    const link = await prisma.verificationToken.create({
+      data: {
+        userId: verificationToken.userId,
+        token: hashOpaqueToken(setPasswordToken),
+        type: 'PASSWORD_RESET',
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1 hour, as a reset link
+      },
+      select: { id: true },
+    });
+    // One live link, as forgot-password keeps it.
+    await prisma.verificationToken.deleteMany({
+      where: { userId: verificationToken.userId, type: 'PASSWORD_RESET', id: { not: link.id } },
+    });
+  }
 
   const pendingReferral = await prisma.referral.findFirst({
     where: {
@@ -1180,6 +1234,15 @@ async function handleVerifyEmailToken(
     () => sendWelcomeEmail(verificationToken.user.email, verificationToken.user.firstName),
     { userId: verificationToken.userId }
   );
+
+  if (setPasswordToken) {
+    res.json({
+      success: true,
+      message: 'Your email is confirmed. Choose the password you will sign in with to finish.',
+      data: { passwordSetupRequired: true, setPasswordToken },
+    });
+    return;
+  }
 
   res.json({
     success: true,
@@ -2460,7 +2523,7 @@ router.post(
         sendBestEffortAuthEmail(
           'Welcome email after Facebook sign-up',
           () => sendWelcomeEmail(fbEmail, fbFirstName),
-          { userId: fbUser.id, email: fbEmail }
+          { userId: fbUser.id }
         );
 
         fbCreated = true;
@@ -3674,7 +3737,7 @@ router.post(
             const sent = await mailUnlockLink(account);
             noteAuthEmail('account_unlock', sent);
           },
-          { userId: account.id, email: account.email }
+          { userId: account.id }
         );
       }
 

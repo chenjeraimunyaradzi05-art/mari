@@ -314,7 +314,7 @@ describe('registering over an unconfirmed account that has been waiting for more
     return request(app).post('/api/auth/register').send({ ...registration, email: 'someone.new@example.com' });
   }
 
-  it('starts the account over: the new password, names and date of birth replace the old, and she is sent a fresh link', async () => {
+  it('starts the account over: the names and date of birth replace the old, the password is withdrawn, and she is sent a fresh link', async () => {
     prisma.user.findUnique.mockResolvedValueOnce(unconfirmed());
 
     const res = await request(app).post('/api/auth/register').send(registration);
@@ -344,7 +344,9 @@ describe('registering over an unconfirmed account that has been waiting for more
     expect(where.createdAt.lte).toBeInstanceOf(Date);
     expect(Date.now() - where.createdAt.lte.getTime()).toBeGreaterThanOrEqual(HOUR - 1000);
     expect(data).toMatchObject({
-      passwordHash: `hashed:${registration.password}`,
+      // Two people typed a password for this address and the link cannot tell
+      // which will click it, so neither is kept: whoever clicks chooses one.
+      passwordHash: null,
       firstName: 'Nadia',
       lastName: 'Okonkwo',
       displayName: 'Nadia Okonkwo',
@@ -361,17 +363,32 @@ describe('registering over an unconfirmed account that has been waiting for more
     expect(sendAccountExists).not.toHaveBeenCalled();
   });
 
-  it('leaves an account alone that has not yet been waiting an hour: it is probably her own, still being confirmed', async () => {
+  it('keeps the names of an account that has not yet been waiting an hour, but withdraws its password', async () => {
     prisma.user.findUnique.mockResolvedValueOnce(unconfirmed({}, 30 * 60 * 1000));
 
     const res = await request(app).post('/api/auth/register').send(registration);
     await until(() => sendVerification.mock.calls.length > 0, 'the fresh confirmation email');
 
     expect(res.status).toBe(201);
-    expect(prisma.user.updateMany).not.toHaveBeenCalled();
+    // Probably her own, still being confirmed, so the names stand; but a second
+    // password has been typed for the address, so neither password is kept.
+    expect(prisma.user.updateMany).toHaveBeenCalledTimes(1);
+    expect(prisma.user.updateMany.mock.calls[0][0].data).toEqual({ passwordHash: null });
+    expect(prisma.user.updateMany.mock.calls[0][0].where.createdAt).toBeUndefined();
     expect(prisma.session.deleteMany).not.toHaveBeenCalled();
     // She still gets a fresh link, under the name the account already has.
     expect(sendVerification.mock.calls[0].slice(0, 2)).toEqual([EMAIL, 'Previous']);
+  });
+
+  it('treats an account whose age is not known as one still being confirmed', async () => {
+    prisma.user.findUnique.mockResolvedValueOnce(unconfirmed({ createdAt: undefined }));
+
+    const res = await request(app).post('/api/auth/register').send(registration);
+
+    expect(res.status).toBe(201);
+    expect(prisma.user.updateMany).toHaveBeenCalledTimes(1);
+    expect(prisma.user.updateMany.mock.calls[0][0].data).toEqual({ passwordHash: null });
+    expect(prisma.session.deleteMany).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -380,8 +397,7 @@ describe('registering over an unconfirmed account that has been waiting for more
     ['one linked to Facebook', { facebookId: 'fb-id' }],
     ['one that is suspended', { isSuspended: true }],
     ['one that is banned', { bannedAt: new Date() }],
-    ['one whose age is not known', { createdAt: undefined }],
-  ])('never takes over %s', async (_label, overrides) => {
+  ])('never touches %s', async (_label, overrides) => {
     prisma.user.findUnique.mockResolvedValueOnce(unconfirmed(overrides));
 
     const res = await request(app).post('/api/auth/register').send(registration);
