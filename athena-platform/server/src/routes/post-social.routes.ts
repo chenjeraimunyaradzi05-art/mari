@@ -25,14 +25,14 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { commentLimiter, reactionLimiter } from '../middleware/socialLimits';
 import { assertContentAllowed } from '../services/moderation.service';
-import { resolveMentionedUserIds } from '../utils/mentions';
-import { canViewAuthor, canViewGroupPosts } from '../services/audience.service';
-import { getBlockedRelationshipIds } from '../utils/safety-store';
+import { MENTION_LIMIT, resolveMentionedUserIds } from '../utils/mentions';
+import { blockedEitherWayIds, canViewAuthor, canViewGroupPosts, postsShownToWhere } from '../services/audience.service';
 import { parsePagination } from '../utils/pagination';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { notifySocial, socialLinks } from '../utils/social-notifications';
 import { isBlockedRelationship } from '../utils/safety-store';
+import { PUBLIC_AUTHOR_SELECT, maskLegalNamesInResponses, publicName } from '../utils/member-display';
 import { CONTENT_LIMITS, normalizeOptionalUserText, normalizeUserText } from '../utils/contentSafety';
 import {
   decoratePosts,
@@ -44,9 +44,14 @@ import {
 
 const router = Router();
 
+// Every answer from here goes to other members, so a member who is not the reader is
+// named by her public name and her legal first and last name are never sent (see
+// utils/member-display: the pseudonymous display name). Reactions, comment authors and collections are all covered.
+router.use(maskLegalNamesInResponses);
+
 const AUTHOR_SELECT = {
   author: {
-    select: { id: true, firstName: true, lastName: true, displayName: true, avatar: true, headline: true },
+    select: PUBLIC_AUTHOR_SELECT,
   },
 };
 
@@ -139,7 +144,10 @@ router.get('/:id/reactions', authenticate, async (req: AuthRequest, res: Respons
       throw new ApiError(400, 'Unknown reaction');
     }
 
-    const blocked = await getBlockedRelationshipIds(req.user!.id);
+    // Both stores, both directions: a block made from the DV safety page that
+    // never reached the platform-wide list still keeps him off her post's list of
+    // who reacted.
+    const blocked = await blockedEitherWayIds(req.user!.id);
     const where = {
       postId: post.id,
       ...(type ? { type } : {}),
@@ -155,7 +163,7 @@ router.get('/:id/reactions', authenticate, async (req: AuthRequest, res: Respons
         select: {
           type: true,
           createdAt: true,
-          user: { select: { id: true, firstName: true, lastName: true, displayName: true, avatar: true, headline: true } },
+          user: { select: PUBLIC_AUTHOR_SELECT },
         },
       }),
       prisma.like.count({ where }),
@@ -170,7 +178,7 @@ router.get('/:id/reactions', authenticate, async (req: AuthRequest, res: Respons
         reactedAt: row.createdAt,
         user: {
           id: row.user.id,
-          name: row.user.displayName?.trim() || [row.user.firstName, row.user.lastName].filter(Boolean).join(' ').trim() || 'Member',
+          name: publicName(row.user),
           avatar: row.user.avatar,
           headline: row.user.headline,
           isFollowing: followed.has(row.user.id),
@@ -334,13 +342,19 @@ router.get('/me/scheduled', authenticate, async (req: AuthRequest, res, next) =>
 
 router.get('/me/mentions', authenticate, async (req: AuthRequest, res, next) => {
   try {
+    const viewerId = req.user!.id;
+    // Only mentions she may still be shown. This list read the mention and
+    // nothing else, so a post made private after it named her, a private
+    // group's post, and a post by someone she (or who has) blocked, came back
+    // with their words; a block made after the mention is why this is read now
+    // and not only when the mention is written.
     const posts = await prisma.post.findMany({
-      where: { mentionedUserIds: { has: req.user!.id }, isHidden: false },
+      where: { AND: [{ mentionedUserIds: { has: viewerId } }, await postsShownToWhere(viewerId)] },
       include: AUTHOR_SELECT,
       orderBy: { createdAt: 'desc' },
       take: 50,
     });
-    res.json({ success: true, data: await decoratePosts(posts, req.user!.id) });
+    res.json({ success: true, data: await decoratePosts(posts, viewerId) });
   } catch (error) {
     next(error);
   }
@@ -385,13 +399,13 @@ router.patch(
         where: { id: comment.id },
         data: { content, editedAt: new Date() },
         include: {
-          author: { select: { id: true, firstName: true, lastName: true, displayName: true, avatar: true } },
+          author: { select: { id: true, firstName: true, displayName: true, avatar: true } },
         },
       });
 
       // Only people the new words name and the old ones did not.
       const before = new Set((await resolveMentionedUserIds(comment.content)));
-      const mentioned = (await resolveMentionedUserIds(content)).filter(
+      const mentioned = (await resolveMentionedUserIds(content, MENTION_LIMIT, comment.authorId)).filter(
         (userId) => userId !== req.user!.id && userId !== comment.post.authorId && !before.has(userId)
       );
       for (const userId of mentioned) {
@@ -417,6 +431,7 @@ router.patch(
 // ===========================================
 // The post's author keeps one comment at the top of the thread. Pinning a
 // second one replaces the first.
+// validated: the only field read is pinned, as !== false.
 router.patch('/:postId/comments/:commentId/pin', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { postId, commentId } = req.params;
@@ -495,6 +510,7 @@ router.get('/collections', authenticate, async (req: AuthRequest, res, next) => 
   }
 });
 
+// validated: name and description go through normalizeUserText with their limits.
 router.post('/collections', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const name = normalizeUserText(req.body?.name, { field: 'name', maxLength: COLLECTION_NAME_MAX });
@@ -536,6 +552,7 @@ async function loadOwnCollection(id: string, userId: string) {
   return row;
 }
 
+// validated: name and description go through normalizeUserText with their limits.
 router.patch('/collections/:id', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const existing = await loadOwnCollection(req.params.id, req.user!.id);
@@ -568,6 +585,8 @@ router.delete('/collections/:id', authenticate, async (req: AuthRequest, res, ne
   }
 });
 
+// validated: collectionId is read only as text and must then be one of her own collections
+//   (loadOwnCollection).
 router.patch('/:id/save', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
@@ -659,6 +678,8 @@ router.get('/me/drafts', authenticate, async (req: AuthRequest, res, next) => {
 });
 
 // Creates a draft, or updates one by id. An empty draft is not kept.
+// validated: draftData keeps only the named fields, each by type and cut to its length (content
+//   5,000 characters, ten media links); the draft is private to her.
 router.put('/me/drafts', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const body = (req.body ?? {}) as Record<string, unknown>;

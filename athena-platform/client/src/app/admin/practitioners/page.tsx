@@ -6,6 +6,11 @@
  * her against the AHPRA register (or her professional body, for the kinds
  * AHPRA does not register). Verify puts her in Find care; Hide takes the
  * profile out of the queue. She is told either way.
+ *
+ * Verifying needs a record of the check: where the admin looked and what they
+ * found. The server refuses a verification without one, so the button stays
+ * off until both are there, and the server's refusal is shown as its own
+ * sentence if the screen is wrong.
  */
 
 import { useState } from 'react';
@@ -39,13 +44,20 @@ type Pending = {
   owner: { id: string; name: string; email: string } | null;
 };
 
+type Register = 'AHPRA' | 'PROFESSIONAL_BODY';
+
 const AHPRA_REGISTER = 'https://www.ahpra.gov.au/Registration/Registers-of-Practitioners.aspx';
+/** The server asks for at least this much, so the record says something. */
+const CHECK_NOTE_MIN = 10;
 
 const where = (p: Pending) => [p.suburb || p.city, p.state].filter(Boolean).join(', ') || 'Anywhere (telehealth)';
 
 export default function AdminPractitionersPage() {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [register, setRegister] = useState<Register>('AHPRA');
+  const [registerName, setRegisterName] = useState('');
+  const [checkNote, setCheckNote] = useState('');
 
   const list = useQuery({
     queryKey: ['admin-practitioners-pending'],
@@ -53,12 +65,29 @@ export default function AdminPractitionersPage() {
     select: (r) => (Array.isArray(r.data?.data) ? (r.data.data as Pending[]) : []),
   });
 
+  const select = (id: string | null) => {
+    setSelectedId(id);
+    // A check record is about one practitioner; it does not carry over to the next.
+    setRegister('AHPRA');
+    setRegisterName('');
+    setCheckNote('');
+  };
+
+  const noteReady = checkNote.trim().length >= CHECK_NOTE_MIN;
+  const registerReady = register === 'AHPRA' || registerName.trim().length > 0;
+  const checkReady = noteReady && registerReady;
+
   const decide = useMutation({
     mutationFn: ({ id, next }: { id: string; next: 'verify' | 'hide' }) =>
-      wellnessApi.verifyPractitioner(id, next === 'verify' ? { isVerified: true } : { isVerified: false, isActive: false }),
+      wellnessApi.verifyPractitioner(
+        id,
+        next === 'verify'
+          ? { isVerified: true, checkedAgainst: register, ...(register === 'PROFESSIONAL_BODY' ? { registerName: registerName.trim() } : {}), checkNote: checkNote.trim() }
+          : { isVerified: false, isActive: false }
+      ),
     onSuccess: (_r, { next }) => {
       queryClient.invalidateQueries({ queryKey: ['admin-practitioners-pending'] });
-      setSelectedId(null);
+      select(null);
       toast.success(next === 'verify' ? 'Verified. She is in Find care now, and has been told.' : 'Hidden. She has been told to check her practice page.');
     },
     onError: (e) => toast.error(wellnessError(e, 'Could not record that')),
@@ -76,7 +105,7 @@ export default function AdminPractitionersPage() {
           <Stethoscope className="h-7 w-7 text-primary-600" /> Practitioners to verify
         </h1>
         <p className="mt-1 text-slate-600 dark:text-slate-400">
-          Check the name and AHPRA number on the public register before verifying. Kinds AHPRA does not register (counsellors, doulas, lactation consultants) are checked with their professional body.
+          Check the name and AHPRA number on the public register before verifying. Kinds AHPRA does not register (counsellors, doulas, lactation consultants) are checked with their professional body. Write down where you looked and what you found; it is kept with your name.
         </p>
       </div>
 
@@ -94,7 +123,7 @@ export default function AdminPractitionersPage() {
             <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-700 dark:bg-slate-900">
               {list.data!.map((p) => (
                 <li key={p.id}>
-                  <button type="button" onClick={() => setSelectedId(p.id)} className={cn('flex w-full items-center gap-3 p-4 text-left hover:bg-slate-50 dark:hover:bg-slate-800', selectedId === p.id && 'bg-primary-50 dark:bg-primary-900/20')}>
+                  <button type="button" onClick={() => select(p.id)} className={cn('flex w-full items-center gap-3 p-4 text-left hover:bg-slate-50 dark:hover:bg-slate-800', selectedId === p.id && 'bg-primary-50 dark:bg-primary-900/20')}>
                     <span className="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300">{p.kindLabel}</span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-medium text-slate-900 dark:text-white">{p.name}</span>
@@ -111,7 +140,7 @@ export default function AdminPractitionersPage() {
 
         {current && (
           <aside className="card relative h-fit space-y-4 lg:sticky lg:top-6">
-            <button type="button" onClick={() => setSelectedId(null)} className="absolute right-4 top-4 text-slate-400 hover:text-slate-600" aria-label="Close">
+            <button type="button" onClick={() => select(null)} className="absolute right-4 top-4 text-slate-400 hover:text-slate-600" aria-label="Close">
               <X className="h-5 w-5" />
             </button>
             <div>
@@ -178,8 +207,35 @@ export default function AdminPractitionersPage() {
                 <dd className="whitespace-pre-line text-slate-700 dark:text-slate-300">{current.bio}</dd>
               </div>
             </dl>
+
+            <div className="space-y-2">
+              <label htmlFor="practitioner-check-register" className="block text-xs font-medium text-slate-600 dark:text-slate-300">Where you looked the practitioner up (needed to verify)</label>
+              <select id="practitioner-check-register" value={register} onChange={(e) => setRegister(e.target.value as Register)} className="input w-full text-sm">
+                <option value="AHPRA">The AHPRA register</option>
+                <option value="PROFESSIONAL_BODY">A professional body&rsquo;s register</option>
+              </select>
+              {register === 'PROFESSIONAL_BODY' && (
+                <>
+                  <label htmlFor="practitioner-check-body" className="block text-xs font-medium text-slate-600 dark:text-slate-300">Which body</label>
+                  <input id="practitioner-check-body" value={registerName} onChange={(e) => setRegisterName(e.target.value)} maxLength={120} placeholder="PACFA, ACA, the Australian College of Midwives" className="input w-full text-sm" />
+                </>
+              )}
+              <label htmlFor="practitioner-check-note" className="block text-xs font-medium text-slate-600 dark:text-slate-300">What you found (needed to verify)</label>
+              <textarea
+                id="practitioner-check-note"
+                value={checkNote}
+                onChange={(e) => setCheckNote(e.target.value)}
+                rows={3}
+                maxLength={1000}
+                placeholder="Name and number match the register; registration current, no conditions."
+                aria-describedby="practitioner-check-note-help"
+                className="input w-full text-sm"
+              />
+              <p id="practitioner-check-note-help" className="text-xs text-slate-500">Kept in the audit record with your name, beside what the profile said when you checked it. Not shown to the practitioner.</p>
+            </div>
+
             <div className="flex flex-wrap items-center gap-3">
-              <button type="button" onClick={() => decide.mutate({ id: current.id, next: 'verify' })} disabled={decide.isPending} className="btn-primary text-sm">
+              <button type="button" onClick={() => decide.mutate({ id: current.id, next: 'verify' })} disabled={decide.isPending || !checkReady} className="btn-primary text-sm disabled:opacity-50">
                 Verify
               </button>
               <button
@@ -196,6 +252,13 @@ export default function AdminPractitionersPage() {
                 Open the profile
               </Link>
             </div>
+            {!checkReady && (
+              <p className="text-xs text-slate-500">
+                To verify: {!registerReady ? 'name the body you checked with' : ''}
+                {!registerReady && !noteReady ? ', and ' : ''}
+                {!noteReady ? 'say what you found, in a sentence or two' : ''}.
+              </p>
+            )}
           </aside>
         )}
       </div>

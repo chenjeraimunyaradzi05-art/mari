@@ -86,6 +86,17 @@ export interface Apprenticeship {
 
   /** Added by the server for a signed-in viewer; absent when signed out. */
   isBookmarked?: boolean;
+
+  /**
+   * How the host stands, said by the server. The host is the employer named on
+   * the listing, or the training provider when none is. Absent on a response
+   * from before the server said so; the screens then show nothing rather than
+   * guess. See HostCheck.tsx for what each means.
+   */
+  hostVerified?: boolean;
+  hostSafetyChecked?: boolean;
+  /** Verified AND holding an approved safety attestation that has not run out: the host may place apprentices. */
+  hostMayPlace?: boolean;
 }
 
 /** Whichever organisation is the public face of the listing. */

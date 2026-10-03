@@ -87,6 +87,8 @@ interface User {
   persona: string;
   emailVerified: boolean;
   isSuspended: boolean;
+  /** Whether she has two-factor sign-in on, and so something staff can reset for her. */
+  twoFactorEnabled?: boolean;
   /** A ban is a suspension that also bars the address from registering again. */
   banned?: boolean;
   /**
@@ -204,6 +206,42 @@ export default function AdminUsersPage() {
       return;
     }
     banMutation.mutate({ userId: user.id, banReason: reason.trim() });
+  };
+
+  // For a member who has lost her phone and her recovery codes. The server
+  // refuses it on your own account, wants the reason on the record and tells her
+  // by email, so this only has to collect the two things it asks for. What to
+  // check first is in docs/runbooks/TWO-FACTOR-RESET.md.
+  const resetTwoFactorMutation = useMutation({
+    mutationFn: async ({ userId, reason }: { userId: string; reason: string }) => {
+      await api.post(`/admin/users/${userId}/two-factor/reset`, { reason, identityChecked: true });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+      window.alert('Two-factor sign-in removed. She has been signed out everywhere and emailed.');
+    },
+    onError: (err: unknown) => {
+      const message = (err as { response?: { data?: { error?: string; message?: string } } })?.response?.data;
+      window.alert(message?.error || message?.message || 'Two-factor could not be reset.');
+    },
+  });
+
+  const resetTwoFactor = (user: User) => {
+    const who = `${user.firstName} ${user.lastName}`;
+    if (
+      !window.confirm(
+        `Reset two-factor for ${who}? Only do this after you have checked it is her who is asking, as the runbook says (reply to the address on her account, plus something only she would know; a second administrator for a staff account). She will be signed out everywhere and emailed.`
+      )
+    ) {
+      return;
+    }
+    const reason = window.prompt('What did you check, and who witnessed it? This is kept on the audit log.');
+    if (reason === null) return;
+    if (reason.trim().length < 10) {
+      window.alert('Say what you checked and who witnessed it, in at least a sentence.');
+      return;
+    }
+    resetTwoFactorMutation.mutate({ userId: user.id, reason: reason.trim() });
   };
 
   const updateRoleMutation = useMutation({
@@ -450,6 +488,18 @@ export default function AdminUsersPage() {
                             aria-label={`Suspend ${user.firstName} ${user.lastName}`}
                           >
                             <ShieldOff className="h-4 w-4" />
+                          </button>
+                        )}
+                        {user.twoFactorEnabled && (
+                          <button
+                            type="button"
+                            onClick={() => resetTwoFactor(user)}
+                            disabled={resetTwoFactorMutation.isPending}
+                            className="min-h-11 rounded-md px-3 text-xs text-slate-600 hover:text-slate-900 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 disabled:opacity-60"
+                            title="Reset two-factor, for a member who has lost her phone and her recovery codes"
+                            aria-label={`Reset two-factor for ${user.firstName} ${user.lastName}`}
+                          >
+                            Reset 2FA
                           </button>
                         )}
                         {!user.banned && (

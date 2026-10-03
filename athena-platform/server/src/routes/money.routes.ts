@@ -2,6 +2,7 @@ import { Router, Response, NextFunction } from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
 import { z } from 'zod';
+import { assertOrgMembership } from '../utils/org-scope';
 import { listMoneyTransactions, createMoneyTransaction, updateMoneyTransaction, deleteMoneyTransaction } from '../services/money.service';
 
 const router = Router();
@@ -62,9 +63,15 @@ router.post('/transactions', authenticate, async (req: AuthRequest, res: Respons
     if (!parsed.success) {
       return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten() });
     }
+    const userId = req.user!.id;
+    // An organisation id off the wire may only name a book the caller belongs
+    // to; the directory hands the ids out, so they are not a credential.
+    if (parsed.data.organizationId) {
+      await assertOrgMembership(parsed.data.organizationId, userId);
+    }
     const transaction = await createMoneyTransaction({
       ...parsed.data,
-      userId: req.user!.id,
+      userId,
     });
     res.status(201).json({ data: transaction });
   } catch (error) {

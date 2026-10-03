@@ -288,13 +288,17 @@ describe('the human check on password sign-up', () => {
     prisma.user.findUnique.mockResolvedValue(account({ email: 'new@example.com' }));
 
     // The address is taken, which is the first thing the ordinary rules check.
-    await request(app).post('/api/auth/register').send({ ...body, humanCheckToken: 'token' }).expect(409);
+    // A taken address is answered like a new one, so the proof that the check
+    // let her through is that the address was looked up at all.
+    await request(app).post('/api/auth/register').send({ ...body, humanCheckToken: 'token' }).expect(201);
+    expect(prisma.user.findUnique).toHaveBeenCalled();
+    expect(prisma.user.create).not.toHaveBeenCalled();
   });
 
   it('is not asked for where no key is configured', async () => {
     prisma.user.findUnique.mockResolvedValue(account({ email: 'new@example.com' }));
 
-    await request(app).post('/api/auth/register').send(body).expect(409);
+    await request(app).post('/api/auth/register').send(body).expect(201);
 
     expect(fetchMock).not.toHaveBeenCalled();
   });

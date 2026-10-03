@@ -6,6 +6,7 @@ jest.mock('../../utils/prisma', () => ({
     user: { findUnique: jest.fn(), update: jest.fn() },
     profile: { findUnique: jest.fn(), upsert: jest.fn() },
     userSafetySettings: { findUnique: jest.fn(), upsert: jest.fn() },
+    dvSafetyProfile: { updateMany: jest.fn() },
   },
 }));
 
@@ -50,14 +51,40 @@ describe('GET /api/safety/settings', () => {
       allowMessages: true,
       isSafeMode: false,
       hideFromSearch: false,
-      allowMessagesFrom: 'connections',
-      filterOffensiveContent: true,
+      // What message-permissions.service lets through for a member with no row:
+      // the page must say what the server does.
+      allowMessagesFrom: 'all',
       hideReadReceipts: false,
       profileVisibility: 'public',
       hideOnlineStatus: false,
-      hideLastSeen: false,
-      enableSafetyAlerts: true,
     });
+  });
+
+  // Three columns exist that nothing reads: the screen is the same for every
+  // recipient, no last-seen is served, and no alert listens. The page used to
+  // offer one of them as a switch, and the API served all three as if they did
+  // something. It does not, any more, even for a row that holds them.
+  it('does not serve the three switches nothing enforces, even for a row that holds them', async () => {
+    (prisma.user.findUnique as any).mockResolvedValue({ allowMessages: true });
+    (prisma.profile.findUnique as any).mockResolvedValue(null);
+    (prisma.userSafetySettings.findUnique as any).mockResolvedValue({
+      allowMessagesFrom: 'all',
+      hideReadReceipts: false,
+      profileVisibility: 'public',
+      hideOnlineStatus: false,
+      filterOffensiveContent: false,
+      hideLastSeen: true,
+      enableSafetyAlerts: false,
+    });
+
+    const res = await request(app).get('/api/safety/settings').expect(200);
+
+    expect(res.body.data).not.toHaveProperty('filterOffensiveContent');
+    expect(res.body.data).not.toHaveProperty('hideLastSeen');
+    expect(res.body.data).not.toHaveProperty('enableSafetyAlerts');
+    // And the query does not even ask the database for them.
+    const asked = (prisma.userSafetySettings.findUnique as any).mock.calls[0][0].select;
+    expect(Object.keys(asked)).toEqual(['allowMessagesFrom', 'hideReadReceipts', 'profileVisibility', 'hideOnlineStatus']);
   });
 
   it('stored preferences win over the defaults', async () => {
@@ -65,12 +92,9 @@ describe('GET /api/safety/settings', () => {
     (prisma.profile.findUnique as any).mockResolvedValue({ isSafeMode: true, hideFromSearch: true });
     (prisma.userSafetySettings.findUnique as any).mockResolvedValue({
       allowMessagesFrom: 'none',
-      filterOffensiveContent: false,
       hideReadReceipts: true,
       profileVisibility: 'private',
       hideOnlineStatus: true,
-      hideLastSeen: true,
-      enableSafetyAlerts: false,
     });
 
     const res = await request(app).get('/api/safety/settings').expect(200);
@@ -88,6 +112,7 @@ describe('PATCH /api/safety/settings', () => {
     (prisma.user.update as any).mockResolvedValue({});
     (prisma.profile.upsert as any).mockResolvedValue({});
     (prisma.userSafetySettings.upsert as any).mockResolvedValue({});
+    (prisma.dvSafetyProfile.updateMany as any).mockResolvedValue({ count: 0 });
   });
 
   it('writes only the preference keys the caller actually sent', async () => {
@@ -102,8 +127,41 @@ describe('PATCH /api/safety/settings', () => {
     expect(call.create).toMatchObject({
       userId: 'user-123',
       profileVisibility: 'connections',
-      allowMessagesFrom: 'connections',
+      // A row made by saving something unrelated starts from what the server
+      // does for a member with none, not from the column's own default, so
+      // saving her profile visibility does not also narrow who may write to her.
+      allowMessagesFrom: 'all',
     });
+  });
+
+  // The DV page keeps a copy of three of these switches, and search and Safe
+  // Mode read it as well. A member who turned Safe Mode off here used to stay in
+  // it there, and one who opened her messages was shown them closed.
+  it('keeps the copy of the three shared switches on the DV page in step, without making one', async () => {
+    await request(app)
+      .patch('/api/safety/settings')
+      .send({ allowMessages: true, isSafeMode: false, hideFromSearch: false })
+      .expect(200);
+
+    expect(prisma.dvSafetyProfile.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'user-123' },
+      data: { allowMessages: true, isSafeMode: false, hideFromSearch: false },
+    });
+  });
+
+  it('copies only the shared switches that were sent', async () => {
+    await request(app).patch('/api/safety/settings').send({ isSafeMode: true }).expect(200);
+
+    expect(prisma.dvSafetyProfile.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'user-123' },
+      data: { isSafeMode: true },
+    });
+  });
+
+  it('leaves the DV page alone when none of the shared switches is sent', async () => {
+    await request(app).patch('/api/safety/settings').send({ profileVisibility: 'private' }).expect(200);
+
+    expect(prisma.dvSafetyProfile.updateMany).not.toHaveBeenCalled();
   });
 
   it('does not touch the preferences table when no preference key is sent', async () => {
@@ -132,14 +190,40 @@ describe('PATCH /api/safety/settings', () => {
   it('accepts the message-settings payload the client sends', async () => {
     await request(app)
       .patch('/api/safety/settings')
-      .send({ allowMessagesFrom: 'all', hideReadReceipts: false, filterOffensiveContent: true })
+      .send({ allowMessagesFrom: 'all', hideReadReceipts: false })
       .expect(200);
 
     expect((prisma.userSafetySettings.upsert as any).mock.calls[0][0].update).toEqual({
       allowMessagesFrom: 'all',
       hideReadReceipts: false,
-      filterOffensiveContent: true,
     });
+  });
+
+  // An older page still sends the switch it used to show. It is ignored, not
+  // refused, so that saving the rest of the page keeps working; and nothing
+  // is written for the three switches nothing enforces.
+  it('ignores the three retired switches a stale client may still send, and keeps the rest', async () => {
+    await request(app)
+      .patch('/api/safety/settings')
+      .send({
+        allowMessagesFrom: 'none',
+        filterOffensiveContent: false,
+        hideLastSeen: true,
+        enableSafetyAlerts: false,
+      })
+      .expect(200);
+
+    const call = (prisma.userSafetySettings.upsert as any).mock.calls[0][0];
+    expect(call.update).toEqual({ allowMessagesFrom: 'none' });
+    expect(call.create).not.toHaveProperty('filterOffensiveContent');
+    expect(call.create).not.toHaveProperty('hideLastSeen');
+    expect(call.create).not.toHaveProperty('enableSafetyAlerts');
+  });
+
+  it('writes nothing at all when the only thing sent is a retired switch', async () => {
+    await request(app).patch('/api/safety/settings').send({ filterOffensiveContent: false }).expect(200);
+
+    expect(prisma.userSafetySettings.upsert).not.toHaveBeenCalled();
   });
 
   // Her counterparts saw her come online before she switched hiding on, and

@@ -125,6 +125,15 @@ const ALLOWED = new Map([
   // through mediaApi.upload(type, file), which the walk resolves to the
   // parameterised route. Re-add an entry, with its reason, if a literal call
   // returns.
+  //
+  // A file sent in a conversation is uploaded to the literal path
+  // /media/upload/chat (mediaApi.uploadChatFile), because the conversation it is
+  // for travels in the query and the client never chooses the kind. The
+  // parameterised route POST /upload/:type IS its handler: media.routes.ts
+  // branches on `type === 'chat'` (the audience check, the ceiling and where the
+  // file is received), so the literal reaching the :type route is the design,
+  // not a route registered in the wrong order.
+  ['POST /api/media/upload/chat', 'Handled by POST /upload/:type, which branches on type === "chat" (media.routes.ts)'],
 ]);
 
 function fail(message) {
@@ -280,8 +289,10 @@ function collectCallsIn(src, record) {
   {
 
     // 1. The axios helper: `api.get('/posts/feed')`, path relative to /api.
+    //    `uploadClient` is the same helper pointed straight at the API for
+    //    uploads (lib/api.ts), so its calls are part of the contract too.
     for (const m of src.matchAll(
-      /\bapi\s*\.\s*(get|post|put|patch|delete)\s*(?:<[^>]*>)?\s*\(\s*([`'"])([^`'"]*)\2/g
+      /\b(?:api|uploadClient)\s*\.\s*(get|post|put|patch|delete)\s*(?:<[^>]*>)?\s*\(\s*([`'"])([^`'"]*)\2/g
     )) {
       const raw = m[3];
       if (!raw.startsWith('/')) continue; // absolute URLs are not our contract

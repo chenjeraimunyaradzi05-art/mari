@@ -8,6 +8,12 @@
  * put an apprenticeship on the platform at all. A listing starts as a draft,
  * which is why it is only visible to the organizations named on it until it
  * is published.
+ *
+ * A listing can be published only while the organisation it is placed with is
+ * verified and holds an approved host safety attestation (HostSafetyPanel).
+ * The server says which on each listing (hostMayPlace) and refuses otherwise;
+ * Publish is switched off here, with the reason, so nobody finds out by being
+ * refused.
  */
 
 import { useState } from 'react';
@@ -23,6 +29,7 @@ import { safeHref } from '@/lib/safe-href';
 import { apiMessage } from '@/lib/strategy-api';
 import { Button } from '@/components/ui/button';
 import { cn, formatDate } from '@/lib/utils';
+import { HostSafetyPanel } from './HostSafetyPanel';
 
 type Apprenticeship = {
   id: string;
@@ -40,7 +47,11 @@ type Apprenticeship = {
   rto?: { id: string; name: string } | null;
   hostEmployer?: { id: string; name: string } | null;
   _count?: { applications: number };
+  /** The organisation it is placed with is verified and holds an approved safety attestation. */
+  hostMayPlace?: boolean;
 };
+
+const NEEDS_HOST_CHECK = 'Needs a verified organisation and an approved host safety attestation before it can be published.';
 
 const LEVELS = [
   ['CERTIFICATE_I', 'Certificate I'],
@@ -265,6 +276,8 @@ export default function ProviderApprenticeshipsPage() {
         <ArrowLeft className="h-4 w-4" /> Back to the organisation
       </Link>
 
+      <HostSafetyPanel organizationId={orgId} />
+
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400">
@@ -361,11 +374,22 @@ export default function ProviderApprenticeshipsPage() {
                     {item.publishedAt ? `Published ${formatDate(item.publishedAt)}` : `Created ${formatDate(item.createdAt)}`}
                     {item._count ? ` · ${item._count.applications} application${item._count.applications === 1 ? '' : 's'}` : ''}
                   </p>
+                  {item.status === 'DRAFT' && item.hostMayPlace === false && <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">{NEEDS_HOST_CHECK}</p>}
+                  {item.status === 'OPEN' && item.hostMayPlace === false && (
+                    <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                      This listing is on the public list but is not taking applications, and cannot offer or confirm a placement, until the host check above is complete.
+                    </p>
+                  )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={cn('rounded-full px-2 py-0.5 text-xs font-semibold', TONE[item.status] ?? TONE.DRAFT)}>{item.status.toLowerCase()}</span>
                   {item.status === 'DRAFT' && (
-                    <Button size="sm" onClick={() => publish.mutate(item.id)} disabled={publish.isPending}>
+                    <Button
+                      size="sm"
+                      onClick={() => publish.mutate(item.id)}
+                      disabled={publish.isPending || item.hostMayPlace === false}
+                      title={item.hostMayPlace === false ? NEEDS_HOST_CHECK : undefined}
+                    >
                       <Globe className="mr-2 h-4 w-4" /> Publish
                     </Button>
                   )}

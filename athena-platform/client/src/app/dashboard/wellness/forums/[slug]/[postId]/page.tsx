@@ -10,8 +10,8 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { Flag, Heart, MessageCircleHeart, Trash2 } from 'lucide-react';
-import { wellnessApi, wellnessError, type Author, type CrisisLine } from '@/lib/wellness-api';
-import { AuthorChips, Chip, CrisisStrip, ErrorBox, Loading, WarningFold, WellnessNav, foldsFor, useLoad } from '@/components/wellness/WellnessUi';
+import { wellnessApi, wellnessError, type Author, type CrisisAnswer, type CrisisLine } from '@/lib/wellness-api';
+import { AuthorChips, Chip, CrisisNotice, CrisisStrip, ErrorBox, Loading, WarningFold, WellnessNav, crisisOf, foldsFor, useLoad } from '@/components/wellness/WellnessUi';
 import { Check, Field, SelectInput, inputClass } from '@/components/strategy/StrategyUi';
 import { formatRelativeTime } from '@/lib/utils';
 
@@ -19,7 +19,24 @@ type Post = { id: string; title: string; body: string; contentWarning: string | 
 type Reply = { id: string; body: string; isHidden: boolean; isFromModerator: boolean; createdAt: string; author: Author; canEdit: boolean };
 type Data = { post: Post; replies: Reply[]; replyPage: number; replyLimit: number; replyTotal: number; isModerator: boolean; crisisLines: CrisisLine[]; viewer?: { hiddenWarnings: string[]; anonymousByDefault: boolean } };
 
-const REPORT_REASONS = [{ value: 'INAPPROPRIATE', label: 'Not right for this forum' }, { value: 'HARASSMENT', label: 'Harassment' }, { value: 'HATE_SPEECH', label: 'Hate speech' }, { value: 'MISINFORMATION', label: 'Medical misinformation' }, { value: 'SPAM', label: 'Spam or selling' }, { value: 'OTHER', label: 'Something else' }];
+// Self-harm is first: it is the report with the shortest clock, and the one a member who is worried about somebody most needs to find.
+const REPORT_REASONS = [{ value: 'SELF_HARM', label: 'Someone may be at risk of harming themselves' }, { value: 'INAPPROPRIATE', label: 'Not right for this forum' }, { value: 'HARASSMENT', label: 'Harassment' }, { value: 'HATE_SPEECH', label: 'Hate speech' }, { value: 'MISINFORMATION', label: 'Medical misinformation' }, { value: 'SPAM', label: 'Spam or selling' }, { value: 'OTHER', label: 'Something else' }];
+
+type Reporting = { target: string; reason: string; description: string };
+
+/** The report form, for a post and for a reply. Self-harm says what to do if it cannot wait. */
+function ReportForm({ value, onChange, onSend, onCancel }: { value: Reporting; onChange: (next: Reporting) => void; onSend: () => void; onCancel: () => void }) {
+  return (
+    <div className="mt-3 space-y-3 rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60">
+      <div className="grid gap-3 sm:grid-cols-[1fr_2fr_auto] sm:items-end">
+        <Field label="What is wrong"><SelectInput value={value.reason} onChange={(v) => onChange({ ...value, reason: v })} options={REPORT_REASONS} /></Field>
+        <Field label="Anything a moderator should know" hint="Optional."><input value={value.description} onChange={(e) => onChange({ ...value, description: e.target.value })} maxLength={1000} className={inputClass} /></Field>
+        <div className="flex gap-2 pb-1"><button type="button" onClick={onSend} className="btn-primary text-xs">Send</button><button type="button" onClick={onCancel} className="btn-ghost text-xs">Cancel</button></div>
+      </div>
+      {value.reason === 'SELF_HARM' && <p className="text-xs text-slate-600 dark:text-slate-300">If this person may be in danger right now, call 000, or Lifeline on 13 11 14. A moderator reads this report within 24 hours; it is not a substitute for a call.</p>}
+    </div>
+  );
+}
 
 export default function ThreadPage() {
   const params = useParams<{ slug: string; postId: string }>();
@@ -28,8 +45,9 @@ export default function ThreadPage() {
   const data = useLoad<Data>(() => wellnessApi.post(params.postId, replyPage), [params.postId, replyPage]);
   const [reply, setReply] = useState({ body: '', isAnonymous: false });
   const [busy, setBusy] = useState(false);
-  const [crisis, setCrisis] = useState<CrisisLine[] | null>(null);
-  const [reporting, setReporting] = useState<{ reason: string; description: string } | null>(null);
+  const [crisis, setCrisis] = useState<CrisisAnswer | null>(null);
+  // Which thing is being reported (the post, or a reply's id) and what she has chosen so far.
+  const [reporting, setReporting] = useState<Reporting | null>(null);
   const p = data.data?.post;
   const folded = foldsFor(data.data?.viewer?.hiddenWarnings);
   const anonymousByDefault = data.data?.viewer?.anonymousByDefault ?? false;
@@ -68,7 +86,7 @@ export default function ThreadPage() {
     setBusy(true);
     try {
       const res = await wellnessApi.reply(p.id, { body: reply.body.trim(), isAnonymous: reply.isAnonymous });
-      if (res.data?.data?.crisis?.flagged) setCrisis(res.data.data.crisis.lines);
+      setCrisis(crisisOf(res));
       setReply({ body: '', isAnonymous: anonymousByDefault });
       // Her reply joins the end of the thread, which on a long one is a later
       // page than the one she is reading. Landing on that page is what keeps
@@ -78,7 +96,17 @@ export default function ThreadPage() {
     } catch (err) { toast.error(wellnessError(err, 'That could not be posted.')); } finally { setBusy(false); }
   };
   const support = async () => { if (!p) return; try { await wellnessApi.support(p.id); data.reload(); } catch (err) { toast.error(wellnessError(err, 'That did not go through.')); } };
-  const report = async () => { if (!p || !reporting) return; try { await wellnessApi.reportPost(p.id, { reason: reporting.reason, description: reporting.description || undefined }); setReporting(null); toast.success('Reported. A moderator will look.'); } catch (err) { toast.error(wellnessError(err, 'That could not be reported.')); } };
+  const report = async () => {
+    if (!p || !reporting) return;
+    try {
+      const body = { reason: reporting.reason, description: reporting.description || undefined };
+      const res = reporting.target === 'post' ? await wellnessApi.reportPost(p.id, body) : await wellnessApi.reportReply(reporting.target, body);
+      setReporting(null);
+      // The reference is hers to quote, and the hours are the clock the report runs on.
+      const sent = res?.data?.data as { reference?: string; reviewHours?: number } | undefined;
+      toast.success(sent?.reference ? `Reported. A moderator will look within ${sent.reviewHours ?? 48} hours. Your reference is ${sent.reference}.` : 'Reported. A moderator will look.');
+    } catch (err) { toast.error(wellnessError(err, 'That could not be reported.')); }
+  };
   const moderate = async (patch: Record<string, unknown>) => { if (!p) return; try { await wellnessApi.updatePost(p.id, patch); data.reload(); } catch (err) { toast.error(wellnessError(err, 'That could not be changed.')); } };
   const removePost = async () => { if (!p || !window.confirm('Remove this post?')) return; try { await wellnessApi.deletePost(p.id); router.push(`/dashboard/wellness/forums/${params.slug}`); } catch (err) { toast.error(wellnessError(err, 'That could not be removed.')); } };
   const removeReply = async (r: Reply) => { try { await wellnessApi.deleteReply(r.id); data.reload(); } catch (err) { toast.error(wellnessError(err, 'That could not be removed.')); } };
@@ -88,7 +116,7 @@ export default function ThreadPage() {
     <div className="mx-auto max-w-3xl space-y-5 p-6">
       <WellnessNav current="/dashboard/wellness/forums" />
       <CrisisStrip lines={data.data?.crisisLines} compact />
-      {crisis && <div className="rounded-2xl border border-rose-300 bg-rose-50 p-4 dark:border-rose-800 dark:bg-rose-900/20"><p className="text-sm font-semibold text-rose-800 dark:text-rose-200">It sounds like things are very hard right now. Your reply is up, and these lines are staffed this minute.</p><div className="mt-3"><CrisisStrip lines={crisis} /></div></div>}
+      <CrisisNotice crisis={crisis} onClose={() => setCrisis(null)} />
       {data.loading && <Loading />}
       <ErrorBox error={data.error} />
       {p && (
@@ -100,17 +128,11 @@ export default function ThreadPage() {
             <div className="mt-3"><WarningFold warning={p.contentWarning} folded={folded(p.contentWarning)}><p className="whitespace-pre-line text-sm leading-7 text-slate-800 dark:text-slate-200">{p.body}</p></WarningFold></div>
             <div className="mt-4 flex flex-wrap items-center gap-4 text-xs text-slate-500">
               <button type="button" onClick={support} className={`inline-flex items-center gap-1 ${p.supportedByMe ? 'text-rose-600' : 'hover:text-rose-600'}`}><Heart className={`h-4 w-4 ${p.supportedByMe ? 'fill-current' : ''}`} /> {p.supportCount} with you</button>
-              {!p.canEdit && <button type="button" onClick={() => setReporting((r) => (r ? null : { reason: 'INAPPROPRIATE', description: '' }))} aria-expanded={Boolean(reporting)} className="inline-flex items-center gap-1 hover:text-rose-600"><Flag className="h-3.5 w-3.5" /> Report</button>}
+              {!p.canEdit && <button type="button" onClick={() => setReporting((r) => (r?.target === 'post' ? null : { target: 'post', reason: 'INAPPROPRIATE', description: '' }))} aria-expanded={reporting?.target === 'post'} className="inline-flex min-h-[44px] items-center gap-1 hover:text-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"><Flag className="h-3.5 w-3.5" /> Report</button>}
               {(p.canEdit || data.data?.isModerator) && <button type="button" onClick={removePost} className="inline-flex items-center gap-1 hover:text-rose-600"><Trash2 className="h-3.5 w-3.5" /> Remove</button>}
               {data.data?.isModerator && <><button type="button" onClick={() => moderate({ isPinned: !p.isPinned })} className="hover:text-rose-600">{p.isPinned ? 'Unpin' : 'Pin'}</button><button type="button" onClick={() => moderate({ isLocked: !p.isLocked })} className="hover:text-rose-600">{p.isLocked ? 'Reopen' : 'Close'}</button><button type="button" onClick={() => moderate({ isHidden: !p.isHidden, hiddenReason: p.isHidden ? null : 'Removed by a moderator' })} className="hover:text-rose-600">{p.isHidden ? 'Unhide' : 'Hide'}</button></>}
             </div>
-            {reporting && (
-              <div className="mt-3 grid gap-3 rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60 sm:grid-cols-[1fr_2fr_auto] sm:items-end">
-                <Field label="What is wrong"><SelectInput value={reporting.reason} onChange={(v) => setReporting((r) => r && ({ ...r, reason: v }))} options={REPORT_REASONS} /></Field>
-                <Field label="Anything a moderator should know" hint="Optional."><input value={reporting.description} onChange={(e) => setReporting((r) => r && ({ ...r, description: e.target.value }))} maxLength={1000} className={inputClass} /></Field>
-                <div className="flex gap-2 pb-1"><button type="button" onClick={report} className="btn-primary text-xs">Send</button><button type="button" onClick={() => setReporting(null)} className="btn-ghost text-xs">Cancel</button></div>
-              </div>
-            )}
+            {reporting?.target === 'post' && <ReportForm value={reporting} onChange={setReporting} onSend={report} onCancel={() => setReporting(null)} />}
           </article>
 
           <section className="space-y-3">
@@ -127,7 +149,12 @@ export default function ThreadPage() {
               <div key={r.id} className={`rounded-xl border p-4 ${r.isFromModerator ? 'border-sky-200 bg-sky-50/50 dark:border-sky-900/40 dark:bg-sky-900/10' : 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900'}`}>
                 <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500"><AuthorChips author={{ ...r.author, isModerator: r.isFromModerator || r.author.isModerator }} /><span>{formatRelativeTime(r.createdAt)}</span>{r.isHidden && <Chip tone="rose">Hidden</Chip>}</div>
                 <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-800 dark:text-slate-200">{r.body}</p>
-                <div className="mt-2 flex gap-3 text-xs text-slate-500">{(r.canEdit || data.data?.isModerator) && <button type="button" onClick={() => removeReply(r)} className="hover:text-rose-600">Remove</button>}{data.data?.isModerator && <button type="button" onClick={() => hideReply(r)} className="hover:text-rose-600">{r.isHidden ? 'Unhide' : 'Hide'}</button>}</div>
+                <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-500">
+                  {!r.canEdit && <button type="button" onClick={() => setReporting((cur) => (cur?.target === r.id ? null : { target: r.id, reason: 'INAPPROPRIATE', description: '' }))} aria-expanded={reporting?.target === r.id} className="inline-flex min-h-[44px] items-center gap-1 hover:text-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"><Flag className="h-3.5 w-3.5" /> Report</button>}
+                  {(r.canEdit || data.data?.isModerator) && <button type="button" onClick={() => removeReply(r)} className="inline-flex min-h-[44px] items-center hover:text-rose-600">Remove</button>}
+                  {data.data?.isModerator && <button type="button" onClick={() => hideReply(r)} className="inline-flex min-h-[44px] items-center hover:text-rose-600">{r.isHidden ? 'Unhide' : 'Hide'}</button>}
+                </div>
+                {reporting?.target === r.id && <ReportForm value={reporting} onChange={setReporting} onSend={report} onCancel={() => setReporting(null)} />}
               </div>
             ))}
             {replyPages > 1 && (

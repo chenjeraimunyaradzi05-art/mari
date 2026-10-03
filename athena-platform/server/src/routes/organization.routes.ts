@@ -25,9 +25,13 @@ import { body, validationResult } from 'express-validator';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
-import { v4 as uuidv4 } from 'uuid';
-import { parsePagination } from '../utils/pagination';
+import { randomUUID } from 'crypto';
+import { clampLimit, clampPage, parsePagination } from '../utils/pagination';
+import { z } from 'zod';
+import { parseWith } from '../middleware/validate';
+import { httpUrl, isHttpUrl } from '../utils/http-url';
 import { assertContentAllowed } from '../services/moderation.service';
+import { directoryReadLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
 
@@ -58,7 +62,9 @@ function emailMatchesWebsite(email: string | null | undefined, website: string |
 // ===========================================
 // GET ALL ORGANIZATIONS
 // ===========================================
-router.get('/', async (req, res, next) => {
+// optionalAuth first, so the directory budget is counted per member and not per
+// address: a campus or an office is one address and many members.
+router.get('/', optionalAuth, directoryReadLimiter, async (req, res, next) => {
   try {
     const { page, limit } = parsePagination(req.query as { page?: string; limit?: string });
     const type = req.query.type as string;
@@ -162,7 +168,7 @@ router.post(
       await assertContentAllowed([name, description].filter(Boolean).join('\n'), { kind: 'profile', userId });
 
       // Generate slug
-      const slug = `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${uuidv4().slice(0, 6)}`;
+      const slug = `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${randomUUID().slice(0, 6)}`;
 
       // The organisation and its owner in one transaction, the same shape as
       // POST /api/employer/organizations: an organisation with no member is
@@ -264,6 +270,29 @@ router.post('/:id/claim', authenticate, async (req: AuthRequest, res: Response, 
 // ===========================================
 // UPDATE ORGANIZATION
 // ===========================================
+const mediaLink = z
+  .string()
+  .trim()
+  .max(2000)
+  .refine((value) => value === '' || value.startsWith('/') || isHttpUrl(value), 'must be a web address');
+
+const optionalColumn = (max: number) => z.string().trim().max(max).nullable().optional();
+
+const updateOrganizationBody = z.object({
+  name: z.string().trim().min(1, 'is required').max(200).optional(),
+  description: optionalColumn(5000),
+  logo: mediaLink.nullable().optional(),
+  banner: mediaLink.nullable().optional(),
+  website: z.union([httpUrl(500), z.literal('')]).nullable().optional(),
+  city: optionalColumn(100),
+  state: optionalColumn(50),
+  country: z.string().trim().min(1).max(100).optional(),
+  industry: optionalColumn(100),
+  size: optionalColumn(50),
+// Strict, so `isVerified`, `abn`, `safetyScore` and the rest of the row are refused by
+// name rather than silently dropped.
+}).strict();
+
 router.patch('/:id', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
@@ -296,13 +325,14 @@ router.patch('/:id', authenticate, async (req: AuthRequest, res, next) => {
       throw new ApiError(403, 'Not authorized to update this organization');
     }
 
-    const allowedFields = ['name', 'description', 'logo', 'banner', 'website', 'city', 'state', 'country', 'industry', 'size'];
-
-    const updateData: Record<string, any> = {};
-    for (const field of allowedFields) {
-      if (req.body[field] !== undefined) {
-        updateData[field] = req.body[field];
-      }
+    // Only the fields the schema names are read, and each is the kind of value
+    // its column holds. The loop this replaced copied any of ten names across
+    // as it found them, so a website of `javascript:...` was stored and shown
+    // as a link, and an object where a name belonged was a 500.
+    const patch = parseWith(updateOrganizationBody, req.body);
+    const updateData: Record<string, string | null> = {};
+    for (const [field, value] of Object.entries(patch)) {
+      if (value !== undefined) updateData[field] = value;
     }
 
     // Screened as profile text, as at creation: see POST / below.
@@ -331,11 +361,11 @@ router.patch('/:id', authenticate, async (req: AuthRequest, res, next) => {
 // ===========================================
 // GET ORGANIZATION JOBS
 // ===========================================
-router.get('/:slug/jobs', async (req, res, next) => {
+router.get('/:slug/jobs', optionalAuth, directoryReadLimiter, async (req, res, next) => {
   try {
     const { slug } = req.params;
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 20;
+    const page = clampPage(req.query.page);
+    const limit = clampLimit(req.query.limit, 20, 100);
 
     const organization = await prisma.organization.findUnique({
       where: { slug },

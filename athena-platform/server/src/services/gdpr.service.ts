@@ -30,7 +30,14 @@ import { prisma } from '../utils/prisma';
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { logger } from '../utils/logger';
 import { hashOpaqueToken } from '../utils/opaqueToken';
+import { sessionEvents } from '../utils/session-events';
 import { bestEffort } from '../utils/best-effort';
+import { presentSafetyPlan } from '../utils/safety-plan-seal';
+import { openText } from '../utils/encryption-key';
+import { decryptJson } from './wellness/health-crypto';
+import { redactIdentityChecksBeforeErasure } from './identity-verification.service';
+import { endBillingBeforeErasure } from './erasure-billing.service';
+import { chatFilesOfMember, deleteChatAttachmentFiles } from './chat-attachment-cleanup.service';
 import { PRIVACY_CONTACT_ROUTE, resolveContactEmail } from '../config/region.config';
 import { emailService } from './email.service';
 import {
@@ -71,11 +78,183 @@ interface PersonalDataModel {
    * exist the account row cannot be dropped, only stripped back to a shell.
    */
   holdsAccount?: true;
+  /**
+   * For a table whose columns are kept sealed: a row as the member should read
+   * it back in an export. An export of ciphertext is no export at all.
+   */
+  readable?: (row: Record<string, unknown>) => object;
   /** Left out of the export bundle; `reason` then explains why. */
   exportable?: false;
   /** Required for retain, skip, and anything not exportable. */
   reason?: string;
 }
+
+/**
+ * A row with one sealed column opened, for an export. A column this host cannot
+ * open (the key it was sealed under is gone) comes back null and is named in
+ * `unreadable`, so the member is told a record exists that cannot be read, and
+ * is never handed ciphertext as though it were what she wrote.
+ */
+function withOpenedColumn(
+  row: Record<string, unknown>,
+  column: string,
+  open: (stored: string) => unknown
+): object {
+  const stored = row[column];
+  if (typeof stored !== 'string') return row;
+  const opened = open(stored);
+  if (opened === null || opened === undefined) return { ...row, [column]: null, unreadable: [column] };
+  return { ...row, [column]: opened };
+}
+
+/** A health record's sealed JSON, opened. */
+const openedJson = (column: string) => (row: Record<string, unknown>) =>
+  withOpenedColumn(row, column, (stored) => decryptJson(stored));
+
+/**
+ * What a member who was reported is handed of a record about her, and nothing
+ * else: the columns are named here, so a column added to the table later is not
+ * in her export until somebody has decided that it may be.
+ *
+ * She is entitled to know that a complaint was made, what it was about and what
+ * became of it. She is not handed who made it or anything the complainant wrote
+ * or attached, because for a woman who reported a man, or blocked him, an export
+ * is the one place he could be told her name: the reporter's account id, the
+ * description she typed, the copy a report keeps of the thread it is about
+ * (which holds the reporter's own earlier messages), the contact address an
+ * anonymous reporter left, and the moderators' working notes, which are written
+ * by reading all of that. The moderator who decided it is a colleague's name and
+ * not hers to be given, and what an automated screen made of the content is
+ * staff's own assessment.
+ */
+const shownFrom = (columns: readonly string[]) => (row: Record<string, unknown>) =>
+  Object.fromEntries(Object.entries(row).filter(([column]) => columns.includes(column)));
+
+/** The columns of a content report that its subject is shown. Held to the schema by the register test. */
+export const REPORT_COLUMNS_SHOWN_TO_SUBJECT = [
+  'id',
+  'reportedUserId',
+  'contentType',
+  'contentId',
+  'reason',
+  'status',
+  'action',
+  'actionTakenAt',
+  'createdAt',
+  'updatedAt',
+] as const;
+
+/** The columns of a safety incident that its subject is shown. Held to the schema by the register test. */
+export const INCIDENT_COLUMNS_SHOWN_TO_SUBJECT = [
+  'id',
+  'userId',
+  'type',
+  'severity',
+  'reason',
+  'contentType',
+  'contentId',
+  'verified',
+  'resolvedAt',
+  'createdAt',
+  'updatedAt',
+] as const;
+
+/**
+ * The columns of a staff flag that its subject is shown: that one was raised, of
+ * what kind and how serious, and when it was closed. Not its reason or its notes,
+ * which are staff's working words, nor who raised it or who closed it. Held to
+ * the schema by the register test.
+ */
+export const FLAG_COLUMNS_SHOWN_TO_SUBJECT = ['id', 'userId', 'type', 'severity', 'resolvedAt', 'createdAt', 'updatedAt'] as const;
+
+/**
+ * The kinds of staff flag that are raised from what other members did to a
+ * member, or from the standing measure that is worked out from it, and so are
+ * not in her export at all:
+ *
+ *   SAFETY_CRITICAL   raised when the safety score falls under 25, and its reason
+ *                     says "Safety score dropped to N". The export withholds the
+ *                     score itself (STAFF_ONLY_ACCOUNT_COLUMNS) because a score
+ *                     that fell the day after a block says who blocked; a flag
+ *                     that states it, and the day it was raised, would say it
+ *                     again.
+ *   UNWANTED_CONTACT  raised when several different members have declined,
+ *                     blocked or reported her message requests, and its notes
+ *                     count each.
+ *   PILE_ON           raised on the person being contacted by a crowd, and its
+ *                     notes list the accounts that did it.
+ *
+ * The names are the ones the services that raise them use (safety-score.service,
+ * unwanted-contact.service and pile-on.service); the register test reads those
+ * files and fails if one of them is renamed without this list being told.
+ */
+export const STAFF_MEASURE_FLAG_TYPES = ['SAFETY_CRITICAL', 'UNWANTED_CONTACT', 'PILE_ON'] as const;
+
+/**
+ * The columns of a member's stored trust record that she is handed. Not the
+ * stored score, the community-feedback figure, the count of reports against her
+ * or the date of the last incident: each is moved by a report or by a block
+ * another member made (trust.service: recordSafetyReport and recordUserBlock,
+ * the second of which counts a block as a report against her), so the record
+ * would say that one was made, and the date of it. Not its own created and
+ * updated dates either, which are the date of the first such event. Held to the
+ * schema by the register test.
+ *
+ * This is not the figure on her Trust page, which is worked out from her
+ * profile each time she looks (calculateTrustScore) and is shown to her.
+ */
+export const TRUST_RECORD_COLUMNS_SHOWN_TO_SUBJECT = [
+  'id',
+  'userId',
+  'identityVerified',
+  'identityScore',
+  'accountAge',
+  'accountAgeScore',
+  'engagementScore',
+  'professionalScore',
+  'badges',
+  'warningsCount',
+  'suspensionsCount',
+  'reportsSubmitted',
+  'reportAccuracy',
+] as const;
+
+/**
+ * Keys of an audit entry's details that hold a member of staff's own working
+ * words, or something a reporter supplied. A moderator's note on a report is
+ * written by reading the reporter's description and the evidence it kept, and the
+ * audit trail keeps a copy of it (admin.routes: the MODERATION_ actions), so withholding
+ * the note from the report and handing it back from here would hand it back.
+ */
+const STAFF_WORDS_IN_AUDIT_DETAILS: readonly string[] = [
+  'notes',
+  'note',
+  'reviewNotes',
+  'decisionNote',
+  'reporterId',
+  'reporterEmail',
+  'contactEmail',
+  'description',
+  'evidence',
+];
+
+/**
+ * An audit entry about her, as she is handed it. When it was her own act she is
+ * handed it as it was. When somebody else did it, she is not given who (a member
+ * of staff's account, address and browser belong to them, not to her), nor the
+ * words they wrote or a reporter supplied.
+ */
+const auditEntryAboutHer = (row: Record<string, unknown>): object => {
+  if (row.actorUserId && row.actorUserId === row.targetUserId) return row;
+  const { actorUserId: _actor, ipAddress: _address, userAgent: _browser, metadata, ...rest } = row;
+  if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
+    return {
+      ...rest,
+      metadata: Object.fromEntries(Object.entries(metadata).filter(([key]) => !STAFF_WORDS_IN_AUDIT_DETAILS.includes(key))),
+    };
+  }
+  return metadata === undefined ? rest : { ...rest, metadata };
+};
 
 /**
  * Every table holding personal data about a member. Both data subject rights
@@ -110,7 +289,7 @@ export const PERSONAL_DATA_MODELS: PersonalDataModel[] = [
     erasure: 'delete',
     exportable: false,
     reason:
-      'A safe chat holds what the other people in it said as well as what she said. Only the messages she sent are handed back, under dvSafeMessagesSent.',
+      'The same messages as dvSafeMessagesSent, reached through the chat they sit in. A safe chat belongs to one member and holds only what she wrote, so they are handed back once, readable, under dvSafeMessagesSent.',
   },
   { model: 'dvPanicAlert', section: 'dvPanicAlerts', keys: [], where: (userId) => ({ profile: { userId } }), erasure: 'delete' },
   // A ban outlives the account it started from, or it is not a ban: erasing the
@@ -144,7 +323,7 @@ export const PERSONAL_DATA_MODELS: PersonalDataModel[] = [
     erasure: 'delete',
     exportable: false,
     reason:
-      'The disguised name and access PIN on a safe chat are safety mechanisms, and the participant list names the other people in it.',
+      'The disguised name and the PIN hash on a safe chat are there to hide the chat and lock it, not records about her. A safe chat has one member in it, so there is no one else it could name.',
   },
 
   // Engagement signals.
@@ -183,6 +362,9 @@ export const PERSONAL_DATA_MODELS: PersonalDataModel[] = [
   { model: 'message', section: 'messages', keys: ['senderId', 'receiverId'], erasure: 'delete' },
   { model: 'conversationParticipant', section: 'conversations', keys: ['userId'], erasure: 'delete' },
   { model: 'liveStreamMessage', section: 'liveStreamMessages', keys: ['userId'], erasure: 'delete' },
+  // A host's silence on a viewer. Both columns are member ids with no foreign
+  // key behind them, so the rows go by key, whichever side the member was on.
+  { model: 'liveStreamMute', section: 'liveStreamMutes', keys: ['userId', 'mutedById'], erasure: 'delete' },
   { model: 'wellnessReply', section: 'wellnessReplies', keys: ['authorId'], erasure: 'delete' },
 
   // Memberships, applications and bookings.
@@ -205,6 +387,48 @@ export const PERSONAL_DATA_MODELS: PersonalDataModel[] = [
   { model: 'investorIntroduction', section: 'investorIntroductions', keys: ['userId'], erasure: 'delete' },
   { model: 'vendorReview', section: 'vendorReviews', keys: ['userId'], erasure: 'delete' },
   { model: 'housingInquiry', section: 'housingInquiries', keys: ['userId'], erasure: 'delete' },
+  // The places she listed carry her street address and her own note on why each
+  // is safe, with no foreign key to her account (HousingListing.agentId is a bare
+  // column), so they were in neither her export nor her erasure.
+  //
+  // The inquiries other women sent about those places go first, because the
+  // foreign key refuses to delete a listing that still has one. They are those
+  // women's records of asking and are not handed back to her: on a confidential
+  // listing she is only ever shown each of them as an alias.
+  {
+    model: 'housingInquiry',
+    section: 'housingInquiriesOnHerListings',
+    keys: [],
+    where: (userId) => ({ listing: { agentId: userId } }),
+    erasure: 'delete',
+    exportable: false,
+    reason:
+      'Inquiries other members sent about a place she listed. They belong to the women who asked, and on a confidential listing the lister is shown each one as an alias so that she cannot tell who asked; they are removed with the listing and are not handed back to her.',
+  },
+  { model: 'housingListing', section: 'housingListings', keys: ['agentId'], erasure: 'delete' },
+  // Her own provider check: what she told ATHENA about herself as a lister, and
+  // what staff recorded. Staff's notes about her are hers to read (APP 12).
+  { model: 'housingProviderVerification', section: 'housingProviderVerification', keys: ['userId'], erasure: 'delete' },
+  {
+    model: 'housingProviderVerification',
+    section: 'housingProvidersReviewed',
+    keys: ['reviewedById'],
+    erasure: 'detach',
+    exportable: false,
+    reason: 'The provider checks a member of staff decided are other members\' records; naming them would hand one member another\'s details.',
+  },
+  // An attestation is the organisation's record that a host employer was
+  // checked before apprentices were placed with it, so it outlives the person
+  // who filled it in; only her name goes.
+  { model: 'hostEmployerSafetyAttestation', section: 'hostSafetyAttestationsMade', keys: ['attestedById'], erasure: 'detach' },
+  {
+    model: 'hostEmployerSafetyAttestation',
+    section: 'hostSafetyAttestationsReviewed',
+    keys: ['reviewedById'],
+    erasure: 'detach',
+    exportable: false,
+    reason: 'An attestation a member of staff reviewed belongs to the organisation that made it, not to the reviewer.',
+  },
   { model: 'insuranceApplication', section: 'insuranceApplications', keys: ['userId'], erasure: 'delete' },
   { model: 'indigenousCommunityMember', section: 'indigenousCommunityMemberships', keys: ['userId'], erasure: 'delete' },
   { model: 'internationalCredential', section: 'internationalCredentials', keys: ['userId'], erasure: 'delete' },
@@ -222,7 +446,18 @@ export const PERSONAL_DATA_MODELS: PersonalDataModel[] = [
   { model: 'wellnessCircleMember', section: 'wellnessCircleMemberships', keys: ['userId'], erasure: 'delete' },
   { model: 'wellnessChallengeMember', section: 'wellnessChallengeMemberships', keys: ['userId'], erasure: 'delete' },
   { model: 'healthReview', section: 'healthReviews', keys: ['userId'], erasure: 'delete' },
-  { model: 'healthBooking', section: 'healthBookings', keys: ['userId'], erasure: 'delete' },
+  {
+    model: 'healthBooking',
+    section: 'healthBookings',
+    keys: ['userId'],
+    erasure: 'delete',
+    // The reason she gave is sealed as {"text": "..."}; she is handed the text.
+    readable: (row) =>
+      withOpenedColumn(row, 'reason', (stored) => {
+        const opened = decryptJson<{ text?: string }>(stored);
+        return opened === null ? null : (opened.text ?? '');
+      }),
+  },
   { model: 'mechanicReview', section: 'mechanicReviews', keys: ['userId'], erasure: 'delete' },
   { model: 'mechanicBooking', section: 'mechanicBookings', keys: ['userId'], erasure: 'delete' },
   { model: 'carReview', section: 'carReviews', keys: ['userId'], erasure: 'delete' },
@@ -284,15 +519,36 @@ export const PERSONAL_DATA_MODELS: PersonalDataModel[] = [
 
   // Profiles, settings and derived insight, including special category data.
   { model: 'profile', section: 'profile', keys: ['userId'], erasure: 'delete' },
-  { model: 'creatorProfile', section: 'creatorProfile', keys: ['userId'], erasure: 'delete' },
+  {
+    model: 'creatorProfile',
+    section: 'creatorProfile',
+    keys: ['userId'],
+    erasure: 'delete',
+    // Whether withdrawals are paused is hers to know and stays in what she is
+    // handed. Why is a note for ATHENA's team: it names a card dispute by its
+    // Stripe id, which is another member's payment, and the profile and wallet
+    // routes already leave it out (getCreatorProfile).
+    readable: (row) => {
+      const { payoutHoldReason: _staffNote, ...hers } = row;
+      return hers;
+    },
+  },
   { model: 'mentorProfile', section: 'mentorProfile', keys: ['userId'], erasure: 'delete' },
   { model: 'creatorAnalytics', section: 'creatorAnalytics', keys: ['userId'], erasure: 'delete' },
   { model: 'userFeedPreferences', section: 'feedPreferences', keys: ['userId'], erasure: 'delete' },
   { model: 'userSafetySettings', section: 'safetySettings', keys: ['userId'], erasure: 'delete' },
-  { model: 'userTrustScore', section: 'trustScore', keys: ['userId'], erasure: 'delete' },
+  // The stored standing record: moved by reports and blocks other members made, so
+  // she is handed only what is not (see TRUST_RECORD_COLUMNS_SHOWN_TO_SUBJECT).
+  {
+    model: 'userTrustScore',
+    section: 'trustScore',
+    keys: ['userId'],
+    erasure: 'delete',
+    readable: shownFrom(TRUST_RECORD_COLUMNS_SHOWN_TO_SUBJECT),
+  },
   { model: 'financialHealthScore', section: 'financialHealthScore', keys: ['userId'], erasure: 'delete' },
   { model: 'languageProfile', section: 'languageProfile', keys: ['userId'], erasure: 'delete' },
-  { model: 'safetyPlan', section: 'safetyPlan', keys: ['userId'], erasure: 'delete' },
+  { model: 'safetyPlan', section: 'safetyPlan', keys: ['userId'], erasure: 'delete', readable: presentSafetyPlan },
   { model: 'accessibilityProfile', section: 'accessibilityProfile', keys: ['userId'], erasure: 'delete' },
   { model: 'savingsGoal', section: 'savingsGoals', keys: ['userId'], erasure: 'delete' },
   { model: 'superannuationAccount', section: 'superannuationAccounts', keys: ['userId'], erasure: 'delete' },
@@ -310,9 +566,11 @@ export const PERSONAL_DATA_MODELS: PersonalDataModel[] = [
   // sensitive information under APP 3; the reason a gap here matters more than
   // a gap in, say, saved jobs.
   { model: 'healthSettings', section: 'healthSettings', keys: ['userId'], erasure: 'delete' },
-  { model: 'healthEntry', section: 'healthEntries', keys: ['userId'], erasure: 'delete' },
-  { model: 'medication', section: 'medications', keys: ['userId'], erasure: 'delete' },
-  { model: 'healthNote', section: 'healthNotes', keys: ['userId'], erasure: 'delete' },
+  // What a health record says is sealed in one column. An export of ciphertext
+  // is no export, so each of these hands the member the opened record.
+  { model: 'healthEntry', section: 'healthEntries', keys: ['userId'], erasure: 'delete', readable: openedJson('payload') },
+  { model: 'medication', section: 'medications', keys: ['userId'], erasure: 'delete', readable: openedJson('details') },
+  { model: 'healthNote', section: 'healthNotes', keys: ['userId'], erasure: 'delete', readable: openedJson('content') },
   { model: 'healthShare', section: 'healthShares', keys: ['userId'], erasure: 'delete' },
   { model: 'mentalLoadEntry', section: 'mentalLoadEntries', keys: ['userId'], erasure: 'delete' },
   { model: 'habit', section: 'habits', keys: ['userId'], erasure: 'delete' },
@@ -330,7 +588,35 @@ export const PERSONAL_DATA_MODELS: PersonalDataModel[] = [
   { model: 'verificationBadge', section: 'verificationsReviewed', keys: ['reviewedById'], erasure: 'detach' },
   { model: 'appeal', section: 'appeals', keys: ['userId'], erasure: 'delete' },
   { model: 'appeal', section: 'appealsReviewed', keys: ['reviewedById'], erasure: 'detach' },
-  { model: 'safetyIncident', section: 'safetyIncidents', keys: ['userId'], erasure: 'delete' },
+  // What moderation recorded about this member, as it concerns her: that a report
+  // was made, what it was about and how it ended. Not who made it, and not the
+  // reporter's own words: reporterId is the reporter's account, or for a block the
+  // blocker's, and metadata holds an anonymous reporter's description and contact
+  // address. resolvedById is the moderator who closed it.
+  {
+    model: 'safetyIncident',
+    section: 'safetyIncidents',
+    keys: ['userId'],
+    where: (userId) => ({ userId, type: { not: 'BLOCK' } }),
+    erasure: 'delete',
+    readable: shownFrom(INCIDENT_COLUMNS_SHOWN_TO_SUBJECT),
+  },
+  // A block is the one thing ATHENA never tells the person it is made against:
+  // every other surface answers her as though the blocker did not exist, so the
+  // closed door does not say why it is closed. A row saying she was blocked, and
+  // when, would tell a man whom a woman has blocked that she has, and the date
+  // is usually enough to say which one. The export says so plainly (below) and
+  // the rows go with the account on erasure like every other.
+  {
+    model: 'safetyIncident',
+    section: 'safetyIncidentsBlocks',
+    keys: ['userId'],
+    where: (userId) => ({ userId, type: 'BLOCK' }),
+    erasure: 'delete',
+    exportable: false,
+    reason:
+      'Blocks other members have made. They are not part of an export because the date of a block, with the member it follows, would tell the person blocked who blocked her. A block is never announced to the person it is made against.',
+  },
   {
     model: 'safetyIncident',
     section: 'safetyIncidentsReported',
@@ -339,7 +625,28 @@ export const PERSONAL_DATA_MODELS: PersonalDataModel[] = [
     exportable: false,
     reason: 'Naming the incidents a member reported would identify the people they reported.',
   },
-  { model: 'adminFlag', section: 'adminFlags', keys: ['userId'], erasure: 'delete' },
+  // What staff flagged about her, as it concerns her: that a flag was raised, what
+  // kind and when. Not the flags that are made of other members' reports, blocks
+  // and contact (STAFF_MEASURE_FLAG_TYPES, next), and not staff's reason or notes,
+  // which state scores and counts and list accounts.
+  {
+    model: 'adminFlag',
+    section: 'adminFlags',
+    keys: ['userId'],
+    where: (userId) => ({ userId, type: { notIn: [...STAFF_MEASURE_FLAG_TYPES] } }),
+    erasure: 'delete',
+    readable: shownFrom(FLAG_COLUMNS_SHOWN_TO_SUBJECT),
+  },
+  {
+    model: 'adminFlag',
+    section: 'adminFlagsStaffMeasures',
+    keys: ['userId'],
+    where: (userId) => ({ userId, type: { in: [...STAFF_MEASURE_FLAG_TYPES] } }),
+    erasure: 'delete',
+    exportable: false,
+    reason:
+      'Flags staff raised from the standing measure and from how many other members have declined, blocked, reported or contacted the account. They state scores and counts and list accounts, and a flag with its date would tell the member who reported or blocked her, or who was contacting her, so they are not handed out.',
+  },
   {
     model: 'safetyIncident',
     section: 'safetyIncidentsResolved',
@@ -361,8 +668,11 @@ export const PERSONAL_DATA_MODELS: PersonalDataModel[] = [
     section: 'dvSafeMessagesSent',
     keys: ['senderId'],
     erasure: 'pseudonymise',
+    // Stored sealed under DV_ENCRYPTION_KEY. The export hands back what she
+    // wrote, not the ciphertext; one the key can no longer open is marked.
+    readable: (row) => withOpenedColumn(row, 'content', (stored) => openText('safe-chat', stored)),
     reason:
-      'A safe chat message names its sender without a foreign key to the account, so the link becomes a one-way hash. Messages she sent inside a safe chat belonging to another member are only reachable this way.',
+      'A safe chat message names its sender without a foreign key to the account, so on erasure the link becomes a one-way hash. The text is sealed in the database and is opened here, so the export is something she can read.',
   },
   {
     model: 'adminFlag',
@@ -394,6 +704,14 @@ export const PERSONAL_DATA_MODELS: PersonalDataModel[] = [
     keys: ['reportedUserId'],
     erasure: 'retain',
     holdsAccount: true,
+    // She is told that a report was made about her and what became of it, never
+    // who made it or what they wrote. The reporter's id, what she typed, the
+    // copy a report keeps of the thread it is about (which holds the reporter's
+    // own earlier messages), and the moderators' notes written from all of that
+    // are the reporter's, and in a case of harassment or violence an export is
+    // the way a person finds out who reported them. REPORT_COLUMNS_SHOWN_TO_SUBJECT
+    // names what she is given; anything else is left out.
+    readable: shownFrom(REPORT_COLUMNS_SHOWN_TO_SUBJECT),
     reason: 'Online Safety Act record of a complaint and how it was handled.',
   },
 
@@ -422,6 +740,8 @@ export const PERSONAL_DATA_MODELS: PersonalDataModel[] = [
     section: 'auditTrailAsTarget',
     keys: ['targetUserId'],
     erasure: 'detach',
+    // Without who acted on her, and without the words they wrote (see auditEntryAboutHer).
+    readable: auditEntryAboutHer,
     reason: 'Seven year accountability record kept without the member link.',
   },
 
@@ -575,6 +895,20 @@ export const PERSONAL_DATA_MODELS: PersonalDataModel[] = [
     reason: 'Tax record, retained seven years.',
   },
   {
+    model: 'paymentDispute',
+    section: 'paymentDisputes',
+    keys: ['userId'],
+    erasure: 'retain',
+    reason:
+      'Chargeback record behind the tax records, retained seven years. It holds the member id as plain text with no link to the account, so it does not keep the account row alive.',
+    // What is hers: the amount, the reason and how it ended. Not ATHENA's working
+    // notes, or the ids of the creators a pause was put on, who are other members.
+    readable: (row) => {
+      const { effects: _workings, heldCreatorProfileIds: _creators, ...hers } = row;
+      return hers;
+    },
+  },
+  {
     model: 'giftTransaction',
     section: 'giftsSent',
     keys: ['senderId'],
@@ -660,6 +994,21 @@ const SECRET_EXPORT_FIELDS = new Set([
   // The PIN that opens a disguised safe chat.
   'accessPinHash',
 ]);
+
+/**
+ * Columns of her own account row that are staff's and are not handed out in an
+ * export. The safety score is worked out from reports and blocks other members
+ * made, to decide which accounts staff look at first, and it is shown to no
+ * member on any screen. In an export it would be the one place a man could read
+ * it, and a score that fell the day after a woman blocked him says who did.
+ */
+const STAFF_ONLY_ACCOUNT_COLUMNS = ['safetyScore', 'safetyScoreUpdatedAt', 'trustScore', 'trustScoreUpdatedAt'] as const;
+
+const STAFF_ONLY_ACCOUNT_REASON =
+  'An internal account-standing measure that decides the order in which our staff review accounts. It is worked out partly from reports and blocks made by other members, so it is not handed out: that could identify them. It is shown to no member, and it restricts no one automatically.';
+
+const STAFF_ONLY_TRUST_REASON =
+  'The stored standing figure on the account and the penalty columns of the trust record (the stored score, the community-feedback figure, the count of reports against the account and the date of the last incident). They are moved by reports and blocks made by other members, so they are not handed out: that could identify them. This is not the trust score on your Trust page, which is worked out from your profile and is shown to you.';
 
 const DOWNLOAD_PATH_PREFIX = '/api/gdpr/download/';
 const EXPORT_TOKEN_BYTES = 32;
@@ -787,6 +1136,17 @@ export interface ErasureOutcome {
   reason?: string;
 }
 
+/**
+ * What a member is told once her erasure has been carried out. One wording for
+ * both doors (Settings, and the data-rights request) so the two cannot drift
+ * into promising different things about the same erasure.
+ */
+export function describeErasure(outcome: Pick<ErasureOutcome, 'accountRemoved'>): string {
+  return outcome.accountRemoved
+    ? 'Your account and personal data have been deleted.'
+    : 'Your personal data has been erased. Records we are legally required to keep are held without anything that identifies you.';
+}
+
 interface MutableDelegate {
   findMany(args: any): Promise<any[]>;
   deleteMany(args: any): Promise<{ count: number }>;
@@ -861,7 +1221,8 @@ function readRestrictionReason(requestDetails: string | null): string | null {
  *
  * `trigger` says what starts the clock: 'age' counts retentionDays from when
  * the record was made, 'expiry' removes it once its own expiry has passed (and
- * retentionDays is 0), and 'erasure' counts from a completed erasure request.
+ * retentionDays is 0), 'erasure' counts from a completed erasure request, and
+ * 'decision' counts from the day a person approved or refused a verification.
  */
 export interface PublishedRetentionPolicy {
   dataType: string;
@@ -871,7 +1232,7 @@ export interface PublishedRetentionPolicy {
   retentionReason: string;
   legalBasis: 'CONSENT' | 'CONTRACT' | 'LEGAL_OBLIGATION' | 'LEGITIMATE_INTERESTS';
   anonymizeInstead: boolean;
-  trigger: 'age' | 'expiry' | 'erasure';
+  trigger: 'age' | 'expiry' | 'erasure' | 'decision';
 }
 
 /**
@@ -957,6 +1318,17 @@ export const EXECUTED_RETENTION_SCHEDULE: readonly PublishedRetentionPolicy[] = 
     legalBasis: 'LEGAL_OBLIGATION',
     anonymizeInstead: false,
     trigger: 'expiry',
+  },
+  {
+    dataType: 'identity_verification_details',
+    description:
+      'Photo ID and selfie checks run on Stripe, not on ATHENA, and Stripe is asked to erase them as soon as a person has decided. The name and document type we kept for the reviewer are removed 90 days after that decision.',
+    dataCategory: DataCategory.PII,
+    retentionDays: 90,
+    retentionReason: 'Long enough for a reviewer to look back at a decision, and no longer.',
+    legalBasis: 'CONSENT',
+    anonymizeInstead: false,
+    trigger: 'decision',
   },
 ];
 
@@ -1192,7 +1564,28 @@ export class GDPRService {
       data: { status: DSARStatus.IN_PROGRESS },
     });
 
-    const outcome = await this.eraseUser(userId, dsarId);
+    let outcome: ErasureOutcome;
+    try {
+      outcome = await this.eraseUser(userId, dsarId);
+    } catch (error) {
+      // A refusal (billing that could not be ended, for one) leaves the account
+      // exactly as it was. The request goes back to waiting rather than staying
+      // "in progress" for a job nobody is doing, and says why.
+      await bestEffort('return a failed erasure request to pending', () =>
+        prisma.dSARRequest.update({
+          where: { id: dsarId },
+          data: {
+            status: DSARStatus.PENDING,
+            processingNotes: error instanceof Error ? error.message.slice(0, 500) : 'Erasure failed',
+          },
+        })
+      );
+      throw error;
+    }
+    // The erasure deleted her session rows, so the REST API refuses her from
+    // here on; this closes the sockets she still has open, which nothing else
+    // would, because a socket only authenticates at the handshake.
+    sessionEvents.announceRevoked({ userId, reason: 'account-deleted' });
 
     // The request row is itself personal data and goes with the rest of it, so
     // the entry below is the only surviving record that the right was honoured.
@@ -1274,6 +1667,10 @@ export class GDPRService {
     }
 
     const outcome = await this.eraseUser(userId, reference);
+    // The erasure deleted her session rows, so the REST API refuses her from
+    // here on; this closes the sockets she still has open, which nothing else
+    // would, because a socket only authenticates at the handshake.
+    sessionEvents.announceRevoked({ userId, reason: 'account-deleted' });
 
     // The account row is gone by now, so this entry is the only surviving
     // record that an administrator — this one — destroyed it.
@@ -2032,6 +2429,10 @@ export class GDPRService {
 
     const records: Record<string, object[]> = {};
     const excluded: Array<{ section: string; reason: string }> = [];
+    // Said every time, whatever her score is: the export's silence about a column
+    // must not be an answer about her.
+    excluded.push({ section: 'account.safetyScore', reason: STAFF_ONLY_ACCOUNT_REASON });
+    excluded.push({ section: 'account.trustScore', reason: STAFF_ONLY_TRUST_REASON });
 
     for (const entry of PERSONAL_DATA_MODELS) {
       if (entry.exportable === false) {
@@ -2043,7 +2444,7 @@ export class GDPRService {
         where: subjectFilter(entry, userId),
       });
 
-      records[entry.section] = rows.map((row) => this.sanitizeForExport(row));
+      records[entry.section] = rows.map((row) => this.sanitizeForExport(entry.readable ? entry.readable(row) : row));
     }
 
     return {
@@ -2053,7 +2454,9 @@ export class GDPRService {
         format: 'JSON',
         sections: Object.keys(records).length,
       },
-      account: this.sanitizeForExport(account),
+      account: this.sanitizeForExport(
+        account && Object.fromEntries(Object.entries(account).filter(([column]) => !(STAFF_ONLY_ACCOUNT_COLUMNS as readonly string[]).includes(column)))
+      ),
       records,
       excluded,
     };
@@ -2068,9 +2471,42 @@ export class GDPRService {
   private async eraseUser(userId: string, dsarId: string): Promise<ErasureOutcome> {
     const hash = pseudonym(userId);
 
-    return prisma.$transaction(
+    // First, and not best effort: a membership that keeps billing after the
+    // account is gone is money taken for nothing. If Stripe cannot be asked to
+    // stop it this throws (409) and nothing below has run, so she is never left
+    // erased and still charged. See erasure-billing.service.ts.
+    await endBillingBeforeErasure(userId);
+
+    // Her photo ID checks are held by Stripe, and the session id on her badges
+    // is the only handle there is to them; the walk below deletes the badges.
+    // So Stripe is asked to erase them first, outside the transaction because it
+    // is a call to another service. It never throws and never holds the erasure
+    // up: a session Stripe refuses is logged and the erasure goes on.
+    await bestEffort('identity check redaction before erasure', () => redactIdentityChecksBeforeErasure(userId));
+
+    // The pictures, recordings and files she sent in conversations, and was sent.
+    // Listed now because the walk below deletes the rows that name them, and
+    // removed after the erasure has committed: a file taken out of the bucket for
+    // an erasure that then rolled back would be gone from a thread that is still
+    // there. It never throws, so it never holds the erasure up.
+    const chatFiles = await chatFilesOfMember(userId);
+
+    const outcome = await prisma.$transaction(
       async (tx) => {
         let rowsRemoved = 0;
+
+        // The address SendGrid told us it could not deliver to (EmailSuppression,
+        // written by the event webhook) is keyed by the address itself, not by
+        // the account, so the register walk below cannot find it. It is her
+        // address all the same, and once the account is gone there is nothing
+        // left here to mail, so the row goes with her. Read before the row that
+        // holds the address is deleted or tombstoned, in the same transaction.
+        const address = await tx.user.findUnique({ where: { id: userId }, select: { email: true } });
+        const email = typeof address?.email === 'string' ? address.email.trim().toLowerCase() : null;
+        if (email) {
+          const { count } = await tx.emailSuppression.deleteMany({ where: { email } });
+          rowsRemoved += count;
+        }
 
         // Event copies the host's name, title and avatar into plain columns
         // beside the link, so detaching hostUserId on its own would leave her
@@ -2163,6 +2599,12 @@ export class GDPRService {
       },
       { timeout: ERASURE_TRANSACTION_TIMEOUT_MS, maxWait: ERASURE_TRANSACTION_MAX_WAIT_MS }
     );
+
+    // Committed. Now the files behind the messages that went, except behind a
+    // message somebody reported (services/chat-attachment-cleanup).
+    await deleteChatAttachmentFiles(chatFiles);
+
+    return outcome;
   }
 
   /**
@@ -2198,9 +2640,17 @@ export class GDPRService {
       twoFactorEnabled: false,
       twoFactorSecret: null,
       twoFactorEnabledAt: null,
+      // Hashed, but still a credential for an account that no longer exists.
+      twoFactorRecoveryCodes: { set: [] },
       womanSelfAttested: false,
       womanVerificationStatus: WomanVerificationStatus.UNVERIFIED,
       womanVerifiedAt: null,
+      // Her date of birth, and the record that a document check confirmed it.
+      // A shell kept so a foreign key resolves must not also keep how old she
+      // was, which for an account closed because its holder was under 18 is the
+      // one personal fact the closure itself was about.
+      dateOfBirth: null,
+      ageVerifiedAt: null,
       consentMarketing: false,
       consentDataProcessing: false,
       consentCookies: false,

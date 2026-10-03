@@ -247,8 +247,15 @@ export function OrderModal({ isOpen, onClose, service, onOrder, onPaid }: OrderM
               </div>
             )}
 
-            <div className="p-3 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded-lg text-sm">
-              Payment will be held securely until you approve the delivered work.
+            <div className="p-3 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded-lg text-sm space-y-1">
+              <p>Your card is held, not charged, until you approve the delivered work.</p>
+              {/* A card hold lasts about a week with a live processor; a package
+                  can take longer. Said now, so a renewal request later is not a
+                  surprise. */}
+              <p>
+                A card hold lasts about a week. If the job takes longer, we will ask you to renew it
+                before it runs out, so the provider is sure to be paid. Renewing never charges you.
+              </p>
             </div>
 
             <div className="flex justify-between pt-4">

@@ -12,8 +12,11 @@
 
 import { prisma } from '../../utils/prisma';
 import { round2 } from './tax-plan.service';
+import { GIFT_POINT_VALUE_AUD } from '../../config/price-book';
+import { isGstRegistered } from '../invoice.service';
 
-export const POINT_VALUE_AUD = 0.01;
+/** What one gift point is worth, from the price book. */
+export const POINT_VALUE_AUD = GIFT_POINT_VALUE_AUD;
 
 export interface FinancialYear {
   label: string;
@@ -43,6 +46,12 @@ export interface EarningsStatement {
   lines: StatementLine[];
   assessableIncome: number;
   platformFees: number;
+  /**
+   * The GST inside the platform fees, one eleventh of them, once ATHENA is
+   * registered for GST; zero before that. The fee is the whole of what ATHENA
+   * keeps, so it includes the GST the way an Australian price does.
+   */
+  platformFeeGst: number;
   paidToBank: number;
   gstRegistrationDue: boolean;
   notes: string[];
@@ -77,9 +86,17 @@ export async function buildEarningsStatement(userId: string, endYear?: number, n
   const giftGross = gifts.reduce((s, g) => s + g.giftValue, 0) * POINT_VALUE_AUD;
   const giftFees = gifts.reduce((s, g) => s + g.platformShare, 0) * POINT_VALUE_AUD;
   const giftNet = gifts.reduce((s, g) => s + g.creatorShare, 0) * POINT_VALUE_AUD;
-  const sessionGross = sessions.reduce((s, x) => s + Number(x.sessionAmount), 0);
-  const sessionFees = sessions.reduce((s, x) => s + Number(x.platformFee), 0);
-  const sessionNet = sessions.reduce((s, x) => s + Number(x.mentorPayout), 0);
+  // Each session is brought to whole cents before it is added, and its payout is
+  // what is left of the amount after the fee. Sessions booked before the amounts
+  // were worked out in cents carry fractions of a cent (24.9975, 4.9995 and
+  // 19.998 for a 25.00 charge), and summing those gave a statement that did not add
+  // up to what the cards were charged.
+  const cents = (value: unknown) => Math.round(Number(value) * 100);
+  const sessionGrossCents = sessions.reduce((s, x) => s + cents(x.sessionAmount), 0);
+  const sessionFeesCents = sessions.reduce((s, x) => s + cents(x.platformFee), 0);
+  const sessionGross = sessionGrossCents / 100;
+  const sessionFees = sessionFeesCents / 100;
+  const sessionNet = (sessionGrossCents - sessionFeesCents) / 100;
   const paid = payouts.reduce((s, p) => s + p.amount, 0);
 
   const lines: StatementLine[] = [
@@ -89,6 +106,10 @@ export async function buildEarningsStatement(userId: string, endYear?: number, n
   ];
   const assessable = round2(giftNet + sessionNet);
   const fees = round2(giftFees + sessionFees);
+  // Asked of the end of the period reported on, or of today for the year in
+  // progress, because ATHENA's registration starts on a day.
+  const registered = isGstRegistered(now < fy.to ? now : fy.to);
+  const feeGst = registered ? round2(fees / 11) : 0;
 
   return {
     fy: fy.label,
@@ -97,12 +118,16 @@ export async function buildEarningsStatement(userId: string, endYear?: number, n
     lines,
     assessableIncome: assessable,
     platformFees: fees,
+    platformFeeGst: feeGst,
     paidToBank: round2(paid),
     gstRegistrationDue: giftGross + sessionGross >= 75000,
     notes: [
       'Income earned on the platform is assessable in the year it was earned, whether or not it had reached your bank by 30 June.',
       'The figures are shown net of the platform fee. If you report the gross instead, the fee is a deduction; do not do both.',
       'Gifts are valued at one cent a point, the rate the platform pays out at.',
+      ...(registered
+        ? [`ATHENA is registered for GST. About ${'$'}${feeGst.toFixed(2)} of the platform fees above is GST, one eleventh of the fee, which is quoted as the whole of what ATHENA keeps. Ask your accountant how it applies to you.`]
+        : []),
       'Regular, organised earning with a view to profit is a business for tax; a few gifts a year may be a hobby. The ATO has a test; an accountant can apply it.',
       giftGross + sessionGross >= 75000 ? 'Gross earnings passed $75,000 this year: GST registration is required, and your sessions would carry GST.' : 'Under $75,000 gross, GST registration is optional.',
       'This is a summary from the platform\'s records, not a payment summary from an employer. Keep it with your tax records.',

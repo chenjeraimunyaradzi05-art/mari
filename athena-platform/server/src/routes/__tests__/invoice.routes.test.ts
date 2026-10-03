@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { describe, it, expect, jest, beforeEach } from '@jest/globals';
+import { describe, it, expect, jest, beforeEach, afterAll } from '@jest/globals';
 
 jest.mock('../../utils/prisma', () => {
   const prisma: any = {
@@ -60,10 +60,38 @@ jest.mock('../../utils/email', () => {
 
 import { app } from '../../index';
 import { prisma as prismaTyped } from '../../utils/prisma';
+import { invoiceService } from '../../services/invoice.service';
 
 const prisma: any = prismaTyped;
 
 const decimal = (value: number) => ({ toNumber: () => value });
+
+// Who ATHENA is on a document. None of the four has a default, and an invoice is
+// emailed or downloaded only when all four are set, so the tests that need a
+// document set them and the ones about their absence clear them.
+const BILLING_KEYS = ['ATHENA_LEGAL_NAME', 'ATHENA_ABN', 'ATHENA_BILLING_ADDRESS', 'ATHENA_BILLING_EMAIL'] as const;
+const savedBilling = Object.fromEntries(BILLING_KEYS.map((key) => [key, process.env[key]]));
+
+function setBilling(configured: boolean) {
+  const values: Record<string, string> = {
+    ATHENA_LEGAL_NAME: 'Example Trading Pty Ltd',
+    ATHENA_ABN: '51824753556',
+    ATHENA_BILLING_ADDRESS: 'Level 3, 100 Queen St|Brisbane QLD 4000',
+    ATHENA_BILLING_EMAIL: 'billing@mail.example-trading.org',
+  };
+  for (const key of BILLING_KEYS) {
+    if (configured) process.env[key] = values[key];
+    else delete process.env[key];
+  }
+}
+
+afterAll(() => {
+  for (const key of BILLING_KEYS) {
+    const saved = savedBilling[key];
+    if (saved === undefined) delete process.env[key];
+    else process.env[key] = saved;
+  }
+});
 
 function stubPayment() {
   prisma.payment.findUnique.mockResolvedValue({
@@ -89,6 +117,7 @@ function answerCreate() {
 describe('POST /api/invoices/payment/:paymentId', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    setBilling(true);
     currentUser = { id: 'admin-1', role: 'ADMIN', email: 'admin@athena.com', twoFactorEnabled: true };
     prisma.invoice.count.mockResolvedValue(0);
     prisma.invoice.findFirst.mockResolvedValue(null);
@@ -290,5 +319,184 @@ describe('POST /api/invoices/subscription/:subscriptionId', () => {
   it('refuses a member', async () => {
     currentUser = { id: 'member-1', role: 'USER', email: 'member@example.com', twoFactorEnabled: false };
     await request(app).post('/api/invoices/subscription/sub-db-1').send({}).expect(403);
+  });
+});
+
+describe('GET /api/invoices/:invoiceId', () => {
+  const stored = {
+    id: 'inv-row-1',
+    invoiceNumber: 'INV-202609-00001',
+    userId: 'member-1',
+    amount: decimal(120),
+    currency: 'AUD',
+    status: 'PAID',
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.invoice.findUnique.mockImplementation(async ({ where }: any) => (where.id === 'inv-row-1' ? stored : null));
+  });
+
+  it('hands a member her own invoice', async () => {
+    currentUser = { id: 'member-1', role: 'USER', email: 'mei@example.com', twoFactorEnabled: false };
+    const res = await request(app).get('/api/invoices/inv-row-1').expect(200);
+    expect(res.body.data.invoiceNumber).toBe('INV-202609-00001');
+  });
+
+  it('answers another member exactly as it answers an invoice that does not exist', async () => {
+    currentUser = { id: 'member-2', role: 'USER', email: 'bea@example.com', twoFactorEnabled: false };
+
+    const stranger = await request(app).get('/api/invoices/inv-row-1').expect(404);
+    const missing = await request(app).get('/api/invoices/inv-nobody').expect(404);
+
+    // A 403 here confirmed that the number was real.
+    expect(stranger.body.message).toBe(missing.body.message);
+    expect(JSON.stringify(stranger.body)).not.toContain('INV-202609-00001');
+  });
+
+  it('will not render someone else’s invoice as a PDF either', async () => {
+    currentUser = { id: 'member-2', role: 'USER', email: 'bea@example.com', twoFactorEnabled: false };
+    const res = await request(app).get('/api/invoices/inv-row-1/pdf').expect(404);
+    expect(res.headers['content-type']).not.toMatch(/pdf/);
+    // The invoice is read to be judged, never to be rendered for a stranger.
+    expect(prisma.payment.findUnique).not.toHaveBeenCalled();
+  });
+
+  // A refunded sale kept a PAID tax invoice: nothing updated one. What went back is
+  // recorded on the invoice, and the document that is downloaded has to say so.
+  describe('the PDF of a sale that was refunded', () => {
+    const render = jest.spyOn(invoiceService, 'generateInvoicePDF');
+
+    beforeEach(() => {
+      currentUser = { id: 'member-1', role: 'USER', email: 'mei@example.com', twoFactorEnabled: false };
+      render.mockResolvedValue(Buffer.from('%PDF'));
+    });
+
+    it('carries what was credited back, and when, onto the document', async () => {
+      prisma.invoice.findUnique.mockResolvedValue({
+        ...stored,
+        amount: '120',
+        status: 'PAID',
+        creditedAmount: '30',
+        creditedAt: new Date('2026-09-10T00:00:00Z'),
+        issuedAt: new Date('2026-09-01T00:00:00Z'),
+      });
+
+      await request(app).get('/api/invoices/inv-row-1/pdf').expect(200);
+
+      const printed: any = render.mock.calls[0][0];
+      expect(printed.credit).toEqual({ amount: 30, creditedAt: new Date('2026-09-10T00:00:00Z') });
+      // The sale stands as it was made: the total is not reduced.
+      expect(printed.total).toBe(120);
+    });
+
+    it('prints no credit for a sale nothing went back on', async () => {
+      prisma.invoice.findUnique.mockResolvedValue({ ...stored, amount: '120', creditedAmount: '0', issuedAt: new Date('2026-09-01T00:00:00Z') });
+
+      await request(app).get('/api/invoices/inv-row-1/pdf').expect(200);
+
+      expect((render.mock.calls[0][0] as any).credit).toBeUndefined();
+    });
+  });
+
+  it('lets an administrator with a second factor read any member’s invoice', async () => {
+    currentUser = { id: 'admin-1', role: 'ADMIN', email: 'admin@athena.com', twoFactorEnabled: true };
+    await request(app).get('/api/invoices/inv-row-1').expect(200);
+  });
+
+  it('refuses an administrator who has not set up a second factor, and says how to fix it', async () => {
+    const previous = process.env.STAFF_TWO_FACTOR_REQUIRED;
+    process.env.STAFF_TWO_FACTOR_REQUIRED = 'true';
+    try {
+      currentUser = { id: 'admin-2', role: 'ADMIN', email: 'admin2@athena.com', twoFactorEnabled: false };
+      const res = await request(app).get('/api/invoices/inv-row-1').expect(403);
+      expect(res.body.code).toBe('TWO_FACTOR_REQUIRED');
+    } finally {
+      if (previous === undefined) delete process.env.STAFF_TWO_FACTOR_REQUIRED;
+      else process.env.STAFF_TWO_FACTOR_REQUIRED = previous;
+    }
+  });
+});
+
+// The invoice rows are filed as sales happen, whatever the environment holds. What
+// is held back until ATHENA says who it is, is the document: a download, and an
+// email that points at one. It used to print a placeholder company, address and
+// mailbox instead.
+describe('when ATHENA has not said who it is', () => {
+  const stored = {
+    id: 'inv-row-1',
+    invoiceNumber: 'INV-202609-00001',
+    userId: 'member-1',
+    paymentId: null,
+    subscriptionId: 'sub-db-1',
+    subscription: { tier: 'PREMIUM_CAREER' },
+    amount: '29',
+    currency: 'AUD',
+    status: 'PAID',
+    issuedAt: new Date('2026-09-01T00:00:00Z'),
+    paidAt: new Date('2026-09-01T00:00:00Z'),
+    user: { displayName: 'Mei Chen', email: 'mei@example.com' },
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    setBilling(false);
+    currentUser = { id: 'member-1', role: 'USER', email: 'mei@example.com', twoFactorEnabled: false };
+    prisma.invoice.findUnique.mockResolvedValue(stored);
+    prisma.invoice.count.mockResolvedValue(0);
+    prisma.invoice.findFirst.mockResolvedValue(null);
+    answerCreate();
+    // Earlier cases in this file stub the renderer; this one needs the real one.
+    const actual: any = jest.requireActual('../../services/invoice.service');
+    jest.spyOn(invoiceService, 'generateInvoicePDF').mockImplementation(actual.generateInvoicePDF);
+  });
+
+  it('answers a download with a 503 and the code, and no PDF', async () => {
+    const res = await request(app).get('/api/invoices/inv-row-1/pdf').expect(503);
+
+    expect(res.headers['content-type']).not.toMatch(/pdf/);
+    expect(res.body.code).toBe('BILLING_IDENTITY_NOT_CONFIGURED');
+    expect(JSON.stringify(res.body)).not.toMatch(/athena.app|Platform Pty Ltd|Final billing address/);
+  });
+
+  it('downloads the same invoice as a PDF once the identity is set', async () => {
+    setBilling(true);
+
+    const res = await request(app).get('/api/invoices/inv-row-1/pdf').buffer(true).expect(200);
+
+    expect(res.headers['content-type']).toMatch(/pdf/);
+  });
+
+  it('says on the list whether a document can be produced yet', async () => {
+    prisma.invoice.findMany.mockResolvedValue([stored]);
+
+    const before = await request(app).get('/api/invoices').expect(200);
+    setBilling(true);
+    const after = await request(app).get('/api/invoices').expect(200);
+
+    expect(before.body.documentsReady).toBe(false);
+    expect(before.body.data).toHaveLength(1);
+    expect(after.body.documentsReady).toBe(true);
+  });
+
+  it('files the invoice for a payment when staff re-issue it without an email', async () => {
+    currentUser = { id: 'admin-1', role: 'ADMIN', email: 'admin@athena.com', twoFactorEnabled: true };
+    stubPayment();
+
+    const res = await request(app).post('/api/invoices/payment/pay-1').send({}).expect(200);
+
+    expect(prisma.invoice.create).toHaveBeenCalledTimes(1);
+    expect(res.body.data).toMatchObject({ alreadyIssued: false, emailed: 'not_requested' });
+  });
+
+  it('refuses a re-issue with an email, since the link would lead to a refusal, and sends and files nothing', async () => {
+    currentUser = { id: 'admin-1', role: 'ADMIN', email: 'admin@athena.com', twoFactorEnabled: true };
+    stubPayment();
+
+    const res = await request(app).post('/api/invoices/payment/pay-1').send({ sendEmail: true }).expect(503);
+
+    expect(res.body.code).toBe('BILLING_IDENTITY_NOT_CONFIGURED');
+    expect(sendEmailMock).not.toHaveBeenCalled();
+    expect(prisma.invoice.create).not.toHaveBeenCalled();
   });
 });

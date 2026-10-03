@@ -82,12 +82,26 @@ const REQUIRED_IN_PRODUCTION = [
   ['METRICS_TOKEN'],
   ['HEALTH_DIAGNOSTICS_TOKEN', 'DEBUG_SECRET'],
   ['SENDGRID_API_KEY'],
+  ['SENDGRID_FROM_EMAIL'],
   ['STRIPE_SECRET_KEY'],
   ['STRIPE_WEBHOOK_SECRET'],
+  // The second Stripe endpoint, the one listening on connected accounts. Without
+  // its secret every payout.paid, payout.failed and account.updated event is
+  // refused, so a withdrawal that bounced is never heard about and a seller whose
+  // account Stripe stopped paying is never told. /health/launch-readiness fails in
+  // production for the same reason.
+  ['STRIPE_CONNECT_WEBHOOK_SECRET'],
   ['STRIPE_PRICE_CAREER'],
   ['STRIPE_PRICE_PROFESSIONAL'],
   ['STRIPE_PRICE_ENTREPRENEUR'],
   ['STRIPE_PRICE_CREATOR'],
+  // Who ATHENA is on an invoice. No default exists for any of them, and no
+  // invoice document is produced until all four are set (invoice.service
+  // supplierReadiness); the GST registration date is optional and not here.
+  ['ATHENA_LEGAL_NAME'],
+  ['ATHENA_ABN'],
+  ['ATHENA_BILLING_ADDRESS'],
+  ['ATHENA_BILLING_EMAIL'],
   ['S3_BUCKET'],
   ['AWS_REGION'],
   ['AWS_ACCESS_KEY_ID'],
@@ -101,6 +115,18 @@ const REQUIRED_IN_PRODUCTION = [
   // can never pass. See docs/runbooks/ML-SERVICE.md for what turning it on
   // would actually take.
   ['REDIS_URL'],
+];
+
+// Values production must never be given, whatever the file says: a switch that
+// makes the platform report success it has not earned. src/utils/env.ts refuses to
+// start with ALLOW_STRIPE_SIMULATION on in production; this says so before the
+// deploy, from the file that would have carried it there.
+const FORBIDDEN_IN_PRODUCTION = [
+  {
+    name: 'ALLOW_STRIPE_SIMULATION',
+    value: 'true',
+    because: 'it lets a business registration be marked paid with no charge, and no production deployment may simulate a payment',
+  },
 ];
 
 // Required only when the matching switch is on.
@@ -119,12 +145,64 @@ const CONDITIONAL = [
     because: 'ENABLE_WORKERS=true and neither worker simulation flag is set, so the video worker calls an external transcoder',
   },
   { when: (env) => env.OPENSEARCH_ENABLED === 'true', names: ['OPENSEARCH_NODE'], because: 'OPENSEARCH_ENABLED=true' },
+  // MALWARE_SCAN_REQUIRED unset means "documents" in production, and a résumé
+  // or a document is refused when it cannot be scanned (services/malware-scan.service),
+  // so a deployment that does not say `off` has to say where the scanner is.
+  {
+    when: (env) => String(env.MALWARE_SCAN_REQUIRED ?? '').trim().toLowerCase() !== 'off',
+    names: ['CLAMAV_HOST'],
+    because: 'MALWARE_SCAN_REQUIRED is not "off", so résumés and documents are refused until a scanner answers',
+  },
 ];
 
 const PLACEHOLDER_VALUES = new Set([
   '', 'changeme', 'change_me', 'secret', 'your-secret', 'your_secret', 'not_configured',
   'sk_test_not_configured', 'price_xxxxx', 'xxx', 'todo', 'replace_me', 'change_this_to_a_secure_random_string_min_32_chars',
+  // What server/.env.example and .env.production.template ship, so a copied
+  // example is caught here rather than discovered when the API refuses to boot.
+  'generate-with-openssl-rand-hex-32',
+  'your-super-secret-jwt-key-change-in-production',
+  'noreply@athena.com',
+  'noreply@your-domain.com',
 ]);
+
+// Names whose value has to be random, not merely present. Mirrors the rules in
+// src/utils/secret-strength.ts (length, placeholder words, a repeating
+// pattern); this script runs before the build and cannot import TypeScript,
+// so src/utils/__tests__/env.test.ts holds the two to the same answers.
+const SECRET_MIN_LENGTH = { JWT_SECRET: 32, PROXY_SHARED_SECRET: 32, BANNED_IDENTITY_HASH_KEY: 32, DV_ENCRYPTION_KEY: 64 };
+const PLACEHOLDER_FRAGMENTS = [
+  'change', 'your-', 'your_', 'placeholder', 'example', 'replace', 'insert', 'generate', 'openssl',
+  'dev-only', 'not-for-prod', 'not_for_prod', 'not_configured',
+];
+const PLACEHOLDER_WHOLE_VALUES = new Set(['secret', 'password', 'changeme', 'change_me', 'todo', 'xxx', 'test', 'development']);
+
+function isShortPatternRepeated(value) {
+  for (let period = 1; period <= 16; period += 1) {
+    let repeats = true;
+    for (let index = period; index < value.length; index += 1) {
+      if (value[index] !== value[index % period]) {
+        repeats = false;
+        break;
+      }
+    }
+    if (repeats) return true;
+  }
+  return false;
+}
+
+/** Why a value cannot be trusted as a secret, or null. Same rules as secretWeakness() in src/utils/secret-strength.ts. */
+function secretWeakness(value, minLength = 32) {
+  const trimmed = String(value ?? '').trim();
+  if (!trimmed) return 'not set';
+  if (trimmed.length < minLength) return `shorter than ${minLength} characters`;
+  const lower = trimmed.toLowerCase();
+  if (PLACEHOLDER_WHOLE_VALUES.has(lower) || PLACEHOLDER_FRAGMENTS.some((fragment) => lower.includes(fragment))) {
+    return 'a placeholder from an example file';
+  }
+  if (new Set(trimmed).size < 8 || isShortPatternRepeated(trimmed)) return 'made of a repeating pattern, not random';
+  return null;
+}
 
 function fail(message) {
   console.error(`\n  check-env: ${message}\n`);
@@ -284,6 +362,21 @@ function main() {
     }
     if (set.every((name) => PLACEHOLDER_VALUES.has(String(env[name]).trim().toLowerCase()))) placeholders.push(group.join(' or '));
   }
+  // A value that is present and typed is not the same as one that is random. A
+  // blueprint entry the host fills in is not judged: this file does not hold it.
+  for (const [name, minLength] of Object.entries(SECRET_MIN_LENGTH)) {
+    const value = env[name];
+    if (value === undefined || value === '' || value === SUPPLIED_BY_HOST) continue;
+    if (PLACEHOLDER_VALUES.has(String(value).trim().toLowerCase())) continue; // already reported above
+    const weakness = secretWeakness(value, minLength);
+    if (weakness) placeholders.push(`${name} (${weakness})`);
+  }
+  const forbidden = [];
+  for (const rule of FORBIDDEN_IN_PRODUCTION) {
+    if (String(env[rule.name] ?? '').trim().toLowerCase() === rule.value) {
+      forbidden.push(`${rule.name}=${rule.value} (${rule.because})`);
+    }
+  }
   const alreadyRequired = new Set(REQUIRED_IN_PRODUCTION.flat());
   for (const name of namesRequiredAtBoot()) {
     if (alreadyRequired.has(name)) continue;
@@ -313,15 +406,22 @@ function main() {
     console.log(`\n  PLACEHOLDER (set to a value that is not real):`);
     for (const name of placeholders) console.log(`    - ${name}`);
   }
+  if (forbidden.length) {
+    console.log(`\n  FORBIDDEN (set to a value production must never have):`);
+    for (const name of forbidden) console.log(`    - ${name}`);
+  }
   if (obsolete.length) {
     console.log(`\n  OBSOLETE (set, but nothing in src/ reads it):`);
     for (const name of obsolete) console.log(`    - ${name}`);
   }
-  if (!missing.length && !placeholders.length && !obsolete.length) {
+  if (!missing.length && !placeholders.length && !forbidden.length && !obsolete.length) {
     console.log('\n  OK: every required variable is set and every variable is read.');
   }
 
-  if (missing.length || placeholders.length) process.exitCode = 1;
+  if (missing.length || placeholders.length || forbidden.length) process.exitCode = 1;
 }
 
-main();
+// Run as a script, and importable for the test that keeps secretWeakness()
+// equal to its TypeScript twin.
+if (require.main === module) main();
+module.exports = { secretWeakness };

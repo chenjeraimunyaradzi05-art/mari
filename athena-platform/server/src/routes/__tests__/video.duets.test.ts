@@ -7,7 +7,16 @@ jest.mock('../../utils/prisma', () => ({
     videoLike: { findMany: jest.fn(async () => []) },
     videoSave: { findMany: jest.fn(async () => []) },
     audioTrack: { findMany: jest.fn(async () => []), findUnique: jest.fn(), updateMany: jest.fn() },
-    follow: { findMany: jest.fn(async () => []) },
+    follow: { findMany: jest.fn(async () => []), findUnique: jest.fn(async () => null), findFirst: jest.fn(async () => null) },
+    // A duet is made only of a reel its maker may be shown: not across a block, in either
+    // store, and not one whose author is in Safe Mode or has closed her profile.
+    userSafetySettings: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
+    dvSafetyProfile: {
+      findFirst: jest.fn(async () => null),
+      findUnique: jest.fn(async () => null),
+      findMany: jest.fn(async () => []),
+    },
+    user: { findFirst: jest.fn(async () => null) },
   },
 }));
 
@@ -38,6 +47,13 @@ describe('Duets', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     prisma.video.update.mockResolvedValue({});
+    prisma.userSafetySettings.findUnique.mockResolvedValue(null);
+    prisma.userSafetySettings.findMany.mockResolvedValue([]);
+    prisma.dvSafetyProfile.findFirst.mockResolvedValue(null);
+    prisma.dvSafetyProfile.findUnique.mockResolvedValue(null);
+    prisma.dvSafetyProfile.findMany.mockResolvedValue([]);
+    prisma.user.findFirst.mockResolvedValue(null);
+    prisma.follow.findUnique.mockResolvedValue(null);
   });
 
   it('refuses a duet of a reel nobody could watch', async () => {
@@ -57,8 +73,34 @@ describe('Duets', () => {
     expect(prisma.video.create).not.toHaveBeenCalled();
   });
 
+  it('refuses a duet of a reel by someone who has blocked its maker, or who has closed her profile to her', async () => {
+    const send = () =>
+      request(app)
+        .post('/api/video')
+        .set('x-test-user', 'user-1')
+        .send({ videoUrl: 'https://cdn.example.com/reply.mp4', duetOfVideoId: 'orig' });
+    prisma.video.findUnique.mockResolvedValue({ id: 'orig', authorId: 'orig-author', status: 'PUBLISHED', isHidden: false });
+
+    // The original's author blocked her.
+    prisma.userSafetySettings.findMany.mockResolvedValue([{ userId: 'orig-author' }]);
+    await send().expect(400);
+
+    // Or her profile is private to everyone but her.
+    prisma.userSafetySettings.findMany.mockResolvedValue([]);
+    prisma.userSafetySettings.findUnique.mockResolvedValue({ profileVisibility: 'private' });
+    await send().expect(400);
+
+    // Or she is in Safe Mode and the maker is not a verified connection.
+    prisma.userSafetySettings.findUnique.mockResolvedValue(null);
+    prisma.user.findFirst.mockResolvedValue({ id: 'orig-author' });
+    await send().expect(400);
+
+    expect(prisma.video.create).not.toHaveBeenCalled();
+    expect(prisma.video.update).not.toHaveBeenCalled();
+  });
+
   it('records the duet on the reply, counts it on the original and keeps the captions', async () => {
-    prisma.video.findUnique.mockResolvedValue({ id: 'orig', status: 'PUBLISHED', isHidden: false });
+    prisma.video.findUnique.mockResolvedValue({ id: 'orig', authorId: 'orig-author', status: 'PUBLISHED', isHidden: false });
     prisma.video.create.mockImplementation(async ({ data }: any) => ({ id: 'reply', ...data }));
 
     const res = await request(app)
@@ -88,6 +130,23 @@ describe('Duets', () => {
 
     expect(res.body.data[0].duetOf).toEqual({ id: 'orig', title: 'The original', thumbnailUrl: null, author: { id: 'o', displayName: 'Mei C.' } });
     expect(res.body.data[1].duetOf).toBeNull();
+  });
+
+  it('names the original only if it is published, and by an author the viewer may be shown, blocks included', async () => {
+    prisma.video.findMany
+      .mockResolvedValueOnce([{ id: 'reply', authorId: 'u', duetOfVideoId: 'orig', audioTrackId: null, author: { id: 'u' } }])
+      .mockResolvedValueOnce([]);
+    // The viewer blocked 'him'; 'blocked-her' blocked her.
+    prisma.userSafetySettings.findUnique.mockResolvedValue({ blockedUsers: ['him'] });
+    prisma.userSafetySettings.findMany.mockResolvedValue([{ userId: 'blocked-her' }]);
+    prisma.dvSafetyProfile.findUnique.mockResolvedValue({ blockedUserIds: ['dv-only'] });
+
+    await request(app).get('/api/video/feed').set('x-test-user', 'viewer-1').expect(200);
+
+    const { where } = prisma.video.findMany.mock.calls[1][0];
+    expect(where).toMatchObject({ id: { in: ['orig'] }, status: 'PUBLISHED', isHidden: false });
+    expect([...where.authorId.notIn].sort()).toEqual(['blocked-her', 'dv-only', 'him']);
+    expect(where.author).toBeDefined();
   });
 });
 

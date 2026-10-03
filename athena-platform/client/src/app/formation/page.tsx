@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { ArrowRight, Building2, Sparkles, Wallet } from 'lucide-react';
+import { FormationFeeList, FormationFeeTerms } from '@/components/business/FormationFeeTerms';
 
 export default function FormationPage() {
   return (
@@ -34,6 +35,15 @@ export default function FormationPage() {
           </span>
         </Link>
       </div>
+
+      {/* What a registration costs, before anyone is asked to start one. The
+          figures and the wording are the server's, so this page promises
+          nothing the payment step does not charge or the review does not do. */}
+      <section aria-labelledby="formation-cost" className="mt-10 space-y-4">
+        <h2 id="formation-cost" className="text-xl font-semibold">What a registration costs</h2>
+        <FormationFeeList />
+        <FormationFeeTerms />
+      </section>
     </div>
   );
 }

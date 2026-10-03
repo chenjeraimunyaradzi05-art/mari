@@ -116,7 +116,7 @@ export function WellnessScreen() {
     >
       <View>
         <Text style={styles.title}>Looked after, on your terms</Text>
-        <Muted>Everything health-related is encrypted before it is stored, and read only by you.</Muted>
+        <Muted>What you log is encrypted before it is stored, and shown only to you unless you share it.</Muted>
       </View>
 
       <CrisisLines lines={reference?.crisisLines} limit={4} />

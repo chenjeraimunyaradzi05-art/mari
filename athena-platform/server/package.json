@@ -25,9 +25,15 @@
     "launch:incident": "node scripts/send-incident-notification.js",
     "validate:launch-readiness": "node -r ts-node/register src/scripts/validate-launch-readiness.ts",
     "validate:auth-sessions": "node -r ts-node/register src/scripts/validate-auth-session-routes.ts",
+    "seal:safety-plans": "node -r ts-node/register src/scripts/seal-safety-plans.ts",
+    "rotate:encryption-keys": "node -r ts-node/register src/scripts/rotate-encryption-keys.ts",
+    "restore:safety-diff": "node -r ts-node/register src/scripts/restore-safety-diff.ts",
     "db:guard": "node scripts/guard-destructive-migration.js",
     "check:api-contract": "node scripts/check-api-contract.js",
     "check:env": "node scripts/check-env.js",
+    "check:raw-body": "node scripts/check-raw-body.js",
+    "check:route-auth": "node scripts/check-route-auth.js",
+    "check:route-validation": "node scripts/check-route-validation.js",
     "db:seed:apprenticeships": "ts-node src/services/seed/apprenticeships.seed.ts",
     "db:seed:super": "ts-node src/services/seed/super.seed.ts",
     "test:integration": "node scripts/integration-db.js test",
@@ -69,7 +75,6 @@
     "stripe": "^14.10.0",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
-    "uuid": "^9.0.1",
     "winston": "^3.11.0",
     "ws": "^8.21.0",
     "zod": "^3.22.4"
@@ -85,7 +90,6 @@
     "@types/supertest": "^6.0.3",
     "@types/swagger-jsdoc": "^6.0.4",
     "@types/swagger-ui-express": "^4.1.8",
-    "@types/uuid": "^9.0.7",
     "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^8.59.2",
     "@typescript-eslint/parser": "^8.59.2",
@@ -100,7 +104,8 @@
     "typescript": "^5.3.3"
   },
   "overrides": {
-    "diff": "^8.0.3"
+    "diff": "^8.0.3",
+    "deepmerge-ts": "^8.0.2"
   },
   "engines": {
     "node": ">=18.0.0"

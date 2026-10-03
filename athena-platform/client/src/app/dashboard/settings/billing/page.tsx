@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useState, useEffect } from 'react';
+import { Suspense, useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
@@ -24,10 +24,12 @@ import {
 import { formatDate, cn, getStoredPreference, getPreferredLocale } from '@/lib/utils';
 import {
   PRO_TIER,
+  describeChatAllowance,
   formatPlanAmount,
   formatPlanInterval,
   usePlanPrices,
 } from '@/app/pricing/plan-prices';
+import { TRIAL_DAYS } from '@/lib/pricing';
 
 /**
  * The plans a member can move between here.
@@ -41,20 +43,26 @@ import {
  * charges, and Enterprise is a conversation rather than a button that cannot
  * work.
  */
+// Only what the server does. The AI tools below are refused to anyone without an
+// active Pro or trial (routes/ai.routes requireAiPremium), and the AI chat has a
+// bigger daily allowance on Pro. These lists used to promise an application cap
+// on Free that nothing enforces, "unlimited" applications on Pro, "Priority
+// support" and "Exclusive events access", none of which exist. See the note on
+// the pricing page's plans.
 const FREE_FEATURES = [
-  '5 job applications/month',
-  'Basic job search',
+  'Job search and applications',
   'Community access',
-  'Limited AI tools',
+  'ATHENA AI chat, with a daily allowance',
 ];
 
 const PRO_FEATURES = [
-  'Unlimited job applications',
-  'AI-powered resume optimizer',
-  'Interview preparation coach',
-  'Career path insights',
-  'Priority support',
-  'Exclusive events access',
+  'AI Resume Optimizer',
+  'Interview Coach',
+  'Opportunity Radar AI',
+  'Career Path Planner',
+  'AI Content Generator',
+  'Business Idea Validator',
+  'A larger daily allowance for the ATHENA AI chat',
 ];
 
 const TIER_NAMES: Record<string, string> = {
@@ -105,6 +113,10 @@ type SubscriptionRow = {
   interval?: string | null;
   currentPeriodEnd?: string | null;
   cancelAtPeriodEnd?: boolean;
+  /** Whether the paid tools are on today: the one rule the server's plan gates all read. */
+  entitled?: boolean;
+  /** For a payment that failed: the day the paid tools pause if it is not put right. */
+  graceEndsAt?: string | null;
 };
 
 /** What she pays, from the row the Stripe webhook keeps, or null when it has not been told. */
@@ -123,6 +135,27 @@ function formatSubscriptionPrice(subscription: SubscriptionRow | undefined): str
   }
 }
 
+/**
+ * The plan a member is on, read from her subscription row.
+ *
+ * This page used to read `user.subscriptionTier`, a field no server response has
+ * ever set: /auth/me sends `subscription: { tier, status }` and nothing else names
+ * a tier (see the note on the field in lib/types.ts). So every member was on the
+ * free plan here, whatever she paid: a paying member was offered Upgrade and sent
+ * to a checkout the server refuses, and a member on a trial was shown no trial,
+ * no end date and no way to cancel before the charge. The row is what the Stripe
+ * webhook writes, so it is what is read. A row that has ended is the free plan,
+ * whatever tier it still names. The user field is kept only as a fallback for a
+ * server that one day sets it, and only when there is no row to read.
+ */
+function planOf(subscription: SubscriptionRow | undefined, fallbackTier: string | undefined): string {
+  if (subscription) {
+    if (subscription.status === 'CANCELED') return 'FREE';
+    return subscription.tier ?? 'FREE';
+  }
+  return fallbackTier ?? 'FREE';
+}
+
 export default function BillingSettingsPage() {
   return (
     <Suspense fallback={null}>
@@ -135,7 +168,8 @@ function BillingContent() {
   const { user } = useAuth();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
-  const { data: subscription } = useSubscription() as { data: SubscriptionRow | undefined };
+  const subscriptionQuery = useSubscription() as { data: SubscriptionRow | undefined; isLoading?: boolean };
+  const subscription = subscriptionQuery.data;
   const cancelSubscription = useCancelSubscription();
   const manageBilling = useManageBilling();
   const createCheckout = useCreateCheckout();
@@ -148,12 +182,31 @@ function BillingContent() {
   // Auto-trigger checkout if upgrade param is present. 'pro' is what the
   // pricing page and the paywall send; anything else is passed through and the
   // server decides whether it is a tier it sells.
+  //
+  // Once per visit, and not for a member who already holds a paid plan. The
+  // effect used to run again whenever the mutation's result changed, which it does
+  // on every state change, so a checkout the server refused started another one the
+  // moment it failed, and went on doing it. That was dormant while a refusal was
+  // rare. Checkout now answers 409 to a member who already has a membership, and
+  // "Choose Pro" on the pricing page sends exactly such a member here with
+  // ?upgrade=pro: she would have had a refusal toast and a request to Stripe in a
+  // loop until the payment limiter stopped it. A refused or failed start is
+  // reported once, and the Upgrade button is her way to try again.
+  // The plan she is on, from the subscription row; see planOf.
+  const currentPlan = planOf(subscription, user?.subscriptionTier);
+  const isPremium = currentPlan !== 'FREE';
+
+  const autoCheckoutStarted = useRef(false);
+  // Not before the row has been read: a paying member's row arrives a moment
+  // after the page does, and starting the checkout on the empty first render
+  // would send her to the 409 she was never going to get past.
+  const subscriptionSettled = !subscriptionQuery.isLoading;
   useEffect(() => {
     const upgradeTier = searchParams.get('upgrade');
-    if (upgradeTier && !createCheckout.isPending && !createCheckout.isSuccess) {
-      createCheckout.mutate(upgradeTier === 'pro' ? PRO_TIER : upgradeTier);
-    }
-  }, [searchParams, createCheckout]);
+    if (!upgradeTier || autoCheckoutStarted.current || !subscriptionSettled || isPremium) return;
+    autoCheckoutStarted.current = true;
+    createCheckout.mutate(upgradeTier === 'pro' ? PRO_TIER : upgradeTier);
+  }, [searchParams, createCheckout, subscriptionSettled, isPremium]);
 
   // Back from Stripe Checkout. The tier changes when Stripe's webhook arrives,
   // which is usually within seconds of the redirect but not always before it,
@@ -174,14 +227,48 @@ function BillingContent() {
     isLoading: paymentMethodsLoading,
     isError: paymentMethodsError,
   } = usePaymentMethods(paymentRegion);
-  const currentPlan = user?.subscriptionTier || 'FREE';
-  const isPremium = currentPlan !== 'FREE';
   const currentPlanName = TIER_NAMES[currentPlan] ?? 'Paid membership';
   const currentPrice = formatSubscriptionPrice(subscription);
 
   const proPlan = planPrices.data?.plans.find((plan) => plan.tier === PRO_TIER);
   const proAmount = proPlan ? formatPlanAmount(proPlan) : null;
   const proInterval = proPlan ? formatPlanInterval(proPlan) : null;
+
+  // What the card is charged on the day a trial ends, said in the same words on
+  // the pricing page: the real price when the server could give it.
+  const firstCharge = proAmount ? `${proAmount}${proInterval ? ` a ${proInterval}` : ''}` : 'the Pro price';
+  const gstStatement = planPrices.data?.gst?.statement ?? null;
+
+  // While an admin has paused new payments the upgrade would be refused, so the
+  // button is held and the page says why, in the admin's own words. Only an
+  // explicit true: a server that does not say is not guessed at.
+  const paymentsPaused = planPrices.data?.paused === true;
+  const pausedNote = planPrices.data?.pauseMessage || 'Memberships are paused while we finish checking payments.';
+
+  // The chat allowance as the server enforces it. Until it arrives, or on a
+  // server that does not send it, the lines keep their plain wording and no
+  // number is guessed.
+  const freeChat = describeChatAllowance(planPrices.data?.entitlements?.free.aiChat);
+  const paidChat = describeChatAllowance(planPrices.data?.entitlements?.paid.aiChat);
+  const freeFeatures = freeChat ? [...FREE_FEATURES.slice(0, -1), `ATHENA AI chat, ${freeChat}`] : FREE_FEATURES;
+  const proFeatures = paidChat
+    ? [...PRO_FEATURES.slice(0, -1), `A larger allowance for the ATHENA AI chat: ${paidChat}`]
+    : PRO_FEATURES;
+
+  // A trial is a subscription Stripe reports as trialing, and its period ends the
+  // day the trial does. She is told that date and what is charged on it, because
+  // the first she would otherwise hear of the charge is the charge.
+  const isTrialing = subscription?.status === 'TRIALING';
+  const trialEnds = subscription?.currentPeriodEnd ? formatDate(subscription.currentPeriodEnd) : null;
+
+  // A renewal whose payment failed. Stripe tries the card again for a few days
+  // and the paid tools stay on for a grace meanwhile; after it they pause until
+  // the payment goes through. Either way she is told, and given the way to fix it,
+  // here rather than by finding a tool switched off. Only an explicit `false`
+  // reads as paused: an older server that does not send the field is not guessed at.
+  const isPastDue = subscription?.status === 'PAST_DUE';
+  const toolsPaused = isPastDue && subscription?.entitled === false;
+  const graceEnds = subscription?.graceEndsAt ? formatDate(subscription.graceEndsAt) : null;
 
   const handleManageBilling = async () => {
     manageBilling.mutate(undefined, {
@@ -252,9 +339,11 @@ function BillingContent() {
                 {isPremium ? currentPlanName : 'Free Plan'}
               </h2>
               <p className="text-sm text-slate-500 dark:text-slate-400">
-                {isPremium
-                  ? 'You have access to all premium features'
-                  : 'Upgrade to unlock all features'}
+                {toolsPaused
+                  ? 'Your paid tools are paused until your payment goes through'
+                  : isPremium
+                    ? 'You have access to all premium features'
+                    : 'Upgrade to unlock all features'}
               </p>
             </div>
           </div>
@@ -304,6 +393,58 @@ function BillingContent() {
                 </p>
               </div>
             </div>
+          </div>
+        )}
+
+        {isPremium && isPastDue && (
+          <div
+            role="alert"
+            className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-100"
+          >
+            <p>
+              {toolsPaused
+                ? 'Your last payment did not go through, so your paid tools are paused until it does. Update your card and they come straight back. Nothing you have made is lost.'
+                : `Your last payment did not go through. Stripe is trying your card again, and you keep your plan${
+                    graceEnds ? ` until ${graceEnds}` : ' while it does'
+                  }. Update your card to be sure it carries on.`}
+            </p>
+            <button
+              type="button"
+              onClick={handleManageBilling}
+              disabled={manageBilling.isPending}
+              className="btn-primary mt-3 min-h-[44px] px-4 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+            >
+              {manageBilling.isPending ? 'Loading...' : 'Update my card'}
+            </button>
+          </div>
+        )}
+
+        {isPremium && isTrialing && (
+          <div
+            role="status"
+            className="mt-4 rounded-lg border border-primary-200 bg-primary-50 p-4 text-sm text-slate-800 dark:border-primary-900/50 dark:bg-primary-900/20 dark:text-slate-100"
+          >
+            {subscription?.cancelAtPeriodEnd ? (
+              <p>
+                Your free trial {trialEnds ? `ends on ${trialEnds}` : 'is ending'}, and you will not be charged. After
+                that you keep the Free plan.
+              </p>
+            ) : (
+              <>
+                <p>
+                  Your free trial {trialEnds ? `ends on ${trialEnds}` : 'is running'}. On that day your card is charged{' '}
+                  {currentPrice ?? 'the price shown in the billing portal'} unless you cancel before then. We email you
+                  a few days ahead.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowCancelModal(true)}
+                  className="btn-outline mt-3 px-4 py-2 text-sm"
+                >
+                  Cancel before I am charged
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -382,7 +523,7 @@ function BillingContent() {
             <div className="mb-6">
               <span className="text-3xl font-bold text-slate-900 dark:text-white">Free</span>
             </div>
-            <PlanFeatures features={FREE_FEATURES} />
+            <PlanFeatures features={freeFeatures} />
             {!isPremium ? (
               <button disabled className="w-full btn-outline py-2.5 cursor-default">
                 Current Plan
@@ -432,7 +573,7 @@ function BillingContent() {
                 </p>
               )}
             </div>
-            <PlanFeatures features={PRO_FEATURES} />
+            <PlanFeatures features={proFeatures} />
             {isPremium ? (
               <button disabled className="w-full btn-outline py-2.5 cursor-default">
                 Current Plan
@@ -440,14 +581,33 @@ function BillingContent() {
             ) : (
               <button
                 onClick={() => createCheckout.mutate(PRO_TIER)}
-                disabled={createCheckout.isPending}
-                className="w-full py-2.5 text-center disabled:opacity-50 btn-primary"
+                disabled={createCheckout.isPending || paymentsPaused}
+                aria-describedby={paymentsPaused ? 'payments-paused-note' : undefined}
+                className="w-full min-h-[44px] py-2.5 text-center disabled:opacity-50 disabled:cursor-not-allowed btn-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
               >
                 {createCheckout.isPending ? 'Opening checkout...' : 'Upgrade'}
               </button>
             )}
+            {!isPremium && paymentsPaused && (
+              <p id="payments-paused-note" role="status" className="mt-3 text-sm text-amber-800 dark:text-amber-200">
+                {pausedNote}
+              </p>
+            )}
+            {!isPremium && (
+              // Said at the button, before Stripe's own page: when a card is
+              // collected and when it is charged.
+              <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+                A first subscription starts with a {TRIAL_DAYS}-day free trial. A card is needed to start it, and it is
+                charged {firstCharge} on the day the trial ends unless you cancel first. If you have subscribed before,
+                your card is charged {firstCharge} when you check out.
+              </p>
+            )}
           </div>
         </div>
+
+        {gstStatement && (
+          <p className="mt-4 text-sm text-slate-500 dark:text-slate-400">{gstStatement}</p>
+        )}
 
         <div className="mt-6 flex items-start gap-3 rounded-lg border border-slate-200 p-4 text-sm text-slate-600 dark:border-slate-800 dark:text-slate-300">
           <Building2 className="mt-0.5 h-5 w-5 flex-shrink-0 text-slate-400" />
@@ -537,8 +697,11 @@ function BillingContent() {
               Cancel Subscription
             </h3>
             <p className="text-slate-500 dark:text-slate-400 mb-6">
-              Are you sure you want to cancel your subscription? You'll lose access to
-              premium features at the end of your current billing period.
+              {isTrialing
+                ? `Cancel now and you will not be charged. Your trial carries on${
+                    trialEnds ? ` until ${trialEnds}` : ' until it ends'
+                  }, and then you move to the Free plan.`
+                : "Are you sure you want to cancel your subscription? You'll lose access to premium features at the end of your current billing period."}
             </p>
             <div className="flex items-center justify-end space-x-3">
               <button

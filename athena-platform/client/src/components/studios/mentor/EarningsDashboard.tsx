@@ -526,6 +526,8 @@ interface EarningsStatement {
     fee: number;
     net: number;
     status: 'RELEASED' | 'REFUNDED';
+    /** How much of `gross` has gone back to the buyer so far. A sale refunded in part is still RELEASED. */
+    refunded?: number;
   }[];
   totals: {
     currency: string;
@@ -540,6 +542,12 @@ interface EarningsStatement {
 }
 
 const fyShort = (year: number) => `FY${year - 1}–${String(year).slice(2)}`;
+
+/** What buyers were given back in part, on sales that still count, in one currency. */
+const partRefunded = (statement: EarningsStatement, currency: string) =>
+  statement.lines
+    .filter((line) => line.currency === currency && line.status === 'RELEASED')
+    .reduce((sum, line) => sum + (line.refunded ?? 0), 0);
 
 /**
  * Her earnings for an Australian financial year, and the same as a CSV file.
@@ -662,6 +670,9 @@ function StatementsPanel() {
                       {t.refundedCount > 0
                         ? `; ${t.refundedCount} refunded to the buyer after release, ${money(t.refundedNet, t.currency)}, not counted`
                         : ''}
+                      {partRefunded(statement, t.currency) > 0
+                        ? `; ${money(partRefunded(statement, t.currency), t.currency)} of the figures above went back to buyers in part refunds and is still counted in them`
+                        : ''}
                     </p>
                   </div>
                 ))}
@@ -695,6 +706,9 @@ function StatementsPanel() {
                         <p className="text-xs text-muted-foreground">
                           {line.kind}
                           {line.status === 'REFUNDED' ? ' · refunded to the buyer after release' : ''}
+                          {line.status === 'RELEASED' && (line.refunded ?? 0) > 0
+                            ? ` · ${money(line.refunded ?? 0, line.currency)} of it refunded to the buyer`
+                            : ''}
                         </p>
                       </TableCell>
                       <TableCell className="text-right">{money(line.gross, line.currency)}</TableCell>
@@ -932,10 +946,11 @@ function WithdrawDialog({
               <Clock className="h-4 w-4 text-yellow-600 shrink-0 mt-0.5" />
               <div className="text-sm">
                 <p className="font-medium text-yellow-800 dark:text-yellow-200">
-                  Processing Time
+                  When it arrives
                 </p>
                 <p className="text-yellow-700 dark:text-yellow-300">
-                  Transfers typically arrive within 2-3 business days.
+                  Stripe pays your bank on the schedule it sets for your account, so ATHENA cannot give a date.
+                  ATHENA takes no fee when you withdraw and sets no minimum.
                 </p>
               </div>
             </div>

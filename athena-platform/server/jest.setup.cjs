@@ -25,3 +25,17 @@
 for (const name of ['AI_OPENAI_API_KEY', 'OPENAI_API_KEY']) {
   process.env[name] = '';
 }
+
+/**
+ * Nor may it reach a malware scanner, or be refused for want of one.
+ *
+ * In production a résumé or a document is refused when it cannot be scanned
+ * (services/malware-scan.service), which is the default these suites would meet
+ * wherever they set NODE_ENV=production to test something else, such as the
+ * launch-readiness report or a media write. The setting that says "nothing is
+ * refused for want of a scanner" is the one these suites are written against;
+ * the suites about scanning set their own, and point CLAMAV_HOST at a stand-in.
+ */
+process.env.MALWARE_SCAN_REQUIRED = 'off';
+process.env.CLAMAV_HOST = '';
+process.env.CLAMAV_PORT = '';

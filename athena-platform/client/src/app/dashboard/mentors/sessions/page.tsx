@@ -17,8 +17,14 @@
  * mentee "Cancel" on one that had already run, both of which the server
  * refuses, while never offering the mentee the one thing she could do after
  * the hour: say it went ahead. The buttons now follow the same clock as the
- * server, and a mentee whose card has been charged is told where to go if the
- * session did not take place.
+ * server.
+ *
+ * When the mentor marks a paid session complete the card is not charged that
+ * minute: the mentee has SESSION_CONFIRMATION_HOURS to say it did not happen,
+ * and this page tells her when the charge falls and gives her the button. A
+ * session she disputes, before or for DISPUTE_WINDOW_DAYS after the charge, is
+ * frozen with the money held while ATHENA's team decides; the mentor can give
+ * her side once from the same row. Older charges go to Help and Support.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -33,12 +39,15 @@ import { useAuthStore } from '@/lib/hooks';
 import { Avatar } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 import { PaymentIntentForm } from '@/components/payments/PaymentIntentForm';
+import { DISPUTE_WINDOW_DAYS, SESSION_CONFIRMATION_HOURS } from '@/lib/pricing';
 
 /** Help & Support, whose contact card reaches a person on the team. */
 const HELP_LINK = '/dashboard/settings/help';
 
+const DAY = 24 * 60 * 60 * 1000;
+
 type Role = 'mentee' | 'mentor';
-type Status = 'REQUESTED' | 'CONFIRMED' | 'CANCELED' | 'COMPLETED';
+type Status = 'REQUESTED' | 'CONFIRMED' | 'CANCELED' | 'COMPLETED' | 'DISPUTED';
 
 type Session = {
   id: string;
@@ -49,6 +58,15 @@ type Session = {
   currency?: string;
   sessionAmount?: string | number;
   paymentStatus?: 'PENDING' | 'AUTHORIZED' | 'CAPTURED' | 'REFUNDED' | 'FAILED' | 'CANCELED';
+  /** When the card is charged for a session the mentor marked complete, unless the mentee objects first. */
+  paymentReleaseAt?: string | null;
+  paymentCapturedAt?: string | null;
+  disputedAt?: string | null;
+  disputeReason?: string | null;
+  disputeResponse?: string | null;
+  disputeResolution?: 'RELEASED' | 'REFUNDED' | null;
+  /** The mentee's bank has disputed the payment, which is separate from her telling ATHENA. */
+  cardDisputeOpen?: boolean;
   mentee?: { id: string; displayName: string | null; avatar: string | null };
   mentorProfile?: { id: string; user: { id: string; displayName: string | null; avatar: string | null } };
 };
@@ -58,6 +76,7 @@ const STATUS: Record<Status, { label: string; className: string }> = {
   CONFIRMED: { label: 'Confirmed', className: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200' },
   COMPLETED: { label: 'Completed', className: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300' },
   CANCELED: { label: 'Cancelled', className: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-200' },
+  DISPUTED: { label: 'In dispute', className: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-200' },
 };
 
 const errorMessage = (error: unknown) =>
@@ -67,7 +86,7 @@ const errorMessage = (error: unknown) =>
 // money on the mentee's card, which is not hers.
 const PAYMENT: Record<Role, Record<string, string>> = {
   mentee: {
-    PENDING: 'Payment not authorised yet',
+    PENDING: 'Payment not authorised yet. The request is cancelled if it is not paid for within a few hours.',
     AUTHORIZED: 'Payment held on your card',
     CAPTURED: 'Paid',
     REFUNDED: 'Refunded',
@@ -120,6 +139,86 @@ function counterpartOf(session: Session, role: Role) {
   return { id: person?.id, name: person?.displayName || (role === 'mentee' ? 'Mentor' : 'Mentee'), avatar: person?.avatar || undefined };
 }
 
+/**
+ * The mentee's account of what went wrong. The text lives here and not in the
+ * page's state: Row is remade on every render of the page, so a keystroke held
+ * by the page would remount the row and take the focus off the box she is
+ * typing in.
+ */
+function DisputeForm({
+  captured,
+  busy,
+  onSend,
+  onCancel,
+}: {
+  captured: boolean;
+  busy: boolean;
+  onSend: (reason: string) => void;
+  onCancel: () => void;
+}) {
+  const [text, setText] = useState('');
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        const reason = text.trim();
+        if (!reason) return;
+        onSend(reason);
+      }}
+      className="space-y-2 rounded-lg border border-slate-200 p-3 dark:border-slate-700"
+    >
+      <label className="block text-sm text-slate-700 dark:text-slate-300">
+        <span className="mb-1 block font-medium">What went wrong?</span>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={3}
+          maxLength={2000}
+          className="input w-full text-sm"
+          placeholder="My mentor did not join, or the session was not what was agreed."
+        />
+      </label>
+      <p className="text-xs text-slate-500">
+        {captured
+          ? 'The payment is not paid on to your mentor while ATHENA’s team looks at it.'
+          : 'The hold stays on your card, and nothing is charged, while ATHENA’s team looks at it.'}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <button type="submit" disabled={busy || !text.trim()} className="btn-primary px-3 py-1.5 text-sm disabled:opacity-60">
+          Send to ATHENA’s team
+        </button>
+        <button type="button" onClick={onCancel} className="btn-outline px-3 py-1.5 text-sm">
+          Keep it
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/** The mentor's one answer to a session in dispute. Its text lives here for the same reason as DisputeForm's. */
+function AnswerForm({ sessionId, busy, onSend }: { sessionId: string; busy: boolean; onSend: (response: string) => void }) {
+  const [text, setText] = useState('');
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        const response = text.trim();
+        if (!response) return;
+        onSend(response);
+      }}
+      className="mt-2 space-y-2"
+    >
+      <label htmlFor={`answer-${sessionId}`} className="block text-xs font-medium">
+        Tell your side. You can answer once, and the team reads it.
+      </label>
+      <textarea id={`answer-${sessionId}`} value={text} onChange={(e) => setText(e.target.value)} rows={3} maxLength={2000} className="input w-full text-sm" />
+      <button type="submit" disabled={busy || !text.trim()} className="btn-primary px-3 py-1.5 text-sm disabled:opacity-60">
+        Send to the team
+      </button>
+    </form>
+  );
+}
+
 function toLocalInput(iso: string | null): string {
   if (!iso) return '';
   const d = new Date(iso);
@@ -136,6 +235,9 @@ export default function MentorSessionsPage() {
   const [rescheduling, setRescheduling] = useState<string | null>(null);
   const [newTime, setNewTime] = useState('');
   const [paying, setPaying] = useState<{ sessionId: string; clientSecret: string; amount: number; currency?: string } | null>(null);
+  // The session the mentee is saying did not happen. What she writes stays in
+  // DisputeForm, which is why this holds only the id.
+  const [disputing, setDisputing] = useState<string | null>(null);
   const highlightRef = useRef<HTMLLIElement | null>(null);
 
   const profile = useQuery({
@@ -209,6 +311,27 @@ export default function MentorSessionsPage() {
     onError: (error) => toast.error(errorMessage(error) || 'Could not move the session'),
   });
 
+  // Saying a session did not happen freezes it with the money held; the
+  // server decides whether she may, and says why when she may not.
+  const dispute = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) => mentorApi.disputeSession(id, reason),
+    onSuccess: () => {
+      refresh();
+      setDisputing(null);
+      toast.success('Sent to ATHENA’s team. Nothing is paid on while they look at it.');
+    },
+    onError: (error) => toast.error(errorMessage(error) || 'Could not send that to the team'),
+  });
+
+  const answer = useMutation({
+    mutationFn: ({ id, response }: { id: string; response: string }) => mentorApi.respondToSessionDispute(id, response),
+    onSuccess: () => {
+      refresh();
+      toast.success('Your answer has been recorded for the team.');
+    },
+    onError: (error) => toast.error(errorMessage(error) || 'Could not record your answer'),
+  });
+
   const { upcoming, past } = useMemo(() => {
     const list = sessions.data ?? [];
     const now = Date.now();
@@ -226,8 +349,8 @@ export default function MentorSessionsPage() {
   };
 
   // Completing is what moves the money, so each side is told what it does
-  // before it happens: the mentee that her card is charged, the mentor that
-  // the mentee is.
+  // before it happens: the mentee that her card is charged now, the mentor
+  // that the mentee has a window to object before it is.
   const confirmComplete = (session: Session) => {
     const amount = session.sessionAmount !== undefined ? Number(session.sessionAmount) : 0;
     const held = amount > 0 && session.paymentStatus === 'AUTHORIZED';
@@ -237,7 +360,7 @@ export default function MentorSessionsPage() {
           ? `Confirm this session went ahead? The ${formatSessionAmount(amount, session.currency)} held on your card is paid to your mentor now.`
           : 'Confirm this session went ahead?'
         : held
-          ? `Mark this session complete? The mentee’s card is charged ${formatSessionAmount(amount, session.currency)} now, and she is told.`
+          ? `Mark this session complete? The mentee is told, and has ${SESSION_CONFIRMATION_HOURS} hours to say it did not happen; after that her card is charged ${formatSessionAmount(amount, session.currency)}.`
           : 'Mark this session complete? The mentee is told.';
     if (!window.confirm(question)) return;
     changeStatus.mutate({ id: session.id, status: 'COMPLETED' });
@@ -260,7 +383,51 @@ export default function MentorSessionsPage() {
         ? session.status === 'REQUESTED' || (session.status === 'CONFIRMED' && !ended)
         : session.status === 'CONFIRMED';
     const menteeCannotCancel = role === 'mentee' && session.status === 'CONFIRMED' && ended;
-    const wasCharged = role === 'mentee' && session.status === 'COMPLETED' && session.paymentStatus === 'CAPTURED' && amount !== null && amount > 0;
+    // The card step is still hers to finish: not yet attempted, or declined while
+    // the request is still a request. The server hands out the card form's secret
+    // for exactly these two (getSessionPaymentSecret).
+    const cardStepOpen =
+      session.paymentStatus === 'PENDING' || (session.paymentStatus === 'FAILED' && session.status === 'REQUESTED');
+    // The server will not let a mentor accept a paid request until the mentee's
+    // card is held, so the button says so instead of offering something that
+    // answers with an error. Free sessions have no card to wait for.
+    const awaitingPayment =
+      role === 'mentor' &&
+      session.status === 'REQUESTED' &&
+      amount !== null &&
+      amount > 0 &&
+      session.paymentStatus !== 'AUTHORIZED' &&
+      session.paymentStatus !== 'CAPTURED';
+    const paidSession = amount !== null && amount > 0;
+    const captured = session.paymentStatus === 'CAPTURED';
+    const capturedAt = session.paymentCapturedAt ? new Date(session.paymentCapturedAt).getTime() : null;
+    // The same rule the server applies (service-disputes.service): a charged
+    // session can be reported from here for DISPUTE_WINDOW_DAYS after the
+    // charge. A row with no charge date is left to the server to decide.
+    const withinDisputeWindow = capturedAt === null || Date.now() - capturedAt <= DISPUTE_WINDOW_DAYS * DAY;
+    // The mentor has marked it complete and the card is still held: the window
+    // in which the mentee can object, ending when the charge falls.
+    const windowEndsAt =
+      session.status === 'COMPLETED' && session.paymentStatus === 'AUTHORIZED' && session.paymentReleaseAt
+        ? new Date(session.paymentReleaseAt)
+        : null;
+    // The hour is over: the mentor or the mentee has closed it, or its booked
+    // time has passed. The sweep can take the money for such a session before
+    // anyone marks it complete (a hold about to lapse), so a confirmed session
+    // already charged is reported the same way as a completed one.
+    const hourOver = session.status === 'COMPLETED' || (session.status === 'CONFIRMED' && ended);
+    // A dispute is raised once. After the team decides, the row keeps it, and
+    // the decision is shown below instead of a second button the server refuses.
+    const alreadyDisputed = Boolean(session.disputedAt) || Boolean(session.disputeResolution);
+    const canDispute =
+      role === 'mentee' &&
+      paidSession &&
+      !alreadyDisputed &&
+      hourOver &&
+      (session.paymentStatus === 'AUTHORIZED' || (captured && withinDisputeWindow));
+    const wasCharged = role === 'mentee' && hourOver && captured && paidSession && !alreadyDisputed;
+    const pastDisputeWindow = wasCharged && !withinDisputeWindow;
+    const inDispute = session.status === 'DISPUTED';
 
     return (
       <li
@@ -298,11 +465,35 @@ export default function MentorSessionsPage() {
 
         {session.paymentStatus && amount !== null && amount > 0 && (
           <p className={cn('text-xs', session.paymentStatus === 'PENDING' && open ? 'text-amber-700 dark:text-amber-300' : 'text-slate-500')}>
-            {PAYMENT[role][session.paymentStatus] ?? session.paymentStatus}
+            {role === 'mentee' && session.paymentStatus === 'FAILED' && cardStepOpen
+              ? 'Payment failed. You can try another card; the request is cancelled if it is not paid for within a few hours.'
+              : (PAYMENT[role][session.paymentStatus] ?? session.paymentStatus)}
           </p>
         )}
 
-        {wasCharged && (
+        {awaitingPayment && (
+          <p id={`awaiting-payment-${session.id}`} className="text-xs text-slate-500 dark:text-slate-400">
+            You can confirm this once the mentee has authorised payment, so you are sure to be paid. We will tell you when
+            she has.
+          </p>
+        )}
+
+        {windowEndsAt && amount !== null && (
+          <p className="text-xs text-amber-700 dark:text-amber-300">
+            {role === 'mentee'
+              ? `Your mentor marked this session complete. ${formatSessionAmount(amount, session.currency)} is charged on ${format(windowEndsAt, 'EEE d MMM, h:mm a')} unless you tell us before then that it did not take place.`
+              : `Marked complete. The mentee’s card is charged ${formatSessionAmount(amount, session.currency)} on ${format(windowEndsAt, 'EEE d MMM, h:mm a')} unless she says the session did not take place.`}
+          </p>
+        )}
+
+        {wasCharged && withinDisputeWindow && (
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            If this session did not take place, tell us below within {DISPUTE_WINDOW_DAYS} days of the charge and the team will
+            look at it with you.
+          </p>
+        )}
+
+        {pastDisputeWindow && (
           <p className="text-xs text-slate-500 dark:text-slate-400">
             If this session did not take place, contact the team from{' '}
             <Link href={HELP_LINK} className="text-primary-600 hover:underline">
@@ -314,12 +505,45 @@ export default function MentorSessionsPage() {
 
         {menteeCannotCancel && (
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            This session’s time has passed. If it went ahead, confirm it below. If it did not, ask your mentor to cancel
-            it, or contact the team from{' '}
-            <Link href={HELP_LINK} className="text-primary-600 hover:underline">
-              Help &amp; Support
-            </Link>
-            .
+            This session’s time has passed. If it went ahead, confirm it below. If it did not, say so below: the hold stays
+            on your card, and nothing is charged, while the team looks at it.
+          </p>
+        )}
+
+        {inDispute && (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-100">
+            <p className="font-medium">
+              {role === 'mentee' ? 'You told us this session did not take place.' : 'The mentee says this session did not take place.'}{' '}
+              ATHENA’s team is looking at it.{' '}
+              {paidSession
+                ? 'The payment stays held and is not paid on until they decide, and neither of you can change the session meanwhile.'
+                : 'Neither of you can change the session meanwhile.'}
+            </p>
+            {session.disputeReason && <p className="mt-1 whitespace-pre-wrap">“{session.disputeReason}”</p>}
+            {session.disputeResponse ? (
+              <p className="mt-2 whitespace-pre-wrap">
+                <span className="font-medium">{role === 'mentor' ? 'Your answer' : 'Your mentor’s answer'}:</span> “{session.disputeResponse}”
+              </p>
+            ) : role === 'mentor' ? (
+              <AnswerForm sessionId={session.id} busy={answer.isPending} onSend={(response) => answer.mutate({ id: session.id, response })} />
+            ) : (
+              <p className="mt-1 text-xs">Your mentor has not answered yet.</p>
+            )}
+          </div>
+        )}
+
+        {session.cardDisputeOpen && (
+          <p className="text-xs text-amber-700 dark:text-amber-300">
+            {role === 'mentee'
+              ? 'Your bank has opened a dispute on this payment. Nothing is paid on while that is open.'
+              : 'The mentee’s bank has opened a dispute on this payment. Nothing is paid on while that is open.'}
+          </p>
+        )}
+
+        {session.disputeResolution && !inDispute && (
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            ATHENA’s team decided this:{' '}
+            {session.disputeResolution === 'RELEASED' ? 'the payment was released to the mentor.' : 'the payment was given back to the mentee.'}
           </p>
         )}
 
@@ -346,8 +570,9 @@ export default function MentorSessionsPage() {
                 <button
                   type="button"
                   onClick={() => changeStatus.mutate({ id: session.id, status: 'CONFIRMED' })}
-                  disabled={changeStatus.isPending}
-                  className="btn-primary inline-flex items-center gap-1 px-3 py-1.5 text-sm"
+                  disabled={changeStatus.isPending || awaitingPayment}
+                  aria-describedby={awaitingPayment ? `awaiting-payment-${session.id}` : undefined}
+                  className="btn-primary inline-flex items-center gap-1 px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Check className="h-4 w-4" /> Confirm
                 </button>
@@ -366,14 +591,14 @@ export default function MentorSessionsPage() {
                 {role === 'mentee' ? 'It went ahead' : 'Mark complete'}
               </button>
             )}
-            {role === 'mentee' && session.paymentStatus === 'PENDING' && amount !== null && amount > 0 && paying?.sessionId !== session.id && (
+            {role === 'mentee' && cardStepOpen && amount !== null && amount > 0 && paying?.sessionId !== session.id && (
               <button
                 type="button"
                 onClick={() => startPayment.mutate(session.id)}
                 disabled={startPayment.isPending}
                 className="btn-primary px-3 py-1.5 text-sm"
               >
-                Authorise payment
+                {session.paymentStatus === 'FAILED' ? 'Try another card' : 'Authorise payment'}
               </button>
             )}
             {canCancel && (
@@ -392,6 +617,26 @@ export default function MentorSessionsPage() {
               {rescheduling === session.id ? 'Keep the time' : 'Move'}
             </button>
           </div>
+        )}
+
+        {canDispute && disputing !== session.id && (
+          <button
+            type="button"
+            onClick={() => setDisputing(session.id)}
+            disabled={dispute.isPending}
+            className="text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-300"
+          >
+            It did not happen
+          </button>
+        )}
+
+        {disputing === session.id && (
+          <DisputeForm
+            captured={captured}
+            busy={dispute.isPending}
+            onSend={(reason) => dispute.mutate({ id: session.id, reason })}
+            onCancel={() => setDisputing(null)}
+          />
         )}
 
         {rescheduling === session.id && (

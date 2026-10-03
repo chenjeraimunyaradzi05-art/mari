@@ -345,7 +345,8 @@ describe('The automotive routes', () => {
     expect(paid.body.data.alreadyHeld).toBe(false);
     expect(paid.body.data.payment.clientSecret).toContain('_secret');
     expect(store.notifications.some((x) => x.data.kind === 'CAR_PAID')).toBe(false);
-    expect((createEscrowPayment as jest.Mock).mock.calls[0][0]).toMatchObject({ amount: 2100000, platformFeePercent: 6, sessionType: 'vehicle_purchase' });
+    // Keyed on the purchase, the hold it replaces (none yet) and the minute, so two taps on Pay are one hold at the processor.
+    expect((createEscrowPayment as jest.Mock).mock.calls[0][0]).toMatchObject({ amount: 2100000, platformFeePercent: 6, sessionType: 'vehicle_purchase', idempotencyKey: expect.stringMatching(new RegExp(`^car-purchase-hold-${pid}-first-\\d+$`)) });
     await request(app).post(`/api/automotive/purchases/${pid}/handover`).set(as('member')).expect(400);
     const held = await request(app).post(`/api/automotive/purchases/${pid}/payment/confirm`).set(as('member')).expect(200);
     expect(held.body.data.status).toBe('PAID_HELD');
@@ -440,6 +441,86 @@ describe('The automotive routes', () => {
     expect(store.notifications.filter((x) => x.userId === 'seller' && x.data.kind === 'CAR_PAID')).toHaveLength(1);
   });
 
+  /** A purchase walked to HANDED_OVER with its hold authorised: where a release or a dispute starts from. */
+  const handedOverPurchase = async (): Promise<string> => {
+    const l = await request(app).post('/api/automotive/listings').set(as('seller')).send({ title: '2016 Mazda 3 Maxx', make: 'Mazda', model: '3', year: 2016, bodyType: 'HATCH', fuelType: 'PETROL', odometerKm: 101000, price: 12000, description: 'Two owners, serviced at the dealer until 2022 and at a local workshop since, with every receipt kept.', state: 'QLD', photos: ['https://img.example.com/a.jpg', 'https://img.example.com/b.jpg', 'https://img.example.com/c.jpg', 'https://img.example.com/d.jpg'], vin: 'JM0BM10H800123456', ppsrChecked: true, publish: true }).expect(201);
+    const offer = await request(app).post(`/api/automotive/listings/${l.body.data.id}/offers`).set(as('member')).send({ amount: 12000 }).expect(201);
+    const pid: string = offer.body.data.id;
+    await request(app).post(`/api/automotive/purchases/${pid}/accept`).set(as('seller')).expect(200);
+    await request(app).post(`/api/automotive/purchases/${pid}/pay`).set(as('member')).expect(200);
+    await request(app).post(`/api/automotive/purchases/${pid}/payment/confirm`).set(as('member')).expect(200);
+    await request(app).post(`/api/automotive/purchases/${pid}/handover`).set(as('member')).expect(200);
+    return pid;
+  };
+
+  /**
+   * Release and dispute both start from HANDED_OVER, and each used to write the
+   * row whatever it held by then. Two requests that read it together — Release
+   * pressed in one tab as a dispute was opened in another, or the sweep
+   * releasing at the end of the period — both passed the transition check and
+   * the later write won, so a release could write RELEASED over her dispute
+   * and the seller could be told twice. The move is conditional now; these
+   * pin what the loser of the race is told, and what it does not do.
+   */
+  it('a release that loses the row to a dispute opened at the same moment does not write over her dispute, and tells the seller nothing', async () => {
+    const pid = await handedOverPurchase();
+    const row = () => store.purchases.find((x) => x.id === pid)!;
+    // Her dispute lands while the processor is being asked to capture.
+    (captureEscrowPayment as jest.Mock).mockImplementationOnce(async (...args: unknown[]) => {
+      const e = store.escrows.find((x) => x.paymentIntentId === args[0])!;
+      e.status = 'CAPTURED';
+      Object.assign(row(), { status: 'DISPUTED', disputeReason: 'The odometer has been wound back; the service book says 150,000.', disputeOpenedAt: new Date() });
+      return { status: 'captured', amountCaptured: e.amount };
+    });
+
+    const res = await request(app).post(`/api/automotive/purchases/${pid}/release`).set(as('member')).expect(409);
+
+    expect(res.body.message).toContain('it is now disputed');
+    expect(row().status).toBe('DISPUTED');
+    expect(row().disputeReason).toContain('wound back');
+    expect(row().releasedAt).toBeNull();
+    expect(store.notifications.some((n) => n.data.kind === 'CAR_PURCHASE_RELEASED')).toBe(false);
+
+    // The hold was captured in the race, which is the admin's to decide: a refund still goes back to her.
+    const resolved = await request(app).post(`/api/automotive/purchases/${pid}/resolve`).set(as('admin', 'ADMIN')).send({ outcome: 'REFUND', note: 'The kilometres were misdescribed; refunded in full.' }).expect(200);
+    expect(resolved.body.data.status).toBe('REFUNDED');
+    expect(store.escrows.find((x) => x.id === row().escrowPaymentId)!.status).toBe('CANCELED');
+  });
+
+  it('a second Release arriving with the first is answered with the released purchase, and does not tell the seller again', async () => {
+    const pid = await handedOverPurchase();
+    const row = () => store.purchases.find((x) => x.id === pid)!;
+    // The twin got to the row first; the one notification it sent is its own and is not simulated here.
+    (captureEscrowPayment as jest.Mock).mockImplementationOnce(async (...args: unknown[]) => {
+      const e = store.escrows.find((x) => x.paymentIntentId === args[0])!;
+      e.status = 'CAPTURED';
+      Object.assign(row(), { status: 'RELEASED', releasedAt: new Date() });
+      return { status: 'captured', amountCaptured: e.amount };
+    });
+
+    const res = await request(app).post(`/api/automotive/purchases/${pid}/release`).set(as('member')).expect(200);
+
+    expect(res.body.data.status).toBe('RELEASED');
+    expect(store.notifications.filter((n) => n.data.kind === 'CAR_PURCHASE_RELEASED')).toHaveLength(0);
+  });
+
+  it('a dispute that loses the row to a release is refused rather than written over it', async () => {
+    const pid = await handedOverPurchase();
+    const row = () => store.purchases.find((x) => x.id === pid)!;
+    // The release wins the row between this request reading it and writing it.
+    (prisma.vehiclePurchase.updateMany as unknown as jest.Mock).mockImplementationOnce(async () => {
+      Object.assign(row(), { status: 'RELEASED', releasedAt: new Date() });
+      return { count: 0 };
+    });
+
+    const res = await request(app).post(`/api/automotive/purchases/${pid}/dispute`).set(as('member')).send({ reason: 'The odometer has been wound back; the service book says 150,000.' }).expect(409);
+
+    expect(res.body.message).toContain('it is now released');
+    expect(row().status).toBe('RELEASED');
+    expect(row().disputeReason).toBeNull();
+    expect(store.notifications.some((n) => n.data.kind === 'CAR_DISPUTE')).toBe(false);
+  });
+
   it('starts a fresh hold when the first card was declined, rather than leaving her with a dead one', async () => {
     const l = await request(app).post('/api/automotive/listings').set(as('seller')).send({ title: '2017 Subaru Impreza', make: 'Subaru', model: 'Impreza', year: 2017, bodyType: 'HATCH', fuelType: 'PETROL', odometerKm: 88000, price: 14000, description: 'All-wheel drive, serviced at the dealer, two owners, tyres near new.', state: 'QLD', photos: ['https://img.example.com/a.jpg', 'https://img.example.com/b.jpg', 'https://img.example.com/c.jpg', 'https://img.example.com/d.jpg'], vin: 'JF1GPAK60H8123456', ppsrChecked: true, publish: true }).expect(201);
     const offer = await request(app).post(`/api/automotive/listings/${l.body.data.id}/offers`).set(as('member')).send({ amount: 14000 }).expect(201);
@@ -452,6 +533,11 @@ describe('The automotive routes', () => {
     const retried = await request(app).post(`/api/automotive/purchases/${pid}/pay`).set(as('member')).expect(200);
     expect((createEscrowPayment as jest.Mock).mock.calls).toHaveLength(2);
     expect(retried.body.data.payment.paymentIntentId).not.toBe(store.escrows[0].paymentIntentId);
+    // A fresh hold carries a fresh key, naming the hold it replaces, so the
+    // processor cannot hand back the one that ended even inside the same minute.
+    const keys = (createEscrowPayment as jest.Mock).mock.calls.map((c) => (c[0] as { idempotencyKey: string }).idempotencyKey);
+    expect(keys[1]).toContain(`car-purchase-hold-${pid}-${store.escrows[0].id}-`);
+    expect(keys[1]).not.toBe(keys[0]);
     await request(app).post(`/api/automotive/purchases/${pid}/payment/confirm`).set(as('member')).expect(200);
     const view = await request(app).get(`/api/automotive/purchases/${pid}`).set(as('member')).expect(200);
     expect(view.body.data.status).toBe('PAID_HELD');
@@ -492,7 +578,7 @@ describe('The automotive routes', () => {
     expect(accepted.body.data.status).toBe('CONFIRMED');
     const paid = await request(app).post(`/api/automotive/bookings/${bid}/pay`).set(as('member')).expect(201);
     expect(paid.body.data.payment.amount).toBe(39400);
-    expect((createEscrowPayment as jest.Mock).mock.calls.at(-1)![0]).toMatchObject({ platformFeePercent: 12, sessionType: 'car_service' });
+    expect((createEscrowPayment as jest.Mock).mock.calls.at(-1)![0]).toMatchObject({ platformFeePercent: 12, sessionType: 'car_service', idempotencyKey: expect.stringMatching(new RegExp(`^car-service-hold-${bid}-\\d+$`)) });
     await request(app).post(`/api/automotive/bookings/${bid}/release`).set(as('member')).expect(400);
     const done = await request(app).patch(`/api/automotive/workshop/bookings/${bid}`).set(as('mech')).send({ status: 'COMPLETED', odometerKm: 90210, workshopNote: 'All good. Rear pads at 40%.' }).expect(200);
     expect(done.body.data.status).toBe('COMPLETED');

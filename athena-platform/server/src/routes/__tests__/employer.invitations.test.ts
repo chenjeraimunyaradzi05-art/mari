@@ -30,8 +30,15 @@ jest.mock('../../utils/logger', () => ({
   logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
 
+// What a block counts towards (services/block.service loads these when it needs them).
+jest.mock('../../services/trust.service', () => ({ recordUserBlock: jest.fn(async () => undefined) }));
+jest.mock('../../services/safety-score.service', () => ({ handleUserBlock: jest.fn(async () => undefined), handleUserUnblock: jest.fn(async () => undefined) }));
+jest.mock('../../services/unwanted-contact.service', () => ({ reviewUnwantedContact: jest.fn(async () => undefined) }));
+
 import { app } from '../../index';
+import { handleUserBlock } from '../../services/safety-score.service';
 import { prisma as prismaTyped } from '../../utils/prisma';
+import { DEFAULT_MESSAGE_AUDIENCE } from '../../services/message-permissions.service';
 
 const prisma: any = prismaTyped;
 const ORG = 'org-A';
@@ -211,7 +218,16 @@ describe('Declining an invitation', () => {
     expect(res.body.data.blocked).toBe(2);
     const managersQuery = prisma.organizationMember.findMany.mock.calls[0][0].where;
     expect(managersQuery).toMatchObject({ organizationId: ORG, acceptedAt: { not: null } });
-    expect(prisma.userSafetySettings.create).toHaveBeenCalledWith({ data: { userId: INVITEE, blockedUsers: [OWNER] } });
+    // The row made by her first block does not choose who else may write to her:
+    // it starts from what the server does for a member with no settings at all.
+    expect(prisma.userSafetySettings.create).toHaveBeenCalledWith({
+      data: { userId: INVITEE, blockedUsers: [OWNER], allowMessagesFrom: DEFAULT_MESSAGE_AUDIENCE },
+    });
+    // Each is a block like any other, so each counts, once, towards the manager.
+    expect((handleUserBlock as jest.Mock).mock.calls).toEqual([
+      [OWNER, INVITEE],
+      ['manager-2', INVITEE],
+    ]);
   });
 
   it('is only hers to decline', async () => {

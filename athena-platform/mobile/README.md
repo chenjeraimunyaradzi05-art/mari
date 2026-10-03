@@ -67,7 +67,7 @@ mobile/
 
 ## Demo Credentials
 
-Only on a database that has been seeded (`npm run db:seed` in `server/`), and
+Only on a database that has been seeded (`npm run db:seed:demo` in `server/`, on a local database), and
 only with the password the seed used — `SEED_DEMO_PASSWORD` if it was set:
 
 ```

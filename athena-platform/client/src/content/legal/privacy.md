@@ -72,6 +72,16 @@ If ATHENA begins offering services in a market that requires a local representat
 - Profile photo
 - Gender (optional)
 
+**Women-Only Confirmation:**
+- When you register you confirm that you are a woman. We keep that confirmation as a yes or no on your account. It is the only thing we record at sign-up about this, and we do not work out or guess anyone's gender
+- The date you confirmed is the date your account was created, because sign-up is the only place we ask
+- If you take part in a women-only check, we keep its status (waiting, approved or not approved), the date it was decided, anything you write to support it, and, for a document check, only its result, the name and type of the document and the date of birth on it. A person makes the decision. You can appeal it from your settings
+
+**Photo ID Check (only if you choose it):**
+- A photo of a government-issued identity document and a selfie, taken on a check page run by our identity provider, Stripe Identity. A photo of your face and an identity document are biometric and identity information, which the Privacy Act treats as sensitive information, so we ask for them only with your consent and only for the check you started. You can use the written route for the women-only check instead
+- ATHENA does not receive or store the document photo or the selfie. Stripe holds them while the check runs. What comes back to us is whether the check passed, the name and type of the document, and, where it is on the document, your date of birth
+- Once a person has made a decision on the check, we ask Stripe to erase it. Stripe says it finishes within about four days. We remove the name and document type we kept for the reviewer 90 days after the decision. If you delete your account we ask Stripe to erase any check you started before we delete our record of it. Your date of birth stays on your account, because the adults-only rule depends on it
+
 **Contact Information:**
 - Email address
 - Phone number
@@ -134,6 +144,17 @@ We use your information to:
 | **Improvement** | Analyze usage patterns, conduct research, improve features |
 | **Legal Compliance** | Meet regulatory requirements, respond to legal requests |
 
+### 4.1 Reports, blocks and account standing
+
+Members can report content and other members, and can block each other. We keep a record of each report and what became of it, and a record that a block was made.
+
+From those records, and from a few signs of good standing (how long the account has existed, a completed profile, activity on the platform, an approved identity or employer check, and finished mentoring sessions), ATHENA works out an internal account-standing measure for every member. It exists so that our safety team looks first at the accounts most likely to need a look.
+
+- Only our staff see it. No other member sees it, and neither does the member it is about. It does not appear on profiles or in search.
+- It does not restrict anyone automatically. A person decides whether a report is upheld. Each person who reports or blocks counts once, however many times they do it, and reports and blocks that no person has checked can only move the measure so far.
+- When it falls a long way we email the member an "Account standing update" and ask a member of staff to look at the account. You can appeal a decision about your account from our [appeal page](/help/appeal), and a person will review it.
+- A report or a block is never announced to the person it is about. If that person asks for a copy of their information, it tells them that reports about them exist and what became of them, but it does not name who made them or include what they wrote, and blocks are not listed in it, because that could put the person at risk.
+
 ---
 
 ## 5. Legal Basis for Processing (UK/EU)
@@ -158,6 +179,7 @@ We may share your information with:
 **Service Providers:**
 - Cloud hosting (AWS, Sydney region, Australia)
 - Payment processing (Stripe)
+- Photo ID and selfie checks, if you choose one (Stripe Identity, operated by Stripe, which may handle them outside Australia)
 - Email and push notification delivery
 - Customer support tools
 
@@ -206,6 +228,7 @@ We retain your information for as long as necessary to provide our services and 
 | Chat messages | 1 year |
 | Payment records | 7 years (legal requirement) |
 | Consent and privacy audit records | 7 years (legal obligation; kept as audit logs) |
+| Name and document type from a photo ID check | 90 days after the decision. Stripe is asked to erase the check itself as soon as a person has decided |
 
 After the retention period, data is securely deleted or anonymized.
 
@@ -257,8 +280,10 @@ To exercise these rights, visit our [Privacy Center](/privacy-center) or contact
 
 We implement appropriate technical and organizational measures to protect your personal information:
 
-- Encryption in transit (TLS 1.3) and at rest (AES-256)
-- Regular security assessments and penetration testing
+- Encryption in transit (TLS) between your device and our servers
+- The most private things you keep with us are encrypted by ATHENA before they are stored (AES-256-GCM): the text of your safe-chat messages, your health records (what you log, your medications, your health notes and the reason you give for a booking), your personal safety plan and the seed behind two-factor sign-in. This is encryption at rest, not a lock only you hold: our servers decrypt a record to show it to you, so it protects you from anyone who gets hold of a copy of our database, not from ATHENA. No moderator or admin screen shows these records. The rest of your personal information is stored as you entered it, behind access controls
+- Messages are encrypted in transit and at rest, but they are not locked so that only the people in the conversation can open them: our systems can read them. Message text may be checked automatically by a content-safety provider (see our [service providers page](/privacy/subprocessors)), and our staff read a message only when it is reported to us or the law requires it
+- A weekly automated check of the software we depend on for known security problems
 - Access controls and authentication
 - Employee training on data protection
 - Incident response procedures

@@ -5,6 +5,7 @@
  */
 
 import { Router, Response, NextFunction } from 'express';
+import { z } from 'zod';
 import { stripeConnectService } from '../services/stripe-connect.service';
 import {
   GENERIC_SESSION_TYPES,
@@ -18,29 +19,64 @@ import {
   statementToCsv,
 } from '../services/earnings-statement.service';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { creatorTermsRefusal, requireAdultAccount } from '../middleware/account-gates';
 import { ApiError } from '../middleware/errorHandler';
+import { payoutCeiling, startingAPayment } from '../middleware/moneyLimits';
+import { zodBody } from '../middleware/validate';
+import { clampLimit } from '../utils/pagination';
+import { idempotencyWindow } from '../utils/idempotency';
 
 const router = Router();
+
+/**
+ * The signed-in member. Every route here sits behind `authenticate`, which has
+ * already answered 401 before a handler runs, so this never refuses in
+ * practice: it narrows `req.user` for the compiler in place of a `!`.
+ */
+function member(req: AuthRequest) {
+  if (!req.user) throw new ApiError(401, 'Authentication required');
+  return req.user;
+}
 
 // A ceiling so a typo or a tampered request cannot ask Stripe to move an
 // implausible sum. Well above any real ATHENA balance today; it exists to make
 // a wrong number fail here rather than at the bank.
 const MAX_PAYOUT_AMOUNT = 100_000;
 
+// Both fields used to be cast and handed to the Stripe service as they came, so
+// `type` could be any word and `businessType` any value Stripe would then
+// refuse with its own message. Each is one of two things.
+const connectedAccountBody = z.object({
+  type: z.enum(['mentor', 'creator']).default('mentor'),
+  businessType: z.enum(['individual', 'company']).optional(),
+});
+
 /**
  * @route POST /api/connect/account
  * @desc Create a connected account for a mentor/creator
  * @access Private (Mentor/Creator)
+ *
+ * Getting paid is for adults (Terms 2.1), and a creator is paid only once she has
+ * accepted the Creator Terms Addendum (Terms 5.1). Both are checked here, where
+ * the account that money lands in is made, and not only on the screens that lead
+ * here. A creator with no profile yet is let through: accepting is part of turning
+ * creator mode on, which is what makes her one.
  */
-router.post('/account', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/account', authenticate, requireAdultAccount, zodBody(connectedAccountBody), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { businessType, type = 'mentor' } = req.body;
-    
+    const { businessType, type } = req.body as z.output<typeof connectedAccountBody>;
+    const user = member(req);
+
+    if (type === 'creator') {
+      const refusal = await creatorTermsRefusal(user.id);
+      if (refusal) return res.status(403).json(refusal);
+    }
+
     const account = await stripeConnectService.createConnectedAccount({
-      userId: req.user!.id,
-      email: req.user!.email,
+      userId: user.id,
+      email: user.email,
       country: 'AU', // Default to Australia
-      type: type as 'mentor' | 'creator',
+      type,
       businessType,
     });
     
@@ -58,7 +94,7 @@ router.post('/account', authenticate, async (req: AuthRequest, res: Response, ne
  * @desc Generate onboarding link for connected account
  * @access Private
  */
-router.post('/account/onboarding', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/account/onboarding', authenticate, requireAdultAccount, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const onboardingLink = await stripeConnectService.getOnboardingLink(req.user!.id);
     
@@ -106,14 +142,18 @@ router.get('/account', authenticate, async (req: AuthRequest, res: Response, nex
  */
 const MAX_ESCROW_AMOUNT_MINOR = 10_000_000; // A$100,000 in cents
 
-router.post('/escrow', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+// validated: recipientId, amount (a whole number of cents up to MAX_ESCROW_AMOUNT_MINOR), currency,
+//   sessionType, description and reference are each checked by type, range or list before the
+//   service is called.
+router.post('/escrow', authenticate, startingAPayment, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { recipientId, amount, currency, description, sessionType, reference } = req.body ?? {};
+    const buyerId = member(req).id;
 
     if (typeof recipientId !== 'string' || !recipientId.trim()) {
       throw new ApiError(400, 'Say who the payment is for');
     }
-    if (recipientId === req.user!.id) {
+    if (recipientId === buyerId) {
       throw new ApiError(400, 'You cannot hold a payment to yourself');
     }
     // In the currency's smallest unit, as createEscrowPayment and Stripe take it.
@@ -141,13 +181,19 @@ router.post('/escrow', authenticate, async (req: AuthRequest, res: Response, nex
     }
 
     const escrowPayment = await stripeConnectService.createEscrowPayment({
-      buyerId: req.user!.id,
+      buyerId,
       sellerId: recipientId,
       amount,
       currency: chargeCurrency,
       description: description?.trim() || 'Payment',
       metadata: reference ? { reference } : undefined,
       sessionType: sessionType as 'course_purchase' | 'creator_content',
+      // This route writes no row of its own to key from, so, as the payout
+      // below does, it keys on the request itself inside a minute: the same
+      // hold asked for twice by the same buyer in that time is a double-submit
+      // and Stripe hands back the one intent, where it used to hold her card
+      // twice.
+      idempotencyKey: `connect-escrow-${buyerId}-${recipientId}-${sessionType}-${chargeCurrency}-${amount}-${idempotencyWindow()}`,
     });
 
     res.json({
@@ -203,6 +249,8 @@ router.post('/escrow/:paymentId/capture', authenticate, async (req: AuthRequest,
  * @desc Cancel an escrow payment (refund to payer)
  * @access Private
  */
+// validated: only reason is read, and only when it is text, cut to 500 characters; who may cancel
+//   the hold is checked by assertMemberMayMoveHold.
 router.post('/escrow/:paymentId/cancel', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { paymentId } = req.params;
@@ -256,10 +304,9 @@ router.get('/earnings', authenticate, async (req: AuthRequest, res: Response, ne
 router.get('/earnings/transactions', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const text = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : undefined);
-    const limit = text(req.query.limit) ? Number(req.query.limit) : undefined;
-    if (limit !== undefined && !Number.isFinite(limit)) {
-      throw new ApiError(400, 'limit must be a number');
-    }
+    // Clamped here and in the service (1 to 100): a limit that is not a number
+    // is the usual page, as on every other list.
+    const limit = clampLimit(req.query.limit, 50, 100);
 
     const page = await listEarningsTransactions(req.user!.id, {
       from: text(req.query.from),
@@ -359,7 +406,9 @@ router.post(
  * @desc Request a payout to bank account
  * @access Private (Mentor/Creator)
  */
-router.post('/payout', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+// validated: amount must be a finite number above zero and at most MAX_PAYOUT_AMOUNT, currency a
+//   three-letter code; the destination account comes from the session, never the body.
+router.post('/payout', authenticate, requireAdultAccount, payoutCeiling, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { amount, currency } = req.body;
 
@@ -393,7 +442,12 @@ router.post('/payout', authenticate, async (req: AuthRequest, res: Response, nex
     // The destination is resolved from the session, never from the request.
     // Taking it from the body let any authenticated user name someone else's
     // connected account and move money out of it.
-    const connectedAccountId = await stripeConnectService.requireConnectedAccountId(
+    //
+    // And only an account Stripe has verified and switched on for payouts: one
+    // that has not finished its checks, or that Stripe has since paused, is turned
+    // away here with what to do about it, before Stripe is asked, instead of
+    // being refused there and reported as "Failed to create payout".
+    const connectedAccountId = await stripeConnectService.requirePayableAccountId(
       req.user!.id
     );
 

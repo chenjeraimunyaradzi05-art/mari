@@ -36,10 +36,115 @@ import { z } from 'zod';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import { recordFailure } from '../utils/ops-metrics';
+import { isHttpUrl } from '../utils/http-url';
 import { parseCsv } from './automotive/catalogue-admin.service';
 
 export const LISTING_TYPES = ['RENTAL', 'SHARE', 'EMERGENCY', 'TRANSITIONAL'] as const;
+
+/**
+ * The types that are confidential whether or not the lister ticks DV-safe. A
+ * place offered as emergency or transitional accommodation is offered to a
+ * woman leaving a bad situation, which is exactly the offer a bad actor would
+ * make, so these are held for the same staff check as a DV-safe claim.
+ */
+export const CONFIDENTIAL_LISTING_TYPES = ['EMERGENCY', 'TRANSITIONAL'] as const;
+
+/** Whether a listing is confidential, and so held for a staff check before it is shown. */
+export const isConfidentialListing = (l: { dvSafe?: boolean | null; type?: string | null }): boolean =>
+  Boolean(l.dvSafe) || (CONFIDENTIAL_LISTING_TYPES as readonly string[]).includes(String(l.type));
+
 export const AU_STATES = ['QLD', 'NSW', 'VIC', 'WA', 'SA', 'TAS', 'ACT', 'NT'] as const;
+
+// ------------------------------------------------------- what a listing may say
+
+/** How many pictures one listing carries. */
+export const MAX_LISTING_IMAGES = 10;
+const MAX_IMAGE_LINK_LENGTH = 500;
+
+/**
+ * Why the pictures given for a listing cannot be stored, or null when they can.
+ *
+ * `images` is a JSON column that was written exactly as the body gave it, so a
+ * listing could carry anything under that name: an object, a `javascript:`
+ * link, a thousand entries. A member's page renders each one as a picture, so
+ * each has to be a link a browser may follow (utils/http-url), and there is a
+ * ceiling on how many.
+ */
+export function listingImagesProblem(images: unknown): string | null {
+  if (images === undefined || images === null) return null;
+  if (!Array.isArray(images)) return 'Pictures are given as a list of links.';
+  if (images.length > MAX_LISTING_IMAGES) return `A listing carries at most ${MAX_LISTING_IMAGES} pictures.`;
+  const bad = images.find((image) => typeof image !== 'string' || image.trim().length > MAX_IMAGE_LINK_LENGTH || !isHttpUrl(image.trim()));
+  return bad === undefined ? null : 'Each picture is an http or https link.';
+}
+
+/** The pictures as they are stored: trimmed links, or nothing when none were given. */
+export function cleanListingImages(images: unknown): string[] | undefined {
+  if (!Array.isArray(images)) return undefined;
+  return images.filter((image): image is string => typeof image === 'string').map((image) => image.trim());
+}
+
+/**
+ * The kinds of road a street address ends in, as Australia Post writes them and
+ * as people shorten them. Matched only after a number and a name, so "2
+ * bedrooms" and "ten minutes to the station" are not addresses, and "12 Example
+ * Street", "3/12 Example St" and "Unit 4, 12 Example Street" are.
+ *
+ * Some of those words are also what a listing says about distance and size:
+ * "5 min walk to the shops", "10 min drive", "2 bedrooms close to transport".
+ * A number followed by a measure (minutes, metres, bedrooms, weeks and the
+ * like) is not a street number, so those are not read as addresses.
+ */
+const STREET_TYPES =
+  'street|st|road|rd|avenue|ave|av|lane|ln|drive|dr|court|ct|place|pl|crescent|cres|cr|terrace|tce|parade|pde|highway|hwy|boulevard|blvd|bvd|way|close|cl|circuit|cct|esplanade|esp|grove|gr|square|sq|walk|rise|row|mews|promenade|prom';
+const NOT_A_STREET_NUMBER =
+  'min|mins|minute|minutes|hr|hrs|hour|hours|day|days|night|nights|week|weeks|wk|wks|month|months|year|years|yr|yrs|m|km|metre|metres|meter|meters|bed|beds|bedroom|bedrooms|bdrm|br|bath|baths|bathroom|bathrooms|car|cars|people|person|women|woman|adults|adult|kids|children|child|pets|pet|storey|storeys|story|stories|level|levels|floor|floors|x';
+const STREET_ADDRESS = new RegExp(
+  `(?:^|[^\\w/])(?:(?:unit|apt|apartment|flat|lot|level|suite)\\s*\\w+[,\\s/]+)?\\d{1,5}(?!\\s*(?:${NOT_A_STREET_NUMBER})\\b)[a-z]?(?:\\s*[-/]\\s*\\d{1,5}[a-z]?)?\\s+(?:[a-z][a-z'\\-]*\\s+){1,2}(?:${STREET_TYPES})\\b`,
+  'i'
+);
+/** An Australian phone number written any of the usual ways: 0400 000 000, (07) 3123 4567, +61 400 000 000, 1800 123 456. */
+const PHONE_NUMBER = /(?:\+?61[\s-]?\(?0?\)?[\s-]?|\(?0)[2-478]\)?(?:[\s-]?\d){8}|\b1[38]00(?:[\s-]?\d){6}\b/;
+
+export interface ConfidentialTextProblem {
+  found: 'a phone number' | 'a street address';
+  /** What the lister is told, as a sentence that stands on its own. */
+  message: string;
+}
+
+/**
+ * Why the words on a confidential listing cannot be shown, or null when they can.
+ *
+ * The address column is withheld until the lister answers, and a confidential
+ * listing loses its suburb and postcode too (housing.routes, present). None of
+ * that holds if the street address, or a phone number to ring for it, is typed
+ * into the title or the description, which every eligible member reads before
+ * anyone has answered. So on a DV-safe, emergency or transitional listing the
+ * words are screened for both, and the lister is asked to keep them for the
+ * conversation on the inquiry.
+ *
+ * It is a screen, not a guarantee: a street written without its number or its
+ * type passes ("on Oxford St", "number twelve"), and the staff check is what
+ * reads the whole listing. An ordinary listing is not held to it; its lister
+ * chooses what to say, and the address column is withheld there as everywhere.
+ */
+export function confidentialTextProblem(...texts: Array<string | null | undefined>): ConfidentialTextProblem | null {
+  const text = texts.filter((t): t is string => typeof t === 'string').join('\n');
+  if (!text) return null;
+  if (PHONE_NUMBER.test(text)) {
+    return {
+      found: 'a phone number',
+      message: 'Leave phone numbers out of a confidential listing. Members write to you here, and you can give a number once you have answered someone.',
+    };
+  }
+  if (STREET_ADDRESS.test(text)) {
+    return {
+      found: 'a street address',
+      message: 'Leave the street address out of the title and description of a confidential listing. It is shown only to a member you have answered, from the address field.',
+    };
+  }
+  return null;
+}
 
 /**
  * How long a DV-safe listing may wait for its check before every admin is
@@ -56,15 +161,41 @@ const HOUR_MS = 60 * 60 * 1000;
 
 export const DV_SAFE_NOTE_PREFIX = 'dv-safe-note:';
 export const CHECK_REQUESTED_PREFIX = 'dv-safe-check-requested:';
-const INTERNAL_PREFIXES = [DV_SAFE_NOTE_PREFIX, CHECK_REQUESTED_PREFIX];
+/**
+ * Marks a listing that staff took down: an administrator withdrew it, or a
+ * moderator removed it on a report. A listing's status alone cannot say so,
+ * because its lister may withdraw it too, and a lister can move her own listing
+ * back to ACTIVE; without this a take-down of an ordinary listing lasted only
+ * until its lister pressed "Available" again. While it is on a listing, only
+ * staff put the listing back (the admin route clears it).
+ */
+export const STAFF_TAKEDOWN_PREFIX = 'staff-takedown:';
+const INTERNAL_PREFIXES = [DV_SAFE_NOTE_PREFIX, CHECK_REQUESTED_PREFIX, STAFF_TAKEDOWN_PREFIX];
 
 const isInternal = (feature: string) => INTERNAL_PREFIXES.some((prefix) => feature.startsWith(prefix));
+const isTakedownTag = (feature: unknown): feature is string => typeof feature === 'string' && feature.startsWith(STAFF_TAKEDOWN_PREFIX);
 
 /** The features a member may see: strings only, and none of the internal tags. */
 export function publicFeatures(features: unknown): string[] {
   if (!Array.isArray(features)) return [];
   return features.filter((f): f is string => typeof f === 'string' && !isInternal(f));
 }
+
+/** Whether staff took this listing down, and nobody but staff has put it back. */
+export const takenDownByStaff = (features: unknown): boolean => Array.isArray(features) && features.some(isTakedownTag);
+
+/** The take-down tag if there is one, so the helpers that rebuild a listing's features carry it over rather than drop it. */
+const takedownTagOf = (features: unknown): string[] => (Array.isArray(features) ? features.filter(isTakedownTag).slice(0, 1) : []);
+
+/** The features of a listing staff have just taken down: everything it had, plus when. */
+export function withStaffTakedown(features: unknown, at: Date = new Date()): string[] {
+  const kept = Array.isArray(features) ? features.filter((f): f is string => typeof f === 'string' && !isTakedownTag(f)) : [];
+  return [...kept, `${STAFF_TAKEDOWN_PREFIX}${at.toISOString()}`];
+}
+
+/** The features of a listing staff have put back: everything it had, minus the take-down. */
+export const withoutStaffTakedown = (features: unknown): string[] =>
+  Array.isArray(features) ? features.filter((f): f is string => typeof f === 'string' && !isTakedownTag(f)) : [];
 
 /** The lister's note on why the place is DV-safe. */
 export function dvSafeNoteOf(features: string[] | null | undefined): string | null {
@@ -78,15 +209,22 @@ export function dvSafeNoteOf(features: string[] | null | undefined): string | nu
  * request replaces the first rather than stacking beside it.
  */
 export function withSafetyCheckRequest(features: unknown, note: string, at: Date = new Date()): string[] {
-  return [...publicFeatures(features), `${DV_SAFE_NOTE_PREFIX}${note}`, `${CHECK_REQUESTED_PREFIX}${at.toISOString()}`];
+  // An emergency or transitional listing asks for the check without claiming
+  // DV-safe, so it may have no note; an empty one is not written as a tag.
+  return [
+    ...publicFeatures(features),
+    ...(note ? [`${DV_SAFE_NOTE_PREFIX}${note}`] : []),
+    `${CHECK_REQUESTED_PREFIX}${at.toISOString()}`,
+    ...takedownTagOf(features),
+  ];
 }
 
 /** The features of a listing that no longer claims to be DV-safe: the note and the request go with the claim. */
-export const withoutSafetyCheckRequest = (features: unknown): string[] => publicFeatures(features);
+export const withoutSafetyCheckRequest = (features: unknown): string[] => [...publicFeatures(features), ...takedownTagOf(features)];
 
 /** The features of a listing staff have checked at creation: the note stays for the record; nothing is waiting. */
 export function withCheckedNote(features: unknown, note: string): string[] {
-  return [...publicFeatures(features), `${DV_SAFE_NOTE_PREFIX}${note}`];
+  return [...publicFeatures(features), ...(note ? [`${DV_SAFE_NOTE_PREFIX}${note}`] : []), ...takedownTagOf(features)];
 }
 
 // ------------------------------------------------------------- the clock
@@ -127,13 +265,14 @@ export function safetyCheckClock(listing: ClockSource, now: Date = new Date()): 
 }
 
 /**
- * The listings waiting for a check. A listing staff took down, or one its
- * lister has since let or withdrawn, is no longer waiting for anything: the
- * queue used to keep a taken-down listing in it for ever, because taking it
- * down left it DV-safe and unchecked.
+ * The listings waiting for a check: DV-safe ones, and emergency and
+ * transitional ones, which are confidential on their own. A listing staff took
+ * down, or one its lister has since let or withdrawn, is no longer waiting for
+ * anything: the queue used to keep a taken-down listing in it for ever, because
+ * taking it down left it DV-safe and unchecked.
  */
 export const SAFETY_CHECK_QUEUE_WHERE: Prisma.HousingListingWhereInput = {
-  dvSafe: true,
+  OR: [{ dvSafe: true }, { type: { in: [...CONFIDENTIAL_LISTING_TYPES] } }],
   safetyVerified: false,
   status: { notIn: ['WITHDRAWN', 'LEASED'] },
 };
@@ -308,14 +447,23 @@ export const staffListingSchema = z
     if (row.dvSafe && !row.dvSafeNote) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['dvSafeNote'], message: 'says in a sentence why the place is safe for a woman leaving violence' });
     }
+    // A partner's sheet is held to the same rule as a member's form: the words
+    // on a confidential place carry neither its street address nor a number to
+    // ring for it, because every eligible member reads them before the address
+    // is released.
+    if (isConfidentialListing(row)) {
+      const problem = confidentialTextProblem(row.title, row.description);
+      if (problem) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['description'], message: `carries ${problem.found}. ${problem.message}` });
+    }
   });
 
 export type StaffListingInput = z.infer<typeof staffListingSchema>;
 
 /**
- * What a listing staff enter is written as. A DV-safe listing staff have
- * checked goes live checked; one they have not is held in the queue like a
- * member's, with its clock started; anything else is live at once.
+ * What a listing staff enter is written as. A confidential listing (DV-safe,
+ * emergency or transitional) staff have checked goes live checked; one they have
+ * not is held in the queue like a member's, with its clock started; anything
+ * else is live at once.
  */
 export function staffListingData(
   input: StaffListingInput,
@@ -323,12 +471,16 @@ export function staffListingData(
   check: { safetyVerified: boolean; now?: Date }
 ): Prisma.HousingListingUncheckedCreateInput {
   const now = check.now ?? new Date();
-  const checked = input.dvSafe && check.safetyVerified;
-  const features = input.dvSafe
+  const confidential = isConfidentialListing(input);
+  const checked = confidential && check.safetyVerified;
+  // A partner's sheet cannot write one of the internal tags, the take-down
+  // among them, into a listing it is creating.
+  const given = publicFeatures(input.features);
+  const features = confidential
     ? checked
-      ? withCheckedNote(input.features, input.dvSafeNote ?? '')
-      : withSafetyCheckRequest(input.features, input.dvSafeNote ?? '', now)
-    : publicFeatures(input.features);
+      ? withCheckedNote(given, input.dvSafeNote ?? '')
+      : withSafetyCheckRequest(given, input.dvSafeNote ?? '', now)
+    : given;
   return {
     agentId: listerId,
     title: input.title,
@@ -353,7 +505,7 @@ export function staffListingData(
     flexibleLease: input.flexibleLease,
     availableFrom: input.availableFrom ?? null,
     minLeaseTerm: input.minLeaseTerm ?? null,
-    status: input.dvSafe && !checked ? 'PENDING' : 'ACTIVE',
+    status: confidential && !checked ? 'PENDING' : 'ACTIVE',
   };
 }
 

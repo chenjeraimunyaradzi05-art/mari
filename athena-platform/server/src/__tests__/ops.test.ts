@@ -5,6 +5,7 @@ import { isCorsOriginAllowed } from '../utils/origins';
 delete process.env.METRICS_TOKEN;
 
 import { app } from '../index';
+import { prisma } from '../utils/prisma';
 
 describe('ops endpoints', () => {
   const originalNodeEnv = process.env.NODE_ENV;
@@ -81,6 +82,43 @@ describe('ops endpoints', () => {
 
   it('GET /livez returns 200', async () => {
     await request(app).get('/livez').expect(200);
+  });
+
+  it('GET /health says the process is up and nothing about which build', async () => {
+    const res = await request(app).get('/health').expect(200);
+
+    expect(Object.keys(res.body).sort()).toEqual(['status', 'timestamp']);
+  });
+
+  it('GET / does not publish the version either', async () => {
+    const res = await request(app).get('/').expect(200);
+
+    expect(res.body).not.toHaveProperty('version');
+  });
+
+  describe('GET /readyz', () => {
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('is 200 only when the database answers', async () => {
+      jest.spyOn(prisma, '$queryRaw').mockResolvedValueOnce([{ '?column?': 1 }] as never);
+
+      const res = await request(app).get('/readyz').expect(200);
+
+      expect(res.body.status).toBe('ready');
+    });
+
+    it('is 503 with no error text when the database cannot be reached', async () => {
+      jest
+        .spyOn(prisma, '$queryRaw')
+        .mockRejectedValueOnce(new Error("Can't reach database server at `ep-secret-123.neon.tech`:`5432`") as never);
+
+      const res = await request(app).get('/readyz').expect(503);
+
+      expect(res.body.status).toBe('not_ready');
+      expect(JSON.stringify(res.body)).not.toMatch(/ep-secret-123|5432|reach database/);
+    });
   });
 
   it('GET /metrics returns 200 and includes http_requests_total', async () => {

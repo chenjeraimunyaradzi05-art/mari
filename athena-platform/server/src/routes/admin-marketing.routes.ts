@@ -284,6 +284,9 @@ router.post('/leads', ...adminOnly, leadValidators, async (req: AuthRequest, res
 });
 
 // Rows pasted from a spreadsheet; the same email and source twice is one lead.
+// validated: rows is read only as an array cut to 1,000; each row needs an email that matches a
+//   pattern, and every text field goes through str() to its length; source must be one of
+//   LEAD_SOURCES.
 router.post('/leads/import', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const rows = Array.isArray(req.body?.rows) ? req.body.rows.slice(0, 1000) : [];

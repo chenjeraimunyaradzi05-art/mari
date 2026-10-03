@@ -27,16 +27,24 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/hooks';
+import { CREATOR_SHARE_RANGE_PERCENT, GIFT_POINT_VALUE_AUD, MINIMUM_PAYOUT_AUD } from '@/lib/pricing';
+import { CREATOR_TERMS_PATH } from '@/lib/creator-terms';
 
 // The server refuses a payout below this; the button says so instead of
-// letting someone press it and read the refusal in a toast.
-const MIN_PAYOUT_AUD = 50;
+// letting someone press it and read the refusal in a toast. It is the price
+// book's figure, the same one the server and the Terms read.
+const MIN_PAYOUT_AUD = MINIMUM_PAYOUT_AUD;
 
 interface CreatorStats {
   totalEarnings: number;
   periodEarnings: number;
   pendingEarnings: number;
   availableForPayout: number;
+  /** ATHENA is looking into a card payment connected to her gifts; withdrawals are paused. */
+  payoutHold: boolean;
+  /** What she keeps of each gift at her creator tier, in per cent; null when the server did not say. */
+  giftSharePercent: number | null;
+  tierName: string | null;
   totalViews: number;
   periodViews: number;
   totalLikes: number;
@@ -99,8 +107,6 @@ interface AnalyticsResponse {
   topPosts?: Array<any>;
 }
 
-const GIFT_POINT_VALUE_AUD = 0.01;
-
 function pointsToCurrency(points: number | null | undefined): number {
   return (points || 0) * GIFT_POINT_VALUE_AUD;
 }
@@ -153,6 +159,14 @@ export default function CreatorDashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedPeriod, setSelectedPeriod] = useState<'7d' | '30d' | '90d' | 'all'>('30d');
   const [requestingPayout, setRequestingPayout] = useState(false);
+  // The server refused the payout until she has accepted the current Creator
+  // Terms Addendum (a creator from before it existed, or before it was last
+  // rewritten). Her earnings are untouched; this holds where it sent her.
+  const [termsNeeded, setTermsNeeded] = useState<{ message: string; href: string } | null>(null);
+  // Whether she has turned creator mode on. GET /creator/profile answers a member
+  // with no creator profile with `data: null`: there is nothing of hers to pay,
+  // and the way in is accepting the Creator Terms Addendum, not this button.
+  const [creatorModeOn, setCreatorModeOn] = useState(true);
 
   const profileHref = user?.id ? `/profile/${user.id}` : '/profile';
 
@@ -161,7 +175,9 @@ export default function CreatorDashboardPage() {
     try {
       const response = await api.post('/creator/payouts/request');
       const paid = Number(response.data?.data?.amount) || 0;
-      toast.success('Payout requested. It reaches your account in 3 to 5 business days.');
+      // Not a number of days: the money goes to her Stripe account now, and Stripe
+      // pays her bank on a schedule of its own, which this page cannot know.
+      toast.success('Payout requested. It is on its way to your Stripe account, and Stripe then pays your bank on its own schedule.');
       // Subtracted, not zeroed. The server now pays out exactly the balance it
       // claimed and leaves anything credited since — a gift that landed while
       // the request was in flight is still hers — so showing zero here would
@@ -176,7 +192,15 @@ export default function CreatorDashboardPage() {
           : current
       );
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'The payout could not be requested.');
+      const refusal = err?.response?.data ?? {};
+      if (refusal.code === 'CREATOR_TERMS_REQUIRED') {
+        setTermsNeeded({
+          message: refusal.error || refusal.message || 'Please read and accept the Creator Terms Addendum before you are paid.',
+          href: typeof refusal.setup === 'string' ? refusal.setup : CREATOR_TERMS_PATH,
+        });
+        return;
+      }
+      toast.error(refusal.error || refusal.message || 'The payout could not be requested.');
     } finally {
       setRequestingPayout(false);
     }
@@ -203,6 +227,7 @@ export default function CreatorDashboardPage() {
         const summary = analytics.summary || {};
         const profile = analytics.profile || {};
         const creatorProfile = profileResponse.data?.data || {};
+        setCreatorModeOn(profileResponse.data?.data != null);
         const gifts = Array.isArray(giftsResponse.data?.data) ? giftsResponse.data.data : [];
 
         const periodEarnings = pointsToCurrency(summary.totalEarningsFromGifts);
@@ -214,6 +239,9 @@ export default function CreatorDashboardPage() {
           periodEarnings,
           pendingEarnings,
           availableForPayout: pendingEarnings,
+          payoutHold: Boolean(creatorProfile.payoutHold),
+          giftSharePercent: typeof creatorProfile.tier?.revShare === 'number' ? creatorProfile.tier.revShare : null,
+          tierName: typeof creatorProfile.tier?.name === 'string' ? creatorProfile.tier.name : null,
           totalViews: summary.totalViews || 0,
           periodViews: summary.totalViews || 0,
           totalLikes: summary.totalLikes || 0,
@@ -524,10 +552,21 @@ export default function CreatorDashboardPage() {
                   <p className="text-sm text-green-700">Lifetime Earnings</p>
                   <p className="text-lg font-semibold text-green-800">{formatCurrency(stats?.totalEarnings || 0)}</p>
                 </div>
+                {!creatorModeOn && (
+                  <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+                    Creator mode is not on yet, so nothing can be paid to you. Read and accept the{' '}
+                    <Link href={CREATOR_TERMS_PATH} className="font-semibold underline">
+                      Creator Terms Addendum
+                    </Link>{' '}
+                    to turn it on.
+                  </p>
+                )}
                 <Button
                   className="w-full"
                   onClick={requestPayout}
-                  disabled={requestingPayout || (stats?.availableForPayout ?? 0) < MIN_PAYOUT_AUD}
+                  disabled={
+                    !creatorModeOn || requestingPayout || Boolean(stats?.payoutHold) || (stats?.availableForPayout ?? 0) < MIN_PAYOUT_AUD
+                  }
                 >
                   {requestingPayout ? (
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -536,10 +575,28 @@ export default function CreatorDashboardPage() {
                   )}
                   Request payout
                 </Button>
+                {termsNeeded && (
+                  <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                    {termsNeeded.message}{' '}
+                    <Link href={termsNeeded.href} className="font-semibold underline">
+                      Read and accept it
+                    </Link>
+                  </p>
+                )}
                 <p className="text-xs text-slate-500 text-center">
-                  {(stats?.availableForPayout ?? 0) < MIN_PAYOUT_AUD
-                    ? `Payouts open at $${MIN_PAYOUT_AUD} AUD. Processing time: 3-5 business days.`
-                    : 'Processing time: 3-5 business days.'}
+                  {stats?.payoutHold
+                    ? 'Withdrawals are paused while ATHENA looks into a card payment connected to some of the gifts you were sent. Your balance is safe and keeps growing, and we will write to you when withdrawals are open again.'
+                    : (stats?.availableForPayout ?? 0) < MIN_PAYOUT_AUD
+                      ? `You can ask for a payout once your balance reaches A$${MIN_PAYOUT_AUD}. Until then it carries over.`
+                      : 'Stripe pays it into your bank on its own schedule.'}
+                </p>
+                {/* The exact share and the rules, beside the button that moves the money. */}
+                <p className="text-xs text-slate-500 text-center">
+                  {stats?.giftSharePercent != null
+                    ? `You keep ${stats.giftSharePercent}% of each gift${stats.tierName ? ` at ${stats.tierName} tier` : ''}.`
+                    : `You keep ${CREATOR_SHARE_RANGE_PERCENT.min}% to ${CREATOR_SHARE_RANGE_PERCENT.max}% of each gift, by creator tier.`}{' '}
+                  ATHENA takes no fee when you withdraw. Payouts are in Australian dollars, go to your own verified
+                  Stripe account, and are only made when you ask. There is no other minimum or waiting period.
                 </p>
               </CardContent>
             </Card>

@@ -11,7 +11,8 @@
  */
 
 import request from 'supertest';
-import { describe, it, expect, jest, beforeEach } from '@jest/globals';
+import { describe, it, expect, jest, beforeEach, afterAll } from '@jest/globals';
+import { Prisma } from '@prisma/client';
 
 jest.mock('../../utils/prisma', () => ({
   prisma: {
@@ -21,7 +22,11 @@ jest.mock('../../utils/prisma', () => ({
     impactReport: { findMany: jest.fn(async () => []), findUnique: jest.fn() },
     impactPartner: { findMany: jest.fn(async () => []), count: jest.fn(async () => 0), findUnique: jest.fn() },
     dVSupportService: { findMany: jest.fn(async () => []) },
-    safetyPlan: { findUnique: jest.fn(), upsert: jest.fn(async ({ create }: any) => ({ id: 'plan-1', ...create })) },
+    safetyPlan: {
+      findUnique: jest.fn(),
+      upsert: jest.fn(async ({ create }: any) => ({ id: 'plan-1', ...create })),
+      deleteMany: jest.fn(async () => ({ count: 1 })),
+    },
     accessibilityProfile: { findUnique: jest.fn(), upsert: jest.fn(async ({ create }: any) => ({ id: 'acc-1', ...create })) },
     disabilityFriendlyEmployer: { findMany: jest.fn(async () => []), count: jest.fn(async () => 0) },
   },
@@ -46,12 +51,23 @@ jest.mock('../../utils/logger', () => ({
 
 import { app } from '../../index';
 import { prisma as prismaTyped } from '../../utils/prisma';
+import { sealPlanLines } from '../../utils/safety-plan-seal';
+import { isSealed } from '../../utils/secret-box';
 
 const prisma: any = prismaTyped;
 const her = { 'x-test-user': 'her' };
 
+const KEY = 'd'.repeat(64);
+const envBefore = { ...process.env };
+
 beforeEach(() => {
   jest.clearAllMocks();
+  process.env = { ...envBefore, NODE_ENV: 'test', DV_ENCRYPTION_KEY: KEY };
+  delete process.env.TOTP_ENCRYPTION_KEY;
+});
+
+afterAll(() => {
+  process.env = envBefore;
 });
 
 describe('The safety plan', () => {
@@ -64,13 +80,15 @@ describe('The safety plan', () => {
     await request(app).post('/api/impact/safety-plan').set(her).send({ userId: 'someone-else', safeLocations: ['Library on Adelaide St'] }).expect(200);
     const upsert = prisma.safetyPlan.upsert.mock.calls[0][0];
     expect(upsert.where).toEqual({ userId: 'her' });
-    expect(upsert.create).toMatchObject({ userId: 'her', safeLocations: ['Library on Adelaide St'] });
+    expect(upsert.create.userId).toBe('her');
     expect(upsert.update.lastReviewedAt).toBeInstanceOf(Date);
   });
 
   it('is closed to anyone not signed in', async () => {
     await request(app).get('/api/impact/safety-plan').expect(401);
+    await request(app).delete('/api/impact/safety-plan').expect(401);
     expect(prisma.safetyPlan.findUnique).not.toHaveBeenCalled();
+    expect(prisma.safetyPlan.deleteMany).not.toHaveBeenCalled();
   });
 
   it('takes lists of lines, not whatever the body holds', async () => {
@@ -80,11 +98,139 @@ describe('The safety plan', () => {
   });
 
   it('leaves a part she did not send alone, and clears one she sent as empty', async () => {
-    await request(app).post('/api/impact/safety-plan').set(her).send({ exitStrategies: null }).expect(200);
+    await request(app).post('/api/impact/safety-plan').set(her).send({ exitStrategies: null, importantDocs: [] }).expect(200);
     const update = prisma.safetyPlan.upsert.mock.calls[0][0].update;
     expect(update).not.toHaveProperty('safeLocations', expect.anything());
     expect(update.safeLocations).toBeUndefined();
-    expect(update.exitStrategies).toBeDefined();
+    // Cleared, not sealed: an empty list has nothing in it to protect.
+    expect(update.exitStrategies).toBe(Prisma.JsonNull);
+    expect(update.importantDocs).toBe(Prisma.JsonNull);
+  });
+
+  describe('at rest', () => {
+    const written = {
+      emergencyContacts: ['Jo - 0400 000 000 - sister'],
+      safeLocations: ['12 Wattle St, Ipswich'],
+      warningTriggers: ['He starts checking my phone'],
+      exitStrategies: ['Bag is in the shed', 'Take the 6pm bus'],
+      importantDocs: ['Passport in the biscuit tin'],
+      financialPlan: ['Cash with Jo'],
+      legalContacts: ['Women’s Legal Service'],
+    };
+
+    it('stores every part sealed, never the words she wrote', async () => {
+      await request(app).post('/api/impact/safety-plan').set(her).send(written).expect(200);
+
+      const { create, update } = prisma.safetyPlan.upsert.mock.calls[0][0];
+      for (const data of [create, update]) {
+        for (const field of Object.keys(written)) {
+          expect(typeof data[field]).toBe('string');
+          expect(isSealed(data[field])).toBe(true);
+        }
+        const stored = JSON.stringify(data);
+        expect(stored).not.toContain('Wattle');
+        expect(stored).not.toContain('0400');
+        expect(stored).not.toContain('shed');
+      }
+    });
+
+    it('answers a save with what she wrote, opened, and says it is encrypted', async () => {
+      const res = await request(app).post('/api/impact/safety-plan').set(her).send(written).expect(200);
+
+      expect(res.body.data).toMatchObject({ ...written, encryptedAtRest: true, unreadableParts: [] });
+      expect(JSON.stringify(res.body)).not.toContain('enc:v1:');
+    });
+
+    it('reads a sealed plan back as the original lists', async () => {
+      prisma.safetyPlan.findUnique.mockResolvedValue({
+        id: 'plan-1',
+        userId: 'her',
+        safeLocations: sealPlanLines(written.safeLocations),
+        exitStrategies: sealPlanLines(written.exitStrategies),
+        emergencyContacts: null,
+      });
+
+      const res = await request(app).get('/api/impact/safety-plan').set(her).expect(200);
+
+      expect(res.body.data.safeLocations).toEqual(written.safeLocations);
+      expect(res.body.data.exitStrategies).toEqual(written.exitStrategies);
+      expect(res.body.data.emergencyContacts).toBeNull();
+      expect(res.body.data.encryptedAtRest).toBe(true);
+      expect(JSON.stringify(res.body)).not.toContain('enc:v1:');
+    });
+
+    it('still reads a plan saved before sealing, and says it is not encrypted yet', async () => {
+      prisma.safetyPlan.findUnique.mockResolvedValue({
+        id: 'plan-1',
+        userId: 'her',
+        safeLocations: ['Mum’s place'],
+        exitStrategies: sealPlanLines(['Take the 6pm bus']),
+      });
+
+      const res = await request(app).get('/api/impact/safety-plan').set(her).expect(200);
+
+      expect(res.body.data.safeLocations).toEqual(['Mum’s place']);
+      expect(res.body.data.exitStrategies).toEqual(['Take the 6pm bus']);
+      expect(res.body.data.encryptedAtRest).toBe(false);
+    });
+
+    it('never hands a part it cannot open to the page, and names it', async () => {
+      const sealedUnderAnotherKey = (() => {
+        process.env.DV_ENCRYPTION_KEY = 'e'.repeat(64);
+        const sealed = sealPlanLines(['Old address']);
+        process.env.DV_ENCRYPTION_KEY = KEY;
+        return sealed;
+      })();
+      prisma.safetyPlan.findUnique.mockResolvedValue({
+        id: 'plan-1',
+        userId: 'her',
+        safeLocations: sealedUnderAnotherKey,
+        exitStrategies: sealPlanLines(['Take the 6pm bus']),
+      });
+
+      const res = await request(app).get('/api/impact/safety-plan').set(her).expect(200);
+
+      expect(res.body.data.safeLocations).toBeNull();
+      expect(res.body.data.unreadableParts).toEqual(['safeLocations']);
+      expect(res.body.data.exitStrategies).toEqual(['Take the 6pm bus']);
+      expect(JSON.stringify(res.body)).not.toContain('enc:v1:');
+    });
+
+    it('is not sealed under the authenticator key, so rotating that key cannot lose a plan', async () => {
+      process.env.TOTP_ENCRYPTION_KEY = 'f'.repeat(64);
+      await request(app).post('/api/impact/safety-plan').set(her).send({ safeLocations: ['Library'] }).expect(200);
+      const sealed = prisma.safetyPlan.upsert.mock.calls[0][0].create.safeLocations;
+
+      process.env.TOTP_ENCRYPTION_KEY = '1'.repeat(64);
+      prisma.safetyPlan.findUnique.mockResolvedValue({ id: 'plan-1', userId: 'her', safeLocations: sealed });
+      const res = await request(app).get('/api/impact/safety-plan').set(her).expect(200);
+
+      expect(res.body.data.safeLocations).toEqual(['Library']);
+    });
+  });
+
+  describe('deleting the whole plan', () => {
+    it('removes her row and says so', async () => {
+      const res = await request(app).delete('/api/impact/safety-plan').set(her).expect(200);
+
+      expect(prisma.safetyPlan.deleteMany).toHaveBeenCalledWith({ where: { userId: 'her' } });
+      expect(res.body).toEqual({ success: true, data: { deleted: true } });
+    });
+
+    it('reports honestly when there was nothing to delete', async () => {
+      prisma.safetyPlan.deleteMany.mockResolvedValueOnce({ count: 0 });
+
+      const res = await request(app).delete('/api/impact/safety-plan').set(her).expect(200);
+
+      expect(res.body.data).toEqual({ deleted: false });
+    });
+
+    it('can only ever reach the signed-in member’s plan, whatever the request names', async () => {
+      await request(app).delete('/api/impact/safety-plan?userId=her').set({ 'x-test-user': 'someone-else' }).send({ userId: 'her' }).expect(200);
+
+      expect(prisma.safetyPlan.deleteMany).toHaveBeenCalledTimes(1);
+      expect(prisma.safetyPlan.deleteMany).toHaveBeenCalledWith({ where: { userId: 'someone-else' } });
+    });
   });
 });
 

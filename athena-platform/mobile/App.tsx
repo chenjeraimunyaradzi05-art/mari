@@ -10,6 +10,7 @@ import * as Notifications from 'expo-notifications';
 import { AuthProvider } from './src/context/AuthContext';
 import { AppNavigator, type RootStackParamList } from './src/navigation/AppNavigator';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { AgeGatePrompt } from './src/components/AgeGatePrompt';
 import { UnreplayableAction, startOfflineSync } from './src/services/offlineSync';
 import { api, webUrl } from './src/services/api';
 import { destinationForNotification } from './src/services/notificationRouting';
@@ -199,6 +200,8 @@ export default function App() {
         <AuthProvider>
           <NavigationContainer linking={linking}>
             <AppNavigator />
+            {/* Answers the server's refusals on the minimum age, from any screen. */}
+            <AgeGatePrompt />
             <StatusBar style="auto" />
           </NavigationContainer>
         </AuthProvider>

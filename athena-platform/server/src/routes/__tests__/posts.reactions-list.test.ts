@@ -5,12 +5,18 @@ jest.mock('../../utils/prisma', () => ({
   prisma: {
     // The block checks read the DV safety profile's list as well as the
     // platform one, in both directions; nobody is blocked here.
-    dvSafetyProfile: { findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => null) },
+    dvSafetyProfile: {
+      findFirst: jest.fn(async () => null),
+      findUnique: jest.fn(async () => null),
+      findMany: jest.fn(async () => []),
+    },
     post: { findUnique: jest.fn(), findMany: jest.fn(async () => []) },
     like: { findMany: jest.fn(async () => []), count: jest.fn(async () => 0), groupBy: jest.fn(async () => []) },
     postSave: { findMany: jest.fn(async () => []) },
     pollVote: { groupBy: jest.fn(async () => []), findMany: jest.fn(async () => []) },
-    user: { findMany: jest.fn(async () => []), findUnique: jest.fn() },
+    // Whether a member is in Safe Mode is asked of the user table with findFirst
+    // (audience.service isDiscreet); nobody is in it here.
+    user: { findFirst: jest.fn(async () => null), findMany: jest.fn(async () => []), findUnique: jest.fn() },
     userSafetySettings: { findMany: jest.fn(async () => []), findUnique: jest.fn(async () => null) },
     follow: { findMany: jest.fn(async () => []), findUnique: jest.fn(async () => null) },
     group: { findUnique: jest.fn() },
@@ -73,7 +79,7 @@ describe('Who reacted', () => {
     const res = await request(app).get('/api/posts/p1/reactions').set(as(VIEWER)).expect(200);
 
     expect(res.body.data).toEqual([
-      expect.objectContaining({ type: 'CELEBRATE', user: expect.objectContaining({ id: 'mei', name: 'Mei X', isFollowing: true, isSelf: false }) }),
+      expect.objectContaining({ type: 'CELEBRATE', user: expect.objectContaining({ id: 'mei', name: 'Mei', isFollowing: true, isSelf: false }) }),
       expect.objectContaining({ type: 'LIKE', user: expect.objectContaining({ id: 'priya', isFollowing: false }) }),
     ]);
     expect(res.body.pagination).toEqual({ page: 1, limit: 20, total: 2, pages: 1 });
@@ -103,6 +109,20 @@ describe('Who reacted', () => {
 
     const where = prisma.like.findMany.mock.calls[0][0].where;
     expect(where.userId.notIn).toEqual(expect.arrayContaining(['muted-by-me', 'stalker']));
+  });
+
+  it('also leaves out a block that exists only in the DV safety profile, in either direction', async () => {
+    prisma.userSafetySettings.findMany.mockResolvedValue([]);
+    prisma.userSafetySettings.findUnique.mockResolvedValue(null);
+    // She blocked 'dv-only' from the DV page; 'dv-blocked-her' blocked her from it.
+    prisma.dvSafetyProfile.findUnique.mockResolvedValueOnce({ blockedUserIds: ['dv-only'] });
+    prisma.dvSafetyProfile.findMany.mockResolvedValueOnce([{ userId: 'dv-blocked-her' }]);
+    prisma.like.findMany.mockResolvedValue([]);
+
+    await request(app).get('/api/posts/p1/reactions').set(as(VIEWER)).expect(200);
+
+    const where = prisma.like.findMany.mock.calls[0][0].where;
+    expect([...where.userId.notIn].sort()).toEqual(['dv-blocked-her', 'dv-only']);
   });
 
   it('is not available for a post the viewer cannot see', async () => {

@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import Image from 'next/image';
 import { api } from '@/lib/api';
+import { ResendVerification } from '@/components/auth/ResendVerification';
 
 export default function VerifyEmailPage() {
   return (
@@ -19,22 +20,12 @@ function VerifyEmailContent() {
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
   
-  const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
+  const [status, setStatus] = useState<'loading' | 'success' | 'choose-password' | 'error'>('loading');
   const [message, setMessage] = useState('');
-  // An expired link is the common failure; a new one is a form away.
-  const [resendEmail, setResendEmail] = useState('');
-  const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent'>('idle');
-  const resend = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!resendEmail.trim()) return;
-    setResendState('sending');
-    try {
-      await api.post('/auth/resend-verification', { email: resendEmail.trim() });
-    } catch {
-      // The route answers the same way whether or not the address exists.
-    }
-    setResendState('sent');
-  };
+  // The one-time link to choose a password, when the server hands one back:
+  // an address registered twice before anyone confirmed it has had its password
+  // withdrawn, and the person who proved the inbox chooses it now.
+  const [setPasswordToken, setSetPasswordToken] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token) {
@@ -46,6 +37,12 @@ function VerifyEmailContent() {
     const verifyEmail = async () => {
       try {
         const response = await api.get(`/auth/verify-email?token=${token}`);
+        const handed = response.data?.data;
+        if (handed?.passwordSetupRequired === true && typeof handed.setPasswordToken === 'string' && handed.setPasswordToken) {
+          setSetPasswordToken(handed.setPasswordToken);
+          setStatus('choose-password');
+          return;
+        }
         setStatus('success');
         setMessage(response.data.message || 'Email verified successfully!');
       } catch (error: any) {
@@ -97,6 +94,30 @@ function VerifyEmailContent() {
             </>
           )}
 
+          {status === 'choose-password' && setPasswordToken && (
+            <>
+              <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                <CheckCircle className="w-10 h-10 text-green-600 dark:text-green-400" />
+              </div>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
+                Email confirmed
+              </h1>
+              <p className="text-slate-600 dark:text-slate-400 mb-2">
+                This address was registered more than once before it was confirmed, so for your safety the
+                account has no password yet.
+              </p>
+              <p className="text-slate-600 dark:text-slate-400 mb-6">
+                Choose the password you will sign in with to finish. The link below works once, for an hour.
+              </p>
+              <Link
+                href={`/reset-password?token=${encodeURIComponent(setPasswordToken)}&setup=1`}
+                className="btn-primary w-full block text-center"
+              >
+                Choose your password
+              </Link>
+            </>
+          )}
+
           {status === 'error' && (
             <>
               <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -116,27 +137,9 @@ function VerifyEmailContent() {
                   Create New Account
                 </Link>
               </div>
-              <form onSubmit={resend} className="mt-6 border-t border-slate-100 pt-5 text-left dark:border-slate-800">
-                <p className="mb-2 text-sm text-slate-600 dark:text-slate-400">Link expired? Get a new one.</p>
-                {resendState === 'sent' ? (
-                  <p className="text-sm text-emerald-700 dark:text-emerald-300">If an unverified account exists for that address, a new link is on its way.</p>
-                ) : (
-                  <div className="flex gap-2">
-                    <input
-                      type="email"
-                      value={resendEmail}
-                      onChange={(event) => setResendEmail(event.target.value)}
-                      placeholder="you@example.com"
-                      aria-label="Email address"
-                      required
-                      className="input flex-1 text-sm"
-                    />
-                    <button type="submit" disabled={resendState === 'sending'} className="btn-primary px-4 text-sm">
-                      {resendState === 'sending' ? 'Sending…' : 'Resend'}
-                    </button>
-                  </div>
-                )}
-              </form>
+              <div className="mt-6 border-t border-slate-100 pt-5 dark:border-slate-800">
+                <ResendVerification />
+              </div>
             </>
           )}
         </div>

@@ -1,6 +1,9 @@
 import axios from 'axios';
 import { clearTokens, getAccessToken, setTokens } from './auth';
-import { refreshSession } from './session-refresh';
+import { refreshEndedTheSession, refreshSession } from './session-refresh';
+import { automaticRetryDelayMs, softenRateLimitMessage } from './rate-limit-backoff';
+import { announceWomanGateRefusal, womanGateRefusalOf } from './woman-gate-refusal';
+import { ageGateRefusalOf, announceAgeGateRefusal } from './age-gate-refusal';
 
 // Direct backend origin — used for WebSocket connections and SSR calls
 export const API_ORIGIN = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000').replace(/\/$/, '');
@@ -59,6 +62,19 @@ api.interceptors.response.use(
       }
     }
 
+    // A member turned away on the women-only check is told where to go: to
+    // complete it, or to appeal if a reviewer refused it. The request still
+    // fails and its caller still shows the server's sentence.
+    const womanGateRefusal = womanGateRefusalOf(error);
+    if (womanGateRefusal) announceWomanGateRefusal(womanGateRefusal);
+
+    // The same for the minimum age: an account with no date of birth is sent to
+    // the form that collects it, and one whose date is under the minimum is told
+    // to write to us. The request still fails and its caller still shows the
+    // server's sentence.
+    const ageGateRefusal = ageGateRefusalOf(error);
+    if (ageGateRefusal) announceAgeGateRefusal(ageGateRefusal);
+
     // If 401 and we haven't already tried to refresh
     if (error.response?.status === 401 && originalRequest && !originalRequest._retry && !shouldSkipRefresh) {
       originalRequest._retry = true;
@@ -77,7 +93,94 @@ api.interceptors.response.use(
         originalRequest.headers.Authorization = `Bearer ${accessToken}`;
         return api(originalRequest);
       } catch (refreshError) {
-        // Refresh failed, clear tokens and redirect to login
+        // A dropped connection, a timeout or the API redeploying says nothing
+        // about the session: the cookie is still good, so the request fails
+        // and the next one refreshes again, instead of bouncing to sign in.
+        if (!refreshEndedTheSession(refreshError)) {
+          return Promise.reject(refreshError);
+        }
+        // The server refused the refresh: clear tokens and redirect to login
+        clearTokens();
+        if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
+        return Promise.reject(refreshError);
+      }
+    }
+
+    // The API says how long to wait when it is going too fast (429). A read
+    // waits that long once, if it is short, and goes again; anything that
+    // still fails shows a calm sentence rather than the generic one.
+    if (error.response?.status === 429 && originalRequest) {
+      const delay = automaticRetryDelayMs(originalRequest, error.response.headers);
+      if (delay !== null) {
+        originalRequest._rateLimitRetried = true;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        return api(originalRequest);
+      }
+      softenRateLimitMessage(error);
+    }
+
+    return Promise.reject(error);
+  }
+);
+
+// ============================================
+// DIRECT UPLOADS
+// ============================================
+// Everything else goes through the same-origin /api proxy, which on Netlify is
+// a function that reads the whole request into memory and refuses a body over
+// about 6 MB (nearer 4.5 MB for a file, once it is encoded). The API accepts a
+// reel of 500 MB, a post picture of 20 MB, a cover or a résumé of 10 MB, so
+// through the proxy only a small avatar could ever be uploaded from the web.
+// Uploads therefore go straight to the API. It already allows this origin
+// (the sockets connect there too) and authenticates an upload by its Bearer
+// token, so no cookie is needed or sent. Reads and small writes stay on the
+// proxy, which is where the session cookie and the visitor's address are
+// handled.
+const uploadClient = axios.create({
+  baseURL: `${API_ORIGIN}/api`,
+  withCredentials: false,
+});
+
+uploadClient.interceptors.request.use((config) => {
+  const token = getAccessToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// An access token that expired during a long upload is refreshed once, the
+// same way the proxy client does, and the upload is sent again.
+uploadClient.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+
+    // Uploads sit behind the same standing check as every other write.
+    const womanGateRefusal = womanGateRefusalOf(error);
+    if (womanGateRefusal) announceWomanGateRefusal(womanGateRefusal);
+    const ageGateRefusal = ageGateRefusalOf(error);
+    if (ageGateRefusal) announceAgeGateRefusal(ageGateRefusal);
+
+    if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
+      originalRequest._retry = true;
+
+      try {
+        const { accessToken } = await refreshSession();
+        if (!accessToken) {
+          throw new Error('Session refresh returned no access token');
+        }
+
+        setTokens(accessToken, null);
+        originalRequest.headers.Authorization = `Bearer ${accessToken}`;
+        return uploadClient(originalRequest);
+      } catch (refreshError) {
+        // As on the proxy client above: only a refusal ends the session.
+        if (!refreshEndedTheSession(refreshError)) {
+          return Promise.reject(refreshError);
+        }
         clearTokens();
         if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
           window.location.href = '/login';
@@ -120,6 +223,9 @@ export const authApi = {
     // Needed when the sign-in creates the account, for the same age check.
     dateOfBirth?: string;
     inviteCode?: string;
+    // Sent with the same credential once the server has asked for it, when the
+    // account has two-factor on. An authenticator code or a recovery code.
+    twoFactorCode?: string;
   }) => api.post('/auth/google', data),
 
   facebook: (data: {
@@ -129,6 +235,8 @@ export const authApi = {
     womanSelfAttested?: boolean;
     dateOfBirth?: string;
     inviteCode?: string;
+    // As for Google: sent again with the same token once it has been asked for.
+    twoFactorCode?: string;
   }) => api.post('/auth/facebook', data),
 
   // twoFactorCode is optional because the first request of a sign-in never has
@@ -209,7 +317,16 @@ export const userApi = {
 
   // Privacy / DSAR
   exportMyData: () => api.get('/users/me/export'),
-  deleteAccount: () => api.delete('/users/me', { data: { confirm: true } }),
+  // Closes the account through the full erasure. The server asks again for her
+  // password (when she has one) and a live second-factor code (when it is on).
+  deleteAccount: (answers?: { currentPassword?: string; code?: string }) =>
+    api.delete('/users/me', {
+      data: {
+        confirm: true,
+        ...(answers?.currentPassword ? { currentPassword: answers.currentPassword } : {}),
+        ...(answers?.code ? { code: answers.code } : {}),
+      },
+    }),
   requestWomanVerification: () => api.post('/users/me/woman-verification'),
 };
 
@@ -481,6 +598,12 @@ export const mentorApi = {
     api.patch(`/mentors/sessions/${sessionId}`, { scheduledAt, ...(durationMinutes ? { durationMinutes } : {}) }),
   // The client secret to authorise a pending session payment, for the mentee.
   paymentIntent: (sessionId: string) => api.post(`/mentors/sessions/${sessionId}/payment-intent`),
+  // The mentee says a paid session did not take place. The card stays held, or a
+  // charge already made is not paid on, while ATHENA's team decides.
+  disputeSession: (sessionId: string, reason: string) => api.post(`/mentors/sessions/${sessionId}/dispute`, { reason }),
+  // The mentor's one answer to a session in dispute, kept for the team to read.
+  respondToSessionDispute: (sessionId: string, response: string) =>
+    api.post(`/mentors/sessions/${sessionId}/dispute/respond`, { response }),
 
   // The times this mentor is actually free on a day, already converted into the
   // viewer's timezone. `date` is `YYYY-MM-DD`.
@@ -513,7 +636,19 @@ export const safetyApi = {
   getReports: () => api.get('/safety/reports'),
 
   createReport: (data: {
-    targetType: 'post' | 'comment' | 'video' | 'user' | 'message' | 'channel' | 'other';
+    targetType:
+      | 'post'
+      | 'comment'
+      | 'video'
+      | 'user'
+      | 'message'
+      | 'group_message'
+      | 'group'
+      | 'livestream'
+      | 'live_message'
+      | 'channel'
+      | 'housing_listing'
+      | 'other';
     targetId?: string;
     reason: string;
     details?: string;
@@ -533,12 +668,9 @@ export const safetyApi = {
     isSafeMode?: boolean;
     hideFromSearch?: boolean;
     allowMessagesFrom?: 'all' | 'connections' | 'none';
-    filterOffensiveContent?: boolean;
     hideReadReceipts?: boolean;
     profileVisibility?: 'public' | 'connections' | 'private';
     hideOnlineStatus?: boolean;
-    hideLastSeen?: boolean;
-    enableSafetyAlerts?: boolean;
   }) => api.patch('/safety/settings', data),
 };
 
@@ -619,6 +751,10 @@ export const educationApi = {
 // FORMATION API
 // ============================================
 export const formationApi = {
+  // What a registration costs and what the fee is for. Open: the landing page
+  // reads it before anyone has an account.
+  fees: () => api.get('/formation/fees'),
+
   list: () => api.get('/formation'),
 
   create: (data: { type: string; businessName: string }) => api.post('/formation', data),
@@ -692,11 +828,29 @@ export const mediaApi = {
   // with no size ceiling and no look at the bytes, so anyone signed in could
   // put a file of any size and any content into the public bucket past every
   // check the upload route below applies; nothing here ever called it. Every
-  // upload goes through the server.
+  // upload goes through the server, and from the browser straight to it
+  // (uploadClient above), not through the proxy that cannot carry a large file.
   upload: (type: string, file: File) => {
     const formData = new FormData();
     formData.append('file', file);
-    return api.post(`/media/upload/${type}`, formData, {
+    return uploadClient.post(`/media/upload/${type}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+
+  // A file for a conversation or a group room. It is stored under that
+  // thread's own private folder and opened only by the people in it, through a
+  // short-lived link the server mints for each of them (lib/chat-attachments).
+  // Who it is for travels in the query, because the server decides whether she
+  // may send there before it reads a byte; a clip says so too (video=1), since
+  // its ceiling, and whether it is received to memory or to disk, are decided
+  // the same way.
+  uploadChatFile: (file: File, target: { conversationId: string } | { groupId: string }) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const params: Record<string, string> = { ...target, ...(file.type.startsWith('video/') ? { video: '1' } : {}) };
+    return uploadClient.post('/media/upload/chat', formData, {
+      params,
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
@@ -704,7 +858,7 @@ export const mediaApi = {
   uploadResume: (file: File) => {
     const formData = new FormData();
     formData.append('resume', file);
-    return api.post('/media/resume', formData, {
+    return uploadClient.post('/media/resume', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
@@ -712,7 +866,7 @@ export const mediaApi = {
   uploadPostImages: (files: File[]) => {
     const formData = new FormData();
     files.forEach((file) => formData.append('images', file));
-    return api.post('/media/post-images', formData, {
+    return uploadClient.post('/media/post-images', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
@@ -1260,6 +1414,8 @@ export const housingApi = {
 
   updateInquiry: (id: string, data: { status?: string; viewingDate?: string; notes?: string; reply?: string }) =>
     api.patch(`/housing/inquiries/${id}`, data),
+  // Takes the whole inquiry back: the row, her message and the thread. Nobody is told.
+  removeInquiry: (id: string) => api.delete(`/housing/inquiries/${id}`),
 
   // Safety. The conversation on a DV-safe listing stays on the inquiry: the
   // lister writes without changing the status, the asker replies, and only
@@ -1268,10 +1424,38 @@ export const housingApi = {
     api.patch(`/housing/listings/${listingId}/inquiries/${inquiryId}`, data),
   shareContact: (inquiryId: string) => api.post(`/housing/inquiries/${inquiryId}/share-contact`),
 
-  // Staff: the DV-safe listings waiting for a check, and the outcome.
+  // The check on whoever offers a DV-safe, emergency or transitional place. A
+  // place can show as checked only while its lister holds an approved one.
+  getMyProviderCheck: () => api.get('/housing/my/provider-check'),
+  askForProviderCheck: (data: { providerName: string; relationship: string; abn?: string; statement: string }) =>
+    api.post('/housing/my/provider-check', data),
+
+  // Staff: the DV-safe, emergency and transitional listings waiting for a check, and the outcome.
   getPendingSafetyChecks: () => api.get('/housing/admin/pending'),
-  adminUpdateListing: (id: string, data: { safetyVerified?: boolean; dvSafe?: boolean; status?: string; note?: string }) =>
-    api.patch(`/housing/admin/listings/${id}`, data),
+  adminUpdateListing: (
+    id: string,
+    data: {
+      safetyVerified?: boolean;
+      dvSafe?: boolean;
+      status?: string;
+      /** A line the lister is shown with the outcome. */
+      note?: string;
+      /** What staff checked; required to mark a listing checked, and kept in the audit record. */
+      checkNote?: string;
+    }
+  ) => api.patch(`/housing/admin/listings/${id}`, data),
+
+  // Staff: provider checks waiting for a decision, and those about to end.
+  getProviderChecks: () => api.get('/housing/admin/provider-checks'),
+  decideProviderCheck: (
+    userId: string,
+    data: {
+      decision: 'APPROVE' | 'REJECT';
+      basis: string;
+      validForDays?: number;
+      checks?: { abnChecked?: boolean; referencesCalled?: boolean; partnerAgreementOnFile?: boolean; identitySighted?: boolean };
+    }
+  ) => api.patch(`/housing/admin/provider-checks/${userId}`, data),
 };
 
 // ============================================
@@ -1388,6 +1572,9 @@ export const impactApi = {
     financialPlan?: unknown;
     legalContacts?: unknown;
   }) => api.post('/impact/safety-plan', data),
+
+  // Removes the whole plan, not just the words in it.
+  deleteSafetyPlan: () => api.delete('/impact/safety-plan'),
 
   // Accessibility Profile
   getAccessibilityProfile: () => api.get('/impact/accessibility'),
@@ -1523,14 +1710,8 @@ export const aiAlgorithmsApi = {
     api.get('/ai-algorithms/salary-equity/analyze', { params }),
   getMySalaryAnalyses: () => api.get('/ai-algorithms/salary-equity/my-analyses'),
 
-  // SafetyScore - Trust & Verification
-  reportContent: (data: {
-    contentType: string;
-    contentId: string;
-    reportedUserId: string;
-    reason: string;
-    description?: string;
-  }) => api.post('/ai-algorithms/report', data),
+  // Reports are filed through safetyApi / the report page (POST /safety/reports).
+  // The route this used to call answers 410 now.
 
   // IncomeStream - Creator Analytics
   getCreatorAnalytics: () => api.get('/ai-algorithms/creator-analytics'),
@@ -1565,15 +1746,6 @@ export const paymentsApi = {
   getCurrencies: () => api.get('/payments/currencies'),
 
   getBestProvider: (region?: string) => api.get('/payments/best-provider', { params: { region } }),
-
-  process: (data: {
-    amount: number;
-    currency: string;
-    description: string;
-    paymentMethodId?: string;
-    returnUrl?: string;
-    metadata?: Record<string, unknown>;
-  }) => api.post('/payments/process', data),
 
   convert: (data: { amount: number; from: string; to: string }) =>
     api.post('/payments/convert', data),
@@ -1625,7 +1797,15 @@ export const creatorApi = {
 
   getPublicProfile: (userId: string) => api.get(`/creator/profile/${userId}`),
 
-  enable: () => api.post('/creator/enable'),
+  // Turning on creator mode is where a creator starts being paid, so the server
+  // asks for the Creator Terms Addendum here and refuses without it (Terms 5.1).
+  // The caller passes the acceptance she gave and the version she read, so an
+  // acceptance of old text is never recorded as one of the current text.
+  enable: (acceptance: { acceptCreatorTerms: true; termsVersion: string }) => api.post('/creator/enable', acceptance),
+
+  // A creator from before the addendum existed, or before it was last rewritten,
+  // accepts the current version. Her next withdrawal is refused until she has.
+  acceptTerms: (version: string) => api.post('/creator/terms/accept', { version }),
 
   onboard: () => api.post('/creator/onboard'),
 
@@ -1658,6 +1838,17 @@ export const creatorApi = {
 
   getLeaderboard: (params?: { period?: string; limit?: number }) =>
     api.get('/creator/leaderboard', { params }),
+};
+
+// ============================================
+// FEES API
+// ============================================
+// Every fee ATHENA takes, with the figures the code charges: what it keeps of a
+// mentoring session, a marketplace sale, a creator's gift by tier and an
+// automotive sale, job or report, whether card processing is charged on top,
+// and whether prices include GST yet. Public; the fees page reads it.
+export const feesApi = {
+  schedule: () => api.get('/fees'),
 };
 
 // ============================================

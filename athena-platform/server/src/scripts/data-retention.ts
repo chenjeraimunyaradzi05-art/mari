@@ -8,6 +8,8 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import { EXECUTED_RETENTION_SCHEDULE } from '../services/gdpr.service';
+import { redactIdentitySession } from '../services/identity-verification.service';
+import { IDENTITY_HOLD_ALIASES } from '../utils/identity-hold';
 
 /**
  * How many days a line of the published schedule keeps its data.
@@ -155,6 +157,15 @@ export const LEGAL_HOLD_DATA_TYPES: readonly LegalHoldDataType[] = [
     purge: 'Old audit rows have the network address and device stripped from them',
     aliases: ['audit_logs', 'audit'],
   },
+  {
+    value: 'identity_verification',
+    label: 'Identity verification details',
+    purge:
+      'Photo ID checks held at Stripe are erased once decided, and the name and document type kept for the reviewer are scrubbed 90 days after the decision',
+    // One list, shared with the redaction that runs at the moment of a decision,
+    // so a hold that stops this sweep stops that too.
+    aliases: IDENTITY_HOLD_ALIASES,
+  },
 ];
 
 /** The words that make one hold freeze every purge. */
@@ -239,6 +250,7 @@ export class DataRetentionService {
         () => this.purgeExpiredDSARExports(holds),
         () => this.purgeOldNotifications(holds),
         () => this.anonymizeOldAuditLogs(holds),
+        () => this.purgeIdentityVerificationDetails(holds),
       ];
 
       for (const job of jobs) {
@@ -635,6 +647,101 @@ export class DataRetentionService {
       dataType: 'audit_logs_anonymized',
       recordsPurged: count,
       errors: [],
+      executedAt: new Date(),
+    };
+  }
+
+  /**
+   * What a photo ID check leaves behind, in the two places it leaves it.
+   *
+   * ATHENA never receives the document or the selfie; Stripe holds them. So the
+   * first half asks Stripe to erase the session behind every decision that has
+   * been made but not yet redacted - the retry for the ones the decision itself
+   * could not redact (Stripe unreachable, a session still processing). The
+   * second half scrubs what ATHENA kept for the reviewer, the legal name and the
+   * document type on the badge, 90 days after the decision, which is the figure
+   * the retention schedule publishes. The opaque session id goes with them once
+   * Stripe has confirmed the redaction; until then it stays, because it is the
+   * only handle left for trying again.
+   *
+   * Idempotent: a redacted session is never asked about twice, and a scrubbed
+   * badge has nothing left that the scrub looks for (and carries
+   * `detailsScrubbedAt`, the date it first happened), so a repeat run finds
+   * nothing. The member's date of birth is not touched; it belongs to the
+   * account and is what the age gate reads.
+   *
+   * Raw SQL for the same reason as the audit-log job: whether a JSON key is
+   * absent cannot be expressed in Prisma's JSON filter.
+   */
+  async purgeIdentityVerificationDetails(holds: LegalHoldScope = EMPTY_HOLD_SCOPE): Promise<PurgeResult> {
+    if (isHeld(holds, ...aliasesOf('identity_verification'))) {
+      return heldResult('identity_verification_details');
+    }
+
+    const cutoffDate = cutoffFor('identity_verification_details');
+    const errors: string[] = [];
+    const heldIds = Array.from(holds.userIds);
+    const heldUserFilter = heldIds.length
+      ? Prisma.sql`AND "userId" NOT IN (${Prisma.join(heldIds)})`
+      : Prisma.empty;
+
+    // Oldest decisions first and a cap per night, so a backlog drains in order
+    // without one run making hundreds of calls to Stripe.
+    const unredacted = await prisma.$queryRaw<Array<{ id: string; userId: string; metadata: unknown }>>`
+      SELECT "id", "userId", "metadata"
+      FROM "VerificationBadge"
+      WHERE "type" = 'IDENTITY'::"VerificationBadgeType"
+        AND "status" IN ('APPROVED'::"VerificationStatus", 'REJECTED'::"VerificationStatus")
+        AND ("metadata" ->> 'sessionId') IS NOT NULL
+        AND ("metadata" ->> 'redactedAt') IS NULL
+        ${heldUserFilter}
+      ORDER BY "reviewedAt" ASC NULLS FIRST
+      LIMIT 200
+    `;
+
+    let redacted = 0;
+    for (const badge of unredacted) {
+      if (await redactIdentitySession(badge, { holdsChecked: true })) redacted++;
+    }
+    if (redacted < unredacted.length) {
+      errors.push(
+        `${unredacted.length - redacted} identity check(s) could not be redacted at Stripe yet and will be tried again`
+      );
+    }
+
+    // The marker goes on the left of `||`, where the right-hand side wins, so a
+    // badge scrubbed before keeps the date it was first scrubbed.
+    //
+    // A row is picked while anything is left on it to remove: the name, the
+    // document type, or a session id whose redaction has been recorded. A
+    // session id that is still waiting for its redaction is not removed and does
+    // not make the row match, so the night the redaction finally lands is the
+    // night the id goes. (Matching on "never scrubbed" instead left the id on
+    // every badge whose redaction came in after its ninetieth day, for good.)
+    const marker = JSON.stringify({ detailsScrubbedAt: new Date().toISOString() });
+    const scrubbed = await prisma.$executeRaw`
+      UPDATE "VerificationBadge"
+      SET "metadata" = ${marker}::jsonb || (
+            CASE WHEN ("metadata" ->> 'redactedAt') IS NOT NULL
+                 THEN ("metadata" - 'documentName' - 'documentType' - 'sessionId')
+                 ELSE ("metadata" - 'documentName' - 'documentType')
+            END
+          )
+      WHERE "type" = 'IDENTITY'::"VerificationBadgeType"
+        AND "status" IN ('APPROVED'::"VerificationStatus", 'REJECTED'::"VerificationStatus")
+        AND "reviewedAt" < ${cutoffDate}
+        AND (
+          ("metadata" ->> 'documentName') IS NOT NULL
+          OR ("metadata" ->> 'documentType') IS NOT NULL
+          OR (("metadata" ->> 'sessionId') IS NOT NULL AND ("metadata" ->> 'redactedAt') IS NOT NULL)
+        )
+        ${heldUserFilter}
+    `;
+
+    return {
+      dataType: 'identity_verification_details',
+      recordsPurged: redacted + scrubbed,
+      errors,
       executedAt: new Date(),
     };
   }

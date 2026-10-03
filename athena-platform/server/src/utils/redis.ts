@@ -12,23 +12,48 @@
 
 import Redis, { RedisOptions } from 'ioredis';
 import { logger } from './logger';
+import { recordCondition } from './ops-metrics';
 
 // Parse Redis URL or use defaults
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 
-// Track whether Redis is available
-let redisAvailable = true;
+/** The longest wait between two attempts to reach Redis again. */
+const RECONNECT_DELAY_CAP_MS = 3000;
+/** After this many failed attempts in a row the outage is reported once; it is never given up on. */
+const OUTAGE_REPORTED_AFTER_ATTEMPTS = 10;
+/** How long a connection that ended, which ioredis then leaves for dead, waits to be reopened. */
+const REVIVE_AFTER_MS = 30_000;
 
-function createClient(name: string, opts: Partial<RedisOptions> = {}): Redis {
+/**
+ * How long to wait before reconnect attempt number `attempt` (1, 2, 3 ...):
+ * a tenth of a second longer each time, never more than three seconds, and
+ * always a number.
+ *
+ * It used to be `null` after ten attempts, about six seconds into an outage.
+ * ioredis reads `null` as "stop for good" and moves the client to `end`, and
+ * nothing here ever opened it again, so a Redis that was restarted by its host
+ * (a deploy, a failover, a maintenance window) left every API instance with a
+ * dead client until the instance itself was restarted: every scheduled sweep
+ * skipped in production, including the warnings about money that is about to
+ * be released, and every rate-limit counter kept in the one process. It is
+ * exported so that a test can hold it to "always a number".
+ */
+export function redisRetryDelay(attempt: number): number {
+  return Math.min(Math.max(1, attempt) * 100, RECONNECT_DELAY_CAP_MS);
+}
+
+function createClient(name: string, opts: Partial<RedisOptions> = {}, onReady?: () => void): Redis {
   const client = new Redis(redisUrl, {
     maxRetriesPerRequest: 3,
     retryStrategy(times) {
-      if (times > 10) {
-        redisAvailable = false;
-        logger.warn(`Redis ${name}: giving up after ${times} retries`);
-        return null; // stop retrying
+      // ioredis counts attempts from one again after a connection works, so
+      // this is one line per outage, not one per attempt.
+      if (times === OUTAGE_REPORTED_AFTER_ATTEMPTS + 1) {
+        logger.error(
+          `Redis ${name}: still unreachable after ${OUTAGE_REPORTED_AFTER_ATTEMPTS} attempts; it keeps trying every ${RECONNECT_DELAY_CAP_MS / 1000} seconds`
+        );
       }
-      return Math.min(times * 100, 3000);
+      return redisRetryDelay(times);
     },
     reconnectOnError(err) {
       return err.message.includes('READONLY');
@@ -38,27 +63,74 @@ function createClient(name: string, opts: Partial<RedisOptions> = {}): Redis {
     ...opts,
   });
 
-  client.on('connect', () => {
-    redisAvailable = true;
-    logger.info(`Redis ${name} connected`);
+  client.on('connect', () => logger.info(`Redis ${name} connected`));
+  client.on('ready', () => {
+    logger.info(`Redis ${name} ready`);
+    onReady?.();
   });
-  client.on('ready', () => logger.info(`Redis ${name} ready`));
   client.on('error', (err) => logger.error(`Redis ${name} error`, { error: err.message }));
   client.on('close', () => logger.warn(`Redis ${name} connection closed`));
+
+  // 'end' is a client that has stopped retrying: its connector failed outright
+  // (a name that would not resolve), or it was closed. Left alone it stays dead,
+  // so it is opened again after a pause. Retrying is no longer given up on in
+  // retryStrategy above; this is the second line for the failures that
+  // strategy is never asked about.
+  let reviveTimer: NodeJS.Timeout | null = null;
+  client.on('end', () => {
+    logger.error(`Redis ${name}: the connection has ended; opening it again in ${REVIVE_AFTER_MS / 1000} seconds`);
+    if (reviveTimer) return;
+    reviveTimer = setTimeout(() => {
+      reviveTimer = null;
+      if (client.status === 'end') client.connect().catch(() => undefined);
+    }, REVIVE_AFTER_MS);
+    reviveTimer.unref();
+  });
 
   return client;
 }
 
+// Whether the main client has been ready at least once since boot: see redisWouldHoldCommands.
+let mainHasBeenReady = false;
+
 // Main client (lazy)
-export const redis = createClient('main');
+export const redis = createClient('main', {}, () => {
+  mainHasBeenReady = true;
+  resumeSkippedSweeps();
+});
 
 // Pub/Sub connections (lazy, unlimited retries per request for blocking ops)
 export const redisSub = createClient('sub', { maxRetriesPerRequest: null });
 export const redisPub = createClient('pub', { maxRetriesPerRequest: null });
 
-/** Check if Redis is believed to be available */
+/**
+ * Whether the main client can answer right now: what the client itself says,
+ * and nothing remembered. It used to be a flag that the first outage set to
+ * false and nothing ever set back, so a Redis that had been away for a minute
+ * was treated as gone until the next restart.
+ */
 export function isRedisAvailable(): boolean {
-  return redisAvailable && redis.status === 'ready';
+  return redis.status === 'ready';
+}
+
+/**
+ * Whether a command sent to the main client now would be held rather than
+ * answered. ioredis keeps a command sent during an outage in its offline
+ * queue and answers it only when the connection is back or, every fourth
+ * reconnect attempt, with an error (maxRetriesPerRequest above); with the
+ * attempts three seconds apart that is up to twelve seconds a request waits
+ * for a cache read or a lock that every caller here can do without. Now that
+ * the client never stops retrying (redisRetryDelay), the wait would last the
+ * whole outage, where it used to end after six seconds with a dead client.
+ *
+ * A client that has never been opened is let through: the command is what
+ * opens it (lazyConnect), and that first connection is quick or fails
+ * outright. Once it has worked and been lost, anything but ready is the retry
+ * cycle.
+ */
+export function redisWouldHoldCommands(): boolean {
+  if (redis.status === 'ready') return false;
+  return mainHasBeenReady || redis.status === 'reconnecting';
 }
 
 /**
@@ -67,15 +139,73 @@ export function isRedisAvailable(): boolean {
  */
 export async function ensureRedisConnected(): Promise<boolean> {
   if (redis.status === 'ready') return true;
+  // A first connection that is under way is not failed yet.
   if (redis.status === 'connecting' || redis.status === 'connect') return true;
+  // ioredis is waiting out its own retry delay and will connect by itself;
+  // calling connect() now would open a second socket beside it.
+  if (redis.status === 'reconnecting') return false;
   try {
     await redis.connect();
     return true;
   } catch {
-    redisAvailable = false;
-    logger.warn('Redis is unavailable, caching/pubsub features disabled');
+    // The client keeps retrying in the background (see redisRetryDelay), and
+    // isRedisAvailable() reads its state, so this does not decide anything.
+    logger.warn('Redis is not reachable yet; it will keep trying, and the limits and sweeps are per process until it answers');
     return false;
   }
+}
+
+/** Production with a REDIS_URL: the deployment that must not run without Redis. */
+export function redisIsRequired(): boolean {
+  return process.env.NODE_ENV === 'production' && Boolean(process.env.REDIS_URL);
+}
+
+/** How long a readiness check waits for Redis before it says no. */
+export const REDIS_PING_TIMEOUT_MS = 1000;
+
+/** Resolves with `promise`'s answer, or with false when it has not answered in `ms`. */
+function answeredWithin(promise: Promise<boolean>, ms: number): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  return Promise.race([
+    promise.catch(() => false),
+    new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), ms);
+    }),
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+/**
+ * Whether Redis answers a PING within a second, on the connection the sweeps
+ * and the rate limits use. Not ready, or no answer in time, is no. A client
+ * that has never been opened (or has ended) is opened and given the same
+ * second, so that a probe is also what starts the connection on a process that
+ * has not needed it yet.
+ *
+ * It asks the shared client in redis.ts, not the one in cache.ts: that one
+ * retries for ever and reports "up" on its own, while this one is the one
+ * whose loss stops the sweeps.
+ */
+export async function pingRedis(timeoutMs: number = REDIS_PING_TIMEOUT_MS): Promise<boolean> {
+  if (redis.status === 'wait' || redis.status === 'end') {
+    await answeredWithin(ensureRedisConnected(), timeoutMs);
+  }
+  if (!isRedisAvailable()) return false;
+  return answeredWithin(
+    redis.ping().then((answer) => answer === 'PONG'),
+    timeoutMs
+  );
+}
+
+/**
+ * For a readiness probe: yes, unless this deployment must have Redis and it
+ * does not answer. Production with a REDIS_URL must (the API will not boot
+ * without one); anywhere else Redis is optional and its absence is not a
+ * reason to take the instance out of rotation.
+ */
+export async function redisReadyForTraffic(): Promise<boolean> {
+  return !redisIsRequired() || (await pingRedis());
 }
 
 // ===========================================
@@ -96,7 +226,9 @@ const DEFAULT_TTL = 3600; // 1 hour
  */
 export async function cacheGet<T>(key: string, options: CacheOptions = {}): Promise<T | null> {
   const fullKey = options.prefix ? `${options.prefix}:${key}` : key;
-  
+  // A miss, at once, rather than a request held for the length of the outage.
+  if (redisWouldHoldCommands()) return null;
+
   try {
     const value = await redis.get(fullKey);
     if (value === null) return null;
@@ -117,7 +249,8 @@ export async function cacheSet<T>(
 ): Promise<boolean> {
   const fullKey = options.prefix ? `${options.prefix}:${key}` : key;
   const ttl = options.ttl ?? DEFAULT_TTL;
-  
+  if (redisWouldHoldCommands()) return false;
+
   try {
     const serialized = JSON.stringify(value);
     if (ttl > 0) {
@@ -137,7 +270,8 @@ export async function cacheSet<T>(
  */
 export async function cacheDel(key: string, options: CacheOptions = {}): Promise<boolean> {
   const fullKey = options.prefix ? `${options.prefix}:${key}` : key;
-  
+  if (redisWouldHoldCommands()) return false;
+
   try {
     await redis.del(fullKey);
     return true;
@@ -151,6 +285,7 @@ export async function cacheDel(key: string, options: CacheOptions = {}): Promise
  * Delete all keys matching a pattern
  */
 export async function cacheDelPattern(pattern: string): Promise<number> {
+  if (redisWouldHoldCommands()) return 0;
   try {
     const keys = await redis.keys(pattern);
     if (keys.length === 0) return 0;
@@ -196,7 +331,9 @@ export async function acquireLock(
 ): Promise<(() => Promise<void>) | null> {
   const lockValue = `${process.pid}-${Date.now()}`;
   const fullKey = `lock:${lockKey}`;
-  
+  // Not acquired, at once: a lock that cannot be asked for is not held.
+  if (redisWouldHoldCommands()) return null;
+
   try {
     const acquired = await redis.set(fullKey, lockValue, 'PX', ttlMs, 'NX');
     
@@ -243,6 +380,45 @@ export async function withLock<T>(
 let warnedNoRedisForSweeps = false;
 
 /**
+ * The sweeps that were skipped because Redis was unreachable, and have not run
+ * since. /health/detailed shows how many, under the condition below, so that
+ * "Redis is down" and "the reminders have stopped" are the same sentence.
+ */
+const skippedSweeps = new Set<string>();
+export const SWEEPS_SKIPPED_CONDITION = 'redis.sweeps_skipped';
+
+function noteSweepSkipped(key: string): boolean {
+  const first = !skippedSweeps.has(key);
+  skippedSweeps.add(key);
+  recordCondition(
+    SWEEPS_SKIPPED_CONDITION,
+    skippedSweeps.size,
+    `Redis is unreachable, so these scheduled sweeps are not running on this instance: ${[...skippedSweeps].join(', ')}. Reminders, expiry warnings and scheduled posts are paused until it answers; they resume by themselves. See the on-call runbook, "Redis is unreachable".`
+  );
+  return first;
+}
+
+/**
+ * Redis answers again, so nothing is being skipped any more. The sweeps that
+ * were run at their next round, which for a daily sweep is later; the condition
+ * is about whether sweeps are being held back, and they are not.
+ */
+function resumeSkippedSweeps(): void {
+  if (skippedSweeps.size === 0) return;
+  logger.info('Redis answers again: the scheduled sweeps that were skipped run at their next round', {
+    sweeps: [...skippedSweeps],
+  });
+  skippedSweeps.clear();
+  recordCondition(SWEEPS_SKIPPED_CONDITION, 0, null);
+}
+
+/** For tests. */
+export function resetSkippedSweeps(): void {
+  skippedSweeps.clear();
+  warnedNoRedisForSweeps = false;
+}
+
+/**
  * A scheduled sweep (reminders, expiries, scheduled posts) runs on one
  * instance at a time.
  *
@@ -267,9 +443,13 @@ let warnedNoRedisForSweeps = false;
 export async function runExclusively<T>(key: string, fn: () => Promise<T>, ttlMs = 10 * 60 * 1000): Promise<T | null> {
   if (!isRedisAvailable()) {
     if (process.env.NODE_ENV === 'production') {
-      logger.error('Skipping a scheduled sweep: Redis is unavailable, so nothing can stop every instance running it at once', {
-        sweep: key,
-      });
+      // One error line per sweep per outage, then a standing condition: nine
+      // sweeps a minute for an hour is not nine hundred lines anyone reads.
+      if (noteSweepSkipped(key)) {
+        logger.error('Skipping a scheduled sweep: Redis is unavailable, so nothing can stop every instance running it at once', {
+          sweep: key,
+        });
+      }
       return null;
     }
     if (!warnedNoRedisForSweeps) {

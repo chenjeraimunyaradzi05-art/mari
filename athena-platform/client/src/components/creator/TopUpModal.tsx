@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import { PaymentIntentForm } from '@/components/payments/PaymentIntentForm';
 import { creatorApi } from '@/lib/api';
 import { apiMessage } from '@/lib/strategy-api';
+import { CREATOR_SHARE_RANGE_PERCENT } from '@/lib/pricing';
 import { cn, formatCurrency } from '@/lib/utils';
 
 type Started = { paymentIntentId: string; clientSecret: string | null; amount: number; giftPoints: number; currency: string };
@@ -63,7 +64,9 @@ export function TopUpModal({ isOpen, onClose, onTopped }: { isOpen: boolean; onC
         {!started ? (
           <>
             <p className="text-sm text-slate-600 dark:text-slate-300">
-              Points are what gifts are sent with. Creators keep most of what a gift is worth; the rest is the platform fee.
+              Points are what gifts are sent with. One point costs one cent, and points are bought in Australian dollars. Creators keep{' '}
+              {CREATOR_SHARE_RANGE_PERCENT.min}% to {CREATOR_SHARE_RANGE_PERCENT.max}% of what a gift is worth, by creator tier; the rest is
+              ATHENA’s fee.
             </p>
             <fieldset>
               <legend className="mb-2 block text-xs font-medium uppercase tracking-wide text-slate-500">How much</legend>
@@ -76,7 +79,7 @@ export function TopUpModal({ isOpen, onClose, onTopped }: { isOpen: boolean; onC
                     aria-pressed={amount === a}
                     className={cn('rounded-full px-4 py-2 text-sm font-medium transition', amount === a ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300')}
                   >
-                    {formatCurrency(a)}
+                    {formatCurrency(a, 'AUD')}
                   </button>
                 ))}
               </div>
@@ -86,7 +89,7 @@ export function TopUpModal({ isOpen, onClose, onTopped }: { isOpen: boolean; onC
               <Button variant="outline" className="flex-1" onClick={onClose} disabled={busy}>Cancel</Button>
               <Button className="flex-1" onClick={start} disabled={busy}>
                 {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Coins className="mr-2 h-4 w-4" />}
-                {busy ? 'Starting…' : `Top up ${formatCurrency(amount)}`}
+                {busy ? 'Starting…' : `Top up ${formatCurrency(amount, 'AUD')}`}
               </Button>
             </div>
           </>

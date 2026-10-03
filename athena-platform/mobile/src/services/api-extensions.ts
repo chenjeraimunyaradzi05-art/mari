@@ -168,6 +168,13 @@ export interface Apprenticeship {
   hostEmployer: { id: string; name: string; logo: string | null } | null;
   /** Attached for a signed-in viewer. */
   isBookmarked?: boolean;
+  /**
+   * The host (the employer named on the listing, or the training provider when
+   * none is) is verified and holds an approved safety attestation that has not run
+   * out, so applications through ATHENA are open. False: shown, labelled, and
+   * the server refuses an application. Absent from a server that does not say.
+   */
+  hostMayPlace?: boolean;
 }
 
 export interface ApprenticeshipFramework {

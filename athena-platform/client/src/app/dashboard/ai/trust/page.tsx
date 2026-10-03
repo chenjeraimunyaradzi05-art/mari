@@ -1,10 +1,8 @@
 'use client';
 
-import { useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, ArrowRight, CheckCircle2, Flag, Shield } from 'lucide-react';
-import { aiAlgorithmsApi } from '@/lib/api';
 import { trustApi } from '@/lib/algorithm-api';
 
 /**
@@ -19,7 +17,15 @@ import { trustApi } from '@/lib/algorithm-api';
  * act on (email verified, LinkedIn, website, verification badges, completed
  * referrals, contributions, suspension) and returns each factor with its
  * points. Every factor she has not earned yet is shown with the page that earns
- * it. The report form still posts to /ai-algorithms/report.
+ * it.
+ *
+ * It also had a report form that asked a member to type a content ID and a user
+ * ID, and posted them to a route that wrote the report row as sent: no check
+ * that the user named was the author of the content, no reference, no review
+ * deadline, no alert and no safety-score update. Nobody can report from a form
+ * that asks for database IDs, and a report that is filed that way is handled
+ * worse than one filed from the report button. It is gone; the section below
+ * points at the real report page.
  *
  * Two stores still exist server-side: trust.service calculateTrustScore writes
  * user.trustScore, while reports and blocks move userTrustScore.trustScore
@@ -70,24 +76,12 @@ const FACTOR_GUIDE: Guide[] = [
 
 const SUSPENSION_LABEL = 'Account suspension';
 
-const fieldClass =
-  'focusable w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500';
-const labelClass = 'mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300';
-
 function levelOf(score: number) {
   if (score >= 80) return 'Strong';
   if (score >= 60) return 'Good';
   if (score >= 40) return 'Growing';
   return 'Just started';
 }
-
-const EMPTY_REPORT = {
-  contentType: 'PROFILE',
-  contentId: '',
-  reportedUserId: '',
-  reason: '',
-  description: '',
-};
 
 export default function TrustScorePage() {
   const { data, isLoading, isError } = useQuery({
@@ -96,48 +90,11 @@ export default function TrustScorePage() {
     select: (response) => response.data.data,
   });
 
-  const [showReport, setShowReport] = useState(false);
-  const [reporting, setReporting] = useState(false);
-  const [reportForm, setReportForm] = useState(EMPTY_REPORT);
-  const [reportError, setReportError] = useState<string | null>(null);
-  const [reportSent, setReportSent] = useState(false);
-
   const earned = data?.factors ?? [];
   const earnedLabels = new Set(earned.map((factor) => factor.label));
   const positive = earned.filter((factor) => factor.points > 0);
   const suspended = earned.some((factor) => factor.label === SUSPENSION_LABEL);
   const toEarn = FACTOR_GUIDE.filter((guide) => !earnedLabels.has(guide.label));
-
-  const handleReport = async () => {
-    if (!reportForm.contentId || !reportForm.reportedUserId || !reportForm.reason) {
-      setReportError('The content ID, the user ID and a reason are needed before this can be sent.');
-      return;
-    }
-
-    setReporting(true);
-    setReportError(null);
-    try {
-      await aiAlgorithmsApi.reportContent({
-        contentType: reportForm.contentType,
-        contentId: reportForm.contentId,
-        reportedUserId: reportForm.reportedUserId,
-        reason: reportForm.reason,
-        description: reportForm.description,
-      });
-      setShowReport(false);
-      setReportForm(EMPTY_REPORT);
-      setReportSent(true);
-    } catch (err: unknown) {
-      const error = err as { response?: { data?: { error?: string; message?: string } } };
-      setReportError(
-        error?.response?.data?.error ||
-          error?.response?.data?.message ||
-          'That did not send. Please try again in a moment.'
-      );
-    } finally {
-      setReporting(false);
-    }
-  };
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-6">
@@ -262,121 +219,20 @@ export default function TrustScorePage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="rail-title">Report something</h2>
-            <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-              Help keep ATHENA safe for everyone.
+            <p className="mt-1 max-w-xl text-sm leading-6 text-slate-600 dark:text-slate-400">
+              If someone or something on ATHENA is not safe, tell us. You can report from the
+              report button beside a post, message or profile, or use the report page, which also
+              tells you where else to turn.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowReport((open) => !open)}
-            aria-expanded={showReport}
-            className="focusable inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-800 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900"
+          <Link
+            href="/report"
+            className="focusable inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-800 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900"
           >
             <Flag className="h-4 w-4" aria-hidden="true" />
-            {showReport ? 'Close' : 'Report'}
-          </button>
+            Report something
+          </Link>
         </div>
-
-        {reportSent && !showReport && (
-          <p className="mt-4 text-sm leading-6 text-slate-600 dark:text-slate-400">
-            Thank you. The report is with our safety team.
-          </p>
-        )}
-
-        {showReport && (
-          <div className="mt-4 space-y-4 border-t border-slate-100 pt-4 dark:border-slate-800">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label className={labelClass} htmlFor="report-type">
-                  What kind of content
-                </label>
-                <select
-                  id="report-type"
-                  value={reportForm.contentType}
-                  onChange={(e) => setReportForm((prev) => ({ ...prev, contentType: e.target.value }))}
-                  className={fieldClass}
-                >
-                  <option value="PROFILE">Profile</option>
-                  <option value="MESSAGE">Message</option>
-                  <option value="VIDEO">Video</option>
-                  <option value="COMMENT">Comment</option>
-                  <option value="STATUS">Status</option>
-                </select>
-              </div>
-              <div>
-                <label className={labelClass} htmlFor="report-reason">
-                  Reason
-                </label>
-                <select
-                  id="report-reason"
-                  value={reportForm.reason}
-                  onChange={(e) => setReportForm((prev) => ({ ...prev, reason: e.target.value }))}
-                  className={fieldClass}
-                  required
-                >
-                  <option value="">Choose a reason</option>
-                  <option value="HARASSMENT">Harassment</option>
-                  <option value="HATE_SPEECH">Hate speech</option>
-                  <option value="SPAM">Spam</option>
-                  <option value="MISINFORMATION">Misinformation</option>
-                  <option value="INAPPROPRIATE">Inappropriate content</option>
-                  <option value="OTHER">Other</option>
-                </select>
-              </div>
-              <div>
-                <label className={labelClass} htmlFor="report-content-id">
-                  Content ID
-                </label>
-                <input
-                  id="report-content-id"
-                  type="text"
-                  value={reportForm.contentId}
-                  onChange={(e) => setReportForm((prev) => ({ ...prev, contentId: e.target.value }))}
-                  className={fieldClass}
-                  required
-                />
-              </div>
-              <div>
-                <label className={labelClass} htmlFor="report-user-id">
-                  User ID
-                </label>
-                <input
-                  id="report-user-id"
-                  type="text"
-                  value={reportForm.reportedUserId}
-                  onChange={(e) => setReportForm((prev) => ({ ...prev, reportedUserId: e.target.value }))}
-                  className={fieldClass}
-                  required
-                />
-              </div>
-            </div>
-            <div>
-              <label className={labelClass} htmlFor="report-details">
-                Anything else (optional)
-              </label>
-              <textarea
-                id="report-details"
-                value={reportForm.description}
-                onChange={(e) => setReportForm((prev) => ({ ...prev, description: e.target.value }))}
-                rows={3}
-                className={fieldClass}
-              />
-            </div>
-
-            {reportError && (
-              <p className="text-sm leading-6 text-rose-600 dark:text-rose-400">{reportError}</p>
-            )}
-
-            <button
-              type="button"
-              onClick={handleReport}
-              disabled={reporting}
-              className="focusable rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {reporting ? 'Sending' : 'Send report'}
-            </button>
-          </div>
-        )}
       </section>
 
       <div className="text-center">

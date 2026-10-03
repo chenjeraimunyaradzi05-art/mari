@@ -7,6 +7,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate, AuthRequest, requireRole } from '../middleware/auth';
 import * as analyticsService from '../services/analytics.service';
 import { logger } from '../utils/logger';
+import { clampLimit } from '../utils/pagination';
 
 const router = Router();
 
@@ -62,7 +63,7 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const period = (req.query.period as 'day' | 'week' | 'month') || 'week';
-      const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
+      const limit = clampLimit(req.query.limit, 10, 50);
       const content = await analyticsService.getTopContent(period, limit);
       res.json(content);
     } catch (error) {

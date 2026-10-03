@@ -8,21 +8,53 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import sharp from 'sharp';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { requireAdultAccount, requireWomanMember } from '../middleware/account-gates';
 import { uploadLimiter } from '../middleware/rateLimiter';
 import { logger } from '../utils/logger';
 import { moderateImage } from '../services/moderation.service';
+import { screenVideoFrames } from '../services/video-screening.service';
 import { checkFileContent } from '../utils/file-signature';
-import { hasS3Credentials, storeFile } from '../utils/media-storage';
+import {
+  hasS3Credentials,
+  mayFallBackToLocalDisk,
+  mediaUrlForKey,
+  PRIVATE_MEDIA_FOLDERS,
+  storeFile,
+} from '../utils/media-storage';
+import {
+  hasStrippableMetadata,
+  MediaMetadataError,
+  stripMediaMetadata,
+  stripMediaMetadataBuffer,
+} from '../services/video-pipeline.service';
 import { canManageJobApplicants, isHiringMemberOfAny } from '../services/hiring-access.service';
+import { screenUpload } from '../services/malware-scan.service';
+import {
+  mayReadChatAttachment,
+  mayStaffReadChatAttachment,
+  resolveChatUploadScope,
+  type Reader,
+} from '../services/chat-attachment.service';
+import { CHAT_FOLDER, CHAT_LINK_SECONDS, chatObjectKey, parseChatKey } from '../utils/chat-attachments';
 
 const router = Router();
+
+/**
+ * The member behind a request on a route mounted behind `authenticate`. The
+ * middleware has always set her, so the refusal is never reached in practice;
+ * the check is what lets a handler read her without a `req.user!` assertion.
+ */
+function member(req: AuthRequest) {
+  if (!req.user) throw new ApiError(401, 'Authentication required');
+  return req.user;
+}
 
 /** Enough of the start of a file for every signature checkFileContent knows. */
 const SIGNATURE_BYTES = 4096;
@@ -70,7 +102,6 @@ const s3Client = new S3Client({
 });
 
 const BUCKET_NAME = process.env.S3_BUCKET || 'athena-media';
-const CDN_URL = process.env.CDN_URL || `https://${BUCKET_NAME}.s3.amazonaws.com`;
 
 // File type configurations
 const FILE_CONFIGS = {
@@ -129,6 +160,34 @@ const FILE_CONFIGS = {
     resize: null,
     visibility: 'public' as const,
   },
+  // A file sent in a direct message or a group chat. Private: the key names the
+  // conversation, and only the people in it are given a link, which expires
+  // (utils/chat-attachments). maxSize is the most a clip may be; everything else
+  // is held to CHAT_FILE_LIMIT. It used to go up as a post picture or a reel, to
+  // a public link with no audience, no expiry and no deletion.
+  chat: {
+    maxSize: 100 * 1024 * 1024, // 100MB, a clip
+    allowedTypes: [
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'image/gif',
+      'video/mp4',
+      'video/quicktime',
+      'video/webm',
+      'audio/mpeg',
+      'audio/mp4',
+      'audio/x-m4a',
+      'audio/aac',
+      'audio/wav',
+      'audio/ogg',
+      'audio/webm',
+      'application/pdf',
+    ],
+    folder: CHAT_FOLDER,
+    resize: null,
+    visibility: 'private' as const,
+  },
   document: {
     maxSize: 25 * 1024 * 1024, // 25MB
     allowedTypes: [
@@ -154,6 +213,18 @@ const FILE_CONFIGS = {
 };
 
 type FileConfig = (typeof FILE_CONFIGS)[keyof typeof FILE_CONFIGS];
+
+/** The most a chat file that is not a clip may be: a picture, a voice note, a PDF. A clip is streamed to disk and may be larger. */
+const CHAT_FILE_LIMIT = 25 * 1024 * 1024;
+
+/**
+ * Whether this upload says it is a clip. The ceiling and where it is received
+ * (memory or a temporary file) have to be decided before a byte is read, and the
+ * file's own type is not known until it has been, so the client says. It is only
+ * a request: the route checks the type it actually got agrees (a clip received
+ * to disk is a video, and anything received to memory is not).
+ */
+const isChatClip = (req: AuthRequest) => req.query.video === '1';
 
 const CONTENT_TYPE_EXTENSIONS: Record<string, string> = {
   'image/jpeg': '.jpg',
@@ -181,11 +252,10 @@ const LOCAL_UPLOADS_ROOT = path.resolve(process.cwd(), 'uploads');
 const VALID_UPLOAD_FOLDERS = new Set(
   Object.values(FILE_CONFIGS).map((config) => config.folder)
 );
-const PRIVATE_UPLOAD_FOLDERS = new Set(
-  Object.values(FILE_CONFIGS)
-    .filter((config) => config.visibility === 'private')
-    .map((config) => config.folder)
-);
+// The same list utils/media-storage uses to decide which files are never
+// addressed through the CDN; a kind marked private above has to be on it, and
+// media.upload.private.test.ts fails if one is not.
+const PRIVATE_UPLOAD_FOLDERS = PRIVATE_MEDIA_FOLDERS;
 
 /**
  * Receives the upload with the ceiling of its own kind, not the video ceiling
@@ -215,7 +285,7 @@ function receiveUpload(
       storage: options.toDisk?.(req)
         ? multer.diskStorage({
             destination: os.tmpdir(),
-            filename: (_req, _file, cb) => cb(null, `athena-upload-${uuidv4()}`),
+            filename: (_req, _file, cb) => cb(null, `athena-upload-${randomUUID()}`),
           })
         : multer.memoryStorage(),
       limits: { fileSize, files: options.maxFiles ?? 1 },
@@ -237,6 +307,85 @@ async function discardTemporaryUpload(file: Express.Multer.File | undefined): Pr
   }
 }
 
+/**
+ * A photo, a video or a recording carries more than its picture or its sound.
+ * A phone writes where it was taken, which phone took it and when into the
+ * file, and a member who sends one in a message or posts it has not chosen to
+ * share any of that. For a woman who has left somebody it can be the address
+ * she is staying at. Everything stored here is rewritten without it:
+ *
+ *   - pictures go through sharp, which drops every tag on re-encoding. The
+ *     orientation tag is read first (.rotate()), because dropping it on its
+ *     own turns a portrait photo on its side.
+ *   - video and sound are copied across by ffmpeg with their tags, chapters
+ *     and data tracks left out (video-pipeline.service stripMediaMetadata).
+ *
+ * A GIF is stored as it was sent: the format has no place for a location.
+ * Documents are stored as sent too; they go to the private folders and are
+ * not offered in a chat.
+ */
+
+/** A picture that could not be decoded is the member's file to replace, not a server fault. */
+async function readableImage(work: Promise<Buffer>): Promise<Buffer> {
+  try {
+    return await work;
+  } catch (error) {
+    logger.warn('Upload refused: the image could not be read', { error: error instanceof Error ? error.message : String(error) });
+    throw new ApiError(400, 'That image could not be read. Try saving it again, or choose another.');
+  }
+}
+
+/** A picture kept in the format it came in, at the size it came in, minus its tags. */
+function reencodedAsSent(buffer: Buffer, mimetype: string): Promise<Buffer> {
+  const image = sharp(buffer).rotate();
+  if (mimetype === 'image/png') return image.png().toBuffer();
+  if (mimetype === 'image/webp') return image.webp({ quality: 90 }).toBuffer();
+  return image.jpeg({ quality: 90 }).toBuffer();
+}
+
+/**
+ * What to do when a file could not be copied without its metadata. A file
+ * ffmpeg cannot read is refused; so is every file when the host has no ffmpeg
+ * in production, since the alternative is to publish it with the tags in. A
+ * developer's machine without the binary stores the file as it is.
+ */
+function refuseOrPassThrough(error: unknown, noun: 'video' | 'recording'): void {
+  if (!(error instanceof MediaMetadataError)) throw error;
+
+  if (error.reason === 'unreadable') {
+    logger.warn(`Upload refused: the ${noun} could not be read`, { error: error.message });
+    throw new ApiError(400, `That ${noun} could not be read. Try saving it again, or choose another.`);
+  }
+  if (process.env.NODE_ENV === 'production') {
+    logger.error(`Upload refused: the ${noun} could not be cleaned of its metadata`, { error: error.message });
+    throw new ApiError(503, `We cannot prepare this ${noun} just now. Please try again in a few minutes.`);
+  }
+  logger.warn(`Storing a ${noun} with its metadata (outside production only)`, { error: error.message });
+}
+
+/**
+ * The temporary file a video was received into, or a copy of it without its
+ * metadata. discard() removes the copy; the route removes the received file.
+ */
+async function videoWithoutMetadata(
+  file: Express.Multer.File
+): Promise<{ path: string; size: number; discard: () => Promise<void> }> {
+  if (!hasStrippableMetadata(file.mimetype)) {
+    return { path: file.path, size: file.size, discard: async () => undefined };
+  }
+
+  const cleanPath = path.join(os.tmpdir(), `athena-clean-${randomUUID()}`);
+  try {
+    await stripMediaMetadata(file.path, cleanPath, file.mimetype);
+  } catch (error) {
+    refuseOrPassThrough(error, 'video');
+    return { path: file.path, size: file.size, discard: async () => undefined };
+  }
+
+  const { size } = await fs.promises.stat(cleanPath);
+  return { path: cleanPath, size, discard: () => fs.promises.rm(cleanPath, { force: true }) };
+}
+
 function configFor(type: unknown): FileConfig | null {
   return typeof type === 'string' && Object.prototype.hasOwnProperty.call(FILE_CONFIGS, type)
     ? FILE_CONFIGS[type as keyof typeof FILE_CONFIGS]
@@ -256,7 +405,7 @@ function configFor(type: unknown): FileConfig | null {
  */
 function onS3UploadFailure(key: string, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
-  if (process.env.NODE_ENV === 'production') {
+  if (!mayFallBackToLocalDisk()) {
     logger.error('S3 upload failed; not storing on the container disk, which the next deploy wipes', { key, error: message });
     throw new ApiError(503, 'Media storage is unavailable. Please try again in a few minutes.');
   }
@@ -288,7 +437,9 @@ async function storeUploadedBuffer(options: {
           Metadata: { userId, originalName },
         })
       );
-      return `${CDN_URL}/${key}`;
+      // A public file is addressed through the CDN; a résumé or a document is
+      // addressed at the bucket, never the CDN (utils/media-storage).
+      return mediaUrlForKey(key);
     } catch (s3Error) {
       onS3UploadFailure(key, s3Error);
     }
@@ -300,8 +451,22 @@ function getSafeExtensionForContentType(contentType: string): string {
   return CONTENT_TYPE_EXTENSIONS[contentType] || '.bin';
 }
 
+/**
+ * A key is a path of plain names. One that climbs (`.` or `..`), or has an empty
+ * or control-character segment, is refused here, because the checks below read
+ * the owner and the folder off the key's own segments, and the disk resolves the
+ * climb afterwards: `resumes/<my id>/../<her id>/cv.pdf` is "mine" to the first
+ * and hers to the second. Every key this server writes is `<folder>/<user
+ * id>/<uuid><ext>`, so nothing honest is turned away.
+ */
 function normalizeUploadKey(key: string): string {
-  return key.replace(/\\/g, '/').replace(/^\/+/, '');
+  const normalized = key.replace(/\\/g, '/').replace(/^\/+/, '');
+  const segments = normalized.split('/');
+  // eslint-disable-next-line no-control-regex -- control characters are exactly what is refused
+  if (segments.some((segment) => segment === '' || segment === '.' || segment === '..') || /[\u0000-\u001f]/.test(normalized)) {
+    throw new ApiError(400, 'Invalid file path');
+  }
+  return normalized;
 }
 
 function resolveLocalFilePath(key: string): string {
@@ -344,6 +509,18 @@ function validateOwnedUploadKey(key: string, userId: string) {
 
   if (!VALID_UPLOAD_FOLDERS.has(folder)) {
     throw new ApiError(400, 'Invalid file path');
+  }
+
+  // A chat file's second segment is the conversation, not an owner: the key says
+  // who sent it, and anybody else is refused here. Nobody takes one back by its
+  // key, the sender included: the delete route answers 409 for the whole folder,
+  // because a chat file goes with its message.
+  if (folder === CHAT_FOLDER) {
+    if (parseChatKey(normalizedKey)?.senderId !== userId) {
+      logger.warn('Unauthorized file access attempt', { userId, attemptedKey: normalizedKey });
+      throw new ApiError(403, 'Not authorized to access this file');
+    }
+    return { normalizedKey, folder };
   }
 
   if (userIdInPath !== userId) {
@@ -410,15 +587,18 @@ async function isHiringReaderOfResume(normalizedKey: string, ownerId: string, re
 /**
  * Who may read a private upload. The owner always. A résumé travels with a
  * job or apprenticeship application, so the hiring staff deciding on that
- * application may read that one file too (isHiringReaderOfResume). Anyone
- * else is told the file does not exist rather than whose it is.
+ * application may read that one file too (isHiringReaderOfResume). A chat file
+ * is read by the people in its conversation, and by a member of staff deciding
+ * a report that names it. Anyone else is told the file does not exist rather
+ * than whose it is.
  *
  * Deleting stays owner-only (validateOwnedUploadKey); this is for reads.
  */
 async function resolveReadableUploadKey(
   key: string,
-  userId: string
+  reader: Reader
 ): Promise<{ normalizedKey: string; folder: string }> {
+  const userId = reader.id;
   const normalizedKey = normalizeUploadKey(key);
   const keyParts = normalizedKey.split('/');
 
@@ -430,6 +610,25 @@ async function resolveReadableUploadKey(
 
   if (!VALID_UPLOAD_FOLDERS.has(folder)) {
     throw new ApiError(400, 'Invalid file path');
+  }
+
+  // A chat file belongs to a conversation, not to a member: whoever is in it
+  // may read it while a message on the thread carries it, and nobody else, and
+  // the answer to anybody else is the one for a file that is not there
+  // (services/chat-attachment). The one exception is the file behind a reported
+  // message, which is kept when the message goes so that the people deciding
+  // the report can look at it: a member of staff with a second factor may open
+  // a key a report's copy names, and nothing else here.
+  if (folder === CHAT_FOLDER) {
+    if (await mayReadChatAttachment(normalizedKey, userId)) {
+      return { normalizedKey, folder };
+    }
+    if (await mayStaffReadChatAttachment(reader, normalizedKey)) {
+      logger.info('Chat file behind a report opened by staff', { userId, key: normalizedKey });
+      return { normalizedKey, folder };
+    }
+    logger.warn('Chat file requested by someone outside the conversation', { userId, attemptedKey: normalizedKey });
+    throw new ApiError(404, 'File not found');
   }
 
   if (ownerId === userId) {
@@ -500,19 +699,63 @@ async function deleteLocalFileIfPresent(key: string): Promise<boolean> {
 // through /upload/:type.
 
 // ===========================================
+// A FILE SENT IN A CONVERSATION
+// ===========================================
+// POST /upload/chat?conversationId=<id> or ?groupId=<id>. Who the file is for is
+// decided before it is read, so nobody who may not send in that conversation has
+// a file buffered on the server's behalf: she has to be in the thread, under the
+// floors sending a message has (the age gate for a thread, the women-only gate for
+// a group room) and the rules about requests, blocks and a group's mute and ban
+// (services/chat-attachment). The file is then stored under the conversation's own
+// key and given to nobody but the people in it.
+const chatFloor = (req: AuthRequest, res: Response, next: NextFunction) =>
+  (req.query.groupId ? requireWomanMember : requireAdultAccount)(req, res, next);
+
+const onlyForChat =
+  (middleware: (req: AuthRequest, res: Response, next: NextFunction) => unknown) =>
+  (req: AuthRequest, res: Response, next: NextFunction) =>
+    req.params.type === CHAT_FOLDER ? middleware(req, res, next) : next();
+
+async function chatAudience(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    res.locals.chatScopeId = await resolveChatUploadScope(member(req).id, req.query);
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
+/** The key a new upload is stored under: a member's own folder, or the conversation's for a chat file. */
+function newObjectKey(config: FileConfig, userId: string, extension: string, chatScopeId?: string): string {
+  return config.folder === CHAT_FOLDER
+    ? chatObjectKey(chatScopeId!, userId, extension)
+    : `${config.folder}/${userId}/${randomUUID()}${extension}`;
+}
+
+// ===========================================
 // UPLOAD FILE (Direct Upload)
 // ===========================================
 router.post(
   '/upload/:type',
   authenticate,
   uploadLimiter,
-  receiveUpload((req) => configFor(req.params.type)?.maxSize ?? null, 'file', {
-    toDisk: (req) => req.params.type === 'video',
-  }),
+  onlyForChat(chatFloor),
+  onlyForChat(chatAudience),
+  receiveUpload(
+    (req) =>
+      req.params.type === CHAT_FOLDER
+        ? isChatClip(req)
+          ? FILE_CONFIGS.chat.maxSize
+          : CHAT_FILE_LIMIT
+        : (configFor(req.params.type)?.maxSize ?? null),
+    'file',
+    { toDisk: (req) => req.params.type === 'video' || (req.params.type === CHAT_FOLDER && isChatClip(req)) }
+  ),
   async (req: AuthRequest, res, next) => {
     const file = req.file;
     try {
       const { type } = req.params;
+      const chatScopeId: string | undefined = res.locals.chatScopeId;
 
       logger.info(`Upload request received: type=${type}, hasFile=${!!file}`);
 
@@ -543,31 +786,60 @@ router.post(
         );
       }
 
+      // A chat file is received to disk when the member said it is a clip and to
+      // memory when she did not; what it really is has to agree with which it
+      // was, or a picture would take the clip's path and miss the picture's.
+      if (type === CHAT_FOLDER && file.mimetype.startsWith('video/') !== Boolean(file.path)) {
+        throw new ApiError(400, file.path ? 'That file is not a video.' : 'This looks like a video and has to be sent as one.');
+      }
+
       await assertContentMatches(file);
 
-      const userId = req.user!.id;
+      const userId = member(req).id;
+
+      // Looked inside before anything is rewritten, moderated or stored, and as
+      // received: a video is scanned from its temporary file, ahead of the
+      // ffmpeg pass that would otherwise be the first thing to parse it. The
+      // type goes with it: a PDF sent in a conversation is a document and is
+      // held to the document rule, although it lives under the chat folder.
+      await screenUpload(file.path ? { path: file.path } : { buffer: file.buffer }, {
+        folder: config.folder,
+        userId,
+        contentType: file.mimetype,
+      });
 
       // A video was received to a temporary file, and is streamed from there
       // to S3 (storeFile sends it with its length, so it never has to be read
       // into memory). A production write that fails is a 503, never a copy on
       // this container's disk.
       if (file.path) {
-        const key = `${config.folder}/${userId}/${uuidv4()}${getSafeExtensionForContentType(file.mimetype)}`;
+        // A video is public the way a picture is, and was never looked at: this
+        // branch returned before the picture check below, so an explicit video
+        // went up as easily as a refused photograph. A few frames of it are
+        // looked at now, by the same check, before it is stored.
+        await screenVideoFrames(file.path, { userId });
+
+        const key = newObjectKey(config, userId, getSafeExtensionForContentType(file.mimetype), chatScopeId);
+        // What is stored is a copy without the tags the phone wrote into it
+        // (where it was filmed, which phone), not the file as received.
+        const clean = await videoWithoutMetadata(file);
         let url: string;
         try {
-          url = await storeFile(key, file.path, file.mimetype);
+          url = await storeFile(key, clean.path, file.mimetype);
         } catch (storageError) {
           logger.error('Streamed upload could not be stored', {
             key,
             error: storageError instanceof Error ? storageError.message : String(storageError),
           });
           throw new ApiError(503, 'Media storage is unavailable. Please try again in a few minutes.');
+        } finally {
+          await clean.discard();
         }
 
         logger.info(`File uploaded: ${key} by user ${userId}`);
         res.json({
           success: true,
-          data: { key, url, contentType: file.mimetype, size: file.size },
+          data: { key, url, contentType: file.mimetype, size: clean.size },
         });
         return;
       }
@@ -591,21 +863,34 @@ router.post(
         file.mimetype.startsWith('image/') &&
         !file.mimetype.includes('gif')
       ) {
-        processedBuffer = await sharp(file.buffer)
-          .resize(config.resize.width, config.resize.height, {
-            fit: 'cover',
-            position: 'center',
-          })
-          .webp({ quality: 85 })
-          .toBuffer();
+        processedBuffer = await readableImage(
+          sharp(file.buffer)
+            .rotate()
+            .resize(config.resize.width, config.resize.height, {
+              fit: 'cover',
+              position: 'center',
+            })
+            .webp({ quality: 85 })
+            .toBuffer()
+        );
         contentType = 'image/webp';
+      } else if (file.mimetype.startsWith('image/') && !file.mimetype.includes('gif')) {
+        // A picture stored at the size it was sent (a poster frame) is still
+        // re-encoded, for the tags in it.
+        processedBuffer = await readableImage(reencodedAsSent(file.buffer, file.mimetype));
+      } else if (hasStrippableMetadata(file.mimetype)) {
+        try {
+          processedBuffer = await stripMediaMetadataBuffer(file.buffer, file.mimetype);
+        } catch (error) {
+          refuseOrPassThrough(error, 'recording');
+        }
       }
 
       const fileExtension =
         contentType === 'image/webp'
           ? '.webp'
           : getSafeExtensionForContentType(contentType);
-      const key = `${config.folder}/${userId}/${uuidv4()}${fileExtension}`;
+      const key = newObjectKey(config, userId, fileExtension, chatScopeId);
 
       const publicUrl = await storeUploadedBuffer({
         key,
@@ -645,17 +930,35 @@ router.post(
 // ===========================================
 // DELETE FILE
 // ===========================================
+// validated: key must be text of at most 512 characters and validateOwnedUploadKey requires it to
+//   sit under her own folder.
 router.delete('/delete', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { key } = req.body;
 
-    if (!key) {
+    if (!key || typeof key !== 'string' || key.length > 512) {
       throw new ApiError(400, 'File key is required');
     }
 
-    const { normalizedKey } = validateOwnedUploadKey(key, req.user!.id);
+    const userId = member(req).id;
+    const { normalizedKey, folder } = validateOwnedUploadKey(key, userId);
+
+    // A file sent in a conversation goes with its message, and with nothing
+    // else: unsending the message removes it, and the sweep and an erasure do
+    // the same, all of them keeping the file behind a message somebody has
+    // reported for the people deciding the report (services/chat-attachment-cleanup).
+    // Nothing under the chat folder is deleted by its key, so this answer is the
+    // same whatever has become of the message, and no table is asked: an answer
+    // that differed once the message was gone, by whether the file was still
+    // kept, would tell a sender she had been reported, and in a thread of two
+    // by whom. An upload a failed send left behind stays too; no message carries
+    // it, so nobody can open it.
+    if (folder === CHAT_FOLDER) {
+      throw new ApiError(409, 'A file sent in a conversation is removed with its message, not on its own.');
+    }
 
     let deletedFromS3 = false;
+    let s3Failed = false;
     if (hasS3Credentials()) {
       try {
         await s3Client.send(
@@ -666,6 +969,7 @@ router.delete('/delete', authenticate, async (req: AuthRequest, res, next) => {
         );
         deletedFromS3 = true;
       } catch (s3Error) {
+        s3Failed = true;
         logger.warn('S3 delete failed, attempting local cleanup', {
           key: normalizedKey,
           error: (s3Error as Error).message,
@@ -676,10 +980,17 @@ router.delete('/delete', authenticate, async (req: AuthRequest, res, next) => {
     const deletedLocally = await deleteLocalFileIfPresent(normalizedKey);
 
     if (!deletedFromS3 && !deletedLocally) {
+      // S3 answers a delete of a key that is not there with success, so a
+      // failure here is S3 failing, not the file being absent. Telling her
+      // "File not found" would send her away believing it was already gone
+      // when it is still stored.
+      if (s3Failed) {
+        throw new ApiError(503, 'We could not remove that file just now. Please try again in a few minutes.');
+      }
       throw new ApiError(404, 'File not found');
     }
 
-    logger.info(`File deleted: ${normalizedKey} by user ${req.user!.id}`);
+    logger.info(`File deleted: ${normalizedKey} by user ${userId}`);
 
     res.json({
       success: true,
@@ -694,9 +1005,19 @@ router.delete('/delete', authenticate, async (req: AuthRequest, res, next) => {
 // GET SIGNED DOWNLOAD URL (for private files)
 // ===========================================
 // The owner of the file, or a team member of the organisation whose job the
-// file was attached to as a résumé (resolveReadableUploadKey). A local file's
+// file was attached to as a résumé, or the people in the conversation a chat
+// file was sent in (resolveReadableUploadKey). A local file's
 // URL points back at GET /local/*, which needs the session header, so the
 // web client fetches it through the API rather than as a plain link.
+//
+// The link lives for PRIVATE_LINK_SECONDS. It used to be an hour, which is how
+// long a link copied out of the page, or out of a browser's history, kept
+// opening a résumé or a photograph for whoever held it. Every page that shows
+// one asks again, so nothing a member does needs it to last.
+const PRIVATE_LINK_SECONDS = CHAT_LINK_SECONDS;
+
+// validated: key must be text of at most 512 characters and resolveReadableUploadKey checks she may
+//   read it.
 router.post('/download-url', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { key } = req.body;
@@ -705,7 +1026,7 @@ router.post('/download-url', authenticate, async (req: AuthRequest, res, next) =
       throw new ApiError(400, 'File key is required');
     }
 
-    const { normalizedKey, folder } = await resolveReadableUploadKey(key, req.user!.id);
+    const { normalizedKey, folder } = await resolveReadableUploadKey(key, member(req));
     const visibility = PRIVATE_UPLOAD_FOLDERS.has(folder) ? 'private' : 'public';
     const fileName = path.basename(normalizedKey);
 
@@ -715,7 +1036,7 @@ router.post('/download-url', authenticate, async (req: AuthRequest, res, next) =
         data: {
           downloadUrl: buildLocalFileUrl(normalizedKey, visibility),
           fileName,
-          expiresIn: 3600,
+          expiresIn: PRIVATE_LINK_SECONDS,
         },
       });
     }
@@ -729,14 +1050,14 @@ router.post('/download-url', authenticate, async (req: AuthRequest, res, next) =
       Key: normalizedKey,
     });
 
-    const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+    const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: PRIVATE_LINK_SECONDS });
 
     res.json({
       success: true,
       data: {
         downloadUrl: signedUrl,
         fileName,
-        expiresIn: 3600,
+        expiresIn: PRIVATE_LINK_SECONDS,
       },
     });
   } catch (error) {
@@ -752,7 +1073,7 @@ router.get('/local/*', authenticate, async (req: AuthRequest, res, next) => {
       throw new ApiError(400, 'File key is required');
     }
 
-    const { normalizedKey, folder } = await resolveReadableUploadKey(key, req.user!.id);
+    const { normalizedKey, folder } = await resolveReadableUploadKey(key, member(req));
 
     if (!PRIVATE_UPLOAD_FOLDERS.has(folder)) {
       throw new ApiError(404, 'File not found');
@@ -808,19 +1129,25 @@ router.post('/resume', authenticate, uploadLimiter, receiveUpload(() => FILE_CON
 
     await assertContentMatches(file);
 
+    // A résumé is stored exactly as it was sent and opened by hiring staff, so
+    // it is the file that most needs looking inside. With no scanner to ask it
+    // is refused in production (see services/malware-scan.service).
+    await screenUpload({ buffer: file.buffer }, { folder: config.folder, userId: req.user?.id, contentType: file.mimetype });
+
+    const userId = member(req).id;
     const fileExtension = getSafeExtensionForContentType(file.mimetype);
-    const key = `${config.folder}/${req.user!.id}/${uuidv4()}${fileExtension}`;
+    const key = `${config.folder}/${userId}/${randomUUID()}${fileExtension}`;
 
     const publicUrl = await storeUploadedBuffer({
       key,
       body: file.buffer,
       contentType: file.mimetype,
       visibility: config.visibility,
-      userId: req.user!.id,
+      userId,
       originalName: file.originalname,
     });
 
-    logger.info(`Resume uploaded: ${key} by user ${req.user!.id}`);
+    logger.info(`Resume uploaded: ${key} by user ${userId}`);
 
     res.json({
       success: true,
@@ -849,7 +1176,17 @@ router.post('/post-images', authenticate, uploadLimiter, receiveUpload(() => FIL
     }
 
     const config = FILE_CONFIGS.post;
+    const userId = member(req).id;
     const uploadedFiles = [];
+
+    // Every picture is looked inside before the first is stored, so a refusal
+    // on the fourth does not leave the first three in the bucket with nothing
+    // pointing at them. A type the loop below will refuse is left for it.
+    for (const file of files) {
+      if (!config.allowedTypes.includes(file.mimetype)) continue;
+      await assertContentMatches(file);
+      await screenUpload({ buffer: file.buffer }, { folder: config.folder, userId: req.user?.id, contentType: file.mimetype });
+    }
 
     for (const file of files) {
       if (!config.allowedTypes.includes(file.mimetype)) {
@@ -875,13 +1212,16 @@ router.post('/post-images', authenticate, uploadLimiter, receiveUpload(() => FIL
       let contentType = file.mimetype;
 
       if (!file.mimetype.includes('gif')) {
-        processedBuffer = await sharp(file.buffer)
-          .resize(config.resize!.width, config.resize!.height, {
-            fit: 'inside',
-            withoutEnlargement: true,
-          })
-          .webp({ quality: 85 })
-          .toBuffer();
+        processedBuffer = await readableImage(
+          sharp(file.buffer)
+            .rotate()
+            .resize(config.resize!.width, config.resize!.height, {
+              fit: 'inside',
+              withoutEnlargement: true,
+            })
+            .webp({ quality: 85 })
+            .toBuffer()
+        );
         contentType = 'image/webp';
       }
 
@@ -889,14 +1229,14 @@ router.post('/post-images', authenticate, uploadLimiter, receiveUpload(() => FIL
         contentType === 'image/webp'
           ? '.webp'
           : getSafeExtensionForContentType(contentType);
-      const key = `${config.folder}/${req.user!.id}/${uuidv4()}${fileExtension}`;
+      const key = `${config.folder}/${userId}/${randomUUID()}${fileExtension}`;
 
       const fileUrl = await storeUploadedBuffer({
         key,
         body: processedBuffer,
         contentType,
         visibility: config.visibility,
-        userId: req.user!.id,
+        userId,
         originalName: file.originalname,
       });
 
@@ -908,7 +1248,7 @@ router.post('/post-images', authenticate, uploadLimiter, receiveUpload(() => FIL
       });
     }
 
-    logger.info(`${uploadedFiles.length} post images uploaded by user ${req.user!.id}`);
+    logger.info(`${uploadedFiles.length} post images uploaded by user ${userId}`);
 
     res.json({
       success: true,

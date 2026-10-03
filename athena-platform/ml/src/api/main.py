@@ -113,11 +113,16 @@ app = FastAPI(
 # exposed port cannot be driven by anyone else. The comparison is constant-time,
 # so how long a wrong key takes to refuse says nothing about how much of it
 # was right.
+def _presents_shared_key(request: Request) -> bool:
+    """Whether the request carries ML_SERVICE_KEY, compared in constant time."""
+    presented = request.headers.get("x-ml-key", "")
+    return hmac.compare_digest(presented.encode("utf-8"), ML_SERVICE_KEY.encode("utf-8"))
+
+
 @app.middleware("http")
 async def require_shared_key(request: Request, call_next):
     if ML_SERVICE_KEY and request.url.path != "/health":
-        presented = request.headers.get("x-ml-key", "")
-        if not hmac.compare_digest(presented.encode("utf-8"), ML_SERVICE_KEY.encode("utf-8")):
+        if not _presents_shared_key(request):
             return JSONResponse(status_code=401, content={"detail": "A valid X-ML-Key header is required"})
     return await call_next(request)
 
@@ -161,8 +166,14 @@ class HealthResponse(BaseModel):
     timestamp: float
 
 
+#: Parts of the model report that name the container's directories and the text of
+#: load errors. Left out of /health in production unless the caller holds the shared
+#: key; see health_check.
+_PUBLIC_HEALTH_WITHHELD = ("searched", "detail")
+
+
 @app.get("/health", response_model=HealthResponse, tags=["System"])
-async def health_check():
+async def health_check(request: Request):
     """
     Health check endpoint for container orchestration.
 
@@ -179,6 +190,15 @@ async def health_check():
     where a probe that should pull this instance out of rotation looks.
     """
     report = model_loader.get_report()
+    if IS_PRODUCTION and not (ML_SERVICE_KEY and _presents_shared_key(request)):
+        # This is the one path the shared key does not cover, so in production
+        # it answers whoever finds the port. `searched` is the list of directories
+        # the loader looked in and `detail` is the sentence built from them and
+        # from the load errors: a map of the container's file system and the text
+        # of whatever went wrong reading it. A caller that holds the key, which
+        # is the Node API and an operator, still gets both; anyone else gets which
+        # models are missing, which is all a stranger can act on.
+        report = {key: value for key, value in report.items() if key not in _PUBLIC_HEALTH_WITHHELD}
     return HealthResponse(
         status="healthy" if model_loader.is_ready() else "degraded",
         models_loaded=model_loader.get_status(),

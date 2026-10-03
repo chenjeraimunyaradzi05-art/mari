@@ -13,7 +13,7 @@ const controls = [
   },
   {
     title: 'Platform security',
-    body: 'All traffic is served over HTTPS. Security headers (CSP, HSTS, frame and MIME protections) are applied across responses. Login endpoints are rate limited with per-account lockout, and payment webhooks are verified against provider signatures.',
+    body: 'All traffic is served over HTTPS. Security headers (CSP, HSTS, frame and MIME protections) are applied across responses. Sign-in, sign-up and password-reset requests are rate limited, and five wrong passwords within fifteen minutes pause sign-in to that account from that address for fifteen minutes. Payment webhooks are verified against provider signatures.',
   },
   {
     title: 'Privacy',

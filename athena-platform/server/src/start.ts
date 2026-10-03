@@ -88,6 +88,14 @@ async function bootstrap() {
       console.log('[ATHENA] Calling startServer()...');
       indexModule.startServer().catch((err: Error) => {
         console.error('[ATHENA] startServer() rejected:', err);
+        // A start that failed has to look like one. This used to log and
+        // return, so a production environment that validateEnvironmentOrExit
+        // refused (it throws) left a process that never listened: the host saw
+        // an exit code 0 or a container that hung until its health check timed
+        // out, with the reason a few lines up in a log nobody was watching.
+        // Exiting non-zero is what makes the deploy fail, say so, and keep the
+        // previous release serving.
+        process.exit(1);
       });
     } else {
       console.error('[ATHENA] WARNING: index module has no startServer export!');
@@ -99,16 +107,17 @@ async function bootstrap() {
     // Start a minimal health server so deploy health checks can surface
     // the startup error instead of leaving the container silent.
     const PORT = process.env.PORT || 5000;
-    const errorMessage = err instanceof Error ? err.message : String(err);
 
     http
       .createServer((_req: any, res: any) => {
         res.writeHead(503, { 'Content-Type': 'application/json' });
+        // The error is in the log above. An import failure's text names file
+        // paths and modules, and this server answers anyone who can reach the
+        // port, so what the caller gets is only that the start failed.
         res.end(
           JSON.stringify({
             status: 'error',
             message: 'Server failed to start',
-            error: errorMessage,
           })
         );
       })

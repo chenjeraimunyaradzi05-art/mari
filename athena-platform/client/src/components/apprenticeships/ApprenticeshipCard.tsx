@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { HostCheckBadge, HOST_NOT_CHECKED_NOTICE, hostChecked } from './HostCheck';
 import {
   Apprenticeship,
   daysUntil,
@@ -58,6 +59,9 @@ export function ApprenticeshipCard({
   const deadlineDays = daysUntil(apprenticeship.applicationDeadline);
   const wage = wageLabel(apprenticeship);
   const left = positionsLeft(apprenticeship);
+  // Applications are open only while the host has been checked. A listing whose
+  // host has not been is still shown, labelled, so a visitor can read about it.
+  const hostNotChecked = hostChecked(apprenticeship) === false;
 
   if (variant === 'compact') {
     return (
@@ -87,6 +91,7 @@ export function ApprenticeshipCard({
               <MapPin className="w-3 h-3" />
               {locationLabel(apprenticeship)}
             </div>
+            <HostCheckBadge apprenticeship={apprenticeship} className="mt-1" />
           </div>
 
           <button
@@ -146,6 +151,7 @@ export function ApprenticeshipCard({
                 Qualification awarded by {apprenticeship.rto.name}
               </p>
             )}
+            <HostCheckBadge apprenticeship={apprenticeship} className="mt-1" />
           </div>
         </div>
 
@@ -240,7 +246,8 @@ export function ApprenticeshipCard({
             e.stopPropagation();
             onApply(apprenticeship.id);
           }}
-          disabled={left === 0 || (deadlineDays !== null && deadlineDays <= 0)}
+          disabled={left === 0 || (deadlineDays !== null && deadlineDays <= 0) || hostNotChecked}
+          title={hostNotChecked ? HOST_NOT_CHECKED_NOTICE : undefined}
         >
           Apply
         </Button>

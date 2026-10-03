@@ -122,8 +122,12 @@ describe('The strategy routes', () => {
     expect(new Date(dated.body.data.acquiredAt).toISOString().slice(0, 10)).toBe('2024-05-01');
 
     prisma.portfolioHolding.findUnique.mockResolvedValue({ id: 'h1', userId: 'ana' });
-    await request(app).patch('/api/strategy/investing/holdings/h1').set(as('bea')).send({ value: 1 }).expect(403);
-    await request(app).delete('/api/strategy/investing/holdings/h1').set(as('bea')).expect(403);
+    // Someone else's holding reads exactly as one that is not there.
+    const stranger = await request(app).patch('/api/strategy/investing/holdings/h1').set(as('bea')).send({ value: 1 }).expect(404);
+    await request(app).delete('/api/strategy/investing/holdings/h1').set(as('bea')).expect(404);
+    prisma.portfolioHolding.findUnique.mockResolvedValueOnce(null);
+    const missing = await request(app).patch('/api/strategy/investing/holdings/h1').set(as('bea')).send({ value: 1 }).expect(404);
+    expect(stranger.body.message).toBe(missing.body.message);
     expect(prisma.portfolioHolding.update).not.toHaveBeenCalled();
     expect(prisma.portfolioHolding.delete).not.toHaveBeenCalled();
 

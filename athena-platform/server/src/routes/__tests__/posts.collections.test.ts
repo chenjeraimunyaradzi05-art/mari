@@ -5,7 +5,10 @@ jest.mock('../../utils/prisma', () => ({
   prisma: {
     // The block checks read the DV safety profile's list as well as the
     // platform one, in both directions; nobody is blocked here.
-    dvSafetyProfile: { findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => null) },
+    dvSafetyProfile: { findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
+    // Whether a member is in Safe Mode is asked of the user table with findFirst
+    // (audience.service isDiscreet); nobody is in it here.
+    user: { findFirst: jest.fn(async () => null) },
     post: { findUnique: jest.fn(), findMany: jest.fn(async () => []) },
     postSave: { findMany: jest.fn(async () => []), upsert: jest.fn(), count: jest.fn(async () => 0) },
     savedCollection: {
@@ -37,6 +40,7 @@ jest.mock('../../utils/logger', () => ({
 
 import { app } from '../../index';
 import { prisma as prismaTyped } from '../../utils/prisma';
+import { mayBeShownToWhere } from '../../services/audience.service';
 
 const prisma: any = prismaTyped;
 
@@ -102,10 +106,18 @@ describe('Saved collections', () => {
     prisma.postSave.findMany.mockResolvedValue([]);
 
     await request(app).get('/api/posts/me/saved?collectionId=c1').expect(200);
-    expect(prisma.postSave.findMany.mock.calls[0][0].where).toEqual({ userId: 'viewer-1', collectionId: 'c1' });
+    expect(prisma.postSave.findMany.mock.calls[0][0].where).toMatchObject({ userId: 'viewer-1', collectionId: 'c1' });
 
     await request(app).get('/api/posts/me/saved?collectionId=none').expect(200);
-    expect(prisma.postSave.findMany.mock.calls[1][0].where).toEqual({ userId: 'viewer-1', collectionId: null });
+    expect(prisma.postSave.findMany.mock.calls[1][0].where).toMatchObject({ userId: 'viewer-1', collectionId: null });
+    // Whichever folder, the list is narrowed to posts she may still be shown: not
+    // hidden, public (or her own), by an author inside her audience (Safe Mode's rule
+    // is in it), and a group's only while she may read the group. The clause itself is
+    // run over members in tests/discreet-members.test.ts and tests/post-visibility.test.ts.
+    const clause = JSON.stringify(prisma.postSave.findMany.mock.calls[1][0].where.post);
+    expect(clause).toContain('"isHidden":false');
+    expect(clause).toContain('"isPublic":true');
+    expect(clause).toContain(JSON.stringify(mayBeShownToWhere('viewer-1')));
   });
 
   it('deleting a folder keeps the posts saved', async () => {

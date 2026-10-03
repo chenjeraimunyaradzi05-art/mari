@@ -13,6 +13,7 @@ import { body, validationResult } from 'express-validator';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
+import { visibleAuthorWhere } from '../services/search.service';
 import { normalizeOptionalUserText, normalizeSafeUrl, normalizeUserText } from '../utils/contentSafety';
 import {
   createSound,
@@ -119,8 +120,15 @@ router.get('/:id/videos', optionalAuth, async (req: AuthRequest, res, next) => {
     const limit = parseLimit(req.query.limit, 20, 50);
     const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined;
 
+    // Each row names its author, so this list answers the question every other
+    // list of reels answers: not across a block, and not a member in Safe Mode
+    // to anyone who is neither her nor her verified connection. It was open to
+    // anyone with a sound's id, which is a way to a member she hid from the
+    // feed, from search and from her own profile.
     const rows = await prisma.video.findMany({
-      where: { audioTrackId: req.params.id, status: 'PUBLISHED', isHidden: false },
+      where: {
+        AND: [{ audioTrackId: req.params.id, status: 'PUBLISHED', isHidden: false }, await visibleAuthorWhere(req.user?.id)],
+      },
       include: { author: { select: { id: true, displayName: true, avatar: true, headline: true } } },
       orderBy: [{ publishedAt: 'desc' }, { id: 'desc' }],
       take: limit + 1,

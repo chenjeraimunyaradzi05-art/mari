@@ -5,14 +5,16 @@ jest.mock('../../utils/prisma', () => ({
   prisma: {
     // The block checks read the DV safety profile's list as well as the
     // platform one, in both directions; nobody is blocked here.
-    dvSafetyProfile: { findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => null) },
+    dvSafetyProfile: { findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
     post: { findMany: jest.fn(), count: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
     follow: { findMany: jest.fn() },
     like: { findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn(), groupBy: jest.fn(async () => []) },
     pollVote: { groupBy: jest.fn(async () => []), findMany: jest.fn(async () => []) },
     postSave: { findMany: jest.fn() },
     comment: { findUnique: jest.fn(), create: jest.fn() },
-    user: { findUnique: jest.fn() },
+    // Whether a member is in Safe Mode is asked of the user table with findFirst
+    // (audience.service isDiscreet); nobody is in it here.
+    user: { findFirst: jest.fn(async () => null), findUnique: jest.fn() },
     notification: { create: jest.fn() },
     userSafetySettings: { findUnique: jest.fn(), findMany: jest.fn() },
   },
@@ -72,6 +74,23 @@ describe('Following tab carries follow state', () => {
       ['p2', false],
     ]);
   });
+
+  // The tab asked who the author lets read her posts and never whether the post
+  // was public, so a follower was shown a post its author had unticked "Post
+  // publicly" for. The rows that come back are run over a small world in
+  // tests/post-visibility.test.ts; this is the clause.
+  it('asks for public posts (or her own), not hidden, from the people she follows', async () => {
+    await request(app).get('/api/posts/feed?tab=following').set('x-test-auth', '1').expect(200);
+
+    const { where } = prisma.post.findMany.mock.calls[0][0];
+    expect(where.authorId).toEqual({ in: ['author-1', 'viewer-1'] });
+    expect(where.AND[0].AND).toEqual(expect.arrayContaining([
+      { isHidden: false },
+      { OR: [{ isPublic: true }, { authorId: 'viewer-1' }] },
+    ]));
+    // The count that becomes the total carries the same clause.
+    expect(prisma.post.count.mock.calls[0][0].where).toEqual(where);
+  });
 });
 
 describe('Liking a post', () => {
@@ -105,7 +124,7 @@ describe('Liking a post', () => {
     expect(prisma.notification.create.mock.calls[0][0].data).toMatchObject({
       userId: 'author-1',
       type: 'LIKE',
-      message: 'Priya Sharma liked your post',
+      message: 'Priya liked your post',
       link: '/posts/p1',
     });
   });

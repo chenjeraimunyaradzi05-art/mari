@@ -113,4 +113,28 @@ describe('UpgradeScreen', () => {
     expect(pressableWithText(screen, 'Manage my membership')).toBeNull();
     expect(pressableWithText(screen, 'See plans on the web')).not.toBeNull();
   });
+
+  it('says a paid tier adds the six AI tools and the larger chat allowance, and promises nothing the server does not do', async () => {
+    mockSubscription.mockResolvedValue({ data: { success: true, data: { tier: 'FREE' } } });
+
+    const screen = await renderScreen(<UpgradeScreen />);
+    const text = said(screen);
+
+    for (const tool of [
+      'AI Resume Optimizer',
+      'Interview Coach',
+      'Opportunity Radar AI',
+      'Career Path Planner',
+      'AI Content Generator',
+      'Business Idea Validator',
+    ]) {
+      expect(text).toContain(tool);
+    }
+    expect(text).toContain('A larger daily allowance for the ATHENA AI chat');
+    expect(text).toContain('Every paid tier adds the same things today');
+    // The cards used to say "priority applications", "mentoring credits and
+    // analytics", "Formation, finance and grant tools" and "a lower platform
+    // fee". None of it existed on the server, and none of it is said now.
+    expect(text).not.toMatch(/priority applications|mentoring credits|grant tools|lower platform fee|unlimited|priority support/i);
+  });
 });

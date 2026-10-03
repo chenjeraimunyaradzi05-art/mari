@@ -28,6 +28,8 @@ jest.mock('@/lib/api', () => ({
     updateSessionStatus: jest.fn(),
     reschedule: jest.fn(),
     paymentIntent: jest.fn(),
+    disputeSession: jest.fn(),
+    respondToSessionDispute: jest.fn(),
   },
 }));
 
@@ -36,10 +38,12 @@ jest.mock('@/components/payments/PaymentIntentForm', () => ({
 }));
 
 import { mentorApi } from '@/lib/api';
+import { DISPUTE_WINDOW_DAYS, SESSION_CONFIRMATION_HOURS } from '@/lib/pricing';
 
 const api = mentorApi as unknown as Record<string, jest.Mock>;
 
 const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
 
 function session(overrides: Record<string, unknown> = {}) {
   return {
@@ -92,7 +96,7 @@ describe('Mentoring sessions', () => {
 
     const confirmButton = await screen.findByRole('button', { name: 'It went ahead' });
     expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
-    expect(screen.getByText(/ask your mentor to cancel/)).toBeInTheDocument();
+    expect(screen.getByText(/If it did not, say so below/)).toBeInTheDocument();
     // To the cent, in the session's own currency.
     expect(screen.getByText('$37.50')).toBeInTheDocument();
 
@@ -118,13 +122,23 @@ describe('Mentoring sessions', () => {
     expect(screen.queryByRole('button', { name: 'It went ahead' })).not.toBeInTheDocument();
   });
 
-  it('tells a charged mentee where to go if the session did not take place', async () => {
-    api.getSessions.mockResolvedValue({ data: [session({ status: 'COMPLETED', paymentStatus: 'CAPTURED' })] });
+  it('tells a mentee charged longer ago than the dispute window where to go if the session did not take place', async () => {
+    api.getSessions.mockResolvedValue({
+      data: [
+        session({
+          status: 'COMPLETED',
+          paymentStatus: 'CAPTURED',
+          paymentCapturedAt: new Date(Date.now() - (DISPUTE_WINDOW_DAYS + 3) * DAY).toISOString(),
+        }),
+      ],
+    });
     renderPage();
 
     const link = await screen.findByRole('link', { name: 'Help & Support' });
     expect(link).toHaveAttribute('href', '/dashboard/settings/help');
     expect(screen.getByText(/look at a refund with you/)).toBeInTheDocument();
+    // The server would refuse it, so the button is not offered.
+    expect(screen.queryByRole('button', { name: 'It did not happen' })).not.toBeInTheDocument();
   });
 
   it('says so when the list could not be loaded, rather than "Nothing booked"', async () => {
@@ -179,7 +193,204 @@ describe('Mentoring sessions', () => {
 
     fireEvent.click(buttons[0]);
 
-    expect(confirmSpy.mock.calls[0][0]).toContain('The mentee’s card is charged $37.50 now');
+    // The mentor's word is not the mentee's: the card is charged after the
+    // window in which the mentee can say it did not happen, not that minute.
+    expect(confirmSpy.mock.calls[0][0]).toContain(
+      `has ${SESSION_CONFIRMATION_HOURS} hours to say it did not happen; after that her card is charged $37.50`
+    );
+    expect(confirmSpy.mock.calls[0][0]).not.toMatch(/charged \$37\.50 now/);
     await waitFor(() => expect(api.updateSessionStatus).toHaveBeenCalledWith('s2', 'COMPLETED'));
+  });
+
+  // The mentor's word starts a window; the mentee's objection freezes the money.
+  describe('saying a session did not happen', () => {
+    beforeEach(() => {
+      api.disputeSession.mockResolvedValue({ data: { success: true } });
+      api.respondToSessionDispute.mockResolvedValue({ data: { success: true } });
+    });
+
+    it('tells the mentee when her card is charged after the mentor marks it complete, and lets her object before then', async () => {
+      const releaseAt = new Date(Date.now() + 20 * HOUR);
+      api.getSessions.mockResolvedValue({
+        data: [session({ status: 'COMPLETED', paymentStatus: 'AUTHORIZED', paymentReleaseAt: releaseAt.toISOString() })],
+      });
+      renderPage();
+
+      expect(await screen.findByText(/\$37\.50 is charged on .* unless you tell us before then/)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'It did not happen' })).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: 'Help & Support' })).not.toBeInTheDocument();
+    });
+
+    it('sends what she wrote, and nothing until she has written it, for a session charged within the window', async () => {
+      api.getSessions.mockResolvedValue({
+        data: [session({ status: 'COMPLETED', paymentStatus: 'CAPTURED', paymentCapturedAt: new Date(Date.now() - 2 * DAY).toISOString() })],
+      });
+      renderPage();
+
+      fireEvent.click(await screen.findByRole('button', { name: 'It did not happen' }));
+      const send = screen.getByRole('button', { name: 'Send to ATHENA’s team' });
+      expect(send).toBeDisabled();
+      expect(screen.getByText(/not paid on to your mentor while ATHENA’s team looks at it/)).toBeInTheDocument();
+
+      fireEvent.change(screen.getByLabelText('What went wrong?'), { target: { value: 'Nobody joined the call' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send to ATHENA’s team' }));
+
+      await waitFor(() => expect(api.disputeSession).toHaveBeenCalledWith('s1', 'Nobody joined the call'));
+    });
+
+    it('shows a session in dispute to the mentor with what the mentee said, lets her answer once, and offers no other action', async () => {
+      searchParams = new URLSearchParams('session=s2');
+      api.getProfileByUser.mockResolvedValue({ data: { id: 'mp-me' } });
+      api.getSessions.mockImplementation(async (role: string) =>
+        role === 'mentor'
+          ? {
+              data: [
+                session({
+                  id: 's2',
+                  status: 'DISPUTED',
+                  disputeReason: 'My mentor never joined',
+                  disputeResponse: null,
+                  mentee: { id: 'mentee-1', displayName: 'Sina', avatar: null },
+                }),
+              ],
+            }
+          : { data: [] }
+      );
+      renderPage();
+
+      expect(await screen.findByText(/The mentee says this session did not take place/)).toBeInTheDocument();
+      expect(screen.getByText('“My mentor never joined”')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Mark complete' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+
+      fireEvent.change(screen.getByLabelText(/Tell your side/), { target: { value: 'We met on Zoom for the full hour' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send to the team' }));
+
+      await waitFor(() => expect(api.respondToSessionDispute).toHaveBeenCalledWith('s2', 'We met on Zoom for the full hour'));
+    });
+
+    it('shows a decided dispute and offers no second one, even inside the window', async () => {
+      api.getSessions.mockResolvedValue({
+        data: [
+          session({
+            status: 'COMPLETED',
+            paymentStatus: 'CAPTURED',
+            paymentCapturedAt: new Date(Date.now() - DAY).toISOString(),
+            disputedAt: new Date(Date.now() - 2 * DAY).toISOString(),
+            disputeReason: 'Nobody joined',
+            disputeResponse: 'We met for the hour',
+            disputeResolution: 'RELEASED',
+          }),
+        ],
+      });
+      renderPage();
+
+      expect(await screen.findByText(/the payment was released to the mentor/)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'It did not happen' })).not.toBeInTheDocument();
+      expect(screen.queryByText(/tell us below within/)).not.toBeInTheDocument();
+    });
+
+    // The sweep takes the money for a finished session whose hold is about to
+    // lapse before anyone has marked it complete. That is still her hour to
+    // question, inside the window, the same as one her mentor closed.
+    it('lets her object to a confirmed session the sweep already charged, while the window is open', async () => {
+      api.getSessions.mockResolvedValue({
+        data: [session({ status: 'CONFIRMED', paymentStatus: 'CAPTURED', paymentCapturedAt: new Date(Date.now() - HOUR).toISOString() })],
+      });
+      renderPage();
+
+      expect(await screen.findByRole('button', { name: 'It did not happen' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'It went ahead' })).toBeInTheDocument();
+    });
+
+    it('shows the mentor’s answer to the mentee and that the money is held, with no way to move it', async () => {
+      api.getSessions.mockResolvedValue({
+        data: [session({ status: 'DISPUTED', disputeReason: 'Nobody joined', disputeResponse: 'We met for the full hour' })],
+      });
+      renderPage();
+
+      expect(await screen.findByText(/You told us this session did not take place/)).toBeInTheDocument();
+      expect(screen.getByText(/Your mentor’s answer/).closest('p')).toHaveTextContent('“We met for the full hour”');
+      expect(screen.queryByRole('button', { name: 'It did not happen' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'It went ahead' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    });
+  });
+
+  // A declined card leaves the request open for another, and the server calls it
+  // off after a few hours, so the mentee has to be able to try again from here.
+  describe('a mentee whose card was declined', () => {
+    it('is offered another card while the request is still open', async () => {
+      api.getSessions.mockResolvedValue({
+        data: [session({ status: 'REQUESTED', paymentStatus: 'FAILED', scheduledAt: new Date(Date.now() + 48 * HOUR).toISOString() })],
+      });
+      api.paymentIntent.mockResolvedValue({ data: { data: { paymentStatus: 'FAILED', amount: 37.5, currency: 'AUD', clientSecret: 'cs_retry' } } });
+      renderPage();
+
+      expect(await screen.findByText(/You can try another card/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Try another card' }));
+
+      await waitFor(() => expect(api.paymentIntent).toHaveBeenCalledWith('s1'));
+      expect(await screen.findByTestId('authorise')).toBeInTheDocument();
+    });
+
+    it('is not offered a card for a finished session whose payment could not be collected', async () => {
+      api.getSessions.mockResolvedValue({ data: [session({ status: 'COMPLETED', paymentStatus: 'FAILED' })] });
+      renderPage();
+
+      expect(await screen.findByText('Payment failed')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Try another card' })).not.toBeInTheDocument();
+      expect(screen.queryByText(/You can try another card/)).not.toBeInTheDocument();
+    });
+  });
+
+  // The server will not let a mentor accept a paid request until the mentee's
+  // card is held, so the button says so instead of offering something that
+  // answers with an error.
+  describe('accepting a paid request', () => {
+    const mentorSide = (sessions: unknown[]) => {
+      searchParams = new URLSearchParams('session=r1');
+      api.getProfileByUser.mockResolvedValue({ data: { id: 'mp-me' } });
+      api.getSessions.mockImplementation(async (role: string) => (role === 'mentor' ? { data: sessions } : { data: [] }));
+    };
+    const request = (overrides: Record<string, unknown> = {}) =>
+      session({
+        id: 'r1',
+        status: 'REQUESTED',
+        scheduledAt: new Date(Date.now() + 48 * HOUR).toISOString(),
+        mentee: { id: 'mentee-1', displayName: 'Sina', avatar: null },
+        ...overrides,
+      });
+
+    it('keeps Confirm switched off, and says why, until the mentee has authorised payment', async () => {
+      mentorSide([request({ paymentStatus: 'PENDING' })]);
+      renderPage();
+
+      const confirm = await screen.findByRole('button', { name: /Confirm/ });
+      expect(confirm).toBeDisabled();
+      expect(confirm).toHaveAccessibleDescription(/once the mentee has authorised payment/);
+
+      fireEvent.click(confirm);
+      expect(api.updateSessionStatus).not.toHaveBeenCalled();
+    });
+
+    it('lets the mentor confirm once the card is held', async () => {
+      mentorSide([request({ paymentStatus: 'AUTHORIZED' })]);
+      renderPage();
+
+      const confirm = await screen.findByRole('button', { name: /Confirm/ });
+      expect(confirm).toBeEnabled();
+      expect(screen.queryByText(/once the mentee has authorised payment/)).not.toBeInTheDocument();
+
+      fireEvent.click(confirm);
+      await waitFor(() => expect(api.updateSessionStatus).toHaveBeenCalledWith('r1', 'CONFIRMED'));
+    });
+
+    it('does not make a mentor wait on a payment for a session that costs nothing', async () => {
+      mentorSide([request({ sessionAmount: 0, paymentStatus: 'CAPTURED' })]);
+      renderPage();
+
+      expect(await screen.findByRole('button', { name: /Confirm/ })).toBeEnabled();
+    });
   });
 });

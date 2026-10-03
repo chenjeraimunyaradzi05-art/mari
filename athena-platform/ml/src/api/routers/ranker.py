@@ -9,6 +9,7 @@ heavy one was, and why asking for it is now refused rather than answered.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional
 from enum import Enum
 
@@ -16,6 +17,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # ===========================================
@@ -139,10 +141,14 @@ async def rank_candidates(request: RankingRequest):
             processing_time_ms=round((time.time() - start) * 1000, 2),
             diversity_applied=request.diversity_factor > 0
         )
-    except Exception as e:
+    except Exception:
+        # What went wrong stays in this service's log. The text of an exception
+        # can name a file path, a model directory or a value out of the request,
+        # and a caller needs none of it to know the call failed.
+        logger.exception("Ranking failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Ranking failed: {str(e)}"
+            detail="Ranking failed"
         )
 
 

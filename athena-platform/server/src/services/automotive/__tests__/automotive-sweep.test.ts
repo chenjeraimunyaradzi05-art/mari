@@ -48,6 +48,14 @@ jest.mock('../../../utils/prisma', () => ({
         Object.assign(row, data);
         return row;
       }),
+      // The conditional move: it matches only while the row still holds the
+      // status the sweep read, which is what lets a dispute that landed in
+      // between keep the row.
+      updateMany: jest.fn(async ({ where, data }: { where: { id: string; status?: string }; data: Row }) => {
+        const hit = store.purchases.filter((p) => p.id === where.id && (where.status === undefined || p.status === where.status));
+        hit.forEach((p) => Object.assign(p, data));
+        return { count: hit.length };
+      }),
       count: jest.fn(async () => 0),
     },
     vehicleListing: { update: jest.fn(async ({ data }: { data: Row }) => data) },
@@ -119,6 +127,39 @@ describe('the car purchase sweep', () => {
     expect(result).toMatchObject({ released: 1, stuck: 0 });
     expect(store.purchases[0].status).toBe('RELEASED');
     expect(kinds()).toEqual(expect.arrayContaining(['CAR_PURCHASE_RELEASED', 'CAR_PURCHASE_COMPLETE']));
+  });
+
+  it('does not mark a purchase released when the buyer disputed it while its hold was being captured, and tells nobody the money moved', async () => {
+    store.purchases = [handedOver(1)];
+    // Her dispute lands between the sweep reading HANDED_OVER and writing RELEASED.
+    (captureEscrowPayment as jest.Mock).mockImplementation(async () => {
+      Object.assign(store.purchases[0], { status: 'DISPUTED', disputeReason: 'The gearbox slips in third; it was described as faultless.', disputeOpenedAt: NOW });
+      return { status: 'captured', amountCaptured: 100 };
+    });
+    const result = await sweepPurchases(NOW);
+    expect(result).toMatchObject({ released: 0, stuck: 1 });
+    // The row is hers: the status she set, the reason she gave, and no release date.
+    expect(store.purchases[0].status).toBe('DISPUTED');
+    expect(store.purchases[0].disputeReason).toContain('gearbox');
+    expect(store.purchases[0].releasedAt).toBeUndefined();
+    expect(kinds()).not.toEqual(expect.arrayContaining(['CAR_PURCHASE_RELEASED']));
+    expect(kinds()).not.toEqual(expect.arrayContaining(['CAR_PURCHASE_COMPLETE']));
+    // Written down with the purchase it belongs to, because the hold was captured and a person has to decide it.
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('automotive.purchase-release.p1'), expect.objectContaining({ purchaseId: 'p1' }));
+  });
+
+  it('leaves a dispute the buyer opened in place when it stops trying, rather than writing ATHENA\'s reason over hers', async () => {
+    store.purchases = [handedOver(4, 'PENDING')];
+    (captureEscrowPayment as jest.Mock).mockImplementation(async () => {
+      Object.assign(store.purchases[0], { status: 'DISPUTED', disputeReason: 'The gearbox slips in third; it was described as faultless.', disputeOpenedAt: NOW });
+      throw new Error('The PaymentIntent cannot be captured');
+    });
+    const result = await sweepPurchases(NOW);
+    expect(result).toMatchObject({ released: 0, stuck: 1 });
+    expect(store.purchases[0].disputeReason).toContain('gearbox');
+    expect(String(store.purchases[0].disputeReason)).not.toContain('Opened by ATHENA');
+    // Her dispute's own notifications went out from the route; the sweep's three would say the wrong thing over them.
+    expect(kinds()).not.toEqual(expect.arrayContaining(['CAR_RELEASE_FAILED']));
   });
 
   it('keeps trying inside the grace period, leaves the purchase alone, and puts the failure in the log with the purchase it belongs to', async () => {

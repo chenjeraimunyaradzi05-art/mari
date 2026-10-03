@@ -47,7 +47,7 @@ import { prisma as prismaTyped } from '../../utils/prisma';
 const prisma: any = prismaTyped;
 const as = (userId: string, role = 'USER') => ({ 'x-test-user': userId, 'x-test-role': role });
 const DAY = 24 * 60 * 60 * 1000;
-const approval = (id: string, at: Date) => ({ createdAt: at, actorUserId: 'admin-7', metadata: { resourceType: 'HealthPractitioner', resourceId: id } });
+const approval = (id: string, at: Date, check?: Record<string, unknown>) => ({ createdAt: at, actorUserId: 'admin-7', metadata: { resourceType: 'HealthPractitioner', resourceId: id, ...(check ? { check } : {}) } });
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -63,7 +63,11 @@ describe('The re-check list', () => {
 
   it('lists every verified practitioner with where her check stands, the one lapsing soonest first', async () => {
     prisma.healthPractitioner.findMany.mockResolvedValue([verified('recent'), verified('old')]);
-    prisma.auditLog.findMany.mockResolvedValue([approval('recent', new Date(Date.now() - 10 * DAY)), approval('old', new Date(Date.now() - 380 * DAY))]);
+    prisma.auditLog.findMany.mockResolvedValue([
+      approval('recent', new Date(Date.now() - 10 * DAY), { register: 'PROFESSIONAL_BODY', registerName: 'PACFA', note: 'Clinical member, name and location match.' }),
+      // A row from before the register was recorded: still a check, with nothing to say about where the admin looked.
+      approval('old', new Date(Date.now() - 380 * DAY)),
+    ]);
 
     const res = await request(app).get('/api/wellness/practitioners/rechecks').set(as('boss', 'ADMIN')).expect(200);
 
@@ -72,7 +76,10 @@ describe('The re-check list', () => {
     expect(rules).toEqual({ recheckAfterDays: 365, graceDays: 30 });
     expect(rechecks.map((r: any) => r.id)).toEqual(['old', 'recent']);
     expect(rechecks[0].verification).toMatchObject({ status: 'DUE', checkedById: 'admin-7', recordMissing: false });
-    expect(rechecks[1].verification.status).toBe('CURRENT');
+    expect(rechecks[0].verification.checkedAgainst).toBeUndefined();
+    expect(rechecks[1].verification).toMatchObject({ status: 'CURRENT', checkedAgainst: 'PACFA' });
+    // The admin's note is for the audit row, not the list.
+    expect(JSON.stringify(rechecks)).not.toContain('Clinical member');
   });
 });
 

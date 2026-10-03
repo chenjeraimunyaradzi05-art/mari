@@ -192,6 +192,15 @@ export async function invalidateFeedCache(userId: string) {
   await cacheDelPattern(`feed:${userId}:*`);
 }
 
+/**
+ * Forget the trending list, whatever hours and size it was asked for. It carries
+ * whole posts for five minutes, so a post that has just been made private or
+ * taken down is dropped from it here instead of being served until it expires.
+ */
+export async function invalidateTrendingFeedCache() {
+  await cacheDelPattern('feed:trending:*');
+}
+
 // ==========================================
 // RATE LIMITING WITH REDIS
 // ==========================================

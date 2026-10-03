@@ -45,6 +45,9 @@ jest.mock('../../utils/prisma', () => ({
     },
     eventRegistration: { upsert: jest.fn(), delete: jest.fn() },
     eventSave: { upsert: jest.fn(), delete: jest.fn() },
+    // The host's block lists, in both stores: nobody is blocked unless a test says so.
+    userSafetySettings: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
+    dvSafetyProfile: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },
     user: {
       findUnique: jest.fn(async () => ({
         displayName: 'Ana S.',

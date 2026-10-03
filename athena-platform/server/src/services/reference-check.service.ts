@@ -316,10 +316,12 @@ export async function sendReferenceRequest(
       },
     });
     
-    logger.info(`Sent reference request email to ${reference.refereeEmail}`);
+    // The referee's address is hers to give and ours to keep out of the log: the
+    // request id finds the row.
+    logger.info('Sent a reference request email', { referenceId });
     return true;
   } catch (error) {
-    logger.error(`Failed to send reference request email: ${error}`);
+    logger.error('Failed to send a reference request email', { referenceId, error });
     return false;
   }
 }
@@ -362,7 +364,7 @@ export async function batchSendReferenceRequests(
         failed++;
       }
     } catch (error) {
-      logger.error(`Failed to create/send reference request for ${referee.email}: ${error}`);
+      logger.error('Failed to create or send a reference request', { candidateId, error });
       failed++;
     }
   }
@@ -562,7 +564,7 @@ export async function submitReferenceResponse(
     await updateApplicationReferenceStatus(reference.applicationId);
   }
   
-  logger.info(`Reference ${reference.id} completed by ${reference.refereeEmail}`);
+  logger.info('A reference was completed by its referee', { referenceId: reference.id });
   
   return true;
 }
@@ -600,7 +602,7 @@ export async function declineReferenceRequest(
     throw new ApiError(409, 'This reference request has already been answered or has expired');
   }
 
-  logger.info(`Reference ${reference.id} declined by ${reference.refereeEmail}`);
+  logger.info('A reference was declined by its referee', { referenceId: reference.id });
   
   return true;
 }

@@ -31,10 +31,24 @@ name: Uptime
 #   PRODUCTION_SITE_URL  the web app, e.g. https://athena-empress.netlify.app
 # Until PRODUCTION_API_URL is set the job is skipped, and a skipped run is shown
 # as skipped rather than as a pass.
+#
+# A second job, once a day, asks a different question. "Is it up" says nothing
+# about "is it set up": the API's /health/launch-readiness lists the settings a
+# production deployment needs (the database, the secrets, media storage, email,
+# the error tracker's DSN), but only answers a caller who holds its diagnostics
+# token, and nothing ever asked. That job asks, and opens one issue titled
+# "Production configuration is incomplete" listing what is missing when the
+# answer is not_ready. It asks with ?probe=media, which adds a check that proves
+# from the outside that a private upload (a résumé) cannot be read without
+# signing in and a public one (an avatar) can. It needs one repository SECRET,
+# HEALTH_DIAGNOSTICS_TOKEN,
+# with the same value as the API's; without it the job says so and passes
+# rather than pretending it checked.
 
 on:
   schedule:
     - cron: '*/15 * * * *'
+    - cron: '23 21 * * *'
   workflow_dispatch:
 
 permissions:
@@ -152,6 +166,142 @@ jobs:
                 repo: context.repo.repo,
                 issue_number: issue.number,
                 body: `Answering again. Open for about ${minutes} minutes, measured from the check that opened this issue.\n\nRun: ${run}`,
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed',
+              });
+            }
+
+  # The daily question of whether the deployment is configured, as opposed to
+  # answering. See the header for why it is a separate job and a separate issue:
+  # a missing setting is not an outage, and "Production is down" would be the
+  # wrong thing to tell whoever reads it.
+  readiness:
+    name: Check launch readiness
+    runs-on: ubuntu-latest
+    if: ${{ vars.PRODUCTION_API_URL != '' && (github.event_name == 'workflow_dispatch' || github.event.schedule == '23 21 * * *') }}
+    timeout-minutes: 10
+
+    steps:
+      - name: Ask /health/launch-readiness
+        id: readiness
+        env:
+          API_URL: ${{ vars.PRODUCTION_API_URL }}
+          HEALTH_DIAGNOSTICS_TOKEN: ${{ secrets.HEALTH_DIAGNOSTICS_TOKEN }}
+        run: |
+          if [ -z "$HEALTH_DIAGNOSTICS_TOKEN" ]; then
+            echo "::notice::HEALTH_DIAGNOSTICS_TOKEN is not a repository secret, so launch readiness is not being checked."
+            exit 0
+          fi
+
+          api="${API_URL%/}"
+          problems="$RUNNER_TEMP/problems.md"
+          : > "$problems"
+
+          # 000 is no answer at all (a host waking from sleep, a dropped
+          # connection), which says nothing about how it is configured, so it is
+          # asked again before it is reported. Any real answer, a 503 included, is
+          # the API speaking and is taken as it is.
+          ask() {
+            local code attempt
+            for attempt in 1 2 3; do
+              code="$(curl --silent --output "$2" --write-out '%{http_code}' --max-time 45 \
+                --header "Authorization: Bearer $HEALTH_DIAGNOSTICS_TOKEN" "$api$1" || true)"
+              [ "$code" != "000" ] && break
+              sleep 30
+            done
+            printf '%s' "$code"
+          }
+
+          # ?probe=media adds a check of whether private uploads (resumes,
+          # documents) really cannot be read without signing in, and public ones
+          # can. The code only chooses which address to hand out; the bucket
+          # policy and the CDN decide the rest, so the API asks from the outside.
+          # It writes and removes two small probe objects, which is why it is
+          # asked for here and is not part of every call.
+          code="$(ask "/health/launch-readiness?probe=media" "$RUNNER_TEMP/readiness.json")"
+          if [ "$code" = "503" ]; then
+            # Only what is required and failing: the recommended-but-missing
+            # settings are listed by the endpoint itself and are not a reason
+            # to open an issue.
+            jq -r '.checks[] | select(.required == true and .ok == false) | "- \(.key): \(.message)"' "$RUNNER_TEMP/readiness.json" >> "$problems"
+          elif [ "$code" != "200" ]; then
+            echo "- /health/launch-readiness answered $code, so readiness could not be read. A 404 means the token in the HEALTH_DIAGNOSTICS_TOKEN secret is not one the API accepts." >> "$problems"
+          fi
+
+          if [ ! -s "$problems" ]; then
+            echo "Launch readiness, including media exposure: fine."
+            echo "checked=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          {
+            echo 'problems<<EOF_PROBLEMS'
+            cat "$problems"
+            echo 'EOF_PROBLEMS'
+          } >> "$GITHUB_OUTPUT"
+          echo "::error::Production is not ready to launch. See the issue this run opened or kept open."
+          exit 1
+
+      - name: Open the configuration issue
+        if: ${{ failure() && steps.readiness.outputs.problems != '' }}
+        uses: actions/github-script@v7
+        env:
+          PROBLEMS: ${{ steps.readiness.outputs.problems }}
+        with:
+          script: |
+            const title = 'Production configuration is incomplete';
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              creator: 'github-actions[bot]',
+              per_page: 100,
+            });
+            if (open.some((issue) => issue.title === title && !issue.pull_request)) {
+              core.info('A configuration issue is already open; not notifying again.');
+              return;
+            }
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              labels: ['configuration'],
+              body: [
+                'The API answers, but its launch-readiness check says it is not set up for production:',
+                '',
+                process.env.PROBLEMS,
+                '',
+                'Each setting is described in `athena-platform/docs/launch/LAUNCH_CHECKLIST.md` and `DEPLOYMENT_GUIDE.md`. This issue closes itself on the first daily check that passes.',
+                '',
+                `Run: ${run}`,
+              ].join('\n'),
+            });
+
+      - name: Close the configuration issue once it passes
+        if: ${{ success() && steps.readiness.outputs.checked == 'true' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = 'Production configuration is incomplete';
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              creator: 'github-actions[bot]',
+              per_page: 100,
+            });
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            for (const issue of open.filter((i) => i.title === title && !i.pull_request)) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `The launch-readiness check passes now.\n\nRun: ${run}`,
               });
               await github.rest.issues.update({
                 owner: context.repo.owner,

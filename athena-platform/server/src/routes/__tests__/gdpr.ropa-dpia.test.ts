@@ -54,7 +54,9 @@ const assessmentBody = {
   description: 'Scores accounts for signs of harassment.',
   featureOrSystem: 'SafetyScore',
   necessity: 'Harassment is the harm the platform exists to prevent.',
-  proportionality: 'Only signals already visible to moderators are used.',
+  // What the score really uses, as an assessment of it has to say: not only what a moderator already sees.
+  proportionality:
+    'Reports, blocks and upheld decisions, and a few signs of good standing (account age, a completed profile, activity, approved verification, finished mentor sessions). Each reporter and blocker counts once, unchecked signals are capped, only staff see the result, and nobody is restricted automatically.',
   residualRiskLevel: 'MEDIUM',
   risks: [{ description: 'A survivor is wrongly scored as the aggressor', likelihood: 'MEDIUM', impact: 'HIGH' }],
   mitigations: [{ measure: 'A person reviews every critical score', status: 'IN_PLACE', risk: 'Wrong score', owner: 'Trust & Safety' }],

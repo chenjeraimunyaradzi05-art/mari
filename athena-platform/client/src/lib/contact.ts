@@ -26,6 +26,14 @@
  * switches over at once. Nothing else needs editing.
  */
 
+import {
+  CREATOR_SHARE_RANGE_PERCENT,
+  MENTOR_PLATFORM_FEE_PERCENT,
+  MINIMUM_PAYOUT_AUD,
+  REFUND_DAYS,
+  TRIAL_DAYS,
+} from './pricing';
+
 function cleanEnv(value: string | undefined): string | null {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
@@ -189,6 +197,16 @@ export function renderLegalTokens(markdown: string): string {
     'email.support': contactEmail('support') ?? 'the help centre at /help',
     'email.legal': contactEmail('legal') ?? 'the contact form at /contact',
     'email.copyright': contactEmail('copyright') ?? 'the report form at /report',
+
+    // What ATHENA charges, keeps and promises, from the price book (lib/pricing),
+    // so the Terms cannot say one number while the pricing page and the code say
+    // another. Whole numbers and ranges read as plain text mid-sentence.
+    'price.trialDays': String(TRIAL_DAYS),
+    'price.refundDays': String(REFUND_DAYS),
+    'price.mentoringFeePercent': `${MENTOR_PLATFORM_FEE_PERCENT}%`,
+    'price.creatorShareRange': `${CREATOR_SHARE_RANGE_PERCENT.min}% to ${CREATOR_SHARE_RANGE_PERCENT.max}%`,
+    'price.platformFeeRange': `${100 - CREATOR_SHARE_RANGE_PERCENT.max}% to ${100 - CREATOR_SHARE_RANGE_PERCENT.min}%`,
+    'price.minimumPayout': `A$${MINIMUM_PAYOUT_AUD}`,
   };
 
   return markdown.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (whole, key: string) =>

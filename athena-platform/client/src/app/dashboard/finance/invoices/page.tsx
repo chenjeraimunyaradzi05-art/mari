@@ -14,6 +14,11 @@
  * stands. This page used to promise "a tax invoice you can claim" over a
  * pipeline that issued nothing but membership documents and printed a tax
  * line of zero on those.
+ *
+ * The invoices are kept as each payment goes through, but the PDF names ATHENA,
+ * and ATHENA does not print a company name, address or mailbox it has not
+ * confirmed. Until the server says it can (documentsReady), the page says that
+ * plainly and holds the downloads, rather than letting each one fail.
  */
 
 import { useState } from 'react';
@@ -52,7 +57,12 @@ export default function InvoicesPage() {
   const invoices = useQuery({
     queryKey: ['invoices'],
     queryFn: invoiceApi.list,
-    select: (r) => (r.data?.data ?? []) as Invoice[],
+    select: (r) => ({
+      rows: (r.data?.data ?? []) as Invoice[],
+      // Only an explicit false holds the downloads: a server that does not say
+      // is one that never refused them.
+      documentsReady: r.data?.documentsReady !== false,
+    }),
   });
 
   const download = async (invoice: Invoice) => {
@@ -67,7 +77,8 @@ export default function InvoicesPage() {
     }
   };
 
-  const rows = invoices.data ?? [];
+  const rows = invoices.data?.rows ?? [];
+  const documentsReady = invoices.data?.documentsReady ?? true;
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-6">
@@ -82,6 +93,12 @@ export default function InvoicesPage() {
         </div>
         <Link href="/dashboard/finance" className="btn-secondary">Finance hub</Link>
       </div>
+
+      {!documentsReady && (
+        <p role="status" className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-100">
+          Your invoices are safe and listed here. The PDFs open once ATHENA has finished confirming its billing details, so downloads are paused for now. Nothing has been lost, and each invoice will be ready to download then.
+        </p>
+      )}
 
       {invoices.isLoading ? (
         <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
@@ -110,7 +127,7 @@ export default function InvoicesPage() {
               <div className="flex items-center gap-3">
                 <span className={cn('rounded-full px-2 py-0.5 text-xs font-semibold', TONE[invoice.status] ?? TONE.DRAFT)}>{invoice.status.toLowerCase()}</span>
                 <span className="tabular-nums font-semibold text-slate-900 dark:text-white">{formatCurrency(Number(invoice.amount), invoice.currency)}</span>
-                <button type="button" onClick={() => download(invoice)} disabled={downloading === invoice.id} className="inline-flex items-center gap-1.5 text-sm font-medium text-rose-600 hover:underline dark:text-rose-400" aria-label={`Download ${invoice.invoiceNumber}`}>
+                <button type="button" onClick={() => download(invoice)} disabled={downloading === invoice.id || !documentsReady} title={documentsReady ? undefined : 'Downloads open once ATHENA has confirmed its billing details'} className="inline-flex min-h-[44px] items-center gap-1.5 rounded text-sm font-medium text-rose-600 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 disabled:cursor-not-allowed disabled:opacity-50 dark:text-rose-400" aria-label={`Download ${invoice.invoiceNumber}`}>
                   {downloading === invoice.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} PDF
                 </button>
               </div>

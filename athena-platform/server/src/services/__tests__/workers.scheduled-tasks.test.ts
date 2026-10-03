@@ -42,6 +42,8 @@ const alertOverdueReports = jest.fn() as jest.Mock<() => Promise<{ overdue: numb
 jest.mock('../content-report.service', () => ({ alertOverdueReports }));
 const alertOverdueSafetyChecks = jest.fn() as jest.Mock<() => Promise<{ waiting: number; overdue: number; notified: number }>>;
 jest.mock('../housing-supply.service', () => ({ alertOverdueSafetyChecks }));
+const sweepProviderChecks = jest.fn() as jest.Mock<() => Promise<{ lapsed: number; listingsTakenDown: number; membersTold: number }>>;
+jest.mock('../housing-provider.service', () => ({ sweepProviderChecks }));
 const sweepPractitionerRechecks = jest.fn() as jest.Mock<
   () => Promise<{ verified: number; due: number; newlyDue: number; lapsed: number }>
 >;
@@ -81,16 +83,42 @@ describe('the scheduled-tasks worker', () => {
   // practitioner verification ever lapsed.
   it('runs the housing safety-check sweep and records what was overdue', async () => {
     alertOverdueSafetyChecks.mockResolvedValue({ waiting: 2, overdue: 1, notified: 1 });
+    sweepProviderChecks.mockResolvedValue({ lapsed: 0, listingsTakenDown: 0, membersTold: 0 });
 
     const result = await scheduledTask()({ id: 'job-4', data: { task: SCHEDULED_TASKS.HOUSING_SAFETY_CHECK_SWEEP } });
 
     expect(alertOverdueSafetyChecks).toHaveBeenCalledTimes(1);
-    expect(result).toEqual({ success: true, waiting: 2, overdue: 1, notified: 1 });
+    expect(result).toEqual({
+      success: true,
+      waiting: 2,
+      overdue: 1,
+      notified: 1,
+      providerChecks: { lapsed: 0, listingsTakenDown: 0, membersTold: 0 },
+    });
     expect(logger.info).toHaveBeenCalledWith('Housing safety-check sweep finished', {
       jobId: 'job-4',
       waiting: 2,
       overdue: 1,
       notified: 1,
+    });
+  });
+
+  // A provider check that ran out must take the badge off the listings that
+  // rested on it, and the hourly worker is what runs that, so a worker that
+  // forgot to call it would leave "Checked by ATHENA staff" on for ever.
+  it('runs the provider-check sweep in the same hour and records what it took down', async () => {
+    alertOverdueSafetyChecks.mockResolvedValue({ waiting: 0, overdue: 0, notified: 0 });
+    sweepProviderChecks.mockResolvedValue({ lapsed: 2, listingsTakenDown: 3, membersTold: 2 });
+
+    const result = await scheduledTask()({ id: 'job-6', data: { task: SCHEDULED_TASKS.HOUSING_SAFETY_CHECK_SWEEP } });
+
+    expect(sweepProviderChecks).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ success: true, providerChecks: { lapsed: 2, listingsTakenDown: 3, membersTold: 2 } });
+    expect(logger.info).toHaveBeenCalledWith('Housing provider-check sweep finished', {
+      jobId: 'job-6',
+      lapsed: 2,
+      listingsTakenDown: 3,
+      membersTold: 2,
     });
   });
 

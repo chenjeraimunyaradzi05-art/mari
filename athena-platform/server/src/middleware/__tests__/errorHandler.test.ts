@@ -7,7 +7,7 @@ jest.mock('../../utils/logger', () => ({
 
 import multer from 'multer';
 import { z } from 'zod';
-import { describeKnownError, errorHandler } from '../errorHandler';
+import { ApiError, describeKnownError, errorHandler } from '../errorHandler';
 
 describe('errorHandler', () => {
   const originalNodeEnv = process.env.NODE_ENV;
@@ -117,5 +117,26 @@ describe('errors raised in front of the handlers', () => {
 
   it('leaves everything else alone', () => {
     expect(describeKnownError(new Error('plain') as any)).toBeNull();
+  });
+});
+
+describe('the code an error was raised with', () => {
+  const respond = (err: any) => {
+    const res: any = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+    errorHandler(err, { method: 'POST', path: '/x', headers: {} } as any, res, jest.fn());
+    return { status: res.status.mock.calls[0][0], body: res.json.mock.calls[0][0] };
+  };
+
+  it('is sent, beside the sentence, when an ApiError carries one', () => {
+    const { status, body } = respond(new ApiError(503, 'Payments are paused.', { code: 'PAYMENTS_PAUSED' }));
+
+    expect(status).toBe(503);
+    expect(body).toMatchObject({ success: false, message: 'Payments are paused.', code: 'PAYMENTS_PAUSED' });
+  });
+
+  it('is left out when there is none, and when it is not a plain upper-case token', () => {
+    expect(respond(new ApiError(503, 'Not ready.')).body).not.toHaveProperty('code');
+    expect(respond(new ApiError(400, 'Nope.', { code: 'has spaces and <b>markup</b>' })).body).not.toHaveProperty('code');
+    expect(respond(new ApiError(400, 'Nope.', { code: 42 as unknown as string })).body).not.toHaveProperty('code');
   });
 });

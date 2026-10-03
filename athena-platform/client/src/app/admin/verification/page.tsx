@@ -11,7 +11,7 @@ import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { formatDistanceToNow } from 'date-fns';
-import { ArrowLeft, BadgeCheck, Building2, Loader2, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, BadgeCheck, Building2, CheckCircle2, HelpCircle, Info, Loader2, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { abnLookupUrl, type OrganisationOutcome } from '@/lib/verification-api';
 import { cn } from '@/lib/utils';
@@ -26,6 +26,20 @@ type Badge = {
   reviewedAt: string | null;
   user: { id: string; firstName: string | null; lastName: string | null; displayName: string | null; email: string; avatar: string | null };
 };
+
+/** What ATHENA could check for an employer or educator application. Prompts for the reviewer; none of them decides. */
+type ReviewerCheck = { key: string; label: string; status: 'pass' | 'warn' | 'info' | 'unavailable'; detail: string };
+
+const CHECK_STATUS: Record<ReviewerCheck['status'], { word: string; className: string; Icon: typeof Info }> = {
+  pass: { word: 'Matches', className: 'text-emerald-700 dark:text-emerald-300', Icon: CheckCircle2 },
+  warn: { word: 'Look closer', className: 'text-amber-700 dark:text-amber-300', Icon: AlertTriangle },
+  info: { word: 'For your information', className: 'text-slate-600 dark:text-slate-300', Icon: Info },
+  unavailable: { word: 'Could not check', className: 'text-slate-600 dark:text-slate-300', Icon: HelpCircle },
+};
+
+// An identity badge sets the verified tick, so approving one by hand has to
+// say what was checked; the server refuses it otherwise.
+const IDENTITY_REASON_MIN = 10;
 
 const errorMessage = (e: unknown) => (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
 const nameOf = (u: Badge['user']) => u.displayName?.trim() || [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email;
@@ -44,8 +58,8 @@ export default function AdminVerificationPage() {
   });
 
   const decide = useMutation({
-    mutationFn: ({ id, next }: { id: string; next: 'APPROVED' | 'REJECTED' }) => api.patch(`/verification/badges/${id}`, { status: next, ...(reason.trim() ? { reason: reason.trim() } : {}) }),
-    onSuccess: (r, { next }) => {
+    mutationFn: ({ id, next }: { id: string; next: 'APPROVED' | 'REJECTED'; type: string }) => api.patch(`/verification/badges/${id}`, { status: next, ...(reason.trim() ? { reason: reason.trim() } : {}) }),
+    onSuccess: (r, { next, type }) => {
       queryClient.invalidateQueries({ queryKey: ['admin-verification'] });
       setReason('');
       setSelectedId(null);
@@ -58,13 +72,31 @@ export default function AdminVerificationPage() {
       } else if (next === 'APPROVED' && organisation) {
         toast(organisation.reason ?? 'The badge was approved; the organisation was left unverified.', { icon: '!' });
       } else {
-        toast.success(next === 'APPROVED' ? 'Approved. The badge is on their profile.' : 'Rejected. They can apply again.');
+        // Only the identity badge puts anything on a profile (the verified
+        // tick). The others are recorded on the member's own verification page,
+        // so this does not say a mark is showing where none is.
+        toast.success(
+          next === 'APPROVED'
+            ? type === 'IDENTITY'
+              ? 'Approved. The verified tick is on their profile.'
+              : 'Approved. It shows as approved on their verification page.'
+            : 'Rejected. They can apply again.'
+        );
       }
     },
     onError: (e) => toast.error(errorMessage(e) || 'Could not record that'),
   });
 
   const current = list.data?.find((b) => b.id === selectedId) ?? null;
+  const hasChecks = current?.type === 'EMPLOYER' || current?.type === 'EDUCATOR';
+  const checks = useQuery({
+    queryKey: ['admin-verification-checks', current?.id],
+    queryFn: () => api.get(`/verification/badges/${current!.id}/checks`),
+    select: (r) => (Array.isArray(r.data?.data?.checks) ? (r.data.data.checks as ReviewerCheck[]) : []),
+    enabled: Boolean(current && hasChecks),
+    retry: false,
+  });
+  const identityNeedsReason = current?.type === 'IDENTITY' && reason.trim().length < IDENTITY_REASON_MIN;
 
   return (
     <div className="mx-auto max-w-6xl p-6">
@@ -141,6 +173,38 @@ export default function AdminVerificationPage() {
                 )}
               </div>
             )}
+            {hasChecks && (
+              <div className="rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700" aria-live="polite">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">What ATHENA could check</p>
+                {checks.isLoading ? (
+                  <p className="flex items-center gap-2 text-slate-500">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Checking…
+                  </p>
+                ) : checks.isError ? (
+                  <p className="text-slate-600 dark:text-slate-300">The checks could not be run just now. Use the links and the details below.</p>
+                ) : (checks.data?.length ?? 0) === 0 ? (
+                  <p className="text-slate-600 dark:text-slate-300">Nothing to check.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {checks.data!.map((check) => {
+                      const { word, className, Icon } = CHECK_STATUS[check.status];
+                      return (
+                        <li key={check.key}>
+                          <p className="text-xs text-slate-500">{check.label}</p>
+                          <p className={cn('flex items-start gap-1.5', className)}>
+                            <Icon className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden="true" />
+                            <span>
+                              <span className="font-medium">{word}.</span> {check.detail}
+                            </span>
+                          </p>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                <p className="mt-2 text-xs text-slate-500">These are prompts, not a decision. You decide.</p>
+              </div>
+            )}
             {current.metadata && Object.keys(current.metadata).length > 0 && (
               <dl className="space-y-1 text-sm">
                 {Object.entries(current.metadata).map(([k, v]) => (
@@ -161,12 +225,26 @@ export default function AdminVerificationPage() {
             )}
             {current.status === 'PENDING' ? (
               <div className="space-y-2">
-                <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} maxLength={500} placeholder="Reason (the member reads this on rejection)" aria-label="Reason" className="input w-full text-sm" />
+                <textarea
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  rows={3}
+                  maxLength={500}
+                  placeholder={current.type === 'IDENTITY' ? 'What you checked, for example the document seen and that it matches. The member can read this.' : 'Reason (the member reads this on rejection)'}
+                  aria-label="Reason"
+                  aria-describedby={current.type === 'IDENTITY' ? 'identity-reason-hint' : undefined}
+                  className="input w-full text-sm"
+                />
+                {current.type === 'IDENTITY' && (
+                  <p id="identity-reason-hint" className="text-xs text-slate-500">
+                    Approving an identity badge puts a verified tick on the profile, so say what you checked. You do not need a reason to reject.
+                  </p>
+                )}
                 <div className="flex gap-2">
-                  <button type="button" onClick={() => decide.mutate({ id: current.id, next: 'APPROVED' })} disabled={decide.isPending} className="btn-primary text-sm">
+                  <button type="button" onClick={() => decide.mutate({ id: current.id, next: 'APPROVED', type: current.type })} disabled={decide.isPending || identityNeedsReason} className="btn-primary text-sm">
                     Approve
                   </button>
-                  <button type="button" onClick={() => decide.mutate({ id: current.id, next: 'REJECTED' })} disabled={decide.isPending} className="text-sm font-medium text-red-600 hover:text-red-700">
+                  <button type="button" onClick={() => decide.mutate({ id: current.id, next: 'REJECTED', type: current.type })} disabled={decide.isPending} className="text-sm font-medium text-red-600 hover:text-red-700">
                     Reject
                   </button>
                 </div>

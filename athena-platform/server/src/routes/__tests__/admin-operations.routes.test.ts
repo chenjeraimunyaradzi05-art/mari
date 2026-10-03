@@ -43,6 +43,12 @@ jest.mock('../../utils/prisma', () => ({
     },
     user: {
       findMany: jest.fn(),
+      // Read by the notification writer for her locale before it stores the row.
+      findUnique: jest.fn(),
+    },
+    // Where a member in the safety group is told of a breach: her own notifications.
+    notification: {
+      create: jest.fn(),
     },
   },
 }));
@@ -471,6 +477,113 @@ describe('Admin operational routes', () => {
 
       expect(response.body.message).toContain('26WL');
       expect(sendEmailMock).not.toHaveBeenCalled();
+    });
+
+    describe('telling members whose safety depends on it not being seen', () => {
+      const ordinary = { id: 'user-ordinary', email: 'ordinary@example.test', firstName: 'Priya', dvSafetyProfile: null };
+      const safeMode = { id: 'user-safe', email: 'safe@example.test', firstName: 'Rachel', dvSafetyProfile: { isSafeMode: true, notificationsSafe: true } };
+      const send = {
+        userIds: ['user-ordinary', 'user-safe'],
+        notificationContent: 'Some account details were readable for six hours. We have fixed it.',
+      };
+
+      beforeEach(() => {
+        prismaAny.dataBreach.findUnique.mockResolvedValue(assessedAuRow({ statementRecommendedSteps: oaicStatement.recommendedSteps }));
+        prismaAny.dataBreach.update.mockResolvedValue({});
+        prismaAny.privacyAuditLog.create.mockResolvedValue({});
+        prismaAny.user.findMany.mockResolvedValue([ordinary, safeMode]);
+        prismaAny.contentReport.findMany.mockResolvedValue([]);
+        prismaAny.notification.create.mockResolvedValue({});
+        prismaAny.user.findUnique.mockResolvedValue({ preferredLocale: null, region: null });
+      });
+
+      it('POST /api/admin/breaches/:id/notify-users emails an ordinary member and tells a Safe Mode member in the app only', async () => {
+        const response = await request(app).post('/api/admin/breaches/breach-1/notify-users').send(send).expect(200);
+
+        expect(sendEmailMock.mock.calls.map((call) => (call[0] as { to: string }).to)).toEqual(['ordinary@example.test']);
+        expect(prismaAny.notification.create).toHaveBeenCalledTimes(1);
+        expect(prismaAny.notification.create.mock.calls[0][0].data).toMatchObject({
+          userId: 'user-safe',
+          type: 'SYSTEM',
+          title: 'Account security update',
+        });
+        expect(response.body).toMatchObject({
+          success: true,
+          requested: 2,
+          emailed: 1,
+          inApp: 1,
+          safetyMembers: 1,
+          safetyMembersInAppOnly: 1,
+          method: 'EMAIL+IN_APP',
+          failedUserIds: [],
+        });
+        expect(prismaAny.dataBreach.update.mock.calls[0][0].data.notificationMethod).toBe('EMAIL+IN_APP');
+      });
+
+      it('refuses to email a Safe Mode member without counsel, and sends nobody anything', async () => {
+        const response = await request(app)
+          .post('/api/admin/breaches/breach-1/notify-users')
+          .send({ ...send, emailSafetyMembers: true })
+          .expect(400);
+
+        expect(response.body.message).toMatch(/counselConsulted/);
+        expect(sendEmailMock).not.toHaveBeenCalled();
+        expect(prismaAny.notification.create).not.toHaveBeenCalled();
+        expect(prismaAny.dataBreach.update).not.toHaveBeenCalled();
+      });
+
+      it('emails her too, under the subject counsel approved, once counsel has been consulted', async () => {
+        await request(app)
+          .post('/api/admin/breaches/breach-1/notify-users')
+          .send({ ...send, emailSafetyMembers: true, counselConsulted: true, neutralSubject: 'Account security update' })
+          .expect(200);
+
+        const subjects = sendEmailMock.mock.calls.map((call) => [(call[0] as { to: string }).to, (call[0] as { subject: string }).subject]);
+        expect(subjects).toEqual(
+          expect.arrayContaining([
+            ['ordinary@example.test', 'Important Security Notice from ATHENA'],
+            ['safe@example.test', 'Account security update'],
+          ])
+        );
+        expect(prismaAny.notification.create).toHaveBeenCalledTimes(1);
+      });
+
+      it('wants true or false and plain text for the safety fields, not whatever the body holds', async () => {
+        await request(app).post('/api/admin/breaches/breach-1/notify-users').send({ ...send, counselConsulted: 'yes' }).expect(400);
+        await request(app).post('/api/admin/breaches/breach-1/notify-users').send({ ...send, emailSafetyMembers: 1 }).expect(400);
+        await request(app).post('/api/admin/breaches/breach-1/notify-users').send({ ...send, neutralSubject: { not: 'text' } }).expect(400);
+        await request(app).post('/api/admin/breaches/breach-1/notify-users').send({ ...send, safetyNotificationContent: 'x'.repeat(4001) }).expect(400);
+
+        expect(sendEmailMock).not.toHaveBeenCalled();
+      });
+
+      it('answers with the members no notice reached, by id', async () => {
+        prismaAny.notification.create.mockRejectedValue(new Error('write failed'));
+
+        const response = await request(app).post('/api/admin/breaches/breach-1/notify-users').send(send).expect(200);
+
+        expect(response.body.failedUserIds).toEqual(['user-safe']);
+        expect(response.body).toMatchObject({ emailed: 1, inApp: 0, method: 'EMAIL' });
+      });
+
+      it('POST /api/admin/breaches/:id/notify-users/preview says who would be told in the app only, and sends nothing', async () => {
+        const response = await request(app)
+          .post('/api/admin/breaches/breach-1/notify-users/preview')
+          .send({ userIds: ['user-ordinary', 'user-safe', 'nobody'] })
+          .expect(200);
+
+        expect(response.body).toEqual({ success: true, requested: 3, found: 2, safetyMembers: 1, ordinaryMembers: 1 });
+        expect(sendEmailMock).not.toHaveBeenCalled();
+        expect(prismaAny.notification.create).not.toHaveBeenCalled();
+        expect(prismaAny.dataBreach.update).not.toHaveBeenCalled();
+      });
+
+      it('the preview wants a list, and a breach that exists', async () => {
+        await request(app).post('/api/admin/breaches/breach-1/notify-users/preview').send({}).expect(400);
+
+        prismaAny.dataBreach.findUnique.mockResolvedValue(null);
+        await request(app).post('/api/admin/breaches/missing/notify-users/preview').send({ userIds: ['user-safe'] }).expect(404);
+      });
     });
   });
 

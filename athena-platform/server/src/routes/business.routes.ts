@@ -12,6 +12,7 @@ import {
   createAcceleratorEnrollmentPayment,
 } from '../services/payments-orchestration.service';
 import { notifyAdmins } from '../services/admin-notify.service';
+import { startingAPayment } from '../middleware/moneyLimits';
 
 const router = Router();
 
@@ -766,6 +767,7 @@ router.get(
 router.post(
   '/accelerators/enrollments/:id/payment',
   authenticate,
+  startingAPayment,
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
@@ -817,7 +819,12 @@ router.post(
 
       if (!payment.free && !payment.clientSecret) {
         logger.error(`Accelerator payment could not be started for enrollment ${enrollment.id}`);
-        throw new ApiError(500, payment.error || 'Could not start payment. Please try again.');
+        // 'pending' is an earlier payment for this place that Stripe is still
+        // settling. Nothing is wrong, and a second charge must not be started.
+        throw new ApiError(
+          payment.status === 'pending' ? 409 : 500,
+          payment.error || 'Could not start payment. Please try again.'
+        );
       }
 
       res.json({

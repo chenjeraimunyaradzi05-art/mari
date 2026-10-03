@@ -21,7 +21,20 @@ const WEIGHTS = {
   BLOCK_RECEIVED: -5,
   CONTENT_REMOVED: -15,
   SUSPENSION: -50,
-  
+
+  // What signals no person has checked can add up to, however many arrive.
+  // A report nobody has decided and a block are one account's word, and a score
+  // that a handful of accounts could move to the critical band, which puts a
+  // member in front of staff and emails her an Account Standing Update, is a
+  // way for a few people to make a woman look like the risk: the DPIA names
+  // "a survivor is wrongly scored as the aggressor". Three different people
+  // fill each cap, so a pile-on cannot go further than three, and the two
+  // together (-45) cannot take a member from the default of 75 below the
+  // critical line of 25. A report a moderator upheld is not capped: a person
+  // checked it.
+  UNDECIDED_REPORTS_CAP: -30,
+  BLOCKS_CAP: -15,
+
   // Positive factors (increase score)
   ACCOUNT_AGE_DAY: 0.1, // Per day, max 365 days
   VERIFIED_IDENTITY: 20,
@@ -64,6 +77,21 @@ export interface SafetyScoreBreakdown {
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
   restrictions: string[];
   lastUpdated: Date;
+}
+
+/**
+ * The score a member stands at: what was last worked out for her, or the
+ * baseline when nothing ever has been.
+ *
+ * The column's own default is 50 and the baseline the scorer starts from is 75,
+ * so a member who had never been assessed read as "caution" in her standing, and
+ * her first report was measured as a rise from 50 instead of a fall from 75, so
+ * the notice that goes with a fall never went. Until safetyScoreUpdatedAt is set
+ * the column holds no measurement, only the default.
+ */
+function scoreStoodAt(user: { safetyScore: number; safetyScoreUpdatedAt: Date | null } | null | undefined): number {
+  if (!user || !user.safetyScoreUpdatedAt) return WEIGHTS.DEFAULT_SCORE;
+  return user.safetyScore;
 }
 
 /**
@@ -127,8 +155,12 @@ export async function calculateSafetyScore(userId: string): Promise<SafetyScoreB
   });
   
   // 2. Verification badges
+  // A badge counts when a reviewer has approved it. This read a column the table
+  // does not have (isActive), through an `any` that hid it from the compiler, so
+  // it was always undefined and neither bonus below was ever applied: a member
+  // whose identity staff had checked scored the same as one who had not.
   const verifications = user.verificationBadges || [];
-  if (verifications.some((v: any) => v.type === 'IDENTITY' && v.isActive)) {
+  if (verifications.some((v) => v.type === 'IDENTITY' && v.status === 'APPROVED')) {
     score += WEIGHTS.VERIFIED_IDENTITY;
     factors.push({
       category: 'verification',
@@ -136,7 +168,7 @@ export async function calculateSafetyScore(userId: string): Promise<SafetyScoreB
       details: 'Identity verified',
     });
   }
-  if (verifications.some((v: any) => v.type === 'EMPLOYER' && v.isActive)) {
+  if (verifications.some((v) => v.type === 'EMPLOYER' && v.status === 'APPROVED')) {
     score += WEIGHTS.VERIFIED_EMPLOYER;
     factors.push({
       category: 'verification',
@@ -165,6 +197,14 @@ export async function calculateSafetyScore(userId: string): Promise<SafetyScoreB
     orderBy: { createdAt: 'desc' },
   });
   
+  // Each reporter and each blocker is one voice, and the unchecked voices have
+  // a ceiling (see UNDECIDED_REPORTS_CAP). Incidents are newest first, so the
+  // ones that are counted are the freshest of each.
+  const countedReporters = new Set<string>();
+  const countedBlockers = new Set<string>();
+  let undecidedReportImpact = 0;
+  let blockImpact = 0;
+
   for (const incident of incidents) {
     const decay = calculateDecay(incident.createdAt);
     let impact = 0;
@@ -191,18 +231,44 @@ export async function calculateSafetyScore(userId: string): Promise<SafetyScoreB
       continue;
     }
 
+    // A block she took back is not a block she still holds.
+    if (incident.type === 'BLOCK' && incident.resolvedAt) {
+      factors.push({ category: 'incident', impact: 0, details: `BLOCK - ${incident.reason} (lifted)` });
+      continue;
+    }
+
     switch (incident.type) {
       case 'REPORT':
-        impact = incident.verified
-          ? WEIGHTS.REPORT_VERIFIED * decay
-          : WEIGHTS.REPORT_RECEIVED * decay;
+        if (incident.verified) {
+          impact = WEIGHTS.REPORT_VERIFIED * decay;
+        } else {
+          // Nobody has decided it. One voice per reporter, and a ceiling on the
+          // lot: twenty reports from one account, or from three, move the score
+          // no further than three accounts' worth.
+          const reporter = incident.reporterId ?? incident.id;
+          if (countedReporters.has(reporter)) {
+            factors.push({ category: 'incident', impact: 0, details: `REPORT - ${incident.reason} (this reporter is already counted)` });
+            continue;
+          }
+          countedReporters.add(reporter);
+          impact = Math.max(WEIGHTS.REPORT_RECEIVED * decay, WEIGHTS.UNDECIDED_REPORTS_CAP - undecidedReportImpact);
+          undecidedReportImpact += impact;
+        }
         break;
       case 'USER_REPORT':
         impact = incident.verified ? WEIGHTS.REPORT_VERIFIED * decay : 0;
         break;
-      case 'BLOCK':
-        impact = WEIGHTS.BLOCK_RECEIVED * decay;
+      case 'BLOCK': {
+        const blocker = incident.reporterId ?? incident.id;
+        if (countedBlockers.has(blocker)) {
+          factors.push({ category: 'incident', impact: 0, details: `BLOCK - ${incident.reason} (this blocker is already counted)` });
+          continue;
+        }
+        countedBlockers.add(blocker);
+        impact = Math.max(WEIGHTS.BLOCK_RECEIVED * decay, WEIGHTS.BLOCKS_CAP - blockImpact);
+        blockImpact += impact;
         break;
+      }
       case 'CONTENT_REMOVAL':
         impact = WEIGHTS.CONTENT_REMOVED * decay;
         break;
@@ -323,9 +389,28 @@ export async function recordSafetyIncident(incident: Omit<SafetyIncident, 'id' |
    */
   const before = await prisma.user.findUnique({
     where: { id: incident.userId },
-    select: { safetyScore: true },
+    select: { safetyScore: true, safetyScoreUpdatedAt: true },
   });
-  const oldScore = before?.safetyScore ?? WEIGHTS.DEFAULT_SCORE;
+  const oldScore = scoreStoodAt(before);
+
+  // One open report, and one block, per person against another. The same
+  // account reporting someone twenty times (the report limiter allows fifteen an
+  // hour) or blocking, unblocking and blocking again is one voice, not twenty:
+  // every report still reaches the moderation queue, but it is a single entry on
+  // the score until a moderator has decided it.
+  if ((incident.type === 'REPORT' || incident.type === 'BLOCK') && incident.reporterId) {
+    const open = await prisma.safetyIncident.findFirst({
+      where: { userId: incident.userId, type: incident.type, reporterId: incident.reporterId, resolvedAt: null },
+      select: { id: true },
+    });
+    if (open) {
+      logger.info('Safety incident not recorded again: this member already has one open from the same reporter', {
+        userId: incident.userId,
+        type: incident.type,
+      });
+      return;
+    }
+  }
 
   // Create incident record
   await prisma.safetyIncident.create({
@@ -399,6 +484,15 @@ export async function recordSafetyIncident(incident: Omit<SafetyIncident, 'id' |
 }
 
 /**
+ * Reasons a report can be filed for that are about the reported member's
+ * wellbeing and not her conduct. Someone who is reported because she wrote that
+ * she wants to die needs a person to reach her, which the report queue and its
+ * alert do; a safety score that went down because she was at risk would be the
+ * platform marking a woman in crisis as a risk to others.
+ */
+const WELFARE_REASONS: ReadonlySet<string> = new Set(['self_harm']);
+
+/**
  * Handle user report event
  */
 export async function handleUserReport(
@@ -408,6 +502,8 @@ export async function handleUserReport(
   contentId?: string,
   contentType?: string
 ): Promise<void> {
+  if (WELFARE_REASONS.has(reason.trim().toLowerCase())) return;
+
   await recordSafetyIncident({
     userId: reportedUserId,
     type: 'REPORT',
@@ -444,6 +540,18 @@ export async function handleUserBlock(blockedUserId: string, blockerId: string):
     reporterId: blockerId,
     verified: true, // Blocks are automatically verified
   });
+}
+
+/**
+ * Handle a block being lifted: it stops counting against the person it was
+ * made against, and the score is worked out again without it.
+ */
+export async function handleUserUnblock(blockedUserId: string, blockerId: string): Promise<void> {
+  const lifted = await prisma.safetyIncident.updateMany({
+    where: { userId: blockedUserId, type: 'BLOCK', reporterId: blockerId, resolvedAt: null },
+    data: { resolvedAt: new Date() },
+  });
+  if (lifted.count > 0) await updateSafetyScore(blockedUserId);
 }
 
 /**
@@ -515,7 +623,7 @@ export async function getSafetyStatus(userId: string): Promise<{
     include: { verificationBadges: true },
   });
 
-  const score = user?.safetyScore ?? WEIGHTS.DEFAULT_SCORE;
+  const score = scoreStoodAt(user);
   
   let level: 'TRUSTED' | 'GOOD' | 'CAUTION' | 'RESTRICTED';
   if (score >= 85) level = 'TRUSTED';
@@ -524,8 +632,8 @@ export async function getSafetyStatus(userId: string): Promise<{
   else level = 'RESTRICTED';
   
   const badges = (user?.verificationBadges || [])
-    .filter((b: any) => b.isActive)
-    .map((b: any) => b.type);
+    .filter((b) => b.status === 'APPROVED')
+    .map((b) => b.type);
   
   return { score, level, badges, assessedAt: user?.safetyScoreUpdatedAt ?? null };
 }
@@ -536,6 +644,7 @@ export const safetyScoreService = {
   recordSafetyIncident,
   handleUserReport,
   handleUserBlock,
+  handleUserUnblock,
   handleContentRemoval,
   verifyReport,
   getSafetyStatus,

@@ -35,6 +35,10 @@
   # here would be committed):
   #   NEXT_PUBLIC_API_URL = "https://api.your-domain.com"   (baked in at build)
   #   PROXY_SHARED_SECRET = the API's value, 32+ characters (Builds and Functions scopes)
+  #   NEXT_PUBLIC_SENTRY_DSN, SENTRY_ORG, SENTRY_PROJECT, SENTRY_AUTH_TOKEN =
+  #     the error tracker (athena-platform/client/netlify.toml says what each
+  #     does). The auth token is a secret; without it errors arrive but point
+  #     at minified code, and scripts/check-web-env.js warns.
   #   NEXT_PUBLIC_TURNSTILE_SITE_KEY = the site key paired with the API's
   #     TURNSTILE_SECRET_KEY; set both or neither. athena-platform/client/
   #     netlify.toml says what each half does alone.

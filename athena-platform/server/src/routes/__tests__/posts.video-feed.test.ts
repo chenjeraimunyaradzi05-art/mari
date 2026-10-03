@@ -18,6 +18,11 @@ jest.mock('../../utils/prisma', () => ({
       findUnique: jest.fn(),
       findMany: jest.fn(),
     },
+    // ...and so does one made from the DV safety page, in both directions.
+    dvSafetyProfile: {
+      findUnique: jest.fn(async () => null),
+      findMany: jest.fn(async () => []),
+    },
   },
 }));
 

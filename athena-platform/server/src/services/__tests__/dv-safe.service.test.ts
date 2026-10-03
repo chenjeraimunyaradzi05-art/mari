@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 jest.mock('../../utils/prisma', () => ({
   prisma: {
@@ -26,6 +26,10 @@ jest.mock('../dv-sms.service', () => ({
   sendSms: jest.fn(async () => ({ sent: false, reason: 'not-configured' })),
 }));
 jest.mock('../../utils/safety-store', () => ({ blockUser: jest.fn(async () => ({ created: true })) }));
+// What a block counts towards (services/block.service loads these when it needs them).
+jest.mock('../trust.service', () => ({ recordUserBlock: jest.fn(async () => undefined) }));
+jest.mock('../safety-score.service', () => ({ handleUserBlock: jest.fn(async () => undefined), handleUserUnblock: jest.fn(async () => undefined) }));
+jest.mock('../unwanted-contact.service', () => ({ reviewUnwantedContact: jest.fn(async () => undefined) }));
 jest.mock('../../utils/logger', () => ({
   logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
@@ -34,7 +38,9 @@ import { prisma as prismaTyped } from '../../utils/prisma';
 import { sendEmail } from '../../utils/email';
 import { isSmsConfigured, sendSms } from '../dv-sms.service';
 import { blockUser as platformBlock } from '../../utils/safety-store';
-import dvSafe, { decryptMessage } from '../dv-safe.service';
+import { handleUserBlock } from '../safety-score.service';
+import { reviewUnwantedContact } from '../unwanted-contact.service';
+import dvSafe, { decryptMessage, encryptMessage } from '../dv-safe.service';
 
 const prisma: any = prismaTyped;
 
@@ -103,13 +109,91 @@ describe('DV safety settings', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     prisma.dvSafetyProfile.upsert.mockResolvedValue(profile());
+    // No enforcement twins unless a test sets them.
+    prisma.user.findUnique.mockResolvedValue(null);
     prisma.dvSafeChat.findMany.mockResolvedValue([]);
   });
 
-  it('creates the profile with defaults on first read and reports it in the settings shape', async () => {
+  it('answers a member with no profile with the defaults and writes nothing', async () => {
+    // The quick exit in the dashboard shell reads this for every member. A row
+    // is a statement that she has asked to be treated as someone who needs the
+    // protections (the breach notifier reads it as "do not email her"), so
+    // reading must never be how a member gets one.
+    prisma.dvSafetyProfile.findUnique.mockResolvedValue(null);
+    prisma.user.findUnique.mockResolvedValue({ allowMessages: true, profile: null });
+
     const settings = await dvSafe.getSafetySettings('u1');
-    expect(prisma.dvSafetyProfile.upsert).toHaveBeenCalledWith({ where: { userId: 'u1' }, update: {}, create: { userId: 'u1' } });
-    expect(settings).toMatchObject({ userId: 'u1', isSafeMode: false, safeExitUrl: 'https://www.google.com', emergencyContacts: [], hiddenChats: [] });
+
+    expect(prisma.dvSafetyProfile.findUnique).toHaveBeenCalledWith({ where: { userId: 'u1' } });
+    expect(prisma.dvSafetyProfile.upsert).not.toHaveBeenCalled();
+    expect(prisma.dvSafetyProfile.update).not.toHaveBeenCalled();
+    expect(settings).toMatchObject({
+      userId: 'u1',
+      isSafeMode: false,
+      safeExitEnabled: false,
+      safeExitUrl: 'https://www.google.com',
+      allowMessages: true,
+      emergencyContacts: [],
+      hiddenChats: [],
+      blockedUsers: [],
+      // Nothing protective is on for someone who has never turned it on.
+      notificationsSafe: false,
+    });
+  });
+
+  it('shows a member with no profile the Safe Mode she turned on in the Safety Centre', async () => {
+    prisma.dvSafetyProfile.findUnique.mockResolvedValue(null);
+    prisma.user.findUnique.mockResolvedValue({ allowMessages: false, profile: { isSafeMode: true, hideFromSearch: true } });
+
+    const settings = await dvSafe.getSafetySettings('u1');
+
+    expect(prisma.dvSafetyProfile.upsert).not.toHaveBeenCalled();
+    expect(settings).toMatchObject({ isSafeMode: true, hideFromSearch: true, allowMessages: false, notificationsSafe: true });
+  });
+
+  it('reports the enforced value of a switch whose copy here has drifted', async () => {
+    // She closed her messages and went into Safe Mode on this page, then opened
+    // her messages and left Safe Mode in the Safety Centre, which writes
+    // User.allowMessages and Profile.isSafeMode and, before this was mirrored,
+    // not this row. The messages are open and Safe Mode is off, whatever this
+    // row still says.
+    prisma.dvSafetyProfile.findUnique.mockResolvedValue(profile({ allowMessages: false, isSafeMode: false, notificationsSafe: false }));
+    prisma.user.findUnique.mockResolvedValue({ allowMessages: true, profile: { isSafeMode: false, hideFromSearch: false } });
+
+    const settings = await dvSafe.getSafetySettings('u1');
+
+    expect(settings.allowMessages).toBe(true);
+    expect(settings.isSafeMode).toBe(false);
+    expect(settings.notificationsSafe).toBe(false);
+  });
+
+  it('reports Safe Mode and a hidden profile if either store has them on, and keeps notifications vague with it', async () => {
+    prisma.dvSafetyProfile.findUnique.mockResolvedValue(profile({ isSafeMode: false, hideFromSearch: true, notificationsSafe: false }));
+    prisma.user.findUnique.mockResolvedValue({ allowMessages: true, profile: { isSafeMode: true, hideFromSearch: false } });
+
+    const settings = await dvSafe.getSafetySettings('u1');
+
+    expect(settings).toMatchObject({ isSafeMode: true, hideFromSearch: true, notificationsSafe: true });
+  });
+
+  it('makes the row she gets by changing a switch with vague notifications off', async () => {
+    prisma.dvSafetyProfile.update.mockResolvedValue(profile({ panicButtonEnabled: true, notificationsSafe: false }));
+    await dvSafe.updateSafetySettings('u1', { panicButtonEnabled: true });
+    expect(prisma.dvSafetyProfile.upsert).toHaveBeenCalledWith({
+      where: { userId: 'u1' },
+      update: {},
+      create: { userId: 'u1', notificationsSafe: false },
+    });
+  });
+
+  it('reports the profile she has in the settings shape', async () => {
+    prisma.dvSafetyProfile.findUnique.mockResolvedValue(profile({ isSafeMode: true, safeExitEnabled: true, safeExitUrl: 'https://www.bom.gov.au' }));
+    prisma.dvSafeChat.findMany.mockResolvedValue([{ id: 'chat-1' }]);
+
+    const settings = await dvSafe.getSafetySettings('u1');
+
+    expect(prisma.dvSafetyProfile.upsert).not.toHaveBeenCalled();
+    expect(settings).toMatchObject({ userId: 'u1', isSafeMode: true, safeExitEnabled: true, safeExitUrl: 'https://www.bom.gov.au', hiddenChats: ['chat-1'] });
   });
 
   it('safe mode turns every protective switch on at once', async () => {
@@ -250,6 +334,29 @@ describe('Panic button', () => {
     });
     expect(result.message).toContain('Jo');
     expect(prisma.dvPanicAlert.create.mock.calls[0][0].data).toMatchObject({ profileId: 'prof-1', notifiedContacts: ['Mum'] });
+  });
+
+  // The contact's name is typed into her emergency list and the member's is her
+  // display name, so both are text somebody chose. The one message a contact is
+  // told to act on at once must not be able to carry a link of their making.
+  it('puts both names into the alert email as text, never as markup', async () => {
+    prisma.user.findUnique.mockResolvedValue({ firstName: 'Sarah', displayName: '<a href="https://evil.example">Sarah</a>' });
+    prisma.dvSafetyProfile.upsert.mockResolvedValue(
+      profile({
+        emergencyContacts: [
+          { id: 'a', name: '<img src=x onerror=alert(1)>', phone: '0400 000 000', email: 'mum@example.com', relationship: 'Mother', notifyOnPanic: true },
+        ],
+      })
+    );
+
+    await dvSafe.triggerPanicButton('u1');
+
+    const mail = (sendEmail as any).mock.calls[0][0];
+    expect(mail.html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+    expect(mail.html).toContain('&lt;a href=&quot;https://evil.example&quot;&gt;Sarah&lt;/a&gt;');
+    expect(mail.html).not.toMatch(/<img|<a\b/);
+    // The plain-text part is read as text, so it keeps the names as they were typed.
+    expect(mail.text).toContain('<img src=x onerror=alert(1)>');
   });
 
   // The whole of this used to be `return { success: true, ... }`, sent even
@@ -544,6 +651,23 @@ describe('Safety blocks', () => {
     await expect(dvSafe.blockUser('u1', 'u1')).rejects.toMatchObject({ statusCode: 400 });
   });
 
+  // The same act through the Safety Centre counted towards the blocked account's
+  // standing and towards the count of women who have blocked her after an
+  // unwanted message; through this page it counted towards nothing.
+  it('counts towards the blocked account as a block from the Safety Centre does', async () => {
+    await dvSafe.blockUser('u1', 'abuser');
+
+    expect(handleUserBlock).toHaveBeenCalledWith('abuser', 'u1');
+    expect(reviewUnwantedContact).toHaveBeenCalledWith('abuser');
+  });
+
+  it('is still a block when what it counts towards cannot be written', async () => {
+    (handleUserBlock as any).mockRejectedValueOnce(new Error('score unavailable'));
+
+    await expect(dvSafe.blockUser('u1', 'abuser')).resolves.toBe(true);
+    expect(prisma.dvSafetyProfile.update).toHaveBeenCalled();
+  });
+
   // The platform half used to be logged and forgotten when it failed, so she
   // was told he was blocked while messages, posts and the socket — which read
   // the platform list — still let him reach her.
@@ -563,5 +687,83 @@ describe('Safety blocks', () => {
     expect(await dvSafe.isUserVisible('u1', 'friend')).toBe(true);
     prisma.dvSafetyProfile.findUnique.mockResolvedValue(null);
     expect(await dvSafe.isUserVisible('u1', 'anyone')).toBe(true);
+  });
+});
+
+// The key that seals every safe-chat message. Production must never write one
+// under a key that is missing, malformed or printed in the repository: the
+// all-zero value the example env file used to ship is 64 valid hex characters.
+describe('The safe-chat key', () => {
+  const env = { ...process.env };
+  const RANDOM_KEY = '21c983cb1baec38efae62af1e84dc644fdc9306f8b190a8e76dd98eed44be44b';
+  const OTHER_KEY = '1e7668712a2dfacf98da6906a9b348287f7013dbba1cd6f6421e36f7273132e1';
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    process.env = { ...env, NODE_ENV: 'production', DV_ENCRYPTION_KEY: RANDOM_KEY };
+    delete process.env.DV_ENCRYPTION_KEY_PREVIOUS;
+  });
+  afterEach(() => {
+    process.env = env;
+  });
+
+  it('refuses to encrypt in production without a valid key', () => {
+    delete process.env.DV_ENCRYPTION_KEY;
+    expect(() => encryptMessage('Leave Tuesday')).toThrow('DV_ENCRYPTION_KEY must be a 64-character hex key in production');
+
+    process.env.DV_ENCRYPTION_KEY = 'abc123';
+    expect(() => encryptMessage('Leave Tuesday')).toThrow(/64-character hex key in production/);
+  });
+
+  it('refuses a placeholder key in production, the all-zero one the example file used to ship', () => {
+    process.env.DV_ENCRYPTION_KEY = '0'.repeat(64);
+    expect(() => encryptMessage('Leave Tuesday')).toThrow(/and a random one/);
+  });
+
+  it('does not store a message when the key is refused, so a failed seal never becomes a plain row', async () => {
+    process.env.DV_ENCRYPTION_KEY = '0'.repeat(64);
+    prisma.dvSafeChat.findFirst.mockResolvedValue({
+      id: 'c1', profileId: 'prof-1', name: 'Plan', disguisedName: 'Recipes', accessPinHash: null,
+      wrongPinAttempts: 0, pinLockedUntil: null, wrongPinsSinceOpen: 0, lastActivity: new Date(), createdAt: new Date(),
+    });
+
+    await expect(dvSafe.sendSafeChatMessage('u1', 'c1', 'Leave Tuesday')).rejects.toThrow(/64-character hex key/);
+    expect(prisma.dvSafeMessage.create).not.toHaveBeenCalled();
+  });
+
+  it('marks what it writes with the version, and still opens a message written before there was one', () => {
+    const stored = encryptMessage('Leave Tuesday');
+    expect(stored.startsWith('enc:v1:')).toBe(true);
+    expect(decryptMessage(stored)).toBe('Leave Tuesday');
+
+    // The same bytes without the mark are what every message stored so far looks like.
+    expect(decryptMessage(stored.slice('enc:v1:'.length))).toBe('Leave Tuesday');
+  });
+
+  it('shows a message sealed under a key this host no longer has as unreadable, never as ciphertext', async () => {
+    const stored = encryptMessage('Leave Tuesday');
+    process.env.DV_ENCRYPTION_KEY = OTHER_KEY;
+
+    expect(() => decryptMessage(stored)).toThrow(/cannot be opened/);
+
+    prisma.dvSafeChat.findFirst.mockResolvedValue({
+      id: 'c1', profileId: 'prof-1', name: 'Plan', disguisedName: 'Recipes', accessPinHash: null,
+      wrongPinAttempts: 0, pinLockedUntil: null, wrongPinsSinceOpen: 0, lastActivity: new Date(), createdAt: new Date(),
+    });
+    prisma.dvSafeMessage.deleteMany.mockResolvedValue({ count: 0 });
+    prisma.dvSafeMessage.findMany.mockResolvedValue([
+      { id: 'm1', senderId: 'u1', content: stored, autoDeleteAt: null, createdAt: new Date() },
+    ]);
+    const opened = await dvSafe.accessSafeChat('u1', 'c1');
+    expect(opened.messages[0].content).toBe('[This message could not be read]');
+    expect(JSON.stringify(opened)).not.toContain('enc:v1:');
+  });
+
+  it('opens what a retired key sealed while a rotation is under way', () => {
+    const stored = encryptMessage('Leave Tuesday');
+
+    process.env.DV_ENCRYPTION_KEY = OTHER_KEY;
+    process.env.DV_ENCRYPTION_KEY_PREVIOUS = RANDOM_KEY;
+    expect(decryptMessage(stored)).toBe('Leave Tuesday');
   });
 });

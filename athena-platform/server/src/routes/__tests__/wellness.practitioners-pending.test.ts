@@ -87,10 +87,14 @@ describe('The practitioner approval queue', () => {
     expect(notices[0]).toMatchObject({ title: 'A practitioner wants to join the directory', link: '/admin/practitioners', data: { kind: 'WELLNESS_PRACTITIONER_VERIFY', practitionerId: 'pr-created' } });
   });
 
-  it('verifying tells the owner she is live; hiding takes the profile out of the queue too', async () => {
-    await request(app).patch('/api/wellness/practitioners/pr-new/verify').set(as('member')).send({ isVerified: true }).expect(403);
+  // What an admin says they checked when they verify. AHPRA has no lookup API,
+  // so this is a person's word, written down beside the decision.
+  const checked = { checkedAgainst: 'AHPRA', checkNote: 'Found on the AHPRA register under this name and number; registration is current with no conditions.' };
 
-    await request(app).patch('/api/wellness/practitioners/pr-new/verify').set(as('boss', 'ADMIN')).send({ isVerified: true }).expect(200);
+  it('verifying tells the owner she is live; hiding takes the profile out of the queue too', async () => {
+    await request(app).patch('/api/wellness/practitioners/pr-new/verify').set(as('member')).send({ isVerified: true, ...checked }).expect(403);
+
+    await request(app).patch('/api/wellness/practitioners/pr-new/verify').set(as('boss', 'ADMIN')).send({ isVerified: true, ...checked }).expect(200);
     expect(prisma.healthPractitioner.update).toHaveBeenCalledWith({ where: { id: 'pr-new' }, data: { isVerified: true } });
     expect(prisma.notification.create.mock.calls[0][0].data).toMatchObject({ userId: 'doctor', title: 'Your practice profile is live', link: '/dashboard/wellness/practice' });
 
@@ -99,8 +103,8 @@ describe('The practitioner approval queue', () => {
     expect(prisma.notification.create.mock.calls[1][0].data).toMatchObject({ userId: 'doctor', title: 'Your practice profile is hidden' });
   });
 
-  it('records which admin verified a practitioner, and what the profile said when they did', async () => {
-    await request(app).patch('/api/wellness/practitioners/pr-new/verify').set(as('boss', 'ADMIN')).send({ isVerified: true }).expect(200);
+  it('records which admin verified a practitioner, what the profile said when they did, and where they looked', async () => {
+    await request(app).patch('/api/wellness/practitioners/pr-new/verify').set(as('boss', 'ADMIN')).send({ isVerified: true, ...checked }).expect(200);
 
     const row = prisma.auditLog.create.mock.calls[0][0].data;
     expect(row).toMatchObject({ action: 'ADMIN_VERIFICATION_APPROVE', actorUserId: 'boss', targetUserId: 'doctor' });
@@ -108,7 +112,35 @@ describe('The practitioner approval queue', () => {
       resourceType: 'HealthPractitioner',
       resourceId: 'pr-new',
       checked: { name: 'Dr New', ahpraNumber: 'PSY0001234567', qualifications: ['MPsych'] },
+      check: { register: 'AHPRA', registerName: 'AHPRA', note: checked.checkNote },
     });
+  });
+
+  // The row used to hold the profile's snapshot and nothing else: what was
+  // claimed, not what was checked. A badge a woman trusts needs the second.
+  it('refuses to verify without a record of what was checked, and writes nothing', async () => {
+    const noRegister = await request(app).patch('/api/wellness/practitioners/pr-new/verify').set(as('boss', 'ADMIN')).send({ isVerified: true, checkNote: checked.checkNote }).expect(400);
+    expect(noRegister.body.message).toContain('which register');
+
+    const noBody = await request(app).patch('/api/wellness/practitioners/pr-new/verify').set(as('boss', 'ADMIN')).send({ isVerified: true, checkedAgainst: 'PROFESSIONAL_BODY', checkNote: checked.checkNote }).expect(400);
+    expect(noBody.body.message).toContain('Name the professional body');
+
+    const shortNote = await request(app).patch('/api/wellness/practitioners/pr-new/verify').set(as('boss', 'ADMIN')).send({ isVerified: true, checkedAgainst: 'AHPRA', checkNote: 'ok' }).expect(400);
+    expect(shortNote.body.message).toContain('Say what you checked');
+
+    expect(prisma.healthPractitioner.update).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
+    expect(prisma.notification.create).not.toHaveBeenCalled();
+  });
+
+  it('records the professional body by name for a kind AHPRA does not register', async () => {
+    await request(app)
+      .patch('/api/wellness/practitioners/pr-new/verify')
+      .set(as('boss', 'ADMIN'))
+      .send({ isVerified: true, checkedAgainst: 'PROFESSIONAL_BODY', registerName: 'PACFA', checkNote: 'Listed on the PACFA register as a clinical member; name and location match.' })
+      .expect(200);
+
+    expect(prisma.auditLog.create.mock.calls[0][0].data.metadata.check).toEqual({ register: 'PROFESSIONAL_BODY', registerName: 'PACFA', note: 'Listed on the PACFA register as a clinical member; name and location match.' });
   });
 
   it('answers 404 for a practitioner that does not exist, not a database error', async () => {
@@ -117,7 +149,7 @@ describe('The practitioner approval queue', () => {
       new Prisma.PrismaClientKnownRequestError('No record', { code: 'P2025', clientVersion: 'test' })
     );
 
-    await request(app).patch('/api/wellness/practitioners/nope/verify').set(as('boss', 'ADMIN')).send({ isVerified: true }).expect(404);
+    await request(app).patch('/api/wellness/practitioners/nope/verify').set(as('boss', 'ADMIN')).send({ isVerified: true, ...checked }).expect(404);
     expect(prisma.auditLog.create).not.toHaveBeenCalled();
   });
 });

@@ -76,6 +76,7 @@ jest.mock('../utils/email', () => ({
   sendVerificationEmail: jest.fn(async () => true),
   sendPasswordResetEmail: jest.fn(async () => true),
   sendWelcomeEmail: jest.fn(async () => true),
+  sendAccountExistsEmail: jest.fn(async () => true),
 }));
 
 jest.mock('../utils/password', () => ({
@@ -103,16 +104,19 @@ jest.mock('../utils/loginAttempts', () => ({
 }));
 
 jest.mock('../utils/prisma', () => {
+  // Sessions are stored by the SHA-256 of their tokens and looked up by it, so
+  // the row a lookup finds carries the hashes, as it does in the table.
+  const { hashOpaqueToken } = jest.requireActual('../utils/opaqueToken');
   const SESSION = {
     id: 'sess_test_1',
     userId: TEST_USER.id,
-    token: ACTIVE_ACCESS_TOKEN,
-    refreshToken: ACTIVE_REFRESH_TOKEN,
+    token: hashOpaqueToken(ACTIVE_ACCESS_TOKEN),
+    refreshToken: hashOpaqueToken(ACTIVE_REFRESH_TOKEN),
     expiresAt: new Date(Date.now() + 60 * 60 * 1000),
     revokedAt: null,
   };
 
-  const prisma = {
+  const prisma: any = {
     user: {
       findUnique: jest.fn(async ({ where }: any) => {
         if (where?.email) {
@@ -164,9 +168,13 @@ jest.mock('../utils/prisma', () => {
         referralCode: TEST_USER.referralCode,
       })),
       update: jest.fn(async () => ({})),
+      // A second registration for an unconfirmed address withdraws its password.
+      updateMany: jest.fn(async () => ({ count: 1 })),
     },
     // The ban list every new account is checked against; nobody here is on it.
     bannedIdentity: { findUnique: jest.fn(async () => null) },
+    // No invite code exists unless a test says so.
+    inviteCode: { findFirst: jest.fn(async () => null), updateMany: jest.fn(async () => ({ count: 0 })) },
     verificationToken: {
       create: jest.fn(async () => ({})),
       deleteMany: jest.fn(async () => ({})),
@@ -200,6 +208,8 @@ jest.mock('../utils/prisma', () => {
         ...SESSION,
         ...data,
       })),
+      // Rotation retires the old session conditionally and reports how many rows it changed.
+      updateMany: jest.fn(async () => ({ count: 1 })),
     },
     referral: {
       create: jest.fn(async () => ({})),
@@ -212,6 +222,8 @@ jest.mock('../utils/prisma', () => {
     },
     $queryRaw: jest.fn(async () => 1),
     $disconnect: jest.fn(async () => undefined),
+    // Rotation retires the old session and creates the new one in one transaction.
+    $transaction: jest.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
   };
 
   return { prisma };
@@ -220,6 +232,16 @@ jest.mock('../utils/prisma', () => {
 // Import after mocks are declared
 import { app } from '../index';
 import { prisma } from '../utils/prisma';
+import { sendAccountExistsEmail, sendPasswordResetEmail, sendVerificationEmail } from '../utils/email';
+
+/** Deferred mail is sent after the reply, so a test waits for the call rather than assuming it. */
+async function waitForCall(mock: jest.Mock, timeoutMs = 2000): Promise<void> {
+  const started = Date.now();
+  while (mock.mock.calls.length === 0) {
+    if (Date.now() - started > timeoutMs) throw new Error('The deferred email was never handed to the provider');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
 
 describe('auth endpoints (happy path, mocked prisma)', () => {
   const originalAllowedOrigins = process.env.ALLOWED_ORIGINS;
@@ -246,10 +268,127 @@ describe('auth endpoints (happy path, mocked prisma)', () => {
       .expect(201);
 
     expect(res.body).toHaveProperty('success', true);
-    expect(res.body?.data?.user?.email).toBe('new.user@example.com');
     expect(res.body?.data?.verificationRequired).toBe(true);
+    // The account is not described in the reply: a taken address gets the
+    // same body, so it cannot carry anything only a new member would be told.
+    expect(res.body?.data?.user).toBeUndefined();
     expect(res.body?.data?.accessToken).toBeUndefined();
     expect(getSetCookieHeader(res)).not.toContain('refreshToken=');
+  });
+
+  it('POST /api/auth/register answers a taken address exactly as it answers a new one', async () => {
+    const body = {
+      password: 'Password123!',
+      firstName: 'Test',
+      lastName: 'User',
+      womanSelfAttested: true,
+      dateOfBirth: '1990-05-12',
+    };
+    (prisma.user.create as jest.Mock).mockClear();
+    (sendAccountExistsEmail as jest.Mock).mockClear();
+    (sendVerificationEmail as jest.Mock).mockClear();
+
+    const fresh = await request(app).post('/api/auth/register').send({ ...body, email: REGISTER_EMAIL });
+    const taken = await request(app).post('/api/auth/register').send({ ...body, email: TEST_USER.email });
+
+    // The same status and the same body, so the form cannot be used to ask
+    // whether somebody has an account.
+    expect(taken.status).toBe(201);
+    expect(taken.status).toBe(fresh.status);
+    expect(taken.body).toEqual(fresh.body);
+    expect(Object.keys(taken.body.data)).toEqual(['verificationRequired']);
+
+    // One account was made, for the new address only.
+    expect(prisma.user.create).toHaveBeenCalledTimes(1);
+
+    // The owner of the taken address is told by email, after the reply; the
+    // new address is sent its confirmation link.
+    await waitForCall(sendAccountExistsEmail as jest.Mock);
+    expect(sendAccountExistsEmail).toHaveBeenCalledWith(TEST_USER.email, TEST_USER.firstName);
+    expect(sendVerificationEmail).toHaveBeenCalledTimes(1);
+    expect((sendVerificationEmail as jest.Mock).mock.calls[0][0]).toBe(REGISTER_EMAIL);
+  });
+
+  it('POST /api/auth/register sends a fresh confirmation link, not a notice, to an unconfirmed address', async () => {
+    (prisma.user.create as jest.Mock).mockClear();
+    (sendAccountExistsEmail as jest.Mock).mockClear();
+    (sendVerificationEmail as jest.Mock).mockClear();
+    (prisma.user.findUnique as jest.Mock).mockImplementationOnce(async () => ({
+      id: 'user_unconfirmed_1',
+      email: 'unconfirmed@example.com',
+      firstName: 'Una',
+      emailVerified: false,
+    }));
+
+    const res = await request(app)
+      .post('/api/auth/register')
+      .send({
+        email: 'unconfirmed@example.com',
+        password: 'Password123!',
+        firstName: 'Una',
+        lastName: 'Confirmed',
+        womanSelfAttested: true,
+        dateOfBirth: '1990-05-12',
+      })
+      .expect(201);
+
+    expect(res.body?.data).toEqual({ verificationRequired: true });
+    expect(prisma.user.create).not.toHaveBeenCalled();
+    await waitForCall(sendVerificationEmail as jest.Mock);
+    expect((sendVerificationEmail as jest.Mock).mock.calls[0][0]).toBe('unconfirmed@example.com');
+    expect(sendAccountExistsEmail).not.toHaveBeenCalled();
+  });
+
+  it('POST /api/auth/register gives a bad invite code the same refusal for a taken address as a new one', async () => {
+    const body = {
+      password: 'Password123!',
+      firstName: 'Test',
+      lastName: 'User',
+      womanSelfAttested: true,
+      dateOfBirth: '1990-05-12',
+      inviteCode: 'NOSUCHCODE',
+    };
+    (prisma as any).inviteCode.findFirst.mockResolvedValue(null);
+
+    const fresh = await request(app).post('/api/auth/register').send({ ...body, email: 'another.fresh@example.com' });
+    const taken = await request(app).post('/api/auth/register').send({ ...body, email: TEST_USER.email });
+
+    expect(fresh.status).toBe(400);
+    expect(taken.status).toBe(fresh.status);
+    expect(taken.body.message).toBe(fresh.body.message);
+  });
+
+  // A known address used to be slower to answer than an unknown one: the old
+  // reset token was deleted and a new one written before the reply, and an
+  // unknown address had none of that to do. All of it now follows the reply,
+  // so the only work before it is the lookup both addresses get.
+  it('POST /api/auth/forgot-password replies before it writes a reset token, for a known address as for an unknown one', async () => {
+    let releaseToken!: () => void;
+    const tokenWriteIsHeld = new Promise<void>((resolve) => {
+      releaseToken = resolve;
+    });
+    (prisma.verificationToken.deleteMany as jest.Mock).mockClear();
+    (prisma.verificationToken.create as jest.Mock).mockClear();
+    (sendPasswordResetEmail as jest.Mock).mockClear();
+    (prisma.verificationToken.create as jest.Mock).mockImplementationOnce(async () => {
+      await tokenWriteIsHeld;
+      return {};
+    });
+
+    // If the token were written before the reply, this would wait on the held
+    // write and the test would time out instead of getting an answer.
+    const known = await request(app).post('/api/auth/forgot-password').send({ email: TEST_USER.email }).expect(200);
+    const unknown = await request(app).post('/api/auth/forgot-password').send({ email: 'nobody@example.com' }).expect(200);
+    expect(known.body).toEqual(unknown.body);
+
+    // The reply is out and the write is still held: nothing was sent yet.
+    expect(sendPasswordResetEmail).not.toHaveBeenCalled();
+
+    releaseToken();
+    await waitForCall(sendPasswordResetEmail as jest.Mock);
+    expect((sendPasswordResetEmail as jest.Mock).mock.calls[0][0]).toBe(TEST_USER.email);
+    expect(prisma.verificationToken.create).toHaveBeenCalledTimes(1);
+    expect(sendPasswordResetEmail).toHaveBeenCalledTimes(1);
   });
 
   // The platform's own Terms say it is for adults and that it verifies this.

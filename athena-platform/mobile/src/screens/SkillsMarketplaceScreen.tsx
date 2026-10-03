@@ -36,6 +36,7 @@ import {
 import { unwrapApiData } from '../services/api';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { LoadingError } from '../components/ErrorBoundary';
+import { EmergencyHelpButton } from '../components/pillar/EmergencyHelp';
 
 const PAGE_SIZE = 20;
 
@@ -189,6 +190,8 @@ export function SkillsMarketplaceScreen() {
           <Ionicons name="arrow-back" size={24} color="#374151" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Skills Marketplace</Text>
+        {/* This screen draws its own header, so it carries the button itself. */}
+        <EmergencyHelpButton />
         <TouchableOpacity
           onPress={() => navigation.navigate('MyOrders')}
           accessibilityRole="button"

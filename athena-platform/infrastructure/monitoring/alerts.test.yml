@@ -167,3 +167,137 @@ tests:
             exp_annotations:
               summary: "The API has used more than 1.6 GB of its 2 GB for ten minutes."
               runbook: "A steady climb across hours is a leak; take a heap snapshot before restarting. A sudden step is usually one large request."
+
+  # Every sign-up and reset email failing, a few a minute for a quarter of an
+  # hour: a page. The failures are counted after the retries, so this is a
+  # sender or a key the provider has stopped accepting, not a blip.
+  - interval: 1m
+    input_series:
+      - series: 'athena_auth_email_total{job="athena-api", instance="api:5000", kind="verification", outcome="failed"}'
+        values: '0+1x20'
+      - series: 'athena_auth_email_total{job="athena-api", instance="api:5000", kind="verification", outcome="sent"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: AthenaAuthEmailFailing
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: AthenaAuthEmailFailing
+        exp_alerts:
+          - exp_labels:
+              severity: page
+            exp_annotations:
+              summary: "More than half of the sign-up and password-reset emails have failed over the last 15 minutes."
+              runbook: "athena-platform/docs/runbooks/ONCALL.md: \"Sign-up answers 503, or no verification email arrives\"."
+
+  # One in ten failing while the rest arrive is members' typos, not an outage.
+  - interval: 1m
+    input_series:
+      - series: 'athena_auth_email_total{job="athena-api", instance="api:5000", kind="verification", outcome="failed"}'
+        values: '0+1x20'
+      - series: 'athena_auth_email_total{job="athena-api", instance="api:5000", kind="verification", outcome="sent"}'
+        values: '0+9x20'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: AthenaAuthEmailFailing
+        exp_alerts: []
+
+  # Every one failing, but only two in the whole window: below the volume guard,
+  # so a single mistyped address on a quiet night does not wake anyone.
+  - interval: 1m
+    input_series:
+      - series: 'athena_auth_email_total{job="athena-api", instance="api:5000", kind="verification", outcome="failed"}'
+        values: '0 0 0 0 0 0 0 0 0 0 1 2 2 2 2 2 2 2 2 2 2 2'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: AthenaAuthEmailFailing
+        exp_alerts: []
+
+  # Redis lost after boot, and the sign-in lockout counting in the process
+  # instead: a ticket once it has lasted five minutes, not before, and only for
+  # the component that is affected.
+  - interval: 1m
+    input_series:
+      - series: 'athena_redis_fallback_active{job="athena-api", instance="api:5000", component="login_lockout"}'
+        values: '0 0 1 1 1 1 1 1 1 1'
+      - series: 'athena_redis_fallback_active{job="athena-api", instance="api:5000", component="rate_limit_counters"}'
+        values: '0x9'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: AthenaRedisFallbackActive
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: AthenaRedisFallbackActive
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              component: login_lockout
+            exp_annotations:
+              summary: "A sign-in or rate-limit counter has been kept in each API process, not in Redis, for five minutes."
+              runbook: "Restore Redis (athena-redis in render.yaml). Until then the limits are per instance. athena-platform/docs/runbooks/ONCALL.md: \"Redis is unreachable\"."
+
+  # A Redis that came back within a couple of minutes, or an API that has only
+  # just started, is not worth a ticket.
+  - interval: 1m
+    input_series:
+      - series: 'athena_redis_fallback_active{job="athena-api", instance="api:5000", component="rate_limit_sliding_window"}'
+        values: '0 1 1 1 0 0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: AthenaRedisFallbackActive
+        exp_alerts: []
+
+  # Refusing a request every second, for half an hour: a ticket, once it has
+  # been going for a quarter of an hour and not before.
+  - interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="athena-api", instance="api:5000", method="GET", path="/api/users/:id", status="429"}'
+        values: '0+60x30'
+      - series: 'http_requests_total{job="athena-api", instance="api:5000", method="GET", path="/api/users/:id", status="200"}'
+        values: '0+600x30'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: AthenaSustainedRateLimiting
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: AthenaSustainedRateLimiting
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+            exp_annotations:
+              summary: "The API has refused more than one request every two seconds with a 429 for fifteen minutes."
+              runbook: "athena-platform/docs/runbooks/ONCALL.md: \"High 429 rate (rate limiting)\", which says how to tell a crawler from a limit set too tight."
+
+  # A five-minute burst, then quiet: somebody clicked too fast, or a script ran
+  # and was stopped. Not worth a ticket.
+  - interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="athena-api", instance="api:5000", method="GET", path="/api/users/:id", status="429"}'
+        values: '0+120x5 600x30'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: AthenaSustainedRateLimiting
+        exp_alerts: []
+
+  # A steady twelve a minute, one every five seconds: below the floor however
+  # long it lasts. Ordinary use runs into a limit now and then.
+  - interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="athena-api", instance="api:5000", method="GET", path="/api/search/users", status="429"}'
+        values: '0+12x40'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: AthenaSustainedRateLimiting
+        exp_alerts: []
+
+  # Plenty of traffic that was not refused is not rate limiting.
+  - interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="athena-api", instance="api:5000", method="GET", path="/api/users/:id", status="200"}'
+        values: '0+6000x40'
+      - series: 'http_requests_total{job="athena-api", instance="api:5000", method="GET", path="/api/users/:id", status="500"}'
+        values: '0+10x40'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: AthenaSustainedRateLimiting
+        exp_alerts: []

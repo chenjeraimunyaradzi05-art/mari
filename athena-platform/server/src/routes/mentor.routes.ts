@@ -5,13 +5,32 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { body, query, validationResult } from 'express-validator';
+import { z } from 'zod';
+import { zodQuery } from '../middleware/validate';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
-import { isWomanVerified, womanGateState } from '../middleware/account-gates';
+import { isWomanVerified, requireAdultAccount, womanGateState } from '../middleware/account-gates';
 import * as mentorService from '../services/mentor.service';
+import { answerSessionDispute, forMember, openSessionDispute } from '../services/service-disputes.service';
 import * as mentorScheduling from '../services/mentor-scheduling.service';
+import { MENTOR_BOOKING_HORIZON_DAYS } from '../services/escrow-deadline';
+import { mayOpenMemberPage } from '../services/audience.service';
+import { clampLimit, clampPage } from '../utils/pagination';
+import { directoryReadLimiter } from '../middleware/rateLimiter';
+import { startingAPayment } from '../middleware/moneyLimits';
 
 const router = Router();
+
+/**
+ * The signed-in member's id, for the routes that sit behind `authenticate`.
+ * A missing one means the route was wired without it, so it is refused rather
+ * than asserted away.
+ */
+function memberId(req: AuthRequest): string {
+  const id = req.user?.id;
+  if (!id) throw new ApiError(401, 'Authentication required');
+  return id;
+}
 
 // ==========================================
 // PUBLIC / SEMI-PUBLIC ENDPOINTS
@@ -27,6 +46,8 @@ router.get(
   // signed-in viewer's blocks are known and can be applied. Members who asked
   // to be hidden are excluded either way.
   optionalAuth,
+  // Counted per member, or per address for a visitor, after the session is known.
+  directoryReadLimiter,
   [
     query('page').optional().isInt({ min: 1 }),
     query('limit').optional().isInt({ min: 1, max: 100 }),
@@ -53,8 +74,10 @@ router.get(
         sort: req.query.sortBy as mentorService.MentorSort | undefined,
       };
 
-      const page = parseInt(req.query.page as string) || 1;
-      const limit = parseInt(req.query.limit as string) || 20;
+      // The validators above refuse a limit over 100, but only if they run; the
+      // read itself is bounded too, so the ceiling does not depend on them.
+      const page = clampPage(req.query.page);
+      const limit = clampLimit(req.query.limit, 20, 100);
 
       const result = await mentorService.getMentors(filters, page, limit, req.user?.id);
       res.json(result);
@@ -67,11 +90,16 @@ router.get(
 /**
  * GET /api/mentors/profile/:userId
  * Get public mentor profile
+ *
+ * The page names a mentor by her name, picture, headline and bio, so it is
+ * opened only by a viewer who may be shown her (mayOpenMemberPage): the
+ * directory already leaves out a mentor who hid herself, who is in Safe Mode,
+ * or who is across a block, and a link must not be the way round that.
  */
-router.get('/profile/:userId', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/profile/:userId', optionalAuth, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const profile = await mentorService.getMentorProfile(req.params.userId);
-    if (!profile) {
+    if (!profile || !(await mayOpenMemberPage(req.user, profile.userId))) {
       throw new ApiError(404, 'Mentor profile not found');
     }
     res.json(profile);
@@ -163,6 +191,9 @@ router.get(
       res.json({
         timezone,
         date: date.toISOString(),
+        // How far ahead a paid session can be booked, so the page can stop offering
+        // days no time exists on. A mentor who charges nothing has no such limit.
+        paidSessionsDaysAhead: MENTOR_BOOKING_HORIZON_DAYS,
         slots: slots.map(slot => ({
           start: slot.start.toISOString(),
           end: slot.end.toISOString(),
@@ -230,7 +261,7 @@ router.post(
  * POST /api/mentors/enable
  * Enable mentor monetization (Stripe Connect)
  */
-router.post('/enable', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/enable', authenticate, requireAdultAccount, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const profile = await mentorService.enableMentorMonetization(req.user!.id);
     res.status(201).json({ success: true, data: profile });
@@ -243,7 +274,7 @@ router.post('/enable', authenticate, async (req: AuthRequest, res: Response, nex
  * POST /api/mentors/onboard
  * Generate Stripe Express onboarding link
  */
-router.post('/onboard', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/onboard', authenticate, requireAdultAccount, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const url = await mentorService.generateMentorStripeOnboardingLink(req.user!.id);
     res.json({ success: true, url });
@@ -272,6 +303,7 @@ router.post('/stripe-login', authenticate, async (req: AuthRequest, res: Respons
 router.post(
   '/:mentorId/book',
   authenticate,
+  startingAPayment,
   [
     body('scheduledAt').isISO8601().withMessage('Valid date required'),
     body('durationMinutes').optional().isInt({ min: 15, max: 240 }),
@@ -308,10 +340,13 @@ router.post(
 router.get(
   '/sessions',
   authenticate,
-  [query('role').isIn(['mentor', 'mentee'])],
+  // The chain that was here (role is mentor or mentee) was declared and never
+  // read, so `?role=admin` went to the service as it was. Absent still means
+  // her own sessions as a mentee, which is what the handler always did.
+  zodQuery(z.object({ role: z.enum(['mentor', 'mentee']).default('mentee') })),
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
-      const role = (req.query.role as 'mentor' | 'mentee') || 'mentee';
+      const role = req.query.role as unknown as 'mentor' | 'mentee';
       const sessions = await mentorService.getUserSessions(req.user!.id, role);
       res.json(sessions);
     } catch (error) {
@@ -378,6 +413,53 @@ router.post('/sessions/:sessionId/payment-intent', authenticate, async (req: Aut
 });
 
 /**
+ * POST /api/mentors/sessions/:sessionId/dispute
+ * The mentee says a paid session did not take place (mentee only).
+ *
+ * The card stays held, or a charge already made is not paid on, while ATHENA's
+ * team decides. See service-disputes.service for when it is open to her.
+ */
+router.post(
+  '/sessions/:sessionId/dispute',
+  authenticate,
+  [body('reason').isString().trim().isLength({ min: 5, max: 2000 }).withMessage('Tell us what went wrong, in 5 to 2000 characters')],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+      const session = await openSessionDispute(req.params.sessionId, memberId(req), req.body.reason);
+      res.status(201).json({ success: true, data: forMember(session) });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * POST /api/mentors/sessions/:sessionId/dispute/respond
+ * The mentor's one answer to a session in dispute (the session's mentor only).
+ */
+router.post(
+  '/sessions/:sessionId/dispute/respond',
+  authenticate,
+  [body('response').isString().trim().isLength({ min: 5, max: 2000 }).withMessage('Write your answer, in 5 to 2000 characters')],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+      const session = await answerSessionDispute(req.params.sessionId, memberId(req), req.body.response);
+      res.json({ success: true, data: forMember(session) });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
  * PATCH /api/mentors/sessions/:sessionId
  * Reschedule a session
  */
@@ -415,10 +497,10 @@ router.patch(
  * GET /api/mentors/:mentorId
  * Get mentor profile by mentor profile id
  */
-router.get('/:mentorId', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/:mentorId', optionalAuth, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const profile = await mentorService.getMentorProfileById(req.params.mentorId);
-    if (!profile) {
+    if (!profile || !(await mayOpenMemberPage(req.user, profile.userId))) {
       throw new ApiError(404, 'Mentor profile not found');
     }
     res.json({ success: true, data: profile });

@@ -17,6 +17,7 @@ jest.mock('../../utils/prisma', () => ({
     user: { findUnique: jest.fn(), findMany: jest.fn(async () => []), update: jest.fn() },
     post: { findUnique: jest.fn(), update: jest.fn(async () => ({})) },
     comment: { findUnique: jest.fn(), update: jest.fn(async () => ({})) },
+    housingListing: { findUnique: jest.fn() },
     contentReport: { create: jest.fn(), findMany: jest.fn(async () => []) },
     safetyIncident: { findMany: jest.fn(async () => []), findUnique: jest.fn(), count: jest.fn(async () => 0) },
     auditLog: { create: jest.fn(async () => ({})) },
@@ -38,6 +39,7 @@ jest.mock('../../middleware/auth', () => ({
 const scoring = {
   handleUserReport: jest.fn(async (..._args: unknown[]) => undefined),
   handleUserBlock: jest.fn(async (..._args: unknown[]) => undefined),
+  handleUserUnblock: jest.fn(async (..._args: unknown[]) => undefined),
   verifyReport: jest.fn(async (..._args: unknown[]) => undefined),
   getSafetyStatus: jest.fn(async () => ({ score: 60, level: 'GOOD', badges: [], assessedAt: new Date('2026-09-20T00:00:00Z') })),
   calculateSafetyScore: jest.fn(async () => ({ score: 55, factors: [{ category: 'incident', impact: -10, details: 'REPORT - spam (recent)' }], riskLevel: 'MEDIUM', restrictions: ['rate_limited'], lastUpdated: new Date() })),
@@ -63,9 +65,9 @@ jest.mock('../../services/content-report.service', () => ({
 }));
 
 const store = {
-  blockUser: jest.fn(async () => ({ created: true })),
+  blockUser: jest.fn(async (..._args: unknown[]) => ({ created: true })),
   listBlockedUsers: jest.fn(async () => [] as any[]),
-  unblockUser: jest.fn(async () => undefined),
+  unblockUser: jest.fn(async (..._args: unknown[]) => undefined),
 };
 jest.mock('../../utils/safety-store', () => store);
 
@@ -82,6 +84,7 @@ jest.mock('../../utils/logger', () => ({
 
 import { app } from '../../index';
 import { prisma as prismaTyped } from '../../utils/prisma';
+import { reviewReportedContent } from '../../services/moderation-threshold.service';
 
 const prisma: any = prismaTyped;
 const as = (id: string, role = 'USER') => ({ 'x-test-user': id, 'x-test-role': role });
@@ -164,6 +167,89 @@ describe('POST /api/safety/reports', () => {
     );
   });
 
+  // An intimate image shared without consent, and a threat to hurt someone. A
+  // reporter used to have to guess "sexual content" or "violence", and either ran
+  // at high on the 48-hour harmful-content clock, hiding nothing.
+  describe.each(['intimate_image', 'threat'])('a report of %s', (reason) => {
+    it('is critical, on the 24-hour illegal-content clock, and tells Trust & Safety at once', async () => {
+      prisma.post.findUnique.mockResolvedValue({ authorId: 'him' });
+      prisma.contentReport.create.mockImplementation(async ({ data }: any) => ({ id: 'rep-s', ...data, createdAt: new Date(), updatedAt: new Date() }));
+
+      const before = Date.now();
+      const res = await request(app)
+        .post('/api/safety/reports')
+        .set(as(`her-${reason}`))
+        .send({ targetType: 'post', targetId: 'post-1', reason })
+        .expect(201);
+
+      const data = prisma.contentReport.create.mock.calls[0][0].data;
+      expect(data).toMatchObject({ reason, priority: 'URGENT', status: 'PENDING' });
+      expect(data.evidence).toMatchObject({ priority: 'critical', reviewHours: 24 });
+      expect(data.reviewDeadline.getTime()).toBeGreaterThanOrEqual(before + 24 * 60 * 60 * 1000 - 1000);
+      expect(data.reviewDeadline.getTime()).toBeLessThanOrEqual(before + 24 * 60 * 60 * 1000 + 60_000);
+      expect(res.body.data.reviewHours).toBe(24);
+      expect(runReportIntakeConsequences).toHaveBeenCalledWith(
+        expect.objectContaining({ ticketId: data.evidence.ticketId, reason, priority: 'critical', reviewHours: 24 })
+      );
+    });
+
+    it('tells the threshold service the reason and the reference, which is what hides a post, comment or reel on one report', async () => {
+      prisma.post.findUnique.mockResolvedValue({ authorId: 'him' });
+      prisma.contentReport.create.mockImplementation(async ({ data }: any) => ({ id: 'rep-h', ...data, createdAt: new Date(), updatedAt: new Date() }));
+
+      await request(app).post('/api/safety/reports').set(as(`her-hide-${reason}`)).send({ targetType: 'post', targetId: 'post-1', reason }).expect(201);
+
+      expect(reviewReportedContent).toHaveBeenCalledWith('post', 'post-1', { reason, ticketId: expect.stringMatching(/^RPT-/) });
+    });
+
+    it('is counted towards the safety score like any other report of conduct', async () => {
+      prisma.post.findUnique.mockResolvedValue({ authorId: 'him' });
+      prisma.contentReport.create.mockImplementation(async ({ data }: any) => ({ id: 'rep-sc', ...data, createdAt: new Date(), updatedAt: new Date() }));
+
+      await request(app).post('/api/safety/reports').set(as(`her-score-${reason}`)).send({ targetType: 'post', targetId: 'post-1', reason }).expect(201);
+
+      expect(scoring.handleUserReport).toHaveBeenCalledWith('him', `her-score-${reason}`, reason, 'post-1', 'post');
+    });
+  });
+
+  // A listing is the thing a woman in a hard place is told to trust, so it has to
+  // be reportable, and the report has to reach the person who offers it.
+  describe('a housing listing', () => {
+    it('is reported against the member who listed it', async () => {
+      prisma.housingListing.findUnique.mockResolvedValue({ agentId: 'lister', status: 'ACTIVE' });
+      prisma.contentReport.create.mockImplementation(async ({ data }: any) => ({ id: 'rep-h', ...data, createdAt: new Date(), updatedAt: new Date() }));
+
+      await request(app)
+        .post('/api/safety/reports')
+        .set(as('her'))
+        .send({ targetType: 'housing_listing', targetId: 'listing-1', reason: 'other', details: 'The address is not where it says' })
+        .expect(201);
+
+      expect(prisma.housingListing.findUnique.mock.calls[0][0].where).toEqual({ id: 'listing-1' });
+      expect(prisma.contentReport.create.mock.calls[0][0].data).toMatchObject({
+        reporterId: 'her',
+        reportedUserId: 'lister',
+        contentType: 'HOUSING_LISTING',
+        contentId: 'listing-1',
+      });
+      expect(scoring.handleUserReport).toHaveBeenCalledWith('lister', 'her', 'other', 'listing-1', 'housing_listing');
+    });
+
+    it.each(['PENDING', 'WITHDRAWN', 'LEASED'])('cannot be reported while it is %s, because it is not in front of anyone', async (status) => {
+      prisma.housingListing.findUnique.mockResolvedValue({ agentId: 'lister', status });
+      await request(app).post('/api/safety/reports').set(as('her')).send({ targetType: 'housing_listing', targetId: 'listing-1', reason: 'other' }).expect(400);
+      expect(prisma.contentReport.create).not.toHaveBeenCalled();
+    });
+
+    it('is refused when there is no such listing, or it has no lister to route to', async () => {
+      prisma.housingListing.findUnique.mockResolvedValue(null);
+      await request(app).post('/api/safety/reports').set(as('her')).send({ targetType: 'housing_listing', targetId: 'gone', reason: 'other' }).expect(400);
+      prisma.housingListing.findUnique.mockResolvedValue({ agentId: null, status: 'ACTIVE' });
+      await request(app).post('/api/safety/reports').set(as('her')).send({ targetType: 'housing_listing', targetId: 'orphan', reason: 'other' }).expect(400);
+      expect(prisma.contentReport.create).not.toHaveBeenCalled();
+    });
+  });
+
   it('refuses a reason the intake does not know, rather than filing it as medium and alerting nobody', async () => {
     prisma.post.findUnique.mockResolvedValue({ authorId: 'him' });
 
@@ -215,6 +301,37 @@ describe('POST /api/safety/blocks', () => {
     store.blockUser.mockResolvedValue({ created: false });
     await request(app).post('/api/safety/blocks').set(as('her')).send({ blockedUserId: 'him' }).expect(200);
     expect(scoring.handleUserBlock).toHaveBeenCalledTimes(1);
+  });
+
+  // The block is written first and is what protects her. The score used to be
+  // awaited bare after it, so a failure there returned an error for a block that
+  // was in place, and she pressed it again.
+  it('is still a block, and says so, when what it counts towards cannot be written', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: 'him' });
+    store.listBlockedUsers.mockResolvedValue([{ blockedUserId: 'him', createdAt: new Date().toISOString() }]);
+    scoring.handleUserBlock.mockRejectedValueOnce(new Error('score unavailable'));
+
+    const res = await request(app).post('/api/safety/blocks').set(as('her')).send({ blockedUserId: 'him' }).expect(201);
+
+    expect(store.blockUser).toHaveBeenCalledWith('her', 'him');
+    expect(res.body.data.blockedUserId).toBe('him');
+  });
+});
+
+describe('DELETE /api/safety/blocks/:blockedUserId', () => {
+  it('lifts the block and stops it counting against the account it was made against', async () => {
+    await request(app).delete('/api/safety/blocks/him').set(as('her')).expect(200);
+
+    expect(store.unblockUser).toHaveBeenCalledWith('her', 'him');
+    expect(scoring.handleUserUnblock).toHaveBeenCalledWith('him', 'her');
+  });
+
+  it('is still lifted when the score cannot be worked out again', async () => {
+    scoring.handleUserUnblock.mockRejectedValueOnce(new Error('score unavailable'));
+
+    await request(app).delete('/api/safety/blocks/him').set(as('her')).expect(200);
+
+    expect(store.unblockUser).toHaveBeenCalledWith('her', 'him');
   });
 });
 

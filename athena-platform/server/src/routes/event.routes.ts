@@ -9,11 +9,12 @@ import { notifyAdmins } from '../services/admin-notify.service';
 import { auditAfterCommit } from '../services/admin-audit.service';
 import { notificationService } from '../services/notification.service';
 import { bestEffort } from '../utils/best-effort';
-import { getBlockedRelationshipIds } from '../utils/safety-store';
+import { blockedEitherWayIds, isBlockedEitherWay } from '../services/audience.service';
 import { logger } from '../utils/logger';
 import { runExclusively } from '../utils/redis';
 import { recordFailure, recordSuccess } from '../utils/ops-metrics';
 import { sendEmail } from '../utils/email';
+import { publicName } from '../utils/member-display';
 
 const router = Router();
 
@@ -160,7 +161,17 @@ function eventView(dbEvent: any, userId?: string, viewerRole?: string) {
   };
 }
 
-async function getEventView(eventId: string, userId?: string, viewerRole?: string) {
+/**
+ * `contact` is for the routes where the viewer reaches the host: opening the
+ * listing, registering, saving. A member on either side of a block with the
+ * host is answered as though the event were not there. The listing carries the
+ * host's name and picture, and a registration puts the registrant's name on the
+ * list the host reads and gives her the joining link, so an event is a way round
+ * a block unless it is held to it. Staff are not held to it (they reach events
+ * through moderation). A lookup that fails fails the request: answering "not
+ * blocked" on a guess is how a blocked man ends up on the guest list.
+ */
+async function getEventView(eventId: string, userId?: string, viewerRole?: string, contact = false) {
   const include: Prisma.EventInclude = {
     _count: { select: { registrations: true } },
   };
@@ -177,6 +188,11 @@ async function getEventView(eventId: string, userId?: string, viewerRole?: strin
   if (event.isHidden && !isAdminRole(viewerRole) && !hostMaySee) {
     throw new ApiError(404, 'Event not found');
   }
+  if (contact && userId && event.hostUserId && event.hostUserId !== userId && !isAdminRole(viewerRole)) {
+    if (await isBlockedEitherWay(userId, event.hostUserId)) {
+      throw new ApiError(404, 'Event not found');
+    }
+  }
   return eventView(event, userId, viewerRole);
 }
 
@@ -191,6 +207,15 @@ async function getEventView(eventId: string, userId?: string, viewerRole?: strin
 function startOfToday(): Date {
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+/**
+ * Events not hosted by any of these members. An ATHENA listing has no host
+ * (hostUserId is null), and a bare notIn would drop it: SQL's NOT IN is never
+ * true for a null.
+ */
+function notHostedBy(memberIds: string[]): Prisma.EventWhereInput {
+  return { OR: [{ hostUserId: null }, { hostUserId: { notIn: memberIds } }] };
 }
 
 /**
@@ -227,6 +252,11 @@ router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
     // database unread. Filtering here means the hundred rows are the hundred
     // that are actually coming up.
     const filters: Prisma.EventWhereInput[] = [visibility, { date: { gte: startOfToday() } }];
+    // A member on either side of a block with a host does not see her events, as
+    // she is not shown her posts: the listing carries the host's name and picture.
+    // An ATHENA listing has no host to block, and staff see everything.
+    const blocked = req.user?.id && !isAdminRole(req.user.role) ? await blockedEitherWayIds(req.user.id) : [];
+    if (blocked.length > 0) filters.push(notHostedBy(blocked));
     if (dbType) filters.push({ type: dbType });
     if (q) {
       filters.push({
@@ -285,6 +315,8 @@ router.get('/mine', authenticate, async (req: AuthRequest, res, next) => {
       registrations: { where: { userId }, select: { id: true } },
       saves: { where: { userId }, select: { id: true } },
     };
+    // The ones she attends are held to a block with the host, as the catalogue is.
+    const blocked = isAdminRole(req.user?.role) ? [] : await blockedEitherWayIds(userId);
     const [hosting, attending] = await Promise.all([
       prisma.event.findMany({ where: { hostUserId: userId }, include, orderBy: { date: 'desc' }, take: 50 }),
       prisma.event.findMany({
@@ -293,6 +325,7 @@ router.get('/mine', authenticate, async (req: AuthRequest, res, next) => {
             { registrations: { some: { userId } } },
             { date: { gte: startOfToday() } },
             { OR: [{ isHidden: false }, { hostUserId: userId }] },
+            ...(blocked.length > 0 ? [notHostedBy(blocked)] : []),
           ],
         },
         include,
@@ -317,7 +350,7 @@ router.get('/mine', authenticate, async (req: AuthRequest, res, next) => {
  */
 router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
-    res.json({ success: true, data: await getEventView(req.params.id, req.user?.id, req.user?.role) });
+    res.json({ success: true, data: await getEventView(req.params.id, req.user?.id, req.user?.role, true) });
   } catch (err) {
     next(err);
   }
@@ -329,8 +362,11 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
 router.post('/:id/register', authenticate, async (req: AuthRequest, res, next) => {
   try {
     // Ensure the event exists and this member may see it. Her own id goes in
-    // because a held listing is visible to its host, and to nobody else.
-    const event = await getEventView(req.params.id, req.user!.id, req.user?.role);
+    // because a held listing is visible to its host, and to nobody else. The
+    // last argument holds her to a block with the host: registering names her on
+    // the list the host reads and hands her the joining link, so a member on
+    // either side of a block gets the answer for an event that is not there.
+    const event = await getEventView(req.params.id, req.user!.id, req.user?.role, true);
 
     // A called-off event is not taking places. The listing stays up so the
     // women who registered can see what happened to it, and without this a
@@ -423,7 +459,10 @@ router.delete('/:id/register', authenticate, async (req: AuthRequest, res, next)
       if (err?.code !== 'P2025') throw err;
     }
 
-    res.json({ success: true, data: await getEventView(req.params.id, req.user!.id, req.user?.role) });
+    // The registration is gone either way. What is sent back is the listing, and
+    // a member on either side of a block with the host is not shown it, so these
+    // answer as an event that is not there, as the routes that add one do.
+    res.json({ success: true, data: await getEventView(req.params.id, req.user!.id, req.user?.role, true) });
   } catch (err) {
     next(err);
   }
@@ -435,8 +474,9 @@ router.delete('/:id/register', authenticate, async (req: AuthRequest, res, next)
 router.post('/:id/save', authenticate, async (req: AuthRequest, res, next) => {
   try {
     // Ensure the event exists and this member may see it. Her own id goes in
-    // because a held listing is visible to its host, and to nobody else.
-    await getEventView(req.params.id, req.user!.id, req.user?.role);
+    // because a held listing is visible to its host, and to nobody else. Not
+    // across a block with the host, as for registering.
+    await getEventView(req.params.id, req.user!.id, req.user?.role, true);
 
     await prisma.eventSave.upsert({
       where: { eventId_userId: { eventId: req.params.id, userId: req.user!.id } },
@@ -467,7 +507,9 @@ router.delete('/:id/save', authenticate, async (req: AuthRequest, res, next) => 
       if (err?.code !== 'P2025') throw err;
     }
 
-    res.json({ success: true, data: await getEventView(req.params.id, req.user!.id, req.user?.role) });
+    // As for the registration above: the save is gone, and the listing is not sent
+    // back across a block with the host.
+    res.json({ success: true, data: await getEventView(req.params.id, req.user!.id, req.user?.role, true) });
   } catch (err) {
     next(err);
   }
@@ -593,6 +635,8 @@ function assertEventShape(e: {
  * the people who have said they are coming. The admin events console at
  * /admin/events is where a held listing is read and released.
  */
+// validated: parseEventInput checks every field: text through normalizeUserText with its length,
+//   type and format against their lists, the date and the HH:MM times by pattern.
 router.post('/', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const b = (req.body ?? {}) as Record<string, unknown>;
@@ -610,10 +654,10 @@ router.post('/', authenticate, async (req: AuthRequest, res, next) => {
 
     const host = await prisma.user.findUnique({
       where: { id: req.user!.id },
-      select: { displayName: true, firstName: true, lastName: true, headline: true, avatar: true },
+      select: { displayName: true, firstName: true, headline: true, avatar: true },
     });
-    const hostName =
-      host?.displayName?.trim() || [host?.firstName, host?.lastName].filter(Boolean).join(' ').trim() || 'ATHENA member';
+    // The host is named on the event for everyone who sees it: her public name, else her first name.
+    const hostName = publicName(host, 'ATHENA member');
 
     const created = await prisma.event.create({
       data: {
@@ -771,7 +815,7 @@ router.get('/:id/registrations', authenticate, async (req: AuthRequest, res, nex
           },
         },
       }),
-      isHost ? getBlockedRelationshipIds(req.user!.id) : Promise.resolve([] as string[]),
+      isHost ? blockedEitherWayIds(req.user!.id) : Promise.resolve([] as string[]),
     ]);
     const blockedIds = new Set(blocked);
 
@@ -831,6 +875,7 @@ function sameValue(a: unknown, b: unknown): boolean {
  * PATCH /api/events/:id
  * The host changes her own listing.
  */
+// validated: parseEventInput (partial) checks each field that is sent, as on create.
 router.patch('/:id', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { event, isHost } = await loadOwnEvent(req.params.id, req.user!);
@@ -977,6 +1022,8 @@ function cancellationReason(raw: unknown, staff: boolean): string {
  * naming a room and an hour lands in an inbox that is not always hers alone.
  * An event that has already happened is history, and stays as it was.
  */
+// validated: reason goes through cancellationReason: one of the host reasons, or for staff text of
+//   3 to 500 characters.
 router.post('/:id/cancel', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { event, isHost } = await loadOwnEvent(req.params.id, req.user!);
@@ -1233,6 +1280,12 @@ router.get('/:id/calendar.ics', authenticate, async (req: AuthRequest, res, next
     });
     const isHost = Boolean(event?.hostUserId && event.hostUserId === userId);
     if (!event || (event.isHidden && !isHost && !staff)) {
+      throw new ApiError(404, 'Event not found');
+    }
+    // The file carries the place and the joining link, so a member on either side
+    // of a block with the host is answered as for an event that is not there, even
+    // with a registration she made before the block.
+    if (event.hostUserId && !isHost && !staff && (await isBlockedEitherWay(userId, event.hostUserId))) {
       throw new ApiError(404, 'Event not found');
     }
     if (event.registrations.length === 0 && !isHost && !staff) {

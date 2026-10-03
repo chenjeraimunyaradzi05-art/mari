@@ -24,7 +24,7 @@ import {
 import { useAuthStore, useUIStore, useNotificationStore, useMessageStore } from './store';
 import { socketClient } from './socket';
 // getAccessToken no longer needed here — auth bootstrap handled by AuthInitializer
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import toast from 'react-hot-toast';
 
 // Re-export stores for convenience
@@ -72,14 +72,16 @@ export function useAuth() {
     },
   });
 
+  // Registration does not sign anybody in. The server answers every address
+  // the same way, taken or free, with `verificationRequired: true` and no
+  // account and no token, and the link that opens the account is in an email.
+  // This used to read an access token out of that reply, which is not there,
+  // call login() with undefined and welcome her to a dashboard she could not
+  // reach, so a new member was never told to check her inbox. Success now
+  // means only "ask her to check her email"; the register page does that from
+  // `registeredEmail`.
   const registerMutation = useMutation({
     mutationFn: authApi.register,
-    onSuccess: (response) => {
-      const { user: userData, accessToken } = response.data.data;
-      login(userData, accessToken, '');
-      queryClient.invalidateQueries();
-      toast.success('Welcome to ATHENA!');
-    },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || 'Registration failed');
     },
@@ -104,6 +106,11 @@ export function useAuth() {
     isLoading,
     login: loginMutation.mutate,
     register: registerMutation.mutate,
+    // The address a registration was accepted for, until she starts again;
+    // null before one has been. Accepted does not mean created: a taken
+    // address gets the same answer, so this is only "an email is on its way".
+    registeredEmail: registerMutation.isSuccess ? registerMutation.variables?.email ?? null : null,
+    resetRegistration: registerMutation.reset,
     logout: logoutMutation.mutate,
     isLoginPending: loginMutation.isPending,
     isRegisterPending: registerMutation.isPending,
@@ -276,16 +283,23 @@ export function useDeleteAccount() {
   const queryClient = useQueryClient();
   const { logout } = useAuthStore();
 
+  // Closing an account is one thing wherever it is started: Settings, the
+  // Privacy Centre and the privacy settings all open DeleteAccountDialog, which
+  // calls this. The server runs the full erasure at once, so what she is told
+  // is the server's own account of what happened (everything deleted, or a
+  // shell kept for records the law requires), and she is signed out because
+  // there is nothing left to be signed in to.
+  //
+  // A refusal is not toasted here: the dialog shows it beside the boxes she may
+  // have got wrong (a password, a code), and it says nothing has been deleted
+  // when billing could not be ended or a legal hold applies.
   return useMutation({
-    mutationFn: userApi.deleteAccount,
-    onSuccess: () => {
+    mutationFn: (answers?: { currentPassword?: string; code?: string }) => userApi.deleteAccount(answers),
+    onSuccess: (response) => {
       logout();
       queryClient.clear();
-      toast.success('Account deleted');
+      toast.success(response?.data?.message || 'Your account has been deleted.');
       window.location.href = '/';
-    },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Failed to delete account');
     },
   });
 }
@@ -1096,6 +1110,36 @@ export function useDeleteStatus() {
 
 
 // ============================================
+// LIVE UPDATES AND THE POLL BEHIND THEM
+// ============================================
+
+/**
+ * How often a list the socket also keeps fresh is asked for again when the
+ * socket is not there to say it changed.
+ */
+const SAFETY_NET_POLL_MS = 30_000;
+
+/**
+ * Whether the realtime connection is up, for the lists the server pushes
+ * changes to (the bell, the thread list, the Messages badge).
+ *
+ * While it is, the server says when something moves and the client refetches
+ * then, so polling on a timer as well only spends the member's API budget: the
+ * dashboard shell mounts the bell and the badge on every page, and two polls
+ * every thirty seconds is four calls a minute on a page nobody is touching. The
+ * poll resumes the moment the socket drops, which is the case it was written
+ * for, and a reconnect refetches these lists anyway (lib/socket.ts catches up
+ * after a dropout), so nothing that arrived in the gap is left behind.
+ */
+function useSocketConnected(): boolean {
+  return useSyncExternalStore(
+    (onChange) => socketClient.onChange(onChange),
+    () => socketClient.isConnected(),
+    () => false
+  );
+}
+
+// ============================================
 // NOTIFICATION HOOKS
 // ============================================
 export function useNotifications(params?: any) {
@@ -1113,12 +1157,13 @@ export function useNotifications(params?: any) {
       }),
     [queryClient, paramsKey]
   );
+  const live = useSocketConnected();
 
   return useQuery({
     queryKey: ['notifications', params],
     queryFn: () => notificationApi.getAll(params),
     select: (response) => response.data.data,
-    refetchInterval: 30000, // Refetch every 30 seconds
+    refetchInterval: live ? false : SAFETY_NET_POLL_MS,
   });
 }
 
@@ -1219,6 +1264,7 @@ export function useConversations() {
       }),
     [queryClient]
   );
+  const live = useSocketConnected();
 
   return useInfiniteQuery({
     queryKey: ['conversations', 'list'],
@@ -1226,7 +1272,7 @@ export function useConversations() {
     initialPageParam: 1,
     getNextPageParam: nextPageOf,
     select: selectFlattenedRows as (data: InfiniteData<PagedRows, number>) => ConversationRow[],
-    refetchInterval: 30000,
+    refetchInterval: live ? false : SAFETY_NET_POLL_MS,
   });
 }
 
@@ -1245,11 +1291,15 @@ export function useMessages(conversationId: string) {
 // What the send endpoint accepts alongside the text — an already-uploaded file,
 // described by the URL the media service handed back.
 export interface OutgoingAttachment {
-  url: string;
+  /** Where the file now lives, under the conversation's own folder (lib/chat-attachments). Never a link. */
+  key: string;
   name?: string;
   contentType?: string;
   size?: number;
 }
+
+/** Which conversation a file is for. It decides who may ever open it, so it is said before the file goes up. */
+export type ChatUploadTarget = { conversationId: string } | { groupId: string };
 
 export function useSendMessage() {
   const queryClient = useQueryClient();
@@ -1320,22 +1370,20 @@ export function useToggleMessageReaction() {
   });
 }
 
-// Chat attachments ride the shared media pipeline, which only serves the
-// `posts` and `videos` folders publicly — a recipient cannot read anything we
-// put in the private folders, so those types are refused at the picker.
-export function useUploadChatAttachment() {
+// A file sent in a conversation goes to that conversation's own private
+// folder, and the message carries its key: it is opened only by the people in
+// the thread, through a link the API mints for each of them when the message is
+// shown (lib/chat-attachments). It used to go up as a post picture or a reel,
+// to a public link with no audience, no expiry and no deletion, and the server
+// no longer accepts a link on a message at all.
+export function useUploadChatAttachment(target: ChatUploadTarget) {
   return useMutation({
     mutationFn: async (file: File): Promise<OutgoingAttachment> => {
-      const uploadType = file.type.startsWith('video/')
-        ? 'video'
-        : file.type.startsWith('audio/')
-          ? 'audio'
-          : 'post';
-      const response = await mediaApi.upload(uploadType, file);
+      const response = await mediaApi.uploadChatFile(file, target);
       const uploaded = response.data.data;
 
       return {
-        url: uploaded.url,
+        key: uploaded.key,
         name: file.name,
         contentType: uploaded.contentType,
         size: uploaded.size,
@@ -1366,6 +1414,7 @@ export function useUnreadMessageCount() {
       }),
     [queryClient]
   );
+  const live = useSocketConnected();
 
   return useQuery({
     queryKey: ['conversations', 'unread'],
@@ -1378,7 +1427,7 @@ export function useUnreadMessageCount() {
       return total;
     },
     enabled: isAuthenticated && !isLoading,
-    refetchInterval: 30000,
+    refetchInterval: live ? false : SAFETY_NET_POLL_MS,
   });
 }
 
@@ -1634,14 +1683,32 @@ export function useManageBilling() {
   });
 }
 
+/**
+ * What a member is told when she cancels. Cancelling ends nothing today: the
+ * membership runs to the end of the period she has paid for (or, in a trial,
+ * to the day the first charge would have been taken), and "Subscription
+ * cancelled" read as if it had stopped. The server sends the date.
+ */
+export function cancellationMessage(data?: { currentPeriodEnd?: string | null; trialing?: boolean } | null): string {
+  const ends = data?.currentPeriodEnd ? new Date(data.currentPeriodEnd) : null;
+  const when =
+    ends && !Number.isNaN(ends.getTime())
+      ? ends.toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Australia/Brisbane' })
+      : null;
+  if (!when) return 'Cancelled. You keep your membership until the end of the period you have paid for.';
+  return data?.trialing
+    ? `Cancelled. You keep Pro until ${when}, and you will not be charged.`
+    : `Your membership will end on ${when}. You keep it until then.`;
+}
+
 export function useCancelSubscription() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: subscriptionApi.cancel,
-    onSuccess: () => {
+    onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ['subscription'] });
-      toast.success('Subscription cancelled');
+      toast.success(cancellationMessage(response?.data?.data));
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || 'Failed to cancel subscription');

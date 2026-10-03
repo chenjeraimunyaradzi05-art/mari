@@ -29,6 +29,8 @@ jest.mock('../../utils/prisma', () => ({
     // The story feed excludes blocked members in both directions now, and the
     // block list lives on UserSafetySettings.blockedUsers.
     userSafetySettings: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
+    // The DV safety page's own block list, the second place a block can be written: nobody is blocked there unless a test says so.
+    dvSafetyProfile: { findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
     $transaction: jest.fn(async (ops: any) => Promise.all(ops)),
   },
 }));

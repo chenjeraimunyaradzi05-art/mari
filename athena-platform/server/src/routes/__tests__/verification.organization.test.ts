@@ -145,6 +145,32 @@ describe('Organisation verification through the badge review', () => {
       expect(res.body.data.status).toBe('APPROVED');
     });
 
+    it('leaves it alone when the holder was invited as an owner or admin and has not answered, and says so', async () => {
+      prismaAny.verificationBadge.update.mockResolvedValue(badge());
+      // The membership row exists from the moment somebody types her address into the invite box.
+      prismaAny.organizationMember.findUnique.mockResolvedValue({ ...membership('OWNER'), acceptedAt: null });
+
+      const res = await request(app).patch('/api/verification/badges/badge-1').send({ status: 'APPROVED' }).expect(200);
+
+      expect(prismaAny.organization.update).not.toHaveBeenCalled();
+      expect(prismaAny.notification.create).not.toHaveBeenCalled();
+      expect(res.body.data.organization).toMatchObject({ organizationId: 'org-1', verified: false });
+    });
+
+    it('verifies it for a member who has answered, and tells only the owners who have', async () => {
+      prismaAny.verificationBadge.update.mockResolvedValue(badge({ userId: 'admin-2' }));
+      prismaAny.organizationMember.findUnique.mockResolvedValue({ ...membership('ADMIN'), acceptedAt: new Date('2026-06-01') });
+
+      await request(app).patch('/api/verification/badges/badge-1').send({ status: 'APPROVED' }).expect(200);
+
+      expect(prismaAny.organization.update).toHaveBeenCalledTimes(1);
+      expect(prismaAny.organizationMember.findMany.mock.calls[0][0].where).toEqual({
+        organizationId: 'org-1',
+        role: 'OWNER',
+        acceptedAt: { not: null },
+      });
+    });
+
     it('does nothing on rejection', async () => {
       prismaAny.verificationBadge.update.mockResolvedValue(badge({ status: 'REJECTED' }));
 
@@ -187,6 +213,17 @@ describe('Organisation verification through the badge review', () => {
   describe('applying on behalf of an organisation', () => {
     it('is refused up front when the applicant does not run it', async () => {
       prismaAny.organizationMember.findUnique.mockResolvedValue(membership('VIEWER'));
+
+      const res = await request(app)
+        .post('/api/verification/badges')
+        .send({ type: 'EMPLOYER', metadata: { organizationId: 'org-1', abn: '51824753556' } });
+
+      expect(res.status).toBe(403);
+      expect(prismaAny.verificationBadge.create).not.toHaveBeenCalled();
+    });
+
+    it('is refused up front when the applicant was invited as an owner and has not answered', async () => {
+      prismaAny.organizationMember.findUnique.mockResolvedValue({ ...membership('OWNER'), acceptedAt: null });
 
       const res = await request(app)
         .post('/api/verification/badges')

@@ -9,6 +9,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { coldStartAlgorithm } from '../services/cold-start.service';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { clampLimit } from '../utils/pagination';
 
 const router = Router();
 
@@ -62,11 +63,9 @@ router.get('/', retiredMixedFeed);
  */
 router.get('/cold-start', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { limit = '20' } = req.query;
-    
     const recommendations = await coldStartAlgorithm.getColdStartRecommendations(
       req.user!.id,
-      parseInt(limit as string, 10)
+      clampLimit(req.query.limit, 20, 50)
     );
     
     res.json({

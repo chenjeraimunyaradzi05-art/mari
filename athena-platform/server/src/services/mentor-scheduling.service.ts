@@ -30,6 +30,7 @@
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import { sendNotification } from './socket.service';
+import { latestMentorSessionStart } from './escrow-deadline';
 
 export interface Booking {
   id: string;
@@ -260,6 +261,13 @@ export async function getAvailableSlots(
 
   const now = Date.now();
 
+  // A paid session is only booked inside the life of the hold on the mentee's
+  // card (mentor.service refuses anything later), so the times beyond it are not
+  // offered: a mentee would pick one, enter her card and be told no. A mentor who
+  // charges nothing has no hold to outlast, and every day is offered.
+  const isPaid = mentor.hourlyRate !== null && Number(mentor.hourlyRate) > 0;
+  const latestPaidStart = latestMentorSessionStart({ createdAt: new Date(now) }).getTime();
+
   // The mentor's working day may begin on either the previous or the next
   // calendar date in her own zone, so both are generated and filtered back down
   // to the window the mentee asked for.
@@ -294,6 +302,10 @@ export async function getAvailableSlots(
       }
 
       if (startedAt < now) {
+        continue;
+      }
+
+      if (isPaid && startedAt > latestPaidStart) {
         continue;
       }
 

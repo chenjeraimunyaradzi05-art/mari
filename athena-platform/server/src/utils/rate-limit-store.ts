@@ -12,6 +12,7 @@
 import type { ClientRateLimitInfo, Options, Store } from 'express-rate-limit';
 import { ensureRedisConnected, isRedisAvailable, redis as sharedRedis } from './redis';
 import { logger } from './logger';
+import { noteRedisFallback, noteRedisRecovered } from './redis-fallback';
 
 /** The slice of ioredis the store uses, so a test can hand in a stand-in. */
 export interface CounterClient {
@@ -24,9 +25,11 @@ export interface CounterClient {
 type MemoryCounter = { hits: number; resetAt: number };
 const MEMORY_SWEEP_AT = 50_000;
 
-// One line a minute when the counters are per process.
+// One line a minute when the counters are per process. The gauge and the
+// standing condition are set every time: they are what an alert reads.
 let lastFallbackWarning = 0;
 function noteFallback(reason: string): void {
+  noteRedisFallback('rate_limit_counters', reason);
   const now = Date.now();
   if (now - lastFallbackWarning < 60_000) return;
   lastFallbackWarning = now;
@@ -68,7 +71,9 @@ export class SharedRateLimitStore implements Store {
   async increment(key: string): Promise<ClientRateLimitInfo> {
     if (this.usingRedis()) {
       try {
-        return await this.redisIncrement(key);
+        const info = await this.redisIncrement(key);
+        noteRedisRecovered('rate_limit_counters');
+        return info;
       } catch (error) {
         noteFallback(`Redis request failed (${error instanceof Error ? error.message : String(error)})`);
       }

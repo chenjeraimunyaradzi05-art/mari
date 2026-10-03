@@ -128,6 +128,8 @@ describe.each(['followers', 'following'])('GET /api/users/:id/%s', (list) => {
       expect(text).toContain('blocked-one');
       expect(text).toContain('"hideFromSearch":true');
       expect(text).toContain('"isActive":true');
+      // And anyone a moderator suspended or banned, who is not in search either.
+      expect(text).toContain(JSON.stringify({ isSuspended: false, bannedAt: null }));
     }
     expect(prisma.follow.findMany.mock.calls[0][0].where).toEqual(prisma.follow.count.mock.calls[0][0].where);
   });
@@ -157,6 +159,31 @@ describe('GET /api/users/suggest (the @ autocomplete)', () => {
       expect(text).toContain('"hideFromSearch":true');
       // Her own DV block list is honoured even where the platform list missed it.
       expect(text).toContain('"blockedUserIds":{"has":"him"}');
+    }
+  });
+
+  // A suspension or a ban sets isSuspended or bannedAt and leaves isActive alone,
+  // so a box that asked only isActive went on offering a member a moderator had
+  // removed, by the start of her name, to the woman she was removed for.
+  it('does not name a suspended or banned member, in either list', async () => {
+    await request(app).get('/api/users/suggest?q=Sar').set(as('him')).expect(200);
+
+    expect(prisma.user.findMany).toHaveBeenCalledTimes(2);
+    for (const call of prisma.user.findMany.mock.calls as any[]) {
+      expect(JSON.stringify(call[0].where)).toContain(JSON.stringify({ isSuspended: false, bannedAt: null }));
+    }
+  });
+
+  // People search leaves a private profile out; the box that names members by the
+  // start of their name must not be the way round that.
+  it('does not name a member whose profile is private, in either list', async () => {
+    await request(app).get('/api/users/suggest?q=Sar').set(as('him')).expect(200);
+
+    expect(prisma.user.findMany).toHaveBeenCalledTimes(2);
+    for (const call of prisma.user.findMany.mock.calls as any[]) {
+      expect(JSON.stringify(call[0].where)).toContain(
+        JSON.stringify({ NOT: { safetySettings: { is: { profileVisibility: 'private' } } } })
+      );
     }
   });
 

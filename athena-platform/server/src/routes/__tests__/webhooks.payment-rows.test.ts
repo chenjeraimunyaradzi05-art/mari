@@ -15,10 +15,10 @@ import express from 'express';
 
 jest.mock('../../utils/prisma', () => ({
   prisma: {
-    stripeWebhookEvent: { create: jest.fn(), delete: jest.fn() },
+    stripeWebhookEvent: { create: jest.fn(), delete: jest.fn(), findUnique: jest.fn(), updateMany: jest.fn(async () => ({ count: 1 })) },
     payment: { upsert: jest.fn(), findUnique: jest.fn(async () => null), update: jest.fn(), updateMany: jest.fn(async () => ({ count: 0 })) },
     escrowPayment: { updateMany: jest.fn(async () => ({ count: 0 })) },
-    mentorSession: { update: jest.fn(), findFirst: jest.fn(async () => null) },
+    mentorSession: { update: jest.fn(), updateMany: jest.fn(async () => ({ count: 1 })), findFirst: jest.fn(async () => null) },
     businessRegistration: { findUnique: jest.fn(async () => null), findFirst: jest.fn(async () => null), update: jest.fn() },
     acceleratorEnrollment: { findUnique: jest.fn(async () => null), update: jest.fn() },
     creatorPayout: { findFirst: jest.fn(), update: jest.fn(), updateMany: jest.fn(async () => ({ count: 0 })) },
@@ -136,6 +136,81 @@ describe('A succeeded payment becomes a Payment row', () => {
       userId: 'mentee-9',
       type: 'MENTOR_SESSION',
       referenceId: 'sess-1',
+    });
+  });
+
+  // Metadata is a note we wrote when the intent was created. The webhook used to
+  // update whatever session id it named, overwriting the stored intent id and
+  // marking it CAPTURED, so an intent that named somebody else's session paid
+  // for it. The session is now matched on the mentee the metadata names as well,
+  // and only while it holds no intent yet or holds this one.
+  describe('a mentoring payment is applied only to the session it belongs to', () => {
+    const sessionIntent = (id: string, metadata: Record<string, string> = {}) =>
+      succeeded(id, 12000, { type: 'mentor_session', sessionId: 'sess-1', menteeId: 'mentee-9', mentorProfileId: 'mp-1', ...metadata });
+
+    it('moves the session on the mentee and intent it names, and on nothing else', async () => {
+      await deliver(sessionIntent('pi_mentor')).expect(200);
+
+      expect(prisma.mentorSession.update).not.toHaveBeenCalled();
+      expect(prisma.mentorSession.updateMany).toHaveBeenCalledTimes(1);
+      const call = prisma.mentorSession.updateMany.mock.calls[0][0];
+      expect(call.where).toEqual({
+        id: 'sess-1',
+        menteeId: 'mentee-9',
+        OR: [{ stripePaymentIntentId: null }, { stripePaymentIntentId: 'pi_mentor' }],
+        // From the statuses a success may move a payment out of, and no others.
+        paymentStatus: { in: ['PENDING', 'AUTHORIZED', 'FAILED'] },
+      });
+      expect(call.data).toMatchObject({ paymentStatus: 'CAPTURED', stripePaymentIntentId: 'pi_mentor' });
+    });
+
+    it('applies nothing, and says so, when the guard matches no session', async () => {
+      // Somebody else's session, or one already waiting on a different intent:
+      // the write is conditional, so it matches nothing.
+      prisma.mentorSession.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      await deliver(sessionIntent('pi_foreign')).expect(200);
+
+      const { logger } = jest.requireMock('../../utils/logger') as any;
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining('does not fit the session it names'),
+        expect.objectContaining({ paymentIntentId: 'pi_foreign', sessionId: 'sess-1', menteeId: 'mentee-9' })
+      );
+    });
+
+    it('does not touch a session when the metadata does not say whose it is', async () => {
+      await deliver(sessionIntent('pi_nomentee', { menteeId: '' })).expect(200);
+      await deliver(
+        succeeded('pi_nosession', 12000, { type: 'mentor_session', menteeId: 'mentee-9' })
+      ).expect(200);
+
+      expect(prisma.mentorSession.updateMany).not.toHaveBeenCalled();
+      expect(prisma.mentorSession.update).not.toHaveBeenCalled();
+    });
+
+    it('guards an authorisation and a failure the same way', async () => {
+      await deliver({
+        id: 'evt_auth',
+        type: 'payment_intent.amount_capturable_updated',
+        created: 1_760_000_000,
+        data: { object: { id: 'pi_auth', status: 'requires_capture', amount: 12000, amount_received: 0, currency: 'aud', metadata: { type: 'mentor_session', sessionId: 'sess-1', menteeId: 'mentee-9' } } },
+      }).expect(200);
+      await deliver({
+        id: 'evt_failed',
+        type: 'payment_intent.payment_failed',
+        created: 1_760_000_001,
+        data: { object: { id: 'pi_failed', status: 'requires_payment_method', amount: 12000, amount_received: 0, currency: 'aud', metadata: { type: 'mentor_session', sessionId: 'sess-1', menteeId: 'mentee-9' } } },
+      }).expect(200);
+
+      expect(prisma.mentorSession.update).not.toHaveBeenCalled();
+      const wheres = prisma.mentorSession.updateMany.mock.calls.map((c: any[]) => c[0].where);
+      expect(wheres).toHaveLength(2);
+      for (const where of wheres) {
+        expect(where).toMatchObject({ id: 'sess-1', menteeId: 'mentee-9' });
+        expect(where.OR).toHaveLength(2);
+      }
+      expect(prisma.mentorSession.updateMany.mock.calls[0][0].data.paymentStatus).toBe('AUTHORIZED');
+      expect(prisma.mentorSession.updateMany.mock.calls[1][0].data.paymentStatus).toBe('FAILED');
     });
   });
 

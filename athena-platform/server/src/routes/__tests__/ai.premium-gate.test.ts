@@ -65,7 +65,9 @@ import { prisma } from '../../utils/prisma';
 import { aiService } from '../../services/ai.service';
 import { checkAiBudget } from '../../services/ai-budget.service';
 
-type Standing = { tier: string; status: string } | null;
+type Standing = { tier: string; status: string; currentPeriodStart?: Date } | null;
+
+const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
 const findSubscription = prisma.subscription.findUnique as unknown as jest.Mock<(args: unknown) => Promise<Standing>>;
 const optimizeResume = aiService.optimizeResume as unknown as jest.Mock<(...args: unknown[]) => Promise<unknown>>;
@@ -88,6 +90,9 @@ describe('Premium AI access', () => {
       [{ tier: 'PREMIUM_CAREER', status: 'ACTIVE' }, true],
       [{ tier: 'PREMIUM_PROFESSIONAL', status: 'TRIALING' }, true],
       [{ tier: 'PREMIUM_CAREER', status: 'PAST_DUE' }, false],
+      // A failed renewal keeps the tools on for the grace, and then pauses them.
+      [{ tier: 'PREMIUM_CAREER', status: 'PAST_DUE', currentPeriodStart: daysAgo(2) }, true],
+      [{ tier: 'PREMIUM_CAREER', status: 'PAST_DUE', currentPeriodStart: daysAgo(20) }, false],
       [{ tier: 'PREMIUM_CAREER', status: 'CANCELED' }, false],
       [{ tier: 'FREE', status: 'ACTIVE' }, false],
     ])('answers %o with premium %s', async (subscription, premium) => {
@@ -126,6 +131,14 @@ describe('Premium AI access', () => {
       expect(res.status).toBe(403);
       expect(res.body.message).toMatch(/past due/i);
       expect(optimizeResume).not.toHaveBeenCalled();
+    });
+
+    it('lets a member whose renewal has just failed carry on while Stripe retries the card', async () => {
+      findSubscription.mockResolvedValue({ tier: 'PREMIUM_CAREER', status: 'PAST_DUE', currentPeriodStart: daysAgo(1) });
+
+      await analyse().expect(200);
+
+      expect(optimizeResume).toHaveBeenCalled();
     });
 
     it('lets an active Premium member through and meters the call to her', async () => {

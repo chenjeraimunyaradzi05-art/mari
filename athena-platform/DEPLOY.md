@@ -64,6 +64,8 @@ Never run `db:migrate` or `db:push` against this database; see
 | `ALLOWED_ORIGINS` | CORS origins (comma-separated) | `https://athena-empress.netlify.app` |
 | `TRUST_PROXY` | Behind the host's load balancer | `true` |
 | `APP_URL` / `API_URL` | This service's public URL | `https://api.your-domain.com` |
+| `SENDGRID_API_KEY` | Transactional email; the API does not start in production without it | `SG....` (a key with Mail Send only) |
+| `SENDGRID_FROM_EMAIL` | The From address, on a domain you own and have authenticated in SendGrid. No default; `athena.com`, `example.com` and the template's `your-domain.com` are refused. Records and the end-to-end check: `docs/launch/DNS_SSL_CONFIGURATION.md` ("Email records") | `noreply@mail.<your-domain>` |
 
 > **Full template:** `server/.env.production.template` lists every variable with a description.
 
@@ -75,14 +77,14 @@ Never run `db:migrate` or `db:push` against this database; see
 | `STRIPE_SECRET_KEY` | Stripe | `sk_live_...` or `sk_test_...` |
 | `STRIPE_WEBHOOK_SECRET` | Stripe | `whsec_...` |
 | `OPENAI_API_KEY` | OpenAI | For AI features (career coach, resume optimizer) |
-| `SENDGRID_API_KEY` | SendGrid | For transactional email |
-| `SENDGRID_FROM_EMAIL` | SendGrid | e.g. `noreply@your-domain.com` |
+| `SENDGRID_WEBHOOK_PUBLIC_KEY` | SendGrid | Verification key of the Signed Event Webhook posting to `/api/webhooks/sendgrid`; without it bounces are not recorded and the webhook answers 503 |
 | `AWS_ACCESS_KEY_ID` | AWS S3 | For file uploads |
 | `AWS_SECRET_ACCESS_KEY` | AWS S3 | For file uploads |
 | `AWS_REGION` | AWS S3 | e.g. `ap-southeast-2` |
 | `S3_BUCKET` | AWS S3 | Upload bucket name |
+| `CLAMAV_HOST` | Malware scanning | Private address of the ClamAV scanner. Without it a résumé or a document cannot be uploaded in production, and `/health/launch-readiness` answers not_ready. See section 2.6 |
 | `SENTRY_DSN` | Sentry | Error tracking |
-| `DV_ENCRYPTION_KEY` | DV-Safe | 64 hex chars: `openssl rand -hex 32` |
+| `DV_ENCRYPTION_KEY` | DV-Safe, safety plans | 64 hex chars: `openssl rand -hex 32`. Safe chats, health records, safety plans and two-factor seeds are sealed under it. Back it up before anything is sealed: without this exact value they cannot be read again. Changing it is a rotation (`docs/runbooks/ENCRYPTION.md`), not an edit |
 | `ENABLE_WORKERS` | BullMQ | Set `true` to enable background jobs (needs `REDIS_URL`) |
 | `METRICS_TOKEN` | Prometheus | Protect `/metrics` endpoint |
 | `PROXY_SHARED_SECRET` | Web proxy | 32+ chars, same value on Netlify. The web app's route handlers forward each visitor's address with it, so rate limits, the login lockout and new-device alerts see the visitor, not the proxy |
@@ -105,6 +107,42 @@ curl https://api.your-domain.com/health
 curl https://api.your-domain.com/readyz
 # {"status":"ready","database":"connected"}
 ```
+
+### 2.6 Malware scanning
+
+Every upload is looked inside by ClamAV before it is kept. ClamAV is a service of
+its own, not part of the API container: its signature database needs about
+1.5 GB of memory, and a scanner is a program that opens hostile files, so it
+belongs behind a network boundary. The API talks to it over TCP
+(`CLAMAV_HOST`, `CLAMAV_PORT`, default 3310).
+
+What happens when a file cannot be scanned is `MALWARE_SCAN_REQUIRED`:
+
+| Value | Effect |
+|---|---|
+| unset (the default in production) | Résumés and documents are refused with a 503 until a scanner answers, a PDF or Word file sent in a conversation among them. Pictures are stored: they are rewritten on the way in, and so are videos and sounds, which removes what they can carry |
+| `all` | Every upload is refused when it cannot be scanned |
+| `off` | Nothing is refused for want of a scanner. Only choose this on purpose; a scanner that is there is still used |
+
+A file the scanner finds a virus in is refused with a 422 whatever this says.
+
+Running it:
+
+- **Render:** create a Private Service from the Docker image
+  `docker.io/clamav/clamav:stable` in the same region as the API (2 GB plan,
+  port 3310), then set `CLAMAV_HOST` on the API to its internal address. It is
+  not in `render.yaml` because it is a second paid instance.
+- **Fly:** a second app on the private network, with the commands in the footer of
+  `server/fly.toml`; `CLAMAV_HOST=athena-clamav.internal`.
+- Its first start downloads the signature database and takes a few minutes; until
+  it answers, résumé uploads are refused. The scanner keeps the database up to
+  date on its own.
+- The scanner takes files up to 25 MB as shipped, which covers every résumé
+  and document. To scan larger files (reels), raise clamd's `StreamMaxLength` and
+  set `MALWARE_SCAN_MAX_BYTES` on the API to the same figure.
+- Check it: `GET /health/launch-readiness` (with the diagnostics token) lists a
+  `MALWARE_SCANNER` check that asks the scanner and reports its version, and
+  `/health/detailed` shows `malware-scan.unreachable`.
 
 ---
 
@@ -138,9 +176,11 @@ Set in **Netlify Dashboard, Site Settings, Environment Variables:**
 | Variable | Description |
 |---|---|
 | `NEXT_PUBLIC_SOCKET_URL` | Realtime origin if it differs from the API URL |
-| `NEXT_PUBLIC_SENTRY_DSN` | Sentry DSN for frontend error tracking |
-| `SENTRY_ORG` | Sentry org for source map uploads |
-| `SENTRY_PROJECT` | Sentry project name |
+| `NEXT_PUBLIC_MEDIA_HOST` | The host the API's `CDN_URL` points at (for example `cdn.your-domain.com`), so `next/image` will load avatars and logos from it. Read at build time, so deploy again after setting it |
+| `NEXT_PUBLIC_SENTRY_DSN` | Sentry DSN for the web app's error tracking. Read at build time, so set it and then deploy again |
+| `SENTRY_ORG` | Sentry organisation slug, for source map uploads at build time |
+| `SENTRY_PROJECT` | Sentry project name, for source map uploads at build time |
+| `SENTRY_AUTH_TOKEN` | A Sentry organisation token (Settings > Auth Tokens), Builds scope, **secret**. Without it the build cannot upload source maps and errors point at minified code; the build warns when the DSN is set without it |
 | `NEXT_PUBLIC_POSTHOG_KEY` | PostHog analytics key |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Stripe publishable key (`pk_live_...`) |
 | `NEXT_PUBLIC_ENABLE_AI_FEATURES` | Enable AI features (`true` / `false`) |
@@ -185,11 +225,11 @@ Netlify auto-deploys on every push to `main`. To redeploy without a commit:
 - [ ] API proxy works (`/api/health` on the Netlify site returns the API's health response)
 
 ### Optional Services
-- [ ] Stripe webhook: `https://api.your-domain.com/api/webhooks/stripe` (events: `checkout.session.completed`, `customer.subscription.*`, `invoice.*`)
-- [ ] SendGrid sender verified
+- [ ] Stripe webhook: `https://api.your-domain.com/api/webhooks/stripe` (events: `checkout.session.completed`, `customer.subscription.*` including `customer.subscription.trial_will_end`, `invoice.*`, `payment_intent.*`, `charge.refunded`, `charge.dispute.*`, `transfer.*` and `identity.verification_session.*`; the full list is in DEPLOYMENT_GUIDE.md)
+- [ ] SendGrid domain authenticated (the three CNAMEs verified) and DMARC published at `p=none`; a throwaway registration's verification email arrives and passes SPF, DKIM and DMARC in its headers (`docs/launch/DNS_SSL_CONFIGURATION.md`, "Email records")
 - [ ] S3 bucket created + IAM credentials set
 - [ ] Sentry DSN set (both API host + Netlify)
-- [ ] `DV_ENCRYPTION_KEY` set (64 hex chars) if DV-Safe features needed
+- [ ] `DV_ENCRYPTION_KEY` set (64 hex chars) and backed up in a password manager. Safety plans are sealed under it. After the first deploy with it set, run `npm run seal:safety-plans -- --dry-run` then `npm run seal:safety-plans` once from `athena-platform/server` (with `DATABASE_URL` set to the production database, the value the API host uses, because that is the connection the script opens, and `DV_ENCRYPTION_KEY` set to the same key) to seal plans saved before sealing existed; it prints counts only and is safe to run twice
 
 ---
 
@@ -219,10 +259,20 @@ Migrations run twice per release, and both paths are idempotent:
    right schema.
 
 ### Seed Data (manual, optional)
+Only two seeds are meant for the production database:
+
 ```bash
 # From athena-platform/server, with the Neon URLs in the environment
-npm run db:seed
+npm run db:seed:admin   # the administrator account (ADMIN_EMAIL, ADMIN_PASSWORD)
+npm run db:seed:real    # events, reels and stories that were each checked against a public source
 ```
+
+`npm run db:seed:demo` writes invented people, organisations and content, and
+`npm run db:seed:content` writes sample posts and reels under whichever members
+already exist. Both are for a local or throwaway database only and **must never
+be run against production**. The demo seed refuses to run when `NODE_ENV` is
+`production` or the database host is not local, unless `ALLOW_DEMO_SEED=true` is
+set for a throwaway demo database. There is no plain `db:seed` script.
 
 ### Backup
 ```bash
@@ -259,4 +309,5 @@ Restore the branch to a point in time from the Neon console, or
 | Redis errors (non-fatal) | Redis is optional. The app works without it (caching and workers disabled) |
 | Socket.IO not connecting | Ensure `ALLOWED_ORIGINS` includes the Netlify domain |
 | Health check fails | Read the host's logs. `start.ts` logs boot errors visibly |
-| `JWT_SECRET` warning | Set `JWT_SECRET`. The random fallback won't persist across restarts |
+| `JWT_SECRET` error at start | In production the API refuses to start without a real `JWT_SECRET` (32+ random characters; `openssl rand -hex 32`), and refuses a placeholder such as the one in `.env.example`. There is no random fallback: tokens are never signed with an invented key, and a staging or preview deployment (any `NODE_ENV` other than `development` and `test`) refuses to start without a secret too. On Render the blueprint generates it; on Fly use `fly secrets set` |
+| `SENDGRID_FROM_EMAIL` error at start | Set it to an address on a domain you own and have authenticated in SendGrid. There is no default sender; `athena.com` and `example.com` are refused |

@@ -12,6 +12,7 @@ model is read.
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated, Any, Dict, List, Optional
 from enum import Enum
 from datetime import datetime, timezone
@@ -20,6 +21,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # ===========================================
@@ -240,10 +242,14 @@ async def generate_feed(request: FeedGenerationRequest):
             mix_ratios=mix_ratios,
             generation_time_ms=round((time.time() - start) * 1000, 2)
         )
-    except Exception as e:
+    except Exception:
+        # What went wrong stays in this service's log. The text of an exception
+        # can name a file path, a model directory or a value out of the request,
+        # and a caller needs none of it to know the call failed.
+        logger.exception("Feed generation failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Feed generation failed: {str(e)}"
+            detail="Feed generation failed"
         )
 
 

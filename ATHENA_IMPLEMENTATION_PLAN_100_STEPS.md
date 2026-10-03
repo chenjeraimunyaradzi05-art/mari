@@ -63,7 +63,7 @@ This document outlines a granular, step-by-step plan to bridge the gaps identifi
 
 21. **Stripe Connect Setup**: Initialize Stripe Connect for multi-party payouts (Mentors, Creators).
 22. **Payment Intent Flows**: Implement backend logic for "Escrow" style payments for Mentorship sessions.
-23. **Subscription Enforcement**: dynamic middleware that checks `user.subscriptionTier` against route permissions.
+23. **Subscription Enforcement**: the server decides who has paid from the subscription row (`services/entitlements.service.ts`) and gates the AI tools and the AI chat window on it, not on a tier a client sends.
 24. **Safety Score Trigger**: Implement logic to trigger a "Safety Score" recalculation on user report or block events.
 25. **Content Moderation Hook**: Integrate AWS Rekognition or similar for automated pre-screening of image/video uploads.
 26. **Notification Engine**: Build the core service to route notifications to appropriate channels (Push, In-App, Email).
@@ -191,7 +191,7 @@ This document outlines a granular, step-by-step plan to bridge the gaps identifi
 ### PHASE 2: BACKEND LOGIC & INTEGRATIONS (Steps 21-40)
 21. ✅ Stripe Connect Setup — [athena-platform/server/src/routes/connect.routes.ts](athena-platform/server/src/routes/connect.routes.ts), [athena-platform/server/src/services/stripe-connect.service.ts](athena-platform/server/src/services/stripe-connect.service.ts)
 22. ✅ Payment Intent Flows (Escrow) — [athena-platform/server/src/routes/connect.routes.ts](athena-platform/server/src/routes/connect.routes.ts)
-23. ✅ Subscription Enforcement Middleware — [athena-platform/server/src/middleware/subscription.ts](athena-platform/server/src/middleware/subscription.ts)
+23. ✅ Subscription Enforcement — [athena-platform/server/src/services/entitlements.service.ts](athena-platform/server/src/services/entitlements.service.ts) (what each plan buys, in one table), enforced on the six AI tools and the AI chat window by [athena-platform/server/src/routes/ai.routes.ts](athena-platform/server/src/routes/ai.routes.ts). The dynamic tier middleware that stood here was mounted on no route and has been removed.
 24. ✅ Safety Score Trigger on report/block — [athena-platform/server/src/routes/safety.routes.ts](athena-platform/server/src/routes/safety.routes.ts)
 25. ✅ Content Moderation Hook — [athena-platform/server/src/services/moderation.service.ts](athena-platform/server/src/services/moderation.service.ts)
 26. ✅ Notification Engine — [athena-platform/server/src/services/notification.service.ts](athena-platform/server/src/services/notification.service.ts)
@@ -225,7 +225,7 @@ This document outlines a granular, step-by-step plan to bridge the gaps identifi
 52. ✅ Creator Upload Studio — uploads the file and publishes the reel. Evidence: [athena-platform/client/src/app/dashboard/creator-studio/page.tsx](athena-platform/client/src/app/dashboard/creator-studio/page.tsx). (The unmounted super-app/CreatorUploadStudio draft was removed on 2026-09-04.)
 53. ✅ Rich Text Editor — Tiptap-based editor implemented. Evidence: [athena-platform/client/src/components/ui/RichTextEditor.tsx](athena-platform/client/src/components/ui/RichTextEditor.tsx)
 54. ✅ Comment Threading — replies, creator pin and delete on reels; replies on posts. Evidence: [athena-platform/client/src/components/video/VideoComments.tsx](athena-platform/client/src/components/video/VideoComments.tsx), [athena-platform/client/src/components/community/CommentSection.tsx](athena-platform/client/src/components/community/CommentSection.tsx). (The unmounted super-app/CommentThread draft was removed on 2026-09-04.)
-55. ✅ User Profile Header with Safety Score/Badges — implemented in profile page. Evidence: [athena-platform/client/src/app/dashboard/profile/page.tsx](athena-platform/client/src/app/dashboard/profile/page.tsx)
+55. ⚠️ User Profile Header with Safety Score/Badges — not built as written, by decision. The Safety Score is staff-only: it is read only through the moderation routes, and no profile, search result or member screen shows it, to its owner or to anyone else (the privacy statement says so). Verification badges are returned to their owner and to staff, not published on profiles. Evidence: [athena-platform/server/src/__tests__/safety-score.staff-only.test.ts](athena-platform/server/src/__tests__/safety-score.staff-only.test.ts)
 56. ✅ Skeleton Loading States — [athena-platform/client/src/components/ui/loading.tsx](athena-platform/client/src/components/ui/loading.tsx)
 57. ✅ PWA Configuration — manifests, service worker, and install prompt wired. Evidence: [athena-platform/client/public/sw.ts](athena-platform/client/public/sw.ts), [athena-platform/client/src/components/super-app/PWAInstallPrompt.tsx](athena-platform/client/src/components/super-app/PWAInstallPrompt.tsx)
 58. ✅ Accessibility Audit (A11y) — skip links, announcer, and keyboard shortcuts providers integrated. Evidence: [athena-platform/client/src/lib/accessibility.tsx](athena-platform/client/src/lib/accessibility.tsx), [athena-platform/client/src/app/providers.tsx](athena-platform/client/src/app/providers.tsx)

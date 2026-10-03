@@ -27,6 +27,18 @@
  * file that exists locally but was never committed is broken for every other
  * reader, which is exactly the failure this is meant to find.
  *
+ * The same goes for `npm run <script>`. A setup guide that tells the operator to
+ * run a script that no package.json defines fails at the worst moment, in a
+ * shell with the production database URLs exported, and the one that prompted
+ * this check was exactly that: DEPLOY.md said `npm run db:seed` after the script
+ * had been split into `db:seed:demo`, `db:seed:real` and the rest, and the
+ * root package.json went on forwarding to the old name. These are read from
+ * fenced blocks too, since a command is nearly always written in one. A script
+ * counts as defined when ANY tracked package.json (root, server, client,
+ * mobile, shared) defines it: the document does not always say which package it
+ * means, and a false alarm costs more than a script that exists in the wrong
+ * place, which `npm` reports clearly the first time anybody runs it.
+ *
  * A target resolves if it is found relative to the citing document, relative to
  * the repository root, or as the tail of a tracked path. All three
  * conventions are in use here — an audit table lists `studios/x/Y.tsx` against a
@@ -277,6 +289,40 @@ function ignoredByGit(targets) {
   return ignored;
 }
 
+// ---------------------------------------------------------------- npm scripts
+
+// `npm run name` and `npm run-script name`, with or without flags before the
+// name (`npm run --silent name`). The name must start like a script name, so a
+// placeholder such as `npm run <script>` or a bare `npm run` is not a citation.
+const NPM_RUN = /\bnpm\s+run(?:-script)?\s+(?:--?[A-Za-z][\w-]*(?:=\S+)?\s+)*([A-Za-z0-9][A-Za-z0-9:_.-]*)/g;
+
+/** Every `npm run <name>` in the text, fenced blocks included, with its line. */
+function npmScriptCitationsIn(src) {
+  const found = [];
+  for (const m of src.matchAll(NPM_RUN)) {
+    // Sentence punctuation that ran into the name: "npm run db:seed:real."
+    const name = m[1].replace(/[.:_-]+$/, '');
+    if (!name) continue;
+    found.push({ name, line: src.slice(0, m.index).split('\n').length });
+  }
+  return found;
+}
+
+/** The script names defined by the tracked package.json files that are checked out. */
+function definedScripts(files) {
+  const names = new Set();
+  for (const file of files.filter((f) => path.posix.basename(f) === 'package.json')) {
+    const absolute = path.join(REPO_ROOT, file);
+    if (!fs.existsSync(absolute)) continue;
+    try {
+      for (const name of Object.keys(JSON.parse(fs.readFileSync(absolute, 'utf8')).scripts || {})) names.add(name);
+    } catch {
+      fail(`${file} is not valid JSON`);
+    }
+  }
+  return names;
+}
+
 // -------------------------------------------------------------------- baseline
 
 const keyOf = (finding) => `${finding.file}|${finding.target}`;
@@ -339,6 +385,20 @@ function main() {
   findings.length = 0;
   findings.push(...reportable);
 
+  // Scripts are judged after the ignore filter, which answers a question about
+  // paths and has nothing to say about a command.
+  const scripts = definedScripts(files);
+  for (const doc of docs) {
+    const absolute = path.join(REPO_ROOT, doc);
+    if (!fs.existsSync(absolute)) continue;
+
+    for (const citation of npmScriptCitationsIn(fs.readFileSync(absolute, 'utf8'))) {
+      checked += 1;
+      if (scripts.has(citation.name)) continue;
+      findings.push({ file: doc, line: citation.line, target: `npm run ${citation.name}` });
+    }
+  }
+
   findings.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
 
   if (process.argv.includes('--update-baseline')) {
@@ -355,12 +415,13 @@ function main() {
 
   if (newFindings.length > 0) {
     console.error(
-      `\nDocumentation cites ${newFindings.length} path(s) that are not in the repository:\n`
+      `\nDocumentation cites ${newFindings.length} path(s) or npm script(s) that do not exist:\n`
     );
     print(newFindings);
     console.error(
       '\nPoint each citation at where the file actually lives, or drop the claim.' +
-        '\nIf the file is real but was never committed, commit it.\n'
+        '\nIf the file is real but was never committed, commit it.' +
+        '\nFor an `npm run` line, name a script that is in a package.json "scripts" block.\n'
     );
     process.exit(1);
   }
@@ -387,4 +448,6 @@ function main() {
   }
 }
 
-main();
+if (require.main === module) main();
+
+module.exports = { npmScriptCitationsIn, citationsIn };

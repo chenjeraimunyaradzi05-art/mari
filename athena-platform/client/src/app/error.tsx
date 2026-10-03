@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import Link from 'next/link';
+import * as Sentry from '@sentry/nextjs';
 import { AlertTriangle, RefreshCw, Home, Bug } from 'lucide-react';
 import { contactLink } from '@/lib/contact';
 
@@ -13,9 +14,20 @@ export default function Error({
   reset: () => void;
 }) {
   useEffect(() => {
-    // Log the error to an error reporting service
+    // The page below tells her the team has been told, so the team has to be:
+    // this boundary catches what a page throws while rendering, and it used to
+    // stop at the browser console. Sentry only sends when a DSN was set at
+    // build time (instrumentation-client.ts); without one this is the console
+    // line and nothing else, which is the honest state of a site that has not
+    // been connected to an error tracker yet.
+    Sentry.captureException(error);
     console.error(error);
   }, [error]);
+
+  // Sentry sends only from a production build that was given a DSN
+  // (instrumentation-client.ts). Everywhere else nobody was told, so the page
+  // must not say somebody was.
+  const reported = process.env.NODE_ENV === 'production' && Boolean(process.env.NEXT_PUBLIC_SENTRY_DSN);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 px-4">
@@ -30,7 +42,9 @@ export default function Error({
           Something Went Wrong
         </h1>
         <p className="text-lg text-slate-600 dark:text-slate-300 mb-8">
-          We're sorry, but something unexpected happened. Our team has been notified and is working on a fix.
+          {reported
+            ? "We're sorry, but something unexpected happened. The details of the error have been sent to our team."
+            : "We're sorry, but something unexpected happened. Please try again, and if it keeps happening, let us know below."}
         </p>
 
         {/* Error Details (Development only) */}

@@ -18,6 +18,7 @@ import { WELLNESS_GROUPS, WELLNESS_TONES } from '@/lib/wellness-nav';
 import { cn } from '@/lib/utils';
 import { safeHref } from '@/lib/safe-href';
 import { QuickExitButton } from '../dashboard/safety/QuickExit';
+import { EmergencyHelp } from '@/components/safety/EmergencyHelp';
 
 type Reference = { crisisLines: CrisisLine[]; k10: { questions: Array<{ id: number; text: string }>; options: Array<{ value: number; label: string }> } };
 type Library = { topics: Array<{ key: string; name: string; blurb: string; items: Array<{ key: string; title: string; summary: string; source: string; url: string; kind: string }> }> };
@@ -52,7 +53,7 @@ export default function WellnessPage() {
       <PageHero
         kicker="Health and wellbeing"
         title="Looked after, on your terms"
-        description="Track what matters, see what the days are saying, find care that takes you seriously, and talk to women who get it. Everything health-related is encrypted and read only by you."
+        description="Track what matters, see what the days are saying, find care that takes you seriously, and talk to women who get it. What you log, your medications and your health notes are encrypted before they are stored, and shown only to you unless you share them."
         primaryAction={{ label: 'Open the health dashboard', href: '/dashboard/wellness' }}
         secondaryAction={{ label: 'Find a practitioner', href: '/dashboard/wellness/practitioners' }}
       />
@@ -151,6 +152,7 @@ export default function WellnessPage() {
           visitor reading the crisis lines here is as likely as anyone to need
           to leave in a hurry; signed out, it goes to the default address. */}
       <QuickExitButton variant="floating" className="print:hidden" />
+      <EmergencyHelp className="print:hidden" />
     </PageShell>
   );
 }

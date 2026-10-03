@@ -38,7 +38,12 @@ export default function ResetPasswordPage() {
 function ResetPasswordContent() {
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
-  
+  // From the verify-email page: the address was registered twice before it was
+  // confirmed, its password was withdrawn, and she is choosing one for the
+  // first time rather than replacing one she forgot. Same route, same token
+  // kind; only the words change.
+  const choosingFirst = searchParams.get('setup') === '1';
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -115,10 +120,12 @@ function ResetPasswordContent() {
               <CheckCircle className="w-10 h-10 text-green-600 dark:text-green-400" />
             </div>
             <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
-              Password Reset Successfully!
+              {choosingFirst ? 'Your password is set' : 'Password Reset Successfully!'}
             </h1>
             <p className="text-slate-600 dark:text-slate-400 mb-6">
-              Your password has been updated. You can now log in with your new password.
+              {choosingFirst
+                ? 'Your account is ready. Sign in with the password you just chose.'
+                : 'Your password has been updated. You can now log in with your new password.'}
             </p>
             <Link href="/login" className="btn-primary w-full block text-center">
               Continue to Login
@@ -141,10 +148,10 @@ function ResetPasswordContent() {
 
         <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-8">
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
-            Reset your password
+            {choosingFirst ? 'Choose your password' : 'Reset your password'}
           </h1>
           <p className="text-slate-600 dark:text-slate-400 mb-6">
-            Enter your new password below.
+            {choosingFirst ? 'Pick the password you will sign in with.' : 'Enter your new password below.'}
           </p>
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
@@ -240,8 +247,10 @@ function ResetPasswordContent() {
               {isSubmitting ? (
                 <>
                   <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                  Resetting...
+                  {choosingFirst ? 'Saving...' : 'Resetting...'}
                 </>
+              ) : choosingFirst ? (
+                'Save password'
               ) : (
                 'Reset Password'
               )}

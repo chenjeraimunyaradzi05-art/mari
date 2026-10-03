@@ -6,13 +6,18 @@
  * history before she pays.
  */
 
+import { AUTOMOTIVE_FEE_PERCENT } from '../../config/price-book';
 import { BUYER_PROTECTION, FRAUD_SIGNS, INSPECTION_SECTIONS, REGO_CHECKS, type AuState } from './automotive-library';
 import type { PriceVerdict } from './valuation.service';
 
-/** Private sales carry the higher commission the blueprint sets; dealers, with their own obligations, the lower. */
-export const PURCHASE_FEE_PERCENT = { PRIVATE: 6, DEALER: 4 } as const;
-export const SERVICE_FEE_PERCENT = 12;
-export const INSPECTION_FEE_PERCENT = 15;
+/**
+ * Private sales carry the higher commission the blueprint sets; dealers, with their own obligations, the lower.
+ * The rates are held in the price book with every other fee and are named here
+ * as the cars routes already know them.
+ */
+export const PURCHASE_FEE_PERCENT = { PRIVATE: AUTOMOTIVE_FEE_PERCENT.privateSale, DEALER: AUTOMOTIVE_FEE_PERCENT.dealerSale } as const;
+export const SERVICE_FEE_PERCENT = AUTOMOTIVE_FEE_PERCENT.workshopJob;
+export const INSPECTION_FEE_PERCENT = AUTOMOTIVE_FEE_PERCENT.inspection;
 export const DEFAULT_INSPECTION_FEE = 250;
 
 export function inspectionDays(): number {

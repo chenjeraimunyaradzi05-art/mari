@@ -31,6 +31,34 @@ export async function booksScope(params: { organizationId?: string; userId: stri
 }
 
 /**
+ * Whether one row of the books is the caller's to read or change.
+ *
+ * A row in an organisation's books belongs to the organisation: membership is
+ * the whole question, and it is asked first. It used to ask for ownership first
+ * and for any membership row second, which was wrong twice over. A membership
+ * row exists from the moment somebody types an address into the invite box, so
+ * an invitation nobody had answered opened the organisation's chart of
+ * accounts and every journal entry in it to read, edit, post and void; and a
+ * journal entry carries the id of whoever filed it, so a bookkeeper who had
+ * since been removed from the organisation kept the right to rewrite what she
+ * had filed. Only an accepted member counts (utils/org-scope), and a personal
+ * row is its owner's alone.
+ */
+async function assertBooksRowAccess(
+  row: { organizationId: string | null; userId: string | null },
+  userId: string
+): Promise<void> {
+  if (row.organizationId) {
+    await assertOrgMembership(row.organizationId, userId);
+    return;
+  }
+  if (row.userId !== userId) {
+    // Personal row, and not this user's.
+    throw new ApiError(403, 'Access denied');
+  }
+}
+
+/**
  * Verify user has access to an accounting account
  */
 async function verifyAccountAccess(accountId: string, userId: string): Promise<void> {
@@ -41,22 +69,7 @@ async function verifyAccountAccess(accountId: string, userId: string): Promise<v
   if (!account) {
     throw new ApiError(404, 'Account not found');
   }
-  // Check if user owns the account directly
-  if (account.userId === userId) {
-    return;
-  }
-  // Check organization membership
-  if (account.organizationId) {
-    const membership = await prisma.organizationMember.findFirst({
-      where: { organizationId: account.organizationId, userId },
-    });
-    if (!membership) {
-      throw new ApiError(403, 'Access denied');
-    }
-  } else {
-    // Personal account not owned by this user
-    throw new ApiError(403, 'Access denied');
-  }
+  await assertBooksRowAccess(account, userId);
 }
 
 /**
@@ -70,22 +83,7 @@ async function verifyJournalAccess(journalId: string, userId: string): Promise<v
   if (!journal) {
     throw new ApiError(404, 'Journal entry not found');
   }
-  // Check if user owns the journal directly
-  if (journal.userId === userId) {
-    return;
-  }
-  // Check organization membership
-  if (journal.organizationId) {
-    const membership = await prisma.organizationMember.findFirst({
-      where: { organizationId: journal.organizationId, userId },
-    });
-    if (!membership) {
-      throw new ApiError(403, 'Access denied');
-    }
-  } else {
-    // Personal journal not owned by this user
-    throw new ApiError(403, 'Access denied');
-  }
+  await assertBooksRowAccess(journal, userId);
 }
 
 export interface JournalLineInput {

@@ -7,7 +7,7 @@ import { describe, test, expect, beforeAll, afterAll } from '@jest/globals';
 
 // Import all Phase 2 services
 import { stripeConnectService } from '../services/stripe-connect.service';
-import { requireSubscription, enforceSubscription } from '../middleware/subscription';
+import { entitlementsFor, planEntitlements } from '../services/entitlements.service';
 import { safetyScoreService } from '../services/safety-score.service';
 import { opportunityVerseMixer, getMixedFeed } from '../services/opportunity-verse.service';
 import { coldStartAlgorithm } from '../services/cold-start.service';
@@ -31,15 +31,14 @@ describe('Phase 2: Backend Logic & Integrations', () => {
     });
   });
   
-  describe('Subscription Middleware (Step 23)', () => {
-    test('should export subscription enforcement functions', () => {
-      expect(typeof requireSubscription).toBe('function');
-      expect(typeof enforceSubscription).toBe('function');
-    });
-    
-    test('requireSubscription should return middleware', () => {
-      const middleware = requireSubscription('PREMIUM');
-      expect(typeof middleware).toBe('function');
+  // The dynamic tier middleware that stood here (Step 23) was mounted on no route,
+  // and its table described limits nothing enforced and routes that do not exist.
+  // What a plan buys is services/entitlements.service, and the paid routes are
+  // gated by requireAiPremium; those are tested beside them.
+  describe('Entitlements (Step 23)', () => {
+    test('should export what a plan buys and who has paid', () => {
+      expect(typeof entitlementsFor).toBe('function');
+      expect(typeof planEntitlements).toBe('function');
     });
   });
   

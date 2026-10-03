@@ -16,7 +16,7 @@ import { skillsMarketplaceApi } from '@/lib/api-extensions';
 import { formatAud } from '@/components/skills-marketplace/types';
 import { cn } from '@/lib/utils';
 
-type OrderStatus = 'PENDING' | 'ACCEPTED' | 'DELIVERED' | 'REVISION_REQUESTED' | 'COMPLETED' | 'CANCELLED';
+type OrderStatus = 'PENDING' | 'ACCEPTED' | 'DELIVERED' | 'REVISION_REQUESTED' | 'DISPUTED' | 'COMPLETED' | 'CANCELLED';
 type Escrow = { status: string; amount: number; currency: string; paymentIntentId: string | null } | null;
 
 interface OrderRow {
@@ -37,6 +37,9 @@ export const ORDER_STATUS: Record<OrderStatus, { label: string; tone: string }> 
   ACCEPTED: { label: 'In progress', tone: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200' },
   DELIVERED: { label: 'Delivered', tone: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-200' },
   REVISION_REQUESTED: { label: 'Revision requested', tone: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-200' },
+  // The buyer says it was not delivered as agreed; the money is held while
+  // ATHENA's team decides, and neither person can move the order meanwhile.
+  DISPUTED: { label: 'In dispute', tone: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-200' },
   COMPLETED: { label: 'Completed', tone: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200' },
   CANCELLED: { label: 'Cancelled', tone: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' },
 };
@@ -69,6 +72,7 @@ const FILTERS: Array<['all' | OrderStatus, string]> = [
   ['ACCEPTED', 'In progress'],
   ['DELIVERED', 'Delivered'],
   ['REVISION_REQUESTED', 'Revision'],
+  ['DISPUTED', 'In dispute'],
   ['COMPLETED', 'Completed'],
   ['CANCELLED', 'Cancelled'],
 ];
@@ -184,7 +188,11 @@ export default function OrdersPage() {
                     <p className="mt-0.5 truncate text-xs text-slate-500">
                       {counterpart ? `${side === 'buying' ? 'From' : 'For'} ${counterpart} · ` : ''}
                       placed {formatDistanceToNow(new Date(order.createdAt), { addSuffix: true })}
-                      {order.dueAt && order.status !== 'COMPLETED' && order.status !== 'CANCELLED' && ` · due ${formatDistanceToNow(new Date(order.dueAt), { addSuffix: true })}`}
+                      {order.dueAt &&
+                        order.status !== 'COMPLETED' &&
+                        order.status !== 'CANCELLED' &&
+                        order.status !== 'DISPUTED' &&
+                        ` · due ${formatDistanceToNow(new Date(order.dueAt), { addSuffix: true })}`}
                     </p>
                   </div>
                   <div className="text-right">

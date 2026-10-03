@@ -4,6 +4,8 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 jest.mock('../../utils/prisma', () => ({
   prisma: {
     userSafetySettings: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
+    // The DV safety page's own block list, the second place a block can be written: nobody is blocked there unless a test says so.
+    dvSafetyProfile: { findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
     conversation: { findFirst: jest.fn(async () => null), create: jest.fn(), findUnique: jest.fn() },
     follow: { findUnique: jest.fn(async () => null) },
     user: { findUnique: jest.fn(async () => ({ id: 'mei', womanVerificationStatus: 'UNVERIFIED', dvSafetyProfile: null, profile: null, dateOfBirth: new Date('1990-01-01') })) },
@@ -26,7 +28,7 @@ jest.mock('../../utils/logger', () => ({
 
 import { app } from '../../index';
 import { prisma as prismaTyped } from '../../utils/prisma';
-import { canOpenConversation } from '../../services/message-permissions.service';
+import { DEFAULT_MESSAGE_AUDIENCE, canOpenConversation, messageAudienceOf } from '../../services/message-permissions.service';
 
 const prisma: any = prismaTyped;
 
@@ -62,6 +64,24 @@ describe('Who can message me', () => {
     expect(prisma.follow.findUnique.mock.calls[0][0].where).toEqual({
       followerId_followingId: { followerId: 'mei', followingId: 'sarah' },
     });
+  });
+
+  // The Safety Centre shows a member with no settings row the same default the
+  // server enforces for her. They were two different answers (the page said only
+  // people she follows, the server let anyone in), so what she was told was not
+  // what protected her.
+  it('answers a member who has never chosen with the default the settings page shows her', async () => {
+    prisma.user.findUnique.mockResolvedValueOnce({ allowMessages: true });
+    prisma.profile = { findUnique: jest.fn(async () => null) };
+    prisma.userSafetySettings.findUnique.mockResolvedValue(null);
+
+    expect(await messageAudienceOf('mei')).toBe(DEFAULT_MESSAGE_AUDIENCE);
+    // Whatever the default is, the verdict for a stranger follows from it.
+    const verdict = await canOpenConversation('sarah', 'mei');
+    expect(verdict.allowed).toBe(DEFAULT_MESSAGE_AUDIENCE === 'all');
+
+    const page = await request(app).get('/api/safety/settings').expect(200);
+    expect(page.body.data.allowMessagesFrom).toBe(DEFAULT_MESSAGE_AUDIENCE);
   });
 
   it('a thread that already exists stays open whatever the setting', async () => {

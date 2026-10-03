@@ -23,6 +23,8 @@ import { useAuth } from '@/lib/hooks';
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton';
 import { FacebookSignInButton } from '@/components/auth/FacebookSignInButton';
 import { SuspensionAppeal, isSuspendedRefusal } from '@/components/auth/SuspensionAppeal';
+import { ResendVerification, isUnverifiedEmailRefusal } from '@/components/auth/ResendVerification';
+import { RequestUnlockLink, isLockedAccountRefusal } from '@/components/auth/RequestUnlockLink';
 
 // The whole Facebook chain (proxy route, authApi.facebook, server handler) is
 // live; it only needs an app id.
@@ -80,6 +82,13 @@ function LoginContent() {
   // Set when sign-in says the account is suspended: the address and password
   // she typed, which the appeal panel sends to prove the account is hers.
   const [suspendedAs, setSuspendedAs] = useState<{ email: string; password: string } | null>(null);
+  // Set when sign-in says the address has not been confirmed, or that she
+  // locked the account herself: the address she typed, so the way out (a new
+  // confirmation link, a new unlock link) needs nothing more from her.
+  const [unconfirmedAs, setUnconfirmedAs] = useState<string | null>(null);
+  // An empty string is a locked account refused at Google or Facebook, where no
+  // address was typed: the panel then asks for one.
+  const [lockedAs, setLockedAs] = useState<string | null>(null);
 
   useEffect(() => {
     if (isLoading) return;
@@ -97,14 +106,24 @@ function LoginContent() {
   const {
     register,
     handleSubmit,
+    getValues,
     formState: { errors },
   } = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
   });
 
+  // Google and Facebook refuse a locked account in the same words as the
+  // password does, and the way out is the same.
+  const showProviderError = (message: string) => {
+    setServerError(message);
+    if (isLockedAccountRefusal(message)) setLockedAs(getValues('email') ?? '');
+  };
+
   const onSubmit = (data: LoginForm) => {
     setServerError(null);
     setSuspendedAs(null);
+    setUnconfirmedAs(null);
+    setLockedAs(null);
 
     const twoFactorCode = data.twoFactorCode?.trim() ?? '';
     if (requiresTwoFactor && twoFactorCode.length < TWO_FACTOR_MIN_LENGTH) {
@@ -145,6 +164,20 @@ function LoginContent() {
           // contact support and nowhere to do it. The appeal is offered instead.
           if (isSuspendedRefusal(responseMessage)) {
             setSuspendedAs({ email: data.email, password: data.password });
+          }
+
+          // The same for an address nobody has confirmed. Registration opens no
+          // session, so this is the first thing a new member meets if the email
+          // did not arrive or its link has expired, and a bare refusal left her
+          // nowhere to go. The server says it only after the password checks out.
+          if (isUnverifiedEmailRefusal(responseMessage)) {
+            setUnconfirmedAs(data.email);
+          }
+
+          // And for an account she locked herself, which the right password does
+          // not open: the way back is the emailed link, and a new one is offered.
+          if (isLockedAccountRefusal(responseMessage)) {
+            setLockedAs(data.email);
           }
 
           setServerError(
@@ -193,6 +226,10 @@ function LoginContent() {
             )}
 
             {suspendedAs && <SuspensionAppeal email={suspendedAs.email} password={suspendedAs.password} />}
+
+            {unconfirmedAs && <ResendVerification email={unconfirmedAs} />}
+
+            {lockedAs !== null && <RequestUnlockLink email={lockedAs} />}
 
             <div>
               <label htmlFor="email" className="label">
@@ -325,7 +362,7 @@ function LoginContent() {
             <div className={`mt-6 grid gap-4 ${facebookEnabled ? 'grid-cols-2' : 'grid-cols-1'}`}>
               <GoogleSignInButton
                 mode="login"
-                onError={(message) => setServerError(message)}
+                onError={showProviderError}
                 onSuccess={() => {
                   const redirect = safeRedirect(searchParams?.get('redirect'));
                   if (redirect) {
@@ -338,7 +375,7 @@ function LoginContent() {
               {facebookEnabled ? (
                 <FacebookSignInButton
                   mode="login"
-                  onError={(message) => setServerError(message)}
+                  onError={showProviderError}
                   onSuccess={() => {
                     const redirect = safeRedirect(searchParams?.get('redirect'));
                     if (redirect) {

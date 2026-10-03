@@ -4,7 +4,8 @@ import { ApiError } from '../middleware/errorHandler';
 const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u200B-\u200F\u2028\u2029\uFEFF]/g;
 const PUBLIC_UPLOAD_PATH = /^\/uploads\/(?:avatars|covers|posts|videos)\/[A-Za-z0-9_-]+\/[A-Za-z0-9._-]+$/;
 const AUTH_MEDIA_PATH = /^\/api\/media\/local\/(?:documents|resumes)\/[A-Za-z0-9_-]+\/[A-Za-z0-9._-]+$/;
-const UPLOAD_KEY = /^(?:avatars|covers|posts|videos|documents|resumes)\/[A-Za-z0-9_-]+\/[A-Za-z0-9._-]+$/;
+// chat is a file sent in a conversation (utils/chat-attachments), the only kind a message may carry by key.
+const UPLOAD_KEY = /^(?:avatars|covers|posts|videos|documents|resumes|chat)\/[A-Za-z0-9_-]+\/[A-Za-z0-9._-]+$/;
 
 const SAFE_ATTACHMENT_CONTENT_TYPES = new Set([
   'image/jpeg',

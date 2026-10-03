@@ -22,6 +22,9 @@ let currentUser: { id: string; role: string; email: string } | null = null;
 jest.mock('../../utils/prisma', () => ({
   prisma: {
     post: { findUnique: jest.fn() },
+    housingListing: { findUnique: jest.fn() },
+    event: { findUnique: jest.fn() },
+    video: { findUnique: jest.fn() },
     contentReport: { create: jest.fn(), findFirst: jest.fn(), findUnique: jest.fn() },
     safetyIncident: { create: jest.fn(), findFirst: jest.fn() },
     subprocessor: { findMany: jest.fn(async () => []) },
@@ -175,10 +178,86 @@ describe('POST /api/compliance/report-content', () => {
       'post-1',
       'POST'
     );
-    expect(autoHide).toHaveBeenCalledWith('post', 'post-1');
+    expect(autoHide).toHaveBeenCalledWith('post', 'post-1', {
+      reason: 'harassment',
+      ticketId: expect.stringMatching(/^RPT-/),
+    });
     expect(intakeConsequences).toHaveBeenCalledWith(
       expect.objectContaining({ reason: 'HARASSMENT', contentId: 'post-1' })
     );
+  });
+
+  it('takes a housing listing, routes it to the member who listed it, and only while it is live', async () => {
+    currentUser = { id: 'member-1', role: 'USER', email: 'member-1@example.com' };
+    prisma.housingListing.findUnique.mockResolvedValue({ agentId: 'lister-1', status: 'ACTIVE' });
+
+    const res = await request(app).post('/api/compliance/report-content').send(body({ contentType: 'housing_listing', contentId: 'listing-1' }));
+
+    expect(res.status).toBe(201);
+    expect(prisma.contentReport.create.mock.calls[0][0].data).toMatchObject({
+      contentType: 'HOUSING_LISTING',
+      contentId: 'listing-1',
+      reportedUserId: 'lister-1',
+    });
+
+    // A held or withdrawn listing is in front of nobody but its lister and
+    // staff, so a stranger cannot learn from a report that it exists.
+    prisma.contentReport.create.mockClear();
+    prisma.housingListing.findUnique.mockResolvedValue({ agentId: 'lister-1', status: 'PENDING' });
+    const held = await request(app).post('/api/compliance/report-content').send(body({ contentType: 'housing_listing', contentId: 'listing-2' }));
+    expect(held.status).toBeGreaterThanOrEqual(400);
+    expect(prisma.contentReport.create).not.toHaveBeenCalled();
+  });
+
+  // A member-hosted event is reportable, and routes to the member who published
+  // it. Curated events have no host to route to and a hidden one is in front of
+  // nobody but its host and staff, so neither can be reported from outside.
+  it('takes an event, routes it to its host, and only while it is on show and has one', async () => {
+    currentUser = { id: 'member-1', role: 'USER', email: 'member-1@example.com' };
+    prisma.event.findUnique.mockResolvedValue({ hostUserId: 'host-1', isHidden: false });
+
+    const res = await request(app).post('/api/compliance/report-content').send(body({ contentType: 'event', contentId: 'event-1' }));
+
+    expect(res.status).toBe(201);
+    expect(prisma.contentReport.create.mock.calls[0][0].data).toMatchObject({
+      contentType: 'EVENT',
+      contentId: 'event-1',
+      reportedUserId: 'host-1',
+    });
+
+    for (const row of [
+      { hostUserId: 'host-1', isHidden: true },
+      { hostUserId: null, isHidden: false },
+      null,
+    ]) {
+      prisma.contentReport.create.mockClear();
+      prisma.event.findUnique.mockResolvedValue(row);
+      const refused = await request(app).post('/api/compliance/report-content').send(body({ contentType: 'event', contentId: 'event-2' }));
+      expect(refused.status).toBe(404);
+      expect(prisma.contentReport.create).not.toHaveBeenCalled();
+    }
+  });
+
+  it('takes a reel, routes it to its author', async () => {
+    currentUser = { id: 'member-1', role: 'USER', email: 'member-1@example.com' };
+    prisma.video.findUnique.mockResolvedValue({ authorId: 'maker-1' });
+
+    const res = await request(app).post('/api/compliance/report-content').send(body({ contentType: 'video', contentId: 'reel-1' }));
+
+    expect(res.status).toBe(201);
+    expect(prisma.contentReport.create.mock.calls[0][0].data).toMatchObject({ contentType: 'VIDEO', reportedUserId: 'maker-1' });
+  });
+
+  // "Other" has nothing to point at, so no member to route it to and nobody for
+  // a moderator to act on. The form no longer offers it; this is the server
+  // saying what it does take, so a caller that still sends it is told.
+  it('refuses a type with nothing to point at, and lists the ones it takes', async () => {
+    const res = await request(app).post('/api/compliance/report-content').send(body({ contentType: 'other' }));
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/POST[\s\S]*VIDEO[\s\S]*EVENT[\s\S]*HOUSING_LISTING/);
+    expect(prisma.contentReport.create).not.toHaveBeenCalled();
+    expect(prisma.safetyIncident.create).not.toHaveBeenCalled();
   });
 
   it('alerts and refers an anonymous report too, and counts it towards the auto-hide', async () => {
@@ -190,7 +269,8 @@ describe('POST /api/compliance/report-content', () => {
 
     expect(res.status).toBe(201);
     expect(prisma.safetyIncident.create).toHaveBeenCalled();
-    expect(autoHide).toHaveBeenCalledWith('post', 'post-1');
+    // Counted, as one voice; and said to be anonymous, so it never hides alone.
+    expect(autoHide).toHaveBeenCalledWith('post', 'post-1', { reason: 'csam', anonymous: true });
     expect(intakeConsequences).toHaveBeenCalledWith(
       expect.objectContaining({ reason: 'CSAM', priority: 'critical' })
     );

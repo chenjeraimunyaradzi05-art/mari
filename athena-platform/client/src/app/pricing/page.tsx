@@ -15,7 +15,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/lib/store';
 import { TRIAL_DAYS, REFUND_DAYS } from '@/lib/pricing';
-import { PRO_TIER, formatPlanAmount, formatPlanInterval, usePlanPrices } from './plan-prices';
+import { PRO_TIER, describeChatAllowance, formatPlanAmount, formatPlanInterval, usePlanPrices } from './plan-prices';
 
 /**
  * The three cards. None of them carries a price of its own any more.
@@ -27,7 +27,21 @@ import { PRO_TIER, formatPlanAmount, formatPlanInterval, usePlanPrices } from '.
  * a tier checkout sells. Pro's price is now read from the server, which reads
  * it from the Stripe price checkout charges; Free is free; Enterprise is priced
  * in conversation, so it shows no number.
+ *
+ * The feature lists are the same kind of promise and are held to the same rule:
+ * only what the server really does is listed. That is the six AI tools, which
+ * the server refuses to anyone without an active Pro or trial (routes/ai.routes
+ * requireAiPremium), and a larger daily allowance for the AI chat. The free plan
+ * used to say "5 job applications/month" and Pro "Unlimited", when nothing caps
+ * applications on either, and Pro promised "20% off all courses", "1 free
+ * mentor session/month", "Interview Coach (10 sessions/mo)" and "Priority job
+ * matches", none of which exist; Enterprise listed SSO/SAML, API access, a
+ * dedicated account manager and custom job boards. Nothing is on a card here
+ * until the server does it. An offer that is wanted later is built first, with
+ * the server refusing what it does not allow, and listed after.
  */
+type PlanFeature = { name: string; included: boolean; chat?: 'free' | 'paid' };
+
 const plans = [
   {
     id: 'free',
@@ -37,17 +51,16 @@ const plans = [
     color: 'gray',
     popular: false,
     features: [
-      { name: 'Basic job search', included: true },
+      { name: 'Job search and applications', included: true },
       { name: 'Community access', included: true },
-      { name: '5 job applications/month', included: true },
-      { name: 'Basic profile', included: true },
+      { name: 'Your profile', included: true },
+      { name: 'ATHENA AI chat, with a daily allowance', included: true, chat: 'free' as const },
       { name: 'AI Resume Optimizer', included: false },
       { name: 'Interview Coach', included: false },
-      { name: 'Priority job matches', included: false },
-      { name: 'Unlimited applications', included: false },
-      { name: 'Course discounts', included: false },
-      { name: 'Mentor booking', included: false },
-      { name: 'Premium support', included: false },
+      { name: 'Opportunity Radar AI', included: false },
+      { name: 'Career Path Planner', included: false },
+      { name: 'AI Content Generator', included: false },
+      { name: 'Business Idea Validator', included: false },
     ],
     cta: 'Current Plan',
     disabled: true,
@@ -61,16 +74,13 @@ const plans = [
     popular: true,
     features: [
       { name: 'Everything in Free', included: true },
-      { name: 'Unlimited job applications', included: true },
       { name: 'AI Resume Optimizer', included: true },
-      { name: 'Interview Coach (10 sessions/mo)', included: true },
+      { name: 'Interview Coach', included: true },
       { name: 'Opportunity Radar AI', included: true },
       { name: 'Career Path Planner', included: true },
-      { name: 'Priority job matches', included: true },
-      { name: '20% off all courses', included: true },
-      { name: '1 free mentor session/month', included: true },
-      { name: 'Email support', included: true },
-      { name: 'Early access to new features', included: true },
+      { name: 'AI Content Generator', included: true },
+      { name: 'Business Idea Validator', included: true },
+      { name: 'A larger daily allowance for the ATHENA AI chat', included: true, chat: 'paid' as const },
     ],
     cta: 'Upgrade to Pro',
     disabled: false,
@@ -78,24 +88,15 @@ const plans = [
   {
     id: 'enterprise',
     name: 'Enterprise',
-    description: 'For teams and organizations',
+    description: 'For teams and organisations',
     icon: Building2,
     color: 'purple',
     popular: false,
-    features: [
-      { name: 'Everything in Pro', included: true },
-      { name: 'Unlimited team members', included: true },
-      { name: 'Unlimited AI usage', included: true },
-      { name: 'Custom job boards', included: true },
-      { name: 'Employer branding', included: true },
-      { name: 'Analytics dashboard', included: true },
-      { name: 'Dedicated account manager', included: true },
-      { name: 'SSO/SAML integration', included: true },
-      { name: 'API access', included: true },
-      { name: 'Custom contracts', included: true },
-      { name: 'Priority support', included: true },
-    ],
-    cta: 'Contact Sales',
+    // No checklist. What an organisation gets is agreed with it, in writing, so
+    // a list here would be a promise nobody has been asked to keep.
+    features: [] as PlanFeature[],
+    note: 'Tell us what your team needs and we will say plainly what we can offer, and what it costs.',
+    cta: 'Talk to us',
     disabled: false,
   },
 ];
@@ -111,23 +112,25 @@ const faqs = [
     // Stripe Checkout collects card details to start a subscription trial, so
     // "no credit card required" was never true. The trial itself is real —
     // subscription.routes.ts sets trial_period_days from the same constant.
-    answer: `Yes — ${TRIAL_DAYS} days of Pro, free. You enter card details to start it, nothing is charged during the trial, and if you cancel before it ends you pay nothing.`,
+    // Once per person, as the Terms (6.4) say and as checkout enforces: a member
+    // who has had a subscription before gets no second trial and is charged when
+    // she checks out, so the page does not promise her one.
+    answer: `Yes — ${TRIAL_DAYS} days of Pro, free, with your first subscription. You enter card details to start it, nothing is charged during the trial, and if you cancel before it ends you pay nothing. The trial is offered once for each person: if you have subscribed before, your card is charged when you check out.`,
   },
   {
     question: 'What happens when my trial ends?',
+    // The card entered to start the trial is charged on the day it ends, which is
+    // what the answer above and the Terms (6.4) say. This used to promise a move
+    // to the Free plan "unless you choose to subscribe", which is not what
+    // happens: the card is charged unless she has cancelled.
     answer:
-      'When your trial ends, you\'ll automatically be moved to the Free plan unless you choose to subscribe. Your saved data and applications will be preserved.',
+      'The card you entered to start the trial is charged the Pro price on the day the trial ends, unless you cancel first. We email you a few days before, with the date and the amount. To stop it, cancel from Settings, then Billing, before that day and you pay nothing. After you cancel you keep the Free plan, and your saved data and applications are kept.',
   },
   {
     question: 'Do you offer refunds?',
     // Honest about the mechanism: there is no automated refund path, so saying
     // so beats implying an instant one.
     answer: `Yes. First-time subscribers have ${REFUND_DAYS} days — contact us inside that window and we refund in full. Refunds are processed by hand, so allow a few working days for the money to reach your account.`,
-  },
-  {
-    question: 'Can I get a discount for non-profits?',
-    answer:
-      'Yes! We offer 50% off for verified non-profit organizations and students. Contact our support team with proof of eligibility.',
   },
 ];
 
@@ -138,7 +141,31 @@ export default function PricingPage() {
   const proPlan = planPrices.data?.plans.find((plan) => plan.tier === PRO_TIER);
   const proAmount = proPlan ? formatPlanAmount(proPlan) : null;
   const proInterval = proPlan ? formatPlanInterval(proPlan) : null;
+  // The GST sentence comes from the server, which works it out from the same
+  // registration the invoices read. Until it arrives, or on a server that does
+  // not send it, nothing is printed: no guess at a tax position.
+  const gstStatement = planPrices.data?.gst?.statement ?? null;
+  // What the card is charged on the day the trial ends: the real price when the
+  // server could give it, and the plain words when it could not.
+  const firstCharge = proAmount ? `${proAmount}${proInterval ? ` a ${proInterval}` : ''}` : 'the Pro price';
   const [expandedFaq, setExpandedFaq] = useState<number | null>(null);
+  // While an admin has paused new payments the upgrade would be refused, so the
+  // button is held and the page says why, in the admin's own words. Only an
+  // explicit true: a server that does not say is not guessed at.
+  const paymentsPaused = planPrices.data?.paused === true;
+  const pausedNote = planPrices.data?.pauseMessage || 'Memberships are paused while we finish checking payments.';
+  // What the chat allowance really is, from the table the server enforces. Until
+  // it arrives the line keeps its plain wording, and no number is guessed.
+  const chatAllowance = {
+    free: describeChatAllowance(planPrices.data?.entitlements?.free.aiChat),
+    paid: describeChatAllowance(planPrices.data?.entitlements?.paid.aiChat),
+  };
+  const featureName = (feature: PlanFeature) =>
+    feature.chat && chatAllowance[feature.chat]
+      ? feature.chat === 'free'
+        ? `ATHENA AI chat, ${chatAllowance.free}`
+        : `A larger allowance for the ATHENA AI chat: ${chatAllowance.paid}`
+      : feature.name;
 
   const handleSelectPlan = (planId: string) => {
     if (planId === 'enterprise') {
@@ -241,9 +268,11 @@ export default function PricingPage() {
                 {/* CTA Button */}
                 <button
                   onClick={() => handleSelectPlan(plan.id)}
-                  disabled={plan.disabled}
+                  disabled={plan.disabled || (plan.id === 'pro' && paymentsPaused)}
+                  aria-describedby={plan.id === 'pro' && paymentsPaused ? 'payments-paused-note' : undefined}
                   className={cn(
-                    'w-full py-3 rounded-lg font-semibold transition flex items-center justify-center',
+                    'w-full min-h-[44px] py-3 rounded-lg font-semibold transition flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2',
+                    plan.id === 'pro' && paymentsPaused && 'opacity-50 cursor-not-allowed',
                     plan.color === 'primary'
                       ? 'bg-primary-500 text-white hover:bg-primary-600'
                       : plan.color === 'purple'
@@ -255,7 +284,26 @@ export default function PricingPage() {
                   {!plan.disabled && <ArrowRight className="w-4 h-4 ml-2" />}
                 </button>
 
+                {plan.id === 'pro' && paymentsPaused && (
+                  <p id="payments-paused-note" role="status" className="mt-3 text-center text-sm text-amber-800 dark:text-amber-200">
+                    {pausedNote}
+                  </p>
+                )}
+
+                {plan.id === 'pro' && (
+                  // Said at the button, where the decision is made: a card is
+                  // needed to start the trial, and it is charged when it ends.
+                  <p className="mt-3 text-center text-xs text-slate-500 dark:text-slate-400">
+                    {TRIAL_DAYS}-day free trial with a first subscription. A card is needed to start it, and it is
+                    charged {firstCharge} on the day the trial ends unless you cancel first. If you have subscribed
+                    before, your card is charged {firstCharge} when you check out.
+                  </p>
+                )}
+
                 {/* Features */}
+                {'note' in plan && plan.note && (
+                  <p className="mt-8 text-sm text-slate-600 dark:text-slate-300">{plan.note}</p>
+                )}
                 <div className="mt-8 space-y-3">
                   {plan.features.map((feature, index) => (
                     <div key={index} className="flex items-start space-x-3">
@@ -272,7 +320,7 @@ export default function PricingPage() {
                             : 'text-slate-400 dark:text-slate-500'
                         )}
                       >
-                        {feature.name}
+                        {featureName(feature)}
                       </span>
                     </div>
                   ))}
@@ -281,6 +329,10 @@ export default function PricingPage() {
             </div>
           ))}
         </div>
+
+        {gstStatement && (
+          <p className="-mt-10 mb-12 text-center text-sm text-slate-500 dark:text-slate-400">{gstStatement}</p>
+        )}
 
         {/* Trust Badges */}
         <div className="text-center mb-16">
@@ -343,18 +395,19 @@ export default function PricingPage() {
               Ready to accelerate your career?
             </h2>
             <p className="text-white/90 mb-6 max-w-2xl mx-auto">
-              Join thousands of women who are using ATHENA to land their dream jobs,
-              build meaningful connections, and achieve their career goals.
+              Start with the free plan, or try Pro free and see whether the AI career tools
+              are useful to you. Nothing here is charged until the trial ends.
             </p>
             <button
               onClick={() => handleSelectPlan('pro')}
-              className="bg-white text-primary-600 px-8 py-3 rounded-lg font-semibold hover:bg-slate-100 transition flex items-center mx-auto"
+              disabled={paymentsPaused}
+              className="bg-white text-primary-600 px-8 py-3 min-h-[44px] rounded-lg font-semibold hover:bg-slate-100 transition flex items-center mx-auto disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-primary-500"
             >
               Start Free Trial
               <ArrowRight className="w-5 h-5 ml-2" />
             </button>
             <p className="text-white/70 text-sm mt-4">
-              {TRIAL_DAYS}-day free trial &bull; Cancel before it ends and pay nothing
+              {TRIAL_DAYS}-day free trial &bull; A card is needed to start &bull; Cancel before it ends and pay nothing
             </p>
           </div>
         </div>

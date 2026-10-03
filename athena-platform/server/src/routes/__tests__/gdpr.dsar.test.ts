@@ -329,6 +329,16 @@ describe('DSAR export and erasure leave an audit trail', () => {
   });
 
   it('records ACCOUNT_DELETE without naming the member it erased', async () => {
+    // A member who signs in with Google only: no password to ask for, no second
+    // factor. Erasure asks who is at the keyboard again for everyone else; that
+    // is held in user.delete-account.test.ts.
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'user-123',
+      passwordHash: null,
+      twoFactorEnabled: false,
+      twoFactorSecret: null,
+      twoFactorRecoveryCodes: [],
+    });
     jest
       .spyOn(gdprService, 'createDSARRequest')
       .mockResolvedValue({ id: 'dsar-delete-1' } as any);

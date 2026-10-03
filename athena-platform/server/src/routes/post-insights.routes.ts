@@ -29,6 +29,7 @@ import { getJwtSecretOrThrow } from '../utils/jwt';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { bestEffort } from '../utils/best-effort';
+import { groupPostReadableWhere } from '../services/audience.service';
 import { createRateLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
@@ -148,6 +149,8 @@ export async function announceMilestones(postIds: string[]): Promise<void> {
   });
 }
 
+// validated: ids is read only as an array of ids, de-duplicated and cut to MAX_BATCH, and source
+//   must be in SOURCES.
 router.post('/impressions', optionalAuth, impressionLimiter, async (req: AuthRequest, res, next) => {
   try {
     const ids = Array.isArray(req.body?.ids)
@@ -161,10 +164,17 @@ router.post('/impressions', optionalAuth, impressionLimiter, async (req: AuthReq
       return;
     }
 
+    // Only posts that were on someone's screen to be counted: public ones, and
+    // a group's only where this viewer may read the group. The ids come from the
+    // request, so a signed-out caller could add to the reach of a post its author
+    // kept to herself, or of a private group's post, and with it set off the
+    // reach notice that quotes 60 characters of it.
     const visible = await prisma.post.findMany({
       where: {
         id: { in: ids },
         isHidden: false,
+        isPublic: true,
+        OR: [{ groupId: null }, groupPostReadableWhere(req.user?.id)],
         ...(req.user ? { authorId: { not: req.user.id } } : {}),
       },
       select: { id: true },

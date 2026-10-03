@@ -8,6 +8,8 @@ jest.mock('../../utils/prisma', () => ({
     // Blocks live on UserSafetySettings.blockedUsers; utils/safety-store reads
     // both directions out of it.
     userSafetySettings: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
+    // The DV safety page's own block list, the second place a block can be written: nobody is blocked there unless a test says so.
+    dvSafetyProfile: { findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
     // Publishing a story passes the women-only floor and the age gate, and both
     // read the User row. An adult member nobody has refused, so these tests stay
     // about seen state and captions; the gates are proved in
@@ -161,6 +163,38 @@ describe('Stories: seen state and views', () => {
     prisma.statusView.findMany.mockResolvedValue([]);
     await request(app).get('/api/status/s1/viewers').set(as('her')).expect(200);
     expect(prisma.statusView.findMany.mock.calls.at(-1)[0].where).toMatchObject({ statusId: 's1', userId: { notIn: ['him'] } });
+  });
+
+  it('keeps a pair blocked only from the DV safety page out of each other’s ring, story and viewer list', async () => {
+    // The platform list says nothing; the block is in the DV safety profile alone.
+    prisma.userSafetySettings.findUnique.mockResolvedValue(null);
+    prisma.userSafetySettings.findMany.mockResolvedValue([]);
+    prisma.status.findMany.mockResolvedValue([]);
+
+    // She blocked him from the DV page: asked from his side, her profile lists him.
+    prisma.dvSafetyProfile.findUnique.mockResolvedValue(null);
+    prisma.dvSafetyProfile.findMany.mockResolvedValue([{ userId: 'her' }]);
+    prisma.dvSafetyProfile.findFirst.mockResolvedValue({ userId: 'her' });
+
+    await request(app).get('/api/status/feed').set(as('him')).expect(200);
+    expect(prisma.status.findMany.mock.calls.at(-1)[0].where).toMatchObject({ userId: { notIn: ['her'] } });
+
+    prisma.status.findFirst.mockResolvedValue({ id: 's1', userId: 'her', expiresAt: new Date(Date.now() + 1000), viewCount: 2 });
+    prisma.statusView.create.mockClear();
+    await request(app).post('/api/status/s1/view').set(as('him')).expect(404);
+    expect(prisma.statusView.create).not.toHaveBeenCalled();
+
+    // And her own viewer list leaves him out, from her own DV list.
+    prisma.dvSafetyProfile.findUnique.mockResolvedValue({ blockedUserIds: ['him'] });
+    prisma.dvSafetyProfile.findMany.mockResolvedValue([]);
+    prisma.status.findUnique.mockResolvedValue({ id: 's1', userId: 'her', viewCount: 3 });
+    prisma.statusView.findMany.mockResolvedValue([]);
+    await request(app).get('/api/status/s1/viewers').set(as('her')).expect(200);
+    expect(prisma.statusView.findMany.mock.calls.at(-1)[0].where).toMatchObject({ statusId: 's1', userId: { notIn: ['him'] } });
+
+    // Put back for the tests after this one.
+    prisma.dvSafetyProfile.findUnique.mockResolvedValue(null);
+    prisma.dvSafetyProfile.findFirst.mockResolvedValue(null);
   });
 
   it('puts a story caption through the moderation gate before it is published', async () => {

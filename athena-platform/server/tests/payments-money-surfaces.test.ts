@@ -161,6 +161,62 @@ describe('POST /api/payments/payout does not pay an arbitrary amount', () => {
   });
 });
 
+/**
+ * There is no generic "charge this" route.
+ *
+ * POST /api/payments/process took an amount, a currency, a description and a
+ * free `metadata` object from any signed-in member and handed all of it to
+ * stripe.paymentIntents.create. The Stripe webhook reads metadata as the truth
+ * about what was bought, so a member could pay A$1 with metadata saying she had
+ * bought a million gift points, or had paid for another member's mentoring
+ * session, or an accelerator place that costs hundreds, and be credited for it.
+ * Nothing in either app ever called the route. Every real charge is made by the
+ * service that owns the sale, which prices it and writes the metadata itself.
+ *
+ * It is one re-added handler away from coming back, and these are the requests
+ * that would exploit it.
+ */
+describe('POST /api/payments/process does not exist', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  const forged = {
+    amount: 1,
+    currency: 'AUD',
+    description: 'one dollar',
+    paymentMethodId: 'pm_card_visa',
+    metadata: { type: 'gift_balance_purchase', userId: 'ada', giftPoints: '1000000' },
+  };
+
+  it('answers a signed-in member sending a forged gift purchase with a 404, and never reaches Stripe', async () => {
+    await request(app).post('/api/payments/process').set(as(ADA)).send(forged).expect(404);
+
+    expect(stripeFactory).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { type: 'mentor_session', sessionId: 'sess-owned-by-someone-else', menteeId: 'someone-else' },
+    { type: 'accelerator_enrollment', enrollmentId: 'enr-1', amountCents: '100' },
+    { type: 'business_formation', registrationId: 'reg-1' },
+  ])('answers a forged %j with a 404 too', async (metadata) => {
+    await request(app)
+      .post('/api/payments/process')
+      .set(as(ADA))
+      .send({ ...forged, metadata })
+      .expect(404);
+
+    expect(stripeFactory).not.toHaveBeenCalled();
+  });
+
+  it('is not there for a creator or an administrator either', async () => {
+    await request(app).post('/api/payments/process').set(as(GRACE, 'CREATOR')).send(forged).expect(404);
+    await request(app).post('/api/payments/process').set(as('root', 'ADMIN')).send(forged).expect(404);
+
+    expect(stripeFactory).not.toHaveBeenCalled();
+  });
+});
+
 describe('POST /api/payments/convert quotes a rate or says it cannot', () => {
   beforeEach(() => {
     jest.clearAllMocks();

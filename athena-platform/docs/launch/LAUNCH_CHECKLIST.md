@@ -54,8 +54,10 @@ by someone who assumed they were already true:
 
 - [ ] All environment variables configured — `npm run check:env -- <file>` from `athena-platform/server`, and `GET /health/launch-readiness` from the deployed API
 - [ ] Feature flags set for launch
-- [ ] Rate limiting configured — `RATE_LIMIT_ENABLED=true` and `REDIS_URL` set, or the limits are per-instance and reset on deploy
-- [ ] `SENTRY_DSN` set — but do not treat a quiet Sentry as a quiet night; it currently reports only process-level crashes, not route 500s
+- [ ] Media bucket set up as infrastructure/README.md ("Media bucket") says: Block Public Access on, the CDN limited to the public folders, `CDN_URL` on the API and `NEXT_PUBLIC_MEDIA_HOST` on Netlify. Then `GET /health/launch-readiness?probe=media` with the diagnostics token shows `MEDIA_EXPOSURE` passing: a résumé cannot be read without signing in and an avatar can
+- [ ] Malware scanner running (ClamAV, a service of its own) and `CLAMAV_HOST` set on the API, as DEPLOY.md ("Malware scanning") says. Until it answers, a résumé or a document cannot be uploaded, so no one can attach a résumé to an application. `GET /health/launch-readiness` shows `MALWARE_SCANNER` passing, with the scanner's version
+- [ ] Rate limiting — nothing to switch on: production always limits (`RATE_LIMIT_ENABLED=false` is ignored there) and refuses to boot without `REDIS_URL`, so counters are shared across instances. A signed-in member has her own budget (1,500 a window), an address with no valid token has 100; see [API overview](../api/API_OVERVIEW.md#rate-limiting). Redis going away after boot drops the counters to per-instance and raises an alert (ONCALL)
+- [ ] `SENTRY_DSN` set on the API, and `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_ORG`, `SENTRY_PROJECT` and `SENTRY_AUTH_TOKEN` set on Netlify (the DSN is baked in at build time, so deploy again after setting it). The API reports every 5xx its error handler answers, plus process crashes; the web host reports page errors and server-side request errors. A quiet Sentry is still only good news once an alert rule in Sentry emails someone: see [ONCALL](../runbooks/ONCALL.md)
 - [ ] `METRICS_TOKEN` set so `/metrics` is gated. Nothing scrapes it yet; see [ONCALL](../runbooks/ONCALL.md) for what that means
 
 ### Testing
@@ -83,7 +85,7 @@ number you actually reached here when you have one.
 
 ### Business
 
-- [ ] Stripe production keys configured — `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` and the four `STRIPE_PRICE_*` ids
+- [ ] Stripe production keys configured — `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_CONNECT_WEBHOOK_SECRET` (the second endpoint, listening on connected accounts) and the four `STRIPE_PRICE_*` ids
 - [ ] Payment flows tested with real cards
 - [ ] Support email configured
 - [ ] Help documentation published
@@ -198,7 +200,7 @@ node scripts/smoke-test.js --base "$API_URL"
 # - Neon:     https://console.neon.tech
 # - Render:   the athena-api service's Logs and Events tabs
 # - Netlify:  https://app.netlify.com
-# - Sentry:   https://sentry.io — process-level crashes only, see ONCALL
+# - Sentry:   https://sentry.io — API 5xx and crashes, web page and request errors; needs an alert rule to tell anyone, see ONCALL
 # - PostHog:  https://app.posthog.com — web analytics only; the server sends nothing to it
 ```
 
@@ -214,7 +216,7 @@ dependency state in one response; `/metrics` is a Prometheus exposition behind
 
 ### First Hour
 
-- [ ] Error rate — Render logs; Sentry will not show route 500s
+- [ ] Error rate — Sentry's issue list (route 5xx arrive there with the request id that matches the Render log line) and the Render logs
 - [ ] Response time p99
 - [ ] Memory headroom — `/health/detailed`
 - [ ] No 5xx in the Render log
@@ -258,8 +260,10 @@ curl -X POST "$API_URL/api/admin/maintenance" \
 #    production at a timestamp before the problem, and copy the damaged rows
 #    back from it. Restoring production in place, or loading the pre-launch
 #    copy over it, undoes everything written since — including blocks a member
-#    placed, safety settings she changed and erasures she asked for. Before any
-#    row goes back, work the checks in docs/runbooks/ONCALL.md, "Backups and
+#    placed, safety settings she changed and erasures she asked for. Take a
+#    Neon branch of production as it stands before anything is overwritten,
+#    then run the safety diff (npm run restore:safety-diff) and apply the patch
+#    it writes. Work the steps in docs/runbooks/ONCALL.md, "Backups and
 #    restore", which also says how to restore from an off-platform copy.
 
 # 4. Tell people. This exits non-zero and notifies nobody unless
@@ -272,11 +276,23 @@ node scripts/send-incident-notification.js \
 # 5. Begin incident review
 ```
 
-Closing the platform takes the domestic-violence tooling down with everything
-else — safe-mode, the panic button, hidden chats and the emergency-contact
-alerts are all behind the same gate. Maintenance mode is recorded as an admin
-action for that reason. Keep the window as short as the rollback allows, and say
-so in the maintenance message.
+Closing the platform does not take the safety tooling down. The gate leaves
+open everything under `/api/safety/dv` (safe mode, the panic button, hidden
+chats, emergency-contact alerts, the support-line list), her safety settings and
+block list, and the public crisis-line lists under `/api/wellness`. The list is
+`MAINTENANCE_OPEN_PATHS` in `server/src/middleware/maintenance-gate.ts`, and a
+test fails if one of those paths starts answering 503. The web maintenance page
+shows 000, 1800RESPECT and Lifeline as call links, and a quick exit.
+
+What is still closed is everything else, including reports and the moderation
+queue, so a rollback that has to touch the database can still leave those calls
+failing. If the database itself is down, the safety calls that write (the panic
+alert, a new block) fail honestly and tell her to call 000; the support-line list
+and crisis lines have built-in copies and keep answering. Maintenance mode is
+recorded as an admin action. Keep the window as short as the rollback allows, and
+say so in the maintenance message.
+
+Every signed-in page carries an Emergency help button (web: `client/src/components/safety/EmergencyHelp.tsx`; phone: `mobile/src/components/pillar/EmergencyHelp.tsx`) that opens the numbers to ring without asking the API for anything. The numbers are in the code, so nothing will notice if one changes: before launch, check each against the service's own published number (triplezero.gov.au, 1800respect.org.au, lifeline.org.au, and the New Zealand, UK and US lines at their own sites) in `client/src/lib/crisis-lines.ts` and `mobile/src/components/pillar/CrisisLines.tsx`, and record the date.
 
 ---
 
@@ -334,6 +350,7 @@ know that it is blank.
 - [ ] Feature iteration based on feedback
 - [ ] Decide the backup retention period and the key holders, set up the production-backups environment, and confirm the nightly "Database backup" run is green (ONCALL.md, "Backups and restore")
 - [ ] Each key holder decrypts the newest off-platform copy; rehearse a restore against a Neon branch
+- [ ] In that Neon branch drill, run `npm run restore:safety-diff` (production as `--live`, the branch as `--restored`) and check it finishes and lists the day's blocks and safety-setting changes under "put back" (ONCALL.md, "Restoring")
 - [ ] Expand marketing efforts
 - [ ] Plan next release cycle
 

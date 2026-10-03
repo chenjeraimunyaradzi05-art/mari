@@ -12,7 +12,7 @@
 
 import { addDays, daysBetween, isoDay, mean, pearson, round1, weekStart } from './wellness-dates';
 import { groupPeriods, predictCycle, type CyclePrediction, type PeriodDayLike } from './cycle.service';
-import { CRISIS_LINES, K10_QUESTIONS, LIBRARY, type LibraryItem } from './wellness-library';
+import { CRISIS_LINES, K10_QUESTIONS, LIBRARY, distressLines, type LibraryItem } from './wellness-library';
 
 export interface CheckInLog { day: string; mood: number; stress: number; anxiety: number; energy: number; note?: string }
 export interface SleepLog { day: string; hours: number; quality?: number }
@@ -329,19 +329,27 @@ export interface K10Result {
   source: InsightSource;
 }
 
-/** The Kessler 10, scored the way the Australian Bureau of Statistics reports it. */
+/**
+ * The Kessler 10, scored the way the Australian Bureau of Statistics reports it:
+ * 10 to 15 low, 16 to 21 moderate, 22 to 29 high, 30 to 50 very high. The band
+ * keys are kept (they are what the apps style by) but the words a woman reads
+ * are the ABS's own. They used to be a step gentler (a 16 to 21 was "mild", a 30
+ * and over was "high"), which told a woman she was doing better than the survey
+ * this score is quoted from would say. Moderate and above show the crisis lines,
+ * 1800RESPECT among them.
+ */
 export function assessK10(answers: number[]): K10Result {
   if (answers.length !== K10_QUESTIONS.length || answers.some((a) => !Number.isInteger(a) || a < 1 || a > 5)) {
     throw new Error('Ten answers between 1 and 5 are needed');
   }
   const score = answers.reduce((a, b) => a + b, 0);
   const band: K10Result['band'] = score <= 15 ? 'low' : score <= 21 ? 'mild' : score <= 29 ? 'moderate' : 'severe';
-  const labels = { low: 'Likely to be well', mild: 'Mild distress', moderate: 'Moderate distress', severe: 'High distress' };
+  const labels = { low: 'Low distress', mild: 'Moderate distress', moderate: 'High distress', severe: 'Very high distress' };
   const meanings = {
     low: 'Your answers put you in the range most people without a mental health condition report. Keep the check-ins going; they will show a change early.',
-    mild: 'Some distress over the last four weeks. Common, and it often passes; sleep, movement and talking to someone are the first things to try.',
-    moderate: 'A level of distress where support makes a real difference. A GP can write a mental health treatment plan in one visit, which brings a Medicare rebate to psychology sessions.',
-    severe: 'A high level of distress. Please talk to a GP this week, and if things feel unsafe at any point, the lines below are staffed now.',
+    mild: 'A moderate level of distress over the last four weeks. Common, and it often passes; sleep, movement and talking to someone are the first things to try.',
+    moderate: 'A high level of distress, where support makes a real difference. A GP can write a mental health treatment plan in one visit, which brings a Medicare rebate to psychology sessions.',
+    severe: 'A very high level of distress. Please talk to a GP this week, and if things feel unsafe at any point, the lines below are staffed now.',
   };
   const next = {
     low: 'Set a wellness goal or a habit and come back in a month.',
@@ -349,7 +357,7 @@ export function assessK10(answers: number[]): K10Result {
     moderate: 'Book a GP; ask for a mental health treatment plan. MindSpot and This Way Up are free while you wait.',
     severe: 'Call Beyond Blue on 1300 22 4636 or Lifeline on 13 11 14, and book a GP for this week.',
   };
-  return { score, band, label: labels[band], meaning: meanings[band], nextStep: next[band], crisisLines: band === 'severe' || band === 'moderate' ? CRISIS_LINES.slice(0, 5) : CRISIS_LINES.slice(1, 4), source: { name: 'Australian Bureau of Statistics, Kessler Psychological Distress Scale', url: 'https://www.abs.gov.au/statistics/health/mental-health' } };
+  return { score, band, label: labels[band], meaning: meanings[band], nextStep: next[band], crisisLines: band === 'severe' || band === 'moderate' ? distressLines() : CRISIS_LINES.slice(1, 4), source: { name: 'Australian Bureau of Statistics, Kessler Psychological Distress Scale', url: 'https://www.abs.gov.au/statistics/health/mental-health' } };
 }
 
 // ---------------------------------------------------------- doctor report

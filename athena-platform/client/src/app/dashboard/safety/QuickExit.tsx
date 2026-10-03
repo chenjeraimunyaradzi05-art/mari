@@ -14,6 +14,13 @@
  * reading the same stored setting and the same address she chose. Pages
  * import it from the Safety route because that is where the feature belongs;
  * it is a plain module, not a route.
+ *
+ * What it does and does not do. The button, or the Escape key pressed twice
+ * quickly, replaces the page she is on with an ordinary one, so Back from
+ * wherever she lands does not return to ATHENA. No website can clear the
+ * browser's history list: pages she visited earlier are still in it. Clearing
+ * the history, or browsing in a private window, is the only thing that
+ * removes those, and the pages that offer this say so rather than promise it.
  */
 
 import { useCallback, useEffect, useId, useSyncExternalStore } from 'react';
@@ -39,19 +46,39 @@ export function quickExit(url: string): void {
   } catch {
     // Some browsers refuse; leaving still matters more.
   }
-  window.location.replace(url || DEFAULT_EXIT_URL);
+  exitNavigation.replace(url || DEFAULT_EXIT_URL);
 }
 
+/**
+ * The one place the browser is told to leave. It exists so that a test can see
+ * where a press of the exit button goes: a test browser cannot navigate, and
+ * its location cannot be replaced, so without this the one thing the button is
+ * for would be the one thing no test could check.
+ */
+export const exitNavigation = {
+  replace: (url: string): void => window.location.replace(url),
+};
+
 type QuickExitSettings = { safeExitEnabled: boolean; safeExitUrl: string };
+
+/**
+ * How soon the second Escape has to follow the first. Long enough for a hand that
+ * is shaking, short enough that an Escape pressed to close a menu and another
+ * pressed a moment later for something else are not taken for it.
+ */
+export const DOUBLE_ESCAPE_MS = 700;
 
 /**
  * The exit, wired to the member's own setting.
  *
  * `enabled` is whether she has turned Escape-to-leave on. The button is shown
  * regardless of that flag on the safety surfaces — a woman who has never
- * opened the DV settings still deserves a way off the page — but the keyboard
- * shortcut only binds when she asked for it, because Escape has other jobs in
- * a form and silently hijacking it would be its own surprise.
+ * opened the DV settings still deserves a way off the page — and so is a second
+ * way to leave by keyboard: Escape pressed twice quickly, on any page that carries
+ * the button, whether or not she is signed in or has opened her settings. A woman
+ * who is reading about safety with somebody behind her has not turned anything
+ * on. A single Escape leaves only when she asked for that, because Escape has
+ * other jobs in a form and silently hijacking it would be its own surprise.
  *
  * Signed-out visitors never make the request; they get the default address.
  */
@@ -73,9 +100,23 @@ export function useQuickExit(): { exit: () => void; exitUrl: string; escapeEnabl
   const exit = useCallback(() => quickExit(exitUrl), [exitUrl]);
 
   useEffect(() => {
-    if (!escapeEnabled) return;
+    let lastEscapeAt = 0;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') exit();
+      if (event.key !== 'Escape') return;
+      if (escapeEnabled) {
+        exit();
+        return;
+      }
+      // Holding the key down repeats it, and an Escape that cancels an input
+      // method's composition is not meant for us.
+      if (event.repeat || event.isComposing) return;
+      const now = Date.now();
+      if (now - lastEscapeAt <= DOUBLE_ESCAPE_MS) {
+        lastEscapeAt = 0;
+        exit();
+        return;
+      }
+      lastEscapeAt = now;
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -97,7 +138,7 @@ export function useQuickExit(): { exit: () => void; exitUrl: string; escapeEnabl
  * that one unmounts, the next takes over, so the corner is never left empty
  * while any of them is on the page.
  */
-let floatingClaims: string[] = [];
+let floatingClaims: Record<string, string[]> = {};
 const floatingListeners = new Set<() => void>();
 
 function announceFloating(): void {
@@ -111,12 +152,11 @@ function subscribeFloating(listener: () => void): () => void {
   };
 }
 
-const firstFloatingClaim = (): string | undefined => floatingClaims[0];
 const noFloatingClaimOnServer = (): string | undefined => undefined;
 
 /** Test-only: forget every claim, so one test's buttons do not decide the next's. */
 export function resetFloatingExitClaims(): void {
-  floatingClaims = [];
+  floatingClaims = {};
   announceFloating();
 }
 
@@ -124,20 +164,28 @@ export function resetFloatingExitClaims(): void {
  * Whether this floating instance is the one that draws. Before any claim is
  * registered (the first render) every instance draws, so the exit is never
  * missing even for a frame; once they have registered, only the first does.
+ *
+ * `slot` names the corner this control keeps. The quick exit and the Emergency
+ * help button each hold a slot of their own, so a layout and a page that both
+ * carry the same control draw it once, and neither crowds the other out.
  */
-function useDrawsFloatingExit(active: boolean): boolean {
+export function useDrawsFloatingSlot(slot: string, active: boolean): boolean {
   const id = useId();
   useEffect(() => {
     if (!active) return;
-    floatingClaims = [...floatingClaims, id];
+    floatingClaims = { ...floatingClaims, [slot]: [...(floatingClaims[slot] ?? []), id] };
     announceFloating();
     return () => {
-      floatingClaims = floatingClaims.filter((claim) => claim !== id);
+      floatingClaims = { ...floatingClaims, [slot]: (floatingClaims[slot] ?? []).filter((claim) => claim !== id) };
       announceFloating();
     };
-  }, [active, id]);
-  const first = useSyncExternalStore(subscribeFloating, firstFloatingClaim, noFloatingClaimOnServer);
+  }, [active, id, slot]);
+  const first = useSyncExternalStore(subscribeFloating, () => floatingClaims[slot]?.[0], noFloatingClaimOnServer);
   return !active || first === undefined || first === id;
+}
+
+function useDrawsFloatingExit(active: boolean): boolean {
+  return useDrawsFloatingSlot('exit', active);
 }
 
 /**
@@ -161,7 +209,11 @@ export function QuickExitButton({
     <button
       type="button"
       onClick={exit}
-      title={escapeEnabled ? 'Leaves ATHENA now. The Escape key does the same.' : 'Leaves ATHENA now.'}
+      title={
+        escapeEnabled
+          ? 'Leaves ATHENA now. The Escape key does the same.'
+          : 'Leaves ATHENA now. Pressing the Escape key twice quickly does the same.'
+      }
       className={cn(
         'inline-flex items-center gap-2 rounded-xl bg-rose-600 font-semibold text-white shadow hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:ring-offset-2',
         variant === 'floating'

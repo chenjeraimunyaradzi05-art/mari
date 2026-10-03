@@ -87,7 +87,8 @@ This document serves as the legal review checklist for ATHENA's GDPR/Privacy com
 - [x] Video content: creator-controlled retention
 
 ### ✅ Security
-- [x] Encryption at rest (AES-256)
+- [x] Safe-chat messages, health records, safety plans and two-factor secrets are encrypted by ATHENA (AES-256-GCM) before they are stored. This is encryption at rest, not end-to-end: the servers decrypt them to show them to the member. What it does and does not protect against, and the key, are in `athena-platform/docs/runbooks/ENCRYPTION.md`
+- [ ] Encryption at rest of everything else is the database host's own, and is not something this repository verifies
 - [x] Encryption in transit (TLS 1.3)
 - [x] Password hashing (bcrypt with salt)
 - [x] MFA available for all users
@@ -168,10 +169,20 @@ This document serves as the legal review checklist for ATHENA's GDPR/Privacy com
 
 ## 8. Children's Privacy
 
-### ✅ Age Verification
-- [x] Minimum age: 16 (AU), 13 (US with parental consent)
-- [x] Age declaration during registration
-- [x] Parental consent flow for underage users
+ATHENA is for adults. There is **one minimum age, 18, everywhere** (`PLATFORM_MINIMUM_AGE`; Terms 2.1 and 12.4; Privacy Policy 11). It is not 16 in Australia or 13 in the US, and there is **no parental-consent flow and no tier for minors**. None should be built until safeguarding, age assurance, consent, moderation and reporting duties for children have been designed. This section used to tick all three of those; they were never true and contradicted the 18+ decision.
+
+### Minimum age (18+)
+- [x] A date of birth is asked at sign-up by email, Google and Facebook, and the server refuses an account without an acceptable one, or one that makes her under 18
+- [x] The refusal is one sentence for a missing, impossible or too-young date, and does not name the age back
+- [x] An account with no date of birth (made before it was asked) is asked once, on its first write, and refused every write until it answers; reads, safety help, appeals, privacy rights and deletion stay open
+- [x] An account with a recorded date under 18 is refused every write, on every route, in one place (`account-standing.ts`, applied by `authenticate`)
+- [x] The date of birth, and the stamp of a document check that confirmed it, are in the data export
+- [x] They are cleared when an account is erased, including the shell kept for retained records
+- [x] A staff runbook for an account that is, or may be, a child's: `athena-platform/docs/runbooks/UNDER-AGE-ACCOUNT.md`
+- [ ] **The date is self-declared, not verified.** Nothing may call it "age verification". Only a Stripe Identity document check stamps a date as confirmed, and it is optional
+- [ ] **[COUNSEL]** Whether ATHENA is an age-restricted social media platform under Australia's Online Safety Amendment (Social Media Minimum Age) Act 2024 (in force from 10 December 2025, administered by eSafety), and what "reasonable steps" eSafety would expect of a service with a public feed, stories and direct messages that says it is adults-only
+- [ ] **[COUNSEL]** Any effect of the OAIC's Children's Online Privacy Code (being developed under the Privacy and Other Legislation Amendment Act 2024) on a service that declares itself adults-only
+- [ ] **[FOUNDER]** Whether the document check becomes mandatory for accounts with no date of birth, or for anyone reported
 
 ---
 

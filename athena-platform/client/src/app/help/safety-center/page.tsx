@@ -11,6 +11,7 @@ import { Shield, AlertTriangle, Lock, Eye, Phone, Heart, Users, BookOpen, Extern
 import Link from 'next/link';
 import { Metadata } from 'next';
 import { safeHref } from '@/lib/safe-href';
+import { QuickExitButton } from '@/app/dashboard/safety/QuickExit';
 
 export const metadata: Metadata = {
   title: 'Safety Center | ATHENA',
@@ -97,6 +98,9 @@ const SAFETY_RESOURCES = [
 export default function SafetyCenterPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white dark:from-slate-900 dark:to-slate-800">
+      {/* A way off the page for someone reading this with somebody behind her. It
+          works signed out, and the Escape key does the same twice in a row. */}
+      <QuickExitButton variant="floating" className="print:hidden" />
       <div className="max-w-4xl mx-auto px-4 py-12">
         {/* Header */}
         <div className="text-center mb-12">
@@ -185,6 +189,11 @@ export default function SafetyCenterPage() {
                 Report harmful content, harassment, or policy violations. Our Trust & Safety team 
                 reviews all reports within 24-72 hours.
               </p>
+              <p className="text-slate-600 dark:text-slate-400 text-sm mb-4">
+                We never tell the person you reported that it was you, and a block is never announced to the person
+                you block. Reports and blocks also feed an internal account-standing measure that only our staff
+                see: it decides which accounts we look at first, and it never restricts anyone by itself.
+              </p>
               <Link href="/report" className="text-purple-600 dark:text-purple-400 text-sm hover:underline">
                 Report content →
               </Link>
@@ -194,8 +203,14 @@ export default function SafetyCenterPage() {
               <MessageCircle className="w-8 h-8 text-green-500 mb-4" />
               <h3 className="font-semibold text-slate-900 dark:text-white mb-2">Message Filters</h3>
               <p className="text-slate-600 dark:text-slate-400 text-sm mb-4">
-                Filter message requests and hide potentially offensive content. 
+                Filter message requests and hide potentially offensive content.
                 Only receive messages from people you're connected with.
+              </p>
+              <p className="text-slate-600 dark:text-slate-400 text-sm mb-4">
+                Messages are encrypted on their way to us and while we store them, but they are not locked so that
+                only you and the person you write to can open them: ATHENA&apos;s systems can read them. They may be
+                checked automatically for abuse, and our team reads a message only when it is reported to us or the
+                law requires it.
               </p>
               <Link href="/settings/messages" className="text-purple-600 dark:text-purple-400 text-sm hover:underline">
                 Message settings →
@@ -357,7 +372,7 @@ export default function SafetyCenterPage() {
           <div className="rounded-xl border border-rose-200 bg-rose-50 p-6 dark:border-rose-800 dark:bg-rose-900/20">
             <h2 className="text-xl font-bold text-slate-900 dark:text-white">Looking after yourself, here</h2>
             <p className="mt-2 text-slate-700 dark:text-slate-300">
-              The wellness area has moderated forums for anxiety, low mood, burnout, trauma, motherhood and grief, small support circles, a directory of women&apos;s health practitioners with telehealth marked, and trackers that are encrypted and read only by you.
+              The wellness area has moderated forums for anxiety, low mood, burnout, trauma, motherhood and grief, small support circles, a directory of women&apos;s health practitioners with telehealth marked, and trackers that are encrypted before they are stored and shown only to you unless you share them.
             </p>
             <Link href="/wellness" className="mt-4 inline-flex items-center px-6 py-3 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors">Open wellness</Link>
           </div>

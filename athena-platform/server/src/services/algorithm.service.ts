@@ -1,5 +1,7 @@
 import { prisma } from '../utils/prisma';
+import { GIFT_POINT_VALUE_AUD } from '../config/price-book';
 import { hiddenMemberWhere, viewerContextFor, type ViewerContext } from './search.service';
+import { blockedEitherWayIds } from './audience.service';
 
 export interface CareerCompassResult {
   targetRole: string;
@@ -209,6 +211,14 @@ export async function getCareerCompass(userId: string, targetRole?: string): Pro
 export async function getOpportunityScan(userId?: string): Promise<OpportunityScanResult> {
   const now = new Date();
 
+  // A member's event names a place and a day, and the catalogue leaves out the
+  // events of a host on either side of a block with her (routes/event.routes).
+  // This list is another way to the same events, so it is held to the same rule.
+  // An ATHENA listing has no host, and a bare notIn would drop it. A lookup that
+  // fails fails the scan: an empty list standing in for one that could not be
+  // read is how she is shown the event of a woman who blocked her.
+  const blocked = userId ? await blockedEitherWayIds(userId) : [];
+
   const [jobs, courses, events] = await Promise.all([
     prisma.job.findMany({
       where: { status: 'ACTIVE' },
@@ -225,7 +235,12 @@ export async function getOpportunityScan(userId?: string): Promise<OpportunitySc
     // A cancelled event keeps its row, so the women who registered can be
     // told it is off; it is not an opportunity for anyone else to find.
     prisma.event.findMany({
-      where: { date: { gte: now }, isHidden: false, cancelledAt: null },
+      where: {
+        date: { gte: now },
+        isHidden: false,
+        cancelledAt: null,
+        ...(blocked.length > 0 ? { OR: [{ hostUserId: null }, { hostUserId: { notIn: blocked } }] } : {}),
+      },
       select: { id: true, title: true, date: true, location: true, isFeatured: true },
       orderBy: [{ isFeatured: 'desc' }, { date: 'asc' }],
       take: 6,
@@ -405,8 +420,8 @@ export async function getIncomeStream(userId: string): Promise<IncomeStreamResul
   ]);
 
   const followerCount = creatorProfile?.followerCount || 0;
-  const monthlyEarnings = (giftStats._sum.giftValue || 0) * 0.01;
-  const avgGiftValue = (giftStats._avg.giftValue || 0) * 0.01;
+  const monthlyEarnings = (giftStats._sum.giftValue || 0) * GIFT_POINT_VALUE_AUD;
+  const avgGiftValue = (giftStats._avg.giftValue || 0) * GIFT_POINT_VALUE_AUD;
 
   const creatorStatus: IncomeStreamResult['creatorStatus'] = creatorProfile?.isMonetized
     ? followerCount > 20000

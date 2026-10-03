@@ -19,7 +19,7 @@
 import { Router, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
 import { randomUUID } from 'crypto';
-import { gdprService, RectifiableField } from '../services/gdpr.service';
+import { gdprService, describeErasure, RectifiableField } from '../services/gdpr.service';
 import {
   consentService,
   CookiePreferences,
@@ -41,6 +41,7 @@ import { prisma } from '../utils/prisma';
 // Audit rows here follow a committed change, so a failed insert is logged
 // rather than turned into a 500 for work that succeeded.
 import { auditAfterCommit } from '../services/admin-audit.service';
+import { requireStepUp } from './auth.routes';
 import { parsePagination, buildPaginationMeta } from '../utils/pagination';
 import { AuditAction, DataCategory, DSARType, ConsentType, LegalBasis, Prisma } from '@prisma/client';
 import { logger } from '../utils/logger';
@@ -134,11 +135,17 @@ function consentContext(req: AuthRequest) {
  * account, so the server issues a visitor id and keeps it in a first-party
  * cookie. Once the visitor signs in the same id carries their member id too.
  */
+// A visitor id is the key a cookie choice is filed under and the value of a
+// cookie, so it is what we mint: letters, digits, dashes and underscores, of a
+// length no real one exceeds. A submitted id that is not one is not trusted, and
+// the visitor is given a fresh one instead of being refused.
+const VISITOR_ID = /^[A-Za-z0-9_-]{8,100}$/;
+
 function resolveVisitorId(req: AuthRequest, submitted?: unknown): string {
-  if (typeof submitted === 'string' && submitted.trim()) return submitted.trim();
+  if (typeof submitted === 'string' && VISITOR_ID.test(submitted.trim())) return submitted.trim();
 
   const stored = req.cookies?.[VISITOR_COOKIE];
-  if (typeof stored === 'string' && stored.trim()) return stored.trim();
+  if (typeof stored === 'string' && VISITOR_ID.test(stored.trim())) return stored.trim();
 
   return randomUUID();
 }
@@ -242,6 +249,8 @@ router.get('/cookies/:visitorId', optionalAuth, async (req: AuthRequest, res: Re
  * POST /api/gdpr/cookies
  * Record cookie consent
  */
+// validated: analytics, marketing and functional are read as === true; visitorId is accepted only
+//   in the shape resolveVisitorId mints.
 router.post('/cookies', optionalAuth, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { visitorId: submittedVisitorId, analytics, marketing, functional } = req.body;
@@ -502,6 +511,7 @@ router.post('/dsar/export', exportRateLimit, async (req: AuthRequest, res: Respo
  * POST /api/gdpr/dsar/delete
  * Request account deletion (Right to be Forgotten)
  */
+// validated: confirmation must be the exact phrase and reason text, kept to 2,000 characters.
 router.post('/dsar/delete', erasureRateLimit, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
@@ -519,6 +529,11 @@ router.post('/dsar/delete', erasureRateLimit, async (req: AuthRequest, res: Resp
     if (reason !== undefined && typeof reason !== 'string') {
       return res.status(400).json({ success: false, error: 'Reason must be text' });
     }
+
+    // Erasure cannot be undone, and it is also how someone who had got into the
+    // account would destroy the trail of it. So it asks again for her password
+    // (and her second factor when it is on), exactly as DELETE /api/users/me does.
+    await requireStepUp(userId, { currentPassword: req.body.currentPassword, code: req.body.code });
 
     const dsar = await gdprService.createDSARRequest({
       userId,
@@ -562,9 +577,7 @@ router.post('/dsar/delete', erasureRateLimit, async (req: AuthRequest, res: Resp
 
     res.json({
       success: true,
-      message: outcome.accountRemoved
-        ? 'Your account and personal data have been deleted.'
-        : 'Your personal data has been erased. Records we are legally required to keep are held without anything that identifies you.',
+      message: describeErasure(outcome),
       data: {
         requestId: outcome.requestId,
         status: 'COMPLETED',
@@ -701,6 +714,8 @@ router.post(
  * Applied on the spot rather than queued: a restriction that is only recorded
  * as "will be processed" restricts nothing, which is what this route used to do.
  */
+// validated: processingTypes must be a non-empty list of restrictable kinds (checked against
+//   consentService) and reason text, kept to 2,000 characters.
 router.post('/dsar/restrict', restrictRateLimit, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
@@ -895,6 +910,8 @@ router.get('/consents/detail', auditDataAccess('consent_records'), async (req: A
  * PUT /api/gdpr/consents
  * Update user consents (bulk update)
  */
+// validated: consents must be a list whose every item has a known type and a boolean granted;
+//   required consents cannot be withdrawn and restricted ones cannot be granted.
 router.put('/consents', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
@@ -965,6 +982,7 @@ router.delete('/consents/optional', async (req: AuthRequest, res: Response, next
  * POST /api/gdpr/consents/:type
  * Update single consent
  */
+// validated: the type is checked with isKnownConsentType and granted must be a boolean.
 router.post('/consents/:type', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;

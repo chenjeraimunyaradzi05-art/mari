@@ -8,6 +8,7 @@ import { logger } from '../utils/logger';
 import { bestEffort, labelSegment } from '../utils/best-effort';
 import { mayEnterConfidentialSpace, requireWomanMember, womanGateState } from '../middleware/account-gates';
 import {
+  CONFIDENTIAL_LISTING_TYPES,
   HOUSING_CSV_COLUMNS,
   MAX_IMPORT_ROWS,
   SAFETY_CHECK_QUEUE_WHERE,
@@ -16,16 +17,42 @@ import {
   adminRecipients,
   byWaitingLongest,
   checkDueLine,
+  cleanListingImages,
+  confidentialTextProblem,
   dvSafeNoteOf,
+  isConfidentialListing,
+  listingImagesProblem,
   planHousingImport,
   publicFeatures,
   safetyCheckClock,
   staffListingData,
   staffListingSchema,
+  takenDownByStaff,
   withSafetyCheckRequest,
+  withStaffTakedown,
   withoutSafetyCheckRequest,
+  withoutStaffTakedown,
 } from '../services/housing-supply.service';
-import { recordStaffAction } from '../services/staff-record.service';
+import { recordStaffAction, recordStaffRead } from '../services/staff-record.service';
+import {
+  PROVIDER_CHECK_HELD_NOTE,
+  PROVIDER_CHECK_REQUIRED,
+  PROVIDER_CHECK_RENEWAL_WINDOW_DAYS,
+  PROVIDER_RELATIONSHIP_LABELS,
+  decideProviderCheck,
+  isProviderVerified,
+  parseProviderInput,
+  presentProviderCheck,
+  providerApplicationSchema,
+  providerDecisionSchema,
+  providerStanding,
+  providerStandings,
+  submitProviderCheck,
+  sweepProviderChecks,
+} from '../services/housing-provider.service';
+import { formatAbn } from '../services/abr.service';
+import { safeNotificationFor } from '../services/dv-safe.service';
+import { assertContentAllowed } from '../services/moderation.service';
 
 /**
  * Housing: listings, inquiries, and the safety rules around them.
@@ -42,15 +69,35 @@ import { recordStaffAction } from '../services/staff-record.service';
  *   woman-verified or has Safe Mode on. Until the lister answers her, such a
  *   listing shows its city and state only, never suburb or postcode.
  * - `safetyVerified` ("Checked by ATHENA staff") is set only through the admin
- *   route below; the member body is ignored on create and change. A member can
- *   ask for her listing to be shown as DV-safe, with a note saying why. The
- *   listing is held (PENDING) until staff have looked at it, so a live DV-safe
- *   listing is always one that staff checked.
+ *   route below; the member body is ignored on create and change. A confidential
+ *   listing (DV-safe, emergency or transitional) is held (PENDING) until staff
+ *   have looked at it, so a live confidential listing is always one that staff
+ *   checked. The check needs two things on record: what the member of staff
+ *   checked, and a standing provider check on the person offering the place
+ *   (housing-provider.service). Changing a checked listing's title, description
+ *   or rent ends the check, because it was a check of what was there.
+ * - Every response here is per viewer, so none of it may be cached: the whole
+ *   router answers `Cache-Control: private, no-store`.
+ * - A listing can be reported (POST /api/safety/reports, targetType
+ *   housing_listing); the report routes to the lister.
+ * - Only administrators reach the staff routes (requireRole('ADMIN')); a
+ *   moderator reaches none of them. What an administrator is shown that a
+ *   member is not (the check queue, the address of a confidential listing, an
+ *   inquiry thread on one) is written to the audit log as HOUSING_DV_SAFE_VIEWED
+ *   when it is shown (auditStaffView below); the decisions staff make are
+ *   written as they have always been (recordStaffAction).
  * - On a confidential listing the lister sees the asker as an alias derived
  *   from the inquiry id ("Applicant 4F2A"), never her name, avatar or user id.
  *   The conversation is carried on the inquiry rather than in messages, and
  *   her details are shared only once the lister has approved her and she has
  *   chosen to share them.
+ * - The address is released by the lister's answer and nothing else. The asker
+ *   may withdraw, or say "I have applied" once the lister has been in touch;
+ *   no move the asker makes alone reaches a state that releases the address
+ *   (ASKER_MOVES). The words on a confidential listing carry neither its
+ *   street address nor a phone number (housing-supply confidentialTextProblem),
+ *   the pictures are http(s) links and no more than ten, and the title and
+ *   description go through the same screen as a post.
  *
  * - Supply does not depend on members alone. Staff can list a housing
  *   partner's places, singly or from the partner's spreadsheet, each attached
@@ -72,19 +119,47 @@ import { recordStaffAction } from '../services/staff-record.service';
 
 const router = Router();
 
+// Every answer on this router depends on who is asking: a confidential listing
+// is there for one reader and not for another, an address is released to one
+// member and not the next. A shared cache or a browser's back button that kept
+// one reader's answer and handed it to a different request would undo all of
+// that, so none of it is stored.
+router.use((_req, res, next) => {
+  res.setHeader('Cache-Control', 'private, no-store');
+  next();
+});
+
 // ------------------------------------------------------------------ constants
 
 const LISTING_TYPES = ['RENTAL', 'SHARE', 'EMERGENCY', 'TRANSITIONAL'] as const;
 const LISTING_STATUSES = ['ACTIVE', 'PENDING', 'LEASED', 'WITHDRAWN'] as const;
 /** Types that are confidential on their own, DV-safe flag or not. */
-const CONFIDENTIAL_TYPES = ['EMERGENCY', 'TRANSITIONAL'];
+const CONFIDENTIAL_TYPES: string[] = [...CONFIDENTIAL_LISTING_TYPES];
 /** The inquiry states at which the lister has answered, and the address may be shown to the asker. */
 const ADDRESS_RELEASED_AT = ['CONTACTED', 'VIEWING_SCHEDULED', 'APPLICATION_SUBMITTED', 'APPROVED'];
+/**
+ * Where the asker may move an inquiry from, for each move the asker's route
+ * offers. Saying "I have applied" is allowed only once the lister has answered
+ * (CONTACTED or later): APPLICATION_SUBMITTED is one of the states that releases
+ * the address, so a move the asker could make alone from PENDING handed over the
+ * street address of a DV-safe place with the lister never having said a word,
+ * to any account with Safe Mode switched on. A closed inquiry (DECLINED,
+ * WITHDRAWN) is not reopened by either side.
+ */
+const ASKER_MOVES: Record<string, readonly string[]> = {
+  APPLICATION_SUBMITTED: ['CONTACTED', 'VIEWING_SCHEDULED', 'APPROVED'],
+  WITHDRAWN: ['PENDING', 'CONTACTED', 'VIEWING_SCHEDULED', 'APPLICATION_SUBMITTED', 'APPROVED'],
+};
+const CLOSED_INQUIRY = 'This inquiry is closed';
+const APPLY_AFTER_ANSWER = 'You can say you have applied once the lister has been in touch with you.';
 
 const ANONYMOUS_REASON = 'Safe housing listings are shown to signed-in members only.';
 const MEMBER_REASON = 'Safe housing listings are shown to members who have Safe Mode on or a verified account. Safe Mode is free and one switch away, under Safety.';
 const NEEDS_NOTE = 'Tell us in a sentence why this place is safe for a woman leaving violence, so staff can check it before it goes live.';
 const HELD_FOR_CHECK = 'This listing is waiting for a safety check. It goes live as soon as ATHENA staff have looked at it.';
+const CHECK_NOTE_REQUIRED = 'Say what you checked, in a sentence or two: who you spoke to, and how you know the place is safe. It is kept in the record of this decision.';
+const TAKEN_DOWN_BY_STAFF = 'ATHENA staff took this listing down, so it cannot be put back on the list from here. If you think that was a mistake, you can appeal the decision from the Help page.';
+const CHECK_ENDED_BY_EDIT = 'Because you changed what the listing says, its safety check has ended and ATHENA staff will look at it again before it goes back on the list.';
 
 // -------------------------------------------------------------------- helpers
 
@@ -106,7 +181,7 @@ type PersonSelect = { id: true; firstName: true; lastName: true; displayName: tr
 const personSelect: PersonSelect = { id: true, firstName: true, lastName: true, displayName: true, avatar: true };
 
 const isAdmin = (req: AuthRequest) => req.user?.role === 'ADMIN';
-const isConfidential = (l: Pick<ListingRow, 'dvSafe' | 'type'>) => Boolean(l.dvSafe) || CONFIDENTIAL_TYPES.includes(l.type);
+const isConfidential = (l: Pick<ListingRow, 'dvSafe' | 'type'>) => isConfidentialListing(l);
 const isReleased = (status: string) => ADDRESS_RELEASED_AT.includes(status);
 
 /**
@@ -116,9 +191,17 @@ const isReleased = (status: string) => ADDRESS_RELEASED_AT.includes(status);
  * admin's views add the note.
  */
 function present<T extends ListingRow>(l: T, showAddress: boolean) {
-  const base = { ...l, features: publicFeatures(l.features) };
-  if (showAddress) return { ...base, addressReleased: true };
   const confidential = isConfidential(l);
+  // The row is spread whole, and one of its columns is `agentId`: the lister's
+  // user id, which is the key to her profile. Nobody reading a listing has any
+  // need of it: a confidential listing is one a lister may be hiding behind, and
+  // on a room in somebody's home, the id reached anonymous visitors and led to
+  // her name. So it is dropped for every reader and every kind of listing. The
+  // lister's own and the admin's views put it back (presentOwn).
+  const { agentId: _agentId, ...row } = l;
+  void _agentId;
+  const base = { ...row, features: publicFeatures(l.features) };
+  if (showAddress) return { ...base, addressReleased: true };
   return {
     ...base,
     address: null,
@@ -132,8 +215,11 @@ function present<T extends ListingRow>(l: T, showAddress: boolean) {
 function presentOwn<T extends ListingRow>(l: T) {
   return {
     ...present(l, true),
+    ...(l.agentId !== undefined ? { agentId: l.agentId } : {}),
     dvSafeNote: dvSafeNoteOf(l.features),
-    awaitingSafetyCheck: Boolean(l.dvSafe) && !l.safetyVerified,
+    awaitingSafetyCheck: isConfidential(l) && !l.safetyVerified,
+    // Staff took it down; only staff put it back, so the lister is not offered a switch that would be refused.
+    takenDownByStaff: takenDownByStaff(l.features),
   };
 }
 
@@ -167,6 +253,55 @@ async function confidentialAccess(req: AuthRequest): Promise<{ eligible: boolean
   if (isAdmin(req)) return { eligible: true, reason: null };
   const eligible = mayEnterConfidentialSpace(await womanGateState(req.user.id));
   return { eligible, reason: eligible ? null : MEMBER_REASON };
+}
+
+// Staff reads of confidential housing data.
+//
+// The audit log held every change staff made to housing and none of what they
+// looked at, so "need-to-know, audited" (docs/security/authorisation-matrix.md)
+// was true of writes only. Reading is where the harm is for a woman hiding from
+// someone: a street address, the note on why a place is safe, who is asking
+// about it. Each place below that hands one of those to a member of staff, who
+// is not the listing's own lister and has not been given it by the lister's
+// answer, writes one row naming her, the listings, what was in the response and
+// when. No reason is demanded (the check queue is its own reason, and a screen
+// that refused to open would only teach staff to type "x"), but one given with
+// ?reason= is kept beside the row.
+
+const REASON_MAX = 300;
+
+/** The reason a member of staff gave for opening this, if she gave one. */
+function statedReason(req: AuthRequest): string | undefined {
+  const raw = req.query?.reason;
+  const text = typeof raw === 'string' ? raw.replace(/\s+/g, ' ').trim() : '';
+  return text ? text.slice(0, REASON_MAX) : undefined;
+}
+
+/**
+ * Whether this read is staff reading a confidential listing, as opposed to its
+ * lister reading her own, or a woman reading what the lister released to her.
+ * Ordinary listings are not DV-safe data and are not recorded.
+ */
+const isStaffReadOfConfidential = (req: AuthRequest, l: ListingRow, released: Set<string> = new Set()) =>
+  isAdmin(req) && isConfidential(l) && l.agentId !== req.user?.id && !released.has(l.id);
+
+type StaffViewVia = 'check queue' | 'listing list' | 'listing detail' | 'listing change' | 'check decision' | 'inquiry thread';
+
+async function auditStaffView(req: AuthRequest, listings: Array<Pick<ListingRow, 'id' | 'agentId'>>, via: StaffViewVia, disclosed: string[]): Promise<void> {
+  if (listings.length === 0) return;
+  const reason = statedReason(req);
+  const only = listings.length === 1 ? listings[0] : null;
+  await recordStaffRead(req, 'HOUSING_DV_SAFE_VIEWED', {
+    resourceType: 'HousingListing',
+    // One listing is the row's subject, and the lister is the member it is about;
+    // a screen of many is a list of ids.
+    ...(only ? { resourceId: only.id, targetUserId: only.agentId ?? null } : {}),
+    listingIds: listings.map((l) => l.id),
+    count: listings.length,
+    via,
+    disclosed,
+    ...(reason ? { statedReason: reason } : {}),
+  });
 }
 
 // The thread and the share-details decision, kept as JSON in HousingInquiry.notes.
@@ -208,6 +343,11 @@ export const aliasFor = (inquiryId: string | undefined | null) => `Applicant ${S
 type InquiryRow = {
   id: string;
   status: string;
+  listingId?: string;
+  userId?: string;
+  message?: string | null;
+  viewingDate?: Date | string | null;
+  createdAt?: Date | string | null;
   notes?: string | null;
   updatedAt?: Date | string | null;
   user?: Record<string, unknown> | null;
@@ -218,14 +358,35 @@ type InquiryRow = {
  * An inquiry as the lister sees it. On a confidential listing the asker is an
  * alias with no user id or avatar, until the lister has approved her and she
  * has chosen to share her details.
+ *
+ * The row is built from a short list of what a lister may see, not by spreading
+ * what the database returned. Prisma hands back every scalar column with the
+ * include, and one of them is `userId`: the key to her public profile, her real
+ * name and her city. It used to ride along beside a nulled `user`, so a lister
+ * could read the alias and the id in the same response and unmask her before
+ * she had chosen to share anything. A column added to the table later stays out
+ * of this response until someone decides a lister should see it.
  */
 function presentForLister<T extends InquiryRow>(inq: T, listing: Pick<ListingRow, 'dvSafe' | 'type'>) {
   const priv = readPrivate(inq.notes, inq.updatedAt);
   const contactShared = Boolean(priv.contactSharedAt);
   const showPerson = !isConfidential(listing) || (inq.status === 'APPROVED' && contactShared);
-  const { notes: _notes, user, ...rest } = inq;
-  void _notes;
-  return { ...rest, alias: aliasFor(inq.id), user: showPerson ? (user ?? null) : null, contactShared, thread: priv.thread };
+  return {
+    id: inq.id,
+    listingId: inq.listingId,
+    status: inq.status,
+    message: inq.message,
+    viewingDate: inq.viewingDate,
+    createdAt: inq.createdAt,
+    updatedAt: inq.updatedAt,
+    // Her id appears only where `user` does, which is where she has been seen
+    // by name already (an ordinary listing) or has chosen to be.
+    ...(showPerson && inq.userId !== undefined ? { userId: inq.userId } : {}),
+    alias: aliasFor(inq.id),
+    user: showPerson ? (inq.user ?? null) : null,
+    contactShared,
+    thread: priv.thread,
+  };
 }
 
 /** An inquiry as the asker sees it: her listing with the address once the lister has answered. */
@@ -254,8 +415,21 @@ async function note(userId: string | null | undefined, title: string, message: s
   // checks".
   const rawKind = data?.kind;
   const kind = labelSegment(rawKind, 'housing-unspecified');
-  await bestEffort(`notification.${kind}`, () => prisma.notification
-    .create({ data: { userId, type: 'SYSTEM', title, message, link, ...(data ? { data: data as Prisma.InputJsonValue } : {}) } }), null);
+  await bestEffort(`notification.${kind}`, async () => {
+    // A housing note names the place and quotes the other person, which is the
+    // one thing a woman who keeps her notifications vague does not want read by
+    // whoever is holding her open phone. Every notification that leaves the
+    // platform is shaped by this member's setting (push.service, the email
+    // sender), and this bell list was the one that was not: it wrote the
+    // listing's title and the lister's own words straight into the row. The
+    // words stay in the housing page the link opens, where she is signed in; the
+    // row says only that there is an update. A lookup that fails reads as vague,
+    // not as the real words.
+    const shaped = await safeNotificationFor(userId, title, message);
+    return prisma.notification.create({
+      data: { userId, type: 'SYSTEM', title: shaped.title, message: shaped.message, link, ...(data ? { data: data as Prisma.InputJsonValue } : {}) },
+    });
+  }, null);
 }
 
 async function noteAdmins(title: string, message: string, link: string, data: Record<string, unknown>): Promise<void> {
@@ -337,10 +511,17 @@ router.get('/listings', optionalAuth, async (req: AuthRequest, res: Response, ne
     const access = await confidentialAccess(req);
     if (!access.eligible) {
       where.AND = [{ dvSafe: false }, { type: { notIn: CONFIDENTIAL_TYPES } }];
+    } else {
+      // Even for a woman who may see them, a confidential listing is shown only
+      // once staff have checked it. Writes already hold such a listing until
+      // then; this is the read that keeps a row written before that rule, or
+      // by a path that forgot it, from reaching her as "safe".
+      where.AND = [{ OR: [{ safetyVerified: true }, { dvSafe: false, type: { notIn: CONFIDENTIAL_TYPES } }] }];
     }
 
     const take = Math.min(Math.max(1, Number(limit) || 20), 50);
-    const pageNo = Math.max(1, Number(page) || 1);
+    // Capped as every other list is (utils/pagination MAX_PAGE): ?page=1e18 made an OFFSET Postgres refuses.
+    const pageNo = Math.min(Math.max(1, Math.trunc(Number(page)) || 1), 10_000);
     const skip = (pageNo - 1) * take;
 
     const [listings, total] = await Promise.all([
@@ -349,6 +530,10 @@ router.get('/listings', optionalAuth, async (req: AuthRequest, res: Response, ne
     ]);
 
     const released = await releasedListingIds(req.user?.id, listings.map((l) => l.id));
+
+    // A member of staff browsing the list is shown the street address of each
+    // confidential place on it; that is a read of DV-safe data and is recorded.
+    await auditStaffView(req, listings.filter((l) => isStaffReadOfConfidential(req, l, released)), 'listing list', ['address']);
 
     res.json({
       success: true,
@@ -369,15 +554,26 @@ router.get('/listings/:id', optionalAuth, async (req: AuthRequest, res: Response
     if (!listing) throw new ApiError(404, 'Housing listing not found');
 
     const own = Boolean(req.user) && (isAdmin(req) || listing.agentId === req.user!.id);
+    // A held, let or withdrawn listing is the lister's and staff's business. It
+    // used to be readable by id by anyone who could read the type, which put a
+    // listing nobody had checked in front of a woman who had only been given a
+    // link; to everyone else it does not exist.
+    if (!own && listing.status !== 'ACTIVE') throw new ApiError(404, 'Housing listing not found');
     if (isConfidential(listing) && !own) {
       // To a stranger a confidential listing does not exist; a member who is
       // not yet eligible is told how to become so.
       if (!req.user) throw new ApiError(404, 'Housing listing not found');
       const access = await confidentialAccess(req);
       if (!access.eligible) throw new ApiError(403, access.reason || MEMBER_REASON);
+      // Live and confidential but never checked is a row from before the check
+      // was required; it does not exist for her either.
+      if (!listing.safetyVerified) throw new ApiError(404, 'Housing listing not found');
     }
 
     const released = own ? new Set<string>() : await releasedListingIds(req.user?.id, [id]);
+    // Staff reach a held, let or withdrawn confidential listing here too, and
+    // with its address. Recorded whatever its status.
+    await auditStaffView(req, isStaffReadOfConfidential(req, listing, released) ? [listing] : [], 'listing detail', ['address']);
     res.json({ success: true, data: present(listing, canSeeAddress(req, listing, released)) });
   } catch (error) {
     next(error);
@@ -404,6 +600,7 @@ router.post(
       const listing = await prisma.housingListing.findUnique({ where: { id } });
       if (!listing) throw new ApiError(404, 'Housing listing not found');
       if (listing.status !== 'ACTIVE') throw new ApiError(400, 'This listing is no longer available');
+      if (isConfidential(listing) && !listing.safetyVerified) throw new ApiError(400, 'This listing is no longer available');
       if (listing.agentId === userId) throw new ApiError(400, 'This is your own listing');
 
       if (isConfidential(listing) && !isAdmin(req)) {
@@ -478,10 +675,19 @@ router.patch(
       if (!inquiry) throw new ApiError(404, 'Inquiry not found');
       if (inquiry.userId !== userId) throw new ApiError(403, 'Not authorized to update this inquiry');
 
+      const closed = ['WITHDRAWN', 'DECLINED'].includes(inquiry.status);
+      // The status used to be written as sent, so the asker could move a pending
+      // inquiry to APPLICATION_SUBMITTED, and this route's own answer then
+      // carried the street address (presentForAsker releases it at that state),
+      // or move a declined one back to open. See ASKER_MOVES.
+      if (status && !(ASKER_MOVES[status] ?? []).includes(inquiry.status)) {
+        throw new ApiError(409, closed ? CLOSED_INQUIRY : status === 'APPLICATION_SUBMITTED' ? APPLY_AFTER_ANSWER : 'That change cannot be made from where this inquiry stands');
+      }
+
       const text = typeof reply === 'string' ? reply.trim() : '';
+      if (closed && (text || viewingDate)) throw new ApiError(400, CLOSED_INQUIRY);
       let notes: string | undefined;
       if (text) {
-        if (['WITHDRAWN', 'DECLINED'].includes(inquiry.status)) throw new ApiError(400, 'This inquiry is closed');
         const priv = readPrivate(inquiry.notes, inquiry.updatedAt);
         priv.thread.push({ from: 'ASKER', text, at: new Date().toISOString() });
         notes = writePrivate(priv);
@@ -512,6 +718,45 @@ router.patch(
     }
   }
 );
+
+// DELETE /api/housing/inquiries/:id - The asker's side: take the whole thing back.
+//
+// Withdrawing only changed the status: the inquiry, what she wrote and every line
+// of the thread stayed on /my/inquiries for as long as the account did, which on
+// a shared device is a record that she looked for a safe place. This removes it:
+// the row, with the message and the thread it carries, and the notices the lister
+// was given about it. Nobody is told. The lister has no use for a thread with
+// someone who is no longer asking, and a notice "she deleted her inquiry" is a
+// notice about her. The listing is unaffected, and she may ask about it again.
+router.delete('/inquiries/:id', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id;
+    if (!userId) throw new ApiError(401, 'Authentication required');
+    const inquiry = await prisma.housingInquiry.findUnique({
+      where: { id },
+      select: { id: true, userId: true, listing: { select: { agentId: true } } },
+    });
+    if (!inquiry) throw new ApiError(404, 'Inquiry not found');
+    if (inquiry.userId !== userId) throw new ApiError(403, 'Not authorized to remove this inquiry');
+
+    await prisma.housingInquiry.delete({ where: { id: inquiry.id } });
+
+    // Its notices in the lister's bell point at a thread that is gone, and so do
+    // the asker's own. Only those two members are ever sent one about an
+    // inquiry, so the sweep is bounded to them by the indexed column and is not
+    // a scan of every notification on the platform for a value inside the JSON.
+    // Best effort: the inquiry is already deleted, and a stale notice is cosmetic.
+    const recipients = [inquiry.userId, ...(inquiry.listing?.agentId ? [inquiry.listing.agentId] : [])];
+    await bestEffort('housing.inquiry-removed.lister-notices', () =>
+      prisma.notification.deleteMany({ where: { userId: { in: recipients }, data: { path: ['inquiryId'], equals: inquiry.id } } })
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+});
 
 // POST /api/housing/inquiries/:id/share-contact - After approval on a confidential
 // listing, the asker chooses to let the lister see who she is.
@@ -596,14 +841,35 @@ router.post(
       } = req.body;
 
       // `safetyVerified` in the body is ignored: only staff can say a listing
-      // was checked. A DV-safe claim is a request, held until staff look.
+      // was checked. A DV-safe claim is a request, held until staff look. So is
+      // an emergency or transitional place, which is confidential whether or not
+      // the lister ticks DV-safe: it used to go live at once, so anyone with an
+      // account could offer "emergency accommodation" to a woman in crisis with
+      // nobody having looked at it.
       const wantsDvSafe = dvSafe === true || dvSafe === 'true';
+      const needsCheck = isConfidential({ dvSafe: wantsDvSafe, type });
       const safeNote = typeof dvSafeNote === 'string' ? dvSafeNote.trim() : '';
       if (wantsDvSafe && !safeNote) throw new ApiError(400, NEEDS_NOTE);
 
       // Anything in the body shaped like one of the internal tags is dropped,
       // so a lister cannot write her own check clock or somebody else's note.
       const cleanFeatures = publicFeatures(features);
+
+      // The pictures were stored as typed, whatever they were. Each is a link
+      // a member's page will render, so each has to be one a browser may follow.
+      const imagesProblem = listingImagesProblem(images);
+      if (imagesProblem) throw new ApiError(400, imagesProblem);
+
+      // On a confidential place the words carry neither the street address nor
+      // a phone number: every eligible member reads them before the lister has
+      // answered anyone, which is exactly when the address is withheld.
+      const wordsProblem = needsCheck ? confidentialTextProblem(title, description) : null;
+      if (wordsProblem) throw new ApiError(400, wordsProblem.message);
+
+      // Then the same screen a post goes through. A listing was the one public
+      // surface that skipped it, and its words reach a woman looking for
+      // somewhere safe.
+      await assertContentAllowed(`${String(title).trim()}\n${String(description).trim()}`, { kind: 'housing_listing', userId });
 
       const listing = await prisma.housingListing.create({
         data: {
@@ -622,7 +888,7 @@ router.post(
           bedrooms: bedrooms ? Number(bedrooms) : undefined,
           bathrooms: bathrooms ? Number(bathrooms) : undefined,
           parking: parking ? Number(parking) : undefined,
-          features: wantsDvSafe ? withSafetyCheckRequest(cleanFeatures, safeNote) : cleanFeatures,
+          features: needsCheck ? withSafetyCheckRequest(cleanFeatures, safeNote) : cleanFeatures,
           safetyVerified: false,
           dvSafe: wantsDvSafe,
           petFriendly: petFriendly === true,
@@ -630,28 +896,28 @@ router.post(
           availableFrom: availableFrom ? new Date(availableFrom) : undefined,
           minLeaseTerm: minLeaseTerm ? Number(minLeaseTerm) : undefined,
           flexibleLease: flexibleLease === true,
-          images,
-          status: wantsDvSafe ? 'PENDING' : 'ACTIVE',
+          images: cleanListingImages(images),
+          status: needsCheck ? 'PENDING' : 'ACTIVE',
         },
       });
 
-      if (wantsDvSafe) {
+      if (needsCheck) {
         await noteAdmins(
-          'A housing listing asks to be shown as DV-safe',
+          wantsDvSafe ? 'A housing listing asks to be shown as DV-safe' : `A ${String(type).toLowerCase()} housing listing is waiting for a check`,
           `"${listing.title}"${listing.city ? ` in ${listing.city}` : ''} is held until someone checks it. ${checkDueLine()}`,
           '/admin/housing',
           { kind: 'HOUSING_DV_SAFE_CHECK', listingId: listing.id }
         );
       }
 
-      logger.info(`Housing listing created: ${listing.id}${wantsDvSafe ? ' (held for a safety check)' : ''}`);
+      logger.info(`Housing listing created: ${listing.id}${needsCheck ? ' (held for a safety check)' : ''}`);
 
       res.status(201).json({
         success: true,
         data: presentOwn(listing),
-        pendingSafetyCheck: wantsDvSafe,
-        message: wantsDvSafe
-          ? 'Listed. Because you asked for it to be shown as DV-safe, ATHENA staff will look at it before it goes live. You will be told when it does.'
+        pendingSafetyCheck: needsCheck,
+        message: needsCheck
+          ? `Listed. Because ${wantsDvSafe ? 'you asked for it to be shown as DV-safe' : 'it is offered as emergency or transitional housing'}, ATHENA staff will look at it before it goes live. ${PROVIDER_CHECK_HELD_NOTE} You will be told when it does go live.`
           : 'Listed. It is live now.',
       });
     } catch (error) {
@@ -691,6 +957,62 @@ router.get('/my/listings', authenticate, async (req: AuthRequest, res: Response,
   }
 });
 
+// ===========================================
+// THE LISTER'S PROVIDER CHECK
+// ===========================================
+// "Checked by ATHENA staff" on a DV-safe, emergency or transitional place is a
+// promise about the person offering it as well as the place. A member who lists
+// such places asks to be checked as a provider here: who they are and how they
+// are connected to the places they list. Staff decide it from the queue below,
+// and the badge can be given only while the check stands (housing-provider.service).
+// The member is told what is checked and what is not; no police or background
+// check is run, and none is asked for.
+
+// GET /api/housing/my/provider-check - Where the member's check stands, and what asking involves
+router.get('/my/provider-check', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) throw new ApiError(401, 'Authentication required');
+    const row = await prisma.housingProviderVerification.findUnique({ where: { userId } });
+    res.json({
+      success: true,
+      data: {
+        ...presentProviderCheck(row),
+        relationships: Object.entries(PROVIDER_RELATIONSHIP_LABELS).map(([value, label]) => ({ value, label })),
+        renewalWindowDays: PROVIDER_CHECK_RENEWAL_WINDOW_DAYS,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/housing/my/provider-check - Ask to be checked, or ask again
+router.post('/my/provider-check', authenticate, requireWomanMember, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const input = parseProviderInput(providerApplicationSchema, req.body);
+    const userId = req.user?.id;
+    if (!userId) throw new ApiError(401, 'Authentication required');
+    const row = await submitProviderCheck(userId, input);
+
+    await noteAdmins(
+      'A housing provider asks to be checked',
+      `${input.providerName} asks to be checked as a provider of safe housing. Any of their DV-safe, emergency or transitional places that need the badge wait on it.`,
+      '/admin/housing#provider-checks',
+      { kind: 'HOUSING_PROVIDER_CHECK', userId }
+    );
+
+    logger.info(`User ${userId} asked to be checked as a housing provider`);
+    res.status(201).json({
+      success: true,
+      data: presentProviderCheck(row),
+      message: 'Sent. A member of staff will look at it. Your DV-safe, emergency and transitional places can show as checked once they have.',
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // PATCH /api/housing/listings/:id - Change a listing you made (status, price, availability)
 router.patch(
   '/listings/:id',
@@ -708,18 +1030,29 @@ router.patch(
     try {
       failOnErrors(req);
       const { id } = req.params;
+      const userId = req.user?.id;
+      if (!userId) throw new ApiError(401, 'Authentication required');
       const listing = await prisma.housingListing.findUnique({
         where: { id },
-        select: { id: true, agentId: true, title: true, city: true, dvSafe: true, safetyVerified: true, status: true, features: true },
+        select: { id: true, agentId: true, title: true, description: true, rentWeekly: true, type: true, city: true, dvSafe: true, safetyVerified: true, status: true, features: true },
       });
       if (!listing) throw new ApiError(404, 'Housing listing not found');
-      if (listing.agentId !== req.user!.id && !isAdmin(req)) {
+      if (listing.agentId !== userId && !isAdmin(req)) {
         throw new ApiError(403, 'Only the person who listed this place can change it');
       }
 
       // `safetyVerified` is ignored here for everyone; staff set it on the
       // admin route so the change is recorded as theirs.
       const { status, title, description, rentWeekly, availableFrom, dvSafe, dvSafeNote, petFriendly, accessibleUnit } = req.body;
+
+      // A listing staff took down (an administrator withdrew it, or a moderator
+      // removed it on a report) comes back only through staff. Its status is a
+      // switch its lister can press, so without this a take-down of an ordinary
+      // listing, which has no check to go back through, lasted until she pressed
+      // "Available".
+      if (status === 'ACTIVE' && listing.status !== 'ACTIVE' && takenDownByStaff(listing.features)) {
+        throw new ApiError(409, TAKEN_DOWN_BY_STAFF);
+      }
 
       const data: Record<string, unknown> = {
         ...(typeof title === 'string' && { title: title.trim() }),
@@ -732,6 +1065,16 @@ router.patch(
 
       let message: string | null = null;
       let requestedCheck = false;
+      let adminTitle = 'A housing listing asks to be shown as DV-safe';
+
+      // Takes the listing off the list, ends any check it had, and starts the
+      // clock for a new one. Whatever else this call says about the status.
+      const holdForCheck = (safeNote: string) => {
+        data.safetyVerified = false;
+        data.status = 'PENDING';
+        data.features = withSafetyCheckRequest(listing.features, safeNote);
+        requestedCheck = true;
+      };
 
       if (dvSafe === true && !listing.dvSafe) {
         // Asking for DV-safe on a listing that is already up: held again until
@@ -745,31 +1088,103 @@ router.patch(
         const safeNote = typeof dvSafeNote === 'string' ? dvSafeNote.trim() : '';
         if (!safeNote) throw new ApiError(400, NEEDS_NOTE);
         data.dvSafe = true;
-        data.safetyVerified = false;
-        data.status = 'PENDING';
-        data.features = withSafetyCheckRequest(listing.features, safeNote);
-        requestedCheck = true;
+        holdForCheck(safeNote);
         message = 'Asked. ATHENA staff will look at the listing before it shows as DV-safe; it is off the list until then.';
       } else if (dvSafe === false && listing.dvSafe) {
         // Lowering a claim needs no check, and ends the one it had: the badge
         // said this listing was checked as DV-safe, which it no longer claims.
         data.dvSafe = false;
         data.safetyVerified = false;
-        data.features = withoutSafetyCheckRequest(listing.features);
+        if (isConfidential({ dvSafe: false, type: listing.type })) {
+          // An emergency or transitional place is confidential with or without
+          // the DV-safe claim, so lowering it ends the check without making the
+          // place any less in need of one: it goes back to the queue.
+          if (listing.status === 'ACTIVE') {
+            holdForCheck(dvSafeNoteOf(listing.features) ?? '');
+            adminTitle = `A ${String(listing.type).toLowerCase()} housing listing is waiting for a check`;
+            message = 'Staff will look at the listing again before it goes back on the list.';
+          }
+        } else {
+          data.features = withoutSafetyCheckRequest(listing.features);
+        }
+      }
+
+      const claimsDvSafe = typeof data.dvSafe === 'boolean' ? data.dvSafe : listing.dvSafe;
+      const staysConfidential = isConfidential({ dvSafe: claimsDvSafe, type: listing.type });
+
+      // New words are screened as they are on the way in (POST /listings): on a
+      // confidential place for a street address or a phone number, and on any
+      // listing by the gate a post goes through. Only when they changed; a saved
+      // form that repeats them is not a new publication.
+      const titleAfter = typeof data.title === 'string' ? data.title.trim() : String(listing.title).trim();
+      const descriptionAfter = typeof data.description === 'string' ? data.description.trim() : String(listing.description).trim();
+      const wordsChanged = titleAfter !== String(listing.title).trim() || descriptionAfter !== String(listing.description).trim();
+      if (wordsChanged) {
+        const wordsProblem = staysConfidential ? confidentialTextProblem(titleAfter, descriptionAfter) : null;
+        if (wordsProblem) throw new ApiError(400, wordsProblem.message);
+        await assertContentAllowed(`${titleAfter}\n${descriptionAfter}`, { kind: 'housing_listing', userId });
+      }
+
+      // A check is a check of what was there. Changing the title, the
+      // description or the rent afterwards leaves "Checked by ATHENA staff" on
+      // words and a price nobody looked at, so it ends the check. A live
+      // confidential listing is taken off the list until staff have looked
+      // again; anything else just loses the badge.
+      if (listing.safetyVerified && !requestedCheck) {
+        const edited =
+          (typeof data.title === 'string' && data.title.trim() !== String(listing.title).trim()) ||
+          (typeof data.description === 'string' && data.description.trim() !== String(listing.description).trim()) ||
+          (typeof data.rentWeekly === 'number' && data.rentWeekly !== (listing.rentWeekly === null ? null : Number(listing.rentWeekly)));
+        if (edited) {
+          data.safetyVerified = false;
+          message = CHECK_ENDED_BY_EDIT;
+          if (staysConfidential && listing.status === 'ACTIVE') {
+            holdForCheck(dvSafeNoteOf(listing.features) ?? '');
+            adminTitle = 'A checked housing listing was changed and needs checking again';
+          }
+        }
       }
 
       if (status && !requestedCheck) {
-        if (status === 'ACTIVE' && listing.dvSafe && !listing.safetyVerified && !isAdmin(req)) {
-          throw new ApiError(400, HELD_FOR_CHECK);
+        const verifiedAfter = typeof data.safetyVerified === 'boolean' ? data.safetyVerified : listing.safetyVerified;
+        // A checked listing that was withdrawn or let comes back with its badge
+        // only if the check on whoever lists it still stands: the hourly sweep
+        // looks at live listings, so a withdrawn one would otherwise come back
+        // after the provider check ran out, with the badge on it.
+        const providerLapsed =
+          status === 'ACTIVE' && staysConfidential && verifiedAfter && listing.status !== 'ACTIVE' && !(await isProviderVerified(listing.agentId));
+        if (providerLapsed) {
+          holdForCheck(dvSafeNoteOf(listing.features) ?? '');
+          adminTitle = `A ${String(listing.type).toLowerCase()} housing listing is waiting for a check`;
+          message = 'Your provider check is no longer current, so staff will look at the listing again before it goes back on the list. Ask for a new provider check under "Your provider check".';
+        } else if (status === 'ACTIVE' && staysConfidential && !verifiedAfter) {
+          // Not live until checked, and not even for an admin here: staff put a
+          // listing live from the check below, where the decision is recorded.
+          if (listing.status === 'PENDING' || isAdmin(req)) throw new ApiError(400, HELD_FOR_CHECK);
+          // Withdrawn or let, and unchecked: putting it back is asking for the
+          // check, so it goes to the queue rather than being refused with
+          // nothing waiting.
+          holdForCheck(dvSafeNoteOf(listing.features) ?? '');
+          adminTitle = `A ${String(listing.type).toLowerCase()} housing listing is waiting for a check`;
+          message = 'Asked. ATHENA staff will look at the listing before it goes back on the list.';
+        } else {
+          data.status = status;
         }
-        data.status = status;
       }
 
       const updated = await prisma.housingListing.update({ where: { id }, data });
 
+      // An administrator may change a listing that is not hers, and the answer
+      // is the lister's own view of it: address and DV-safe note included. It is a
+      // read of confidential data if the listing was confidential when she opened
+      // it or is after her change: an administrator who lowers the DV-safe claim is
+      // still handed the address and note of the place that was one a moment ago.
+      const confidentialRead = isStaffReadOfConfidential(req, listing) || isStaffReadOfConfidential(req, updated);
+      await auditStaffView(req, confidentialRead ? [updated] : [], 'listing change', ['address', 'dvSafeNote']);
+
       if (requestedCheck) {
         await noteAdmins(
-          'A housing listing asks to be shown as DV-safe',
+          adminTitle,
           `"${listing.title}"${listing.city ? ` in ${listing.city}` : ''} is held until someone checks it. ${checkDueLine()}`,
           '/admin/housing',
           { kind: 'HOUSING_DV_SAFE_CHECK', listingId: id }
@@ -809,6 +1224,14 @@ router.patch(
       if (inquiry.listing.agentId !== req.user!.id && !isAdmin(req)) {
         throw new ApiError(403, 'Only the person who listed this place can answer inquiries');
       }
+      // A closed inquiry is closed for both sides (ASKER_MOVES). The asker's
+      // route refused to reopen one; this one wrote whatever it was sent, so a
+      // lister could set CONTACTED or APPROVED on an inquiry the woman had
+      // withdrawn and keep writing to her through the thread, each line ringing
+      // her bell. Her withdrawal is the end of the contact she agreed to, and a
+      // decline is the lister's own answer; the housing page offers no button on
+      // either, and the API now says the same.
+      if (['WITHDRAWN', 'DECLINED'].includes(inquiry.status)) throw new ApiError(409, CLOSED_INQUIRY);
       if (status === 'VIEWING_SCHEDULED' && !viewingDate) throw new ApiError(400, 'A viewing needs a date');
 
       let notes: string | undefined;
@@ -844,6 +1267,24 @@ router.patch(
         inquiryId: id,
       });
 
+      // An administrator who answers for a lister is shown the whole thread, and
+      // on a confidential listing the thread is the one thing that is kept from
+      // everyone but the lister. The row is about the woman who asked, so her
+      // own export lists it, and it names the thread, not what it says.
+      if (isStaffReadOfConfidential(req, inquiry.listing)) {
+        const reason = statedReason(req);
+        await recordStaffRead(req, 'HOUSING_DV_SAFE_VIEWED', {
+          resourceType: 'HousingInquiry',
+          resourceId: id,
+          targetUserId: inquiry.userId,
+          listingIds: [listingId],
+          count: 1,
+          via: 'inquiry thread',
+          disclosed: ['inquiry thread'],
+          ...(reason ? { statedReason: reason } : {}),
+        });
+      }
+
       res.json({ success: true, data: presentForLister(updated, inquiry.listing) });
     } catch (error) {
       next(error);
@@ -852,19 +1293,22 @@ router.patch(
 );
 
 // ===========================================
-// ADMIN: THE SAFETY CHECK ON DV-SAFE LISTINGS
+// ADMIN: THE SAFETY CHECK ON CONFIDENTIAL LISTINGS
 // ===========================================
-// A listing that asks to be shown as DV-safe waits here. Staff approve it as
-// checked, let it show as an ordinary listing, or take it down; the lister is
-// told either way, and the decision is in the audit log under whoever made it.
+// A listing that asks to be shown as DV-safe, and every emergency or
+// transitional listing, waits here. Staff approve it as checked, let a DV-safe
+// one show as an ordinary listing, or take it down; the lister is told either
+// way, and the decision is in the audit log under whoever made it. Approving
+// takes two things: a note of what staff checked, and a standing provider check
+// on the lister (below).
 //
 // The queue used to be every DV-safe listing nobody had checked, oldest
 // created first, with nothing to say how long any of them had waited. It is
 // now ordered by when the check was asked for, each row carries its due time,
 // and the answer says how many are late.
 
-// GET /api/housing/admin/pending - DV-safe listings waiting for a check
-router.get('/admin/pending', authenticate, requireRole('ADMIN'), async (_req: AuthRequest, res: Response, next: NextFunction) => {
+// GET /api/housing/admin/pending - DV-safe, emergency and transitional listings waiting for a check
+router.get('/admin/pending', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const rows = await prisma.housingListing.findMany({
       where: SAFETY_CHECK_QUEUE_WHERE,
@@ -881,11 +1325,20 @@ router.get('/admin/pending', authenticate, requireRole('ADMIN'), async (_req: Au
       : [];
     const byId = new Map(agents.map((a) => [a.id, a]));
     const now = new Date();
+    // Whether the person offering each place has a standing provider check. A
+    // listing cannot be marked checked without one, so staff are shown it
+    // beside the listing and know before they press Approve.
+    const standings = await providerStandings(agentIds, now);
     const data = listings.map((l) => ({
       ...presentOwn(l),
       lister: l.agentId ? byId.get(l.agentId) ?? null : null,
+      providerCheck: l.agentId ? standings.get(l.agentId) ?? { standing: 'NONE', expiresAt: null } : { standing: 'NONE', expiresAt: null },
       safetyCheck: safetyCheckClock(l, now),
     }));
+    // The queue carries each lister's name and email, the note on why the place
+    // is safe and its street address. One row for the request, naming every
+    // listing it held (an empty queue shows nothing and writes nothing).
+    await auditStaffView(req, listings, 'check queue', ['address', 'dvSafeNote', 'listerName', 'listerEmail']);
     res.json({
       success: true,
       data,
@@ -905,13 +1358,22 @@ router.patch(
     body('safetyVerified').optional().isBoolean(),
     body('dvSafe').optional().isBoolean(),
     body('status').optional().isIn(LISTING_STATUSES as unknown as string[]),
+    // A line the lister is shown with the outcome.
     body('note').optional().isString().isLength({ max: 500 }),
+    // What the member of staff checked. Kept in the audit row, not shown to the lister.
+    body('checkNote').optional().isString().isLength({ max: 1000 }),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       failOnErrors(req);
       const { id } = req.params;
-      const { safetyVerified, dvSafe, status, note: line } = req.body as { safetyVerified?: boolean; dvSafe?: boolean; status?: string; note?: string };
+      const { safetyVerified, dvSafe, status, note: line, checkNote: rawCheckNote } = req.body as {
+        safetyVerified?: boolean;
+        dvSafe?: boolean;
+        status?: string;
+        note?: string;
+        checkNote?: string;
+      };
       if (typeof safetyVerified !== 'boolean' && typeof dvSafe !== 'boolean' && !status) {
         throw new ApiError(400, 'Nothing to change');
       }
@@ -924,19 +1386,65 @@ router.patch(
         dvSafe: typeof dvSafe === 'boolean' ? dvSafe : listing.dvSafe,
         status: status ?? listing.status,
       };
-      // A live DV-safe listing is always one staff checked.
-      if (after.dvSafe && after.status === 'ACTIVE' && !after.safetyVerified) {
-        throw new ApiError(400, 'A DV-safe listing goes live only once it is marked as checked');
+      const confidentialAfter = isConfidential({ dvSafe: after.dvSafe, type: listing.type });
+      // A live DV-safe, emergency or transitional listing is always one staff checked.
+      if (confidentialAfter && after.status === 'ACTIVE' && !after.safetyVerified) {
+        throw new ApiError(400, 'A DV-safe, emergency or transitional listing goes live only once it is marked as checked');
       }
 
-      const clock = listing.dvSafe && !listing.safetyVerified ? safetyCheckClock(listing) : null;
+      // The badge is for confidential listings only, as the staff-entered route
+      // has always said: what it tells a woman (housing page) includes a check
+      // on the provider, which an ordinary listing never goes through. So an
+      // ordinary listing is not badged from here, and a listing that stops being
+      // confidential because staff lower its DV-safe claim loses the badge the
+      // claim earned, as it does when its lister lowers the claim.
+      if (!confidentialAfter && after.safetyVerified) {
+        if (safetyVerified === true) {
+          throw new ApiError(400, 'Only a DV-safe, emergency or transitional listing is marked as checked. Tick DV-safe, or leave the check off.');
+        }
+        after.safetyVerified = false;
+      }
 
+      // Marking a place checked is the promise the badge makes, so the person
+      // making it says what she checked, and that goes in the audit row. The
+      // approval used to take an optional line for the lister and nothing else:
+      // a badge a woman trusts, with no record of what had been looked at.
+      const newlyChecked = after.safetyVerified && !listing.safetyVerified;
+      const checkNote = typeof rawCheckNote === 'string' ? rawCheckNote.trim() : '';
+      if (newlyChecked && checkNote.length < 10) throw new ApiError(400, CHECK_NOTE_REQUIRED);
+
+      // The badge is also a promise about the person offering the place, so a
+      // confidential listing is badged, or put live badged, only while its
+      // lister has a provider check that is approved and has not run out.
+      const badgeNeedsProvider = confidentialAfter && after.safetyVerified && (newlyChecked || after.status === 'ACTIVE');
+      const providerVerified = badgeNeedsProvider ? await isProviderVerified(listing.agentId) : null;
+      if (badgeNeedsProvider && !providerVerified) throw new ApiError(400, PROVIDER_CHECK_REQUIRED);
+
+      const clock = isConfidential(listing) && !listing.safetyVerified ? safetyCheckClock(listing) : null;
+
+      // A listing staff take down comes back only through the staff check. Left
+      // checked, its lister could put it live again herself with the badge on
+      // it, which is the one thing a take-down is meant to stop.
+      const takenDown = confidentialAfter && after.status === 'WITHDRAWN' && listing.status !== 'WITHDRAWN' && typeof safetyVerified !== 'boolean';
+      if (takenDown) after.safetyVerified = false;
+
+      // Whatever its type, a listing staff withdraw is marked as theirs, so its
+      // lister cannot put it back with the status switch; and one staff put back
+      // is released, so she can manage it again.
+      const staffTookDown = after.status === 'WITHDRAWN' && listing.status !== 'WITHDRAWN';
+      const staffPutBack = Boolean(status) && after.status !== 'WITHDRAWN' && takenDownByStaff(listing.features);
+      const features = staffTookDown ? withStaffTakedown(listing.features) : staffPutBack ? withoutStaffTakedown(listing.features) : null;
+
+      // Written when staff said so, and when the rules above changed it (a
+      // take-down, or a claim lowered) from what the row holds.
+      const badgeChanged = after.safetyVerified !== listing.safetyVerified;
       const updated = await prisma.housingListing.update({
         where: { id },
         data: {
-          ...(typeof safetyVerified === 'boolean' && { safetyVerified }),
+          ...((typeof safetyVerified === 'boolean' || badgeChanged) && { safetyVerified: after.safetyVerified }),
           ...(typeof dvSafe === 'boolean' && { dvSafe }),
           ...(status && { status: status as any }),
+          ...(features && { features }),
         },
       });
 
@@ -944,10 +1452,11 @@ router.patch(
       let outcome: string;
       if (after.status === 'WITHDRAWN' && listing.status !== 'WITHDRAWN') {
         outcome = `Your listing "${listing.title}" has been taken down by ATHENA staff.`;
-      } else if (listing.dvSafe && !after.dvSafe) {
+      } else if (listing.dvSafe && !after.dvSafe && !confidentialAfter) {
         outcome = `Your listing "${listing.title}" is ${after.status === 'ACTIVE' ? 'live as an ordinary listing' : 'not shown as DV-safe'}; staff could not confirm it as DV-safe.`;
-      } else if (after.dvSafe && after.safetyVerified && (wentLive || !listing.safetyVerified)) {
-        outcome = `Your listing "${listing.title}" has been checked by ATHENA staff and ${after.status === 'ACTIVE' ? 'is live' : 'will show'} as DV-safe.`;
+      } else if (confidentialAfter && after.safetyVerified && (wentLive || !listing.safetyVerified)) {
+        const shownAs = after.dvSafe ? 'DV-safe' : `${String(listing.type).toLowerCase()} housing`;
+        outcome = `Your listing "${listing.title}" has been checked by ATHENA staff and ${after.status === 'ACTIVE' ? 'is live' : 'will show'} as ${shownAs}.`;
       } else {
         outcome = `Your listing "${listing.title}" was updated by ATHENA staff.`;
       }
@@ -967,9 +1476,21 @@ router.patch(
         targetUserId: listing.agentId,
         before: { safetyVerified: listing.safetyVerified, dvSafe: listing.dvSafe, status: listing.status },
         after,
+        // What the member of staff said she checked, and that the lister held a
+        // standing provider check when the badge was given.
+        ...(newlyChecked ? { checkNote } : {}),
+        ...(providerVerified !== null ? { providerCheckStanding: providerVerified ? 'APPROVED' : 'NOT_APPROVED' } : {}),
         ...(clock ? { waitedHours: clock.hoursWaiting, overdue: clock.overdue } : {}),
         ...(extra ? { noteToLister: extra.trim() } : {}),
       });
+
+      // The answer is the lister's own view of the listing, address and DV-safe
+      // note included, and the route takes any listing's id, not only one from
+      // the queue; so deciding on a confidential listing is also a read of it, and
+      // is recorded as one beside the decision. (A listing the member of staff
+      // lists herself is hers to read, as everywhere else.)
+      const confidentialRead = isStaffReadOfConfidential(req, listing) || isStaffReadOfConfidential(req, updated);
+      await auditStaffView(req, confidentialRead ? [updated] : [], 'check decision', ['address', 'dvSafeNote']);
 
       res.json({ success: true, data: presentOwn(updated) });
     } catch (error) {
@@ -977,6 +1498,137 @@ router.patch(
     }
   }
 );
+
+// ===========================================
+// ADMIN: THE PROVIDER CHECK
+// ===========================================
+// The person offering a DV-safe, emergency or transitional place is checked once
+// and the check stands for a year, so a badge on a listing rests on a person
+// ATHENA has looked at. Approving writes down what was checked; refusing writes
+// down why, which the member can read. Either way the decision is in the audit
+// log under whoever made it. A refusal, or a check withdrawn, takes the badge
+// off that member's listings at once rather than at the next hourly sweep.
+
+const staffProviderRow = (
+  row: {
+    id: string;
+    userId: string;
+    providerName: string;
+    relationship: string;
+    abn: string | null;
+    statement: string | null;
+    status: string;
+    basis: string | null;
+    evidence: unknown;
+    reviewedAt: Date | null;
+    expiresAt: Date | null;
+    submittedAt: Date;
+    user?: unknown;
+  },
+  now: Date
+) => ({
+  id: row.id,
+  userId: row.userId,
+  providerName: row.providerName,
+  relationship: row.relationship,
+  relationshipLabel: PROVIDER_RELATIONSHIP_LABELS[row.relationship as keyof typeof PROVIDER_RELATIONSHIP_LABELS] ?? row.relationship,
+  abn: row.abn ? formatAbn(row.abn) : null,
+  statement: row.statement,
+  standing: providerStanding(row, now),
+  basis: row.basis,
+  evidence: row.evidence ?? null,
+  reviewedAt: row.reviewedAt,
+  expiresAt: row.expiresAt,
+  submittedAt: row.submittedAt,
+  // A member whose check stands asked again before it ended.
+  renewalRequested: row.status === 'APPROVED' && Boolean(row.reviewedAt) && row.submittedAt.getTime() > row.reviewedAt!.getTime(),
+  user: row.user ?? null,
+});
+
+// GET /api/housing/admin/provider-checks - Checks waiting for a decision, those about to end, and the rest that stand
+router.get('/admin/provider-checks', authenticate, requireRole('ADMIN'), async (_req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const now = new Date();
+    const soon = new Date(now.getTime() + PROVIDER_CHECK_RENEWAL_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+    const include = {
+      user: { select: { id: true, firstName: true, lastName: true, displayName: true, email: true, womanVerificationStatus: true, createdAt: true } },
+    };
+    // "Standing" is every approved check that does not end within the month, so
+    // that staff can find one to withdraw. Without it a check could be taken back
+    // only in the last month of its year, because the queue showed nothing else;
+    // and a check whose date has passed is not "ending", it is over.
+    const [waiting, ending, standing] = await Promise.all([
+      prisma.housingProviderVerification.findMany({ where: { status: 'PENDING' }, include, orderBy: { submittedAt: 'asc' }, take: SAFETY_CHECK_WINDOW }),
+      prisma.housingProviderVerification.findMany({ where: { status: 'APPROVED', expiresAt: { gt: now, lte: soon } }, include, orderBy: { expiresAt: 'asc' }, take: SAFETY_CHECK_WINDOW }),
+      prisma.housingProviderVerification.findMany({ where: { status: 'APPROVED', expiresAt: { gt: soon } }, include, orderBy: { expiresAt: 'asc' }, take: SAFETY_CHECK_WINDOW }),
+    ]);
+    res.json({
+      success: true,
+      data: {
+        waiting: waiting.map((row) => staffProviderRow(row, now)),
+        ending: ending.map((row) => staffProviderRow(row, now)),
+        standing: standing.map((row) => staffProviderRow(row, now)),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PATCH /api/housing/admin/provider-checks/:userId - Approve or refuse a member's provider check
+router.patch('/admin/provider-checks/:userId', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = req.params;
+    const decision = parseProviderInput(providerDecisionSchema, req.body);
+    const reviewerId = req.user?.id;
+    if (!reviewerId) throw new ApiError(401, 'Authentication required');
+    // A check decided by the person it is about is not a check. Another member
+    // of staff has to decide it.
+    if (userId === reviewerId) {
+      throw new ApiError(403, 'You cannot decide your own provider check. Ask another member of staff to.');
+    }
+
+    const now = new Date();
+    const { before, after } = await decideProviderCheck(userId, decision, reviewerId, now);
+
+    if (decision.decision === 'REJECT') {
+      // The badge on this member's listings was resting on the check that has
+      // just been refused or withdrawn.
+      const swept = await sweepProviderChecks(now, { userId, tell: false });
+      await note(
+        userId,
+        'Your provider check was not approved',
+        `${decision.basis} Your DV-safe, emergency and transitional places${swept.listingsTakenDown ? ' that showed as checked are off the list' : ' do not show as checked'} until a check is approved. You can ask again under "Your provider check".`,
+        '/dashboard/housing#provider-check',
+        { kind: 'HOUSING_PROVIDER_CHECK_DECISION', outcome: 'REJECTED' }
+      );
+    } else {
+      await note(
+        userId,
+        'Your provider check is approved',
+        `ATHENA staff have checked you as a provider. It stands until ${after.expiresAt!.toLocaleDateString('en-AU', { dateStyle: 'long', timeZone: 'Australia/Brisbane' })}. Your DV-safe, emergency and transitional places can now show as checked once staff have looked at each one.`,
+        '/dashboard/housing#provider-check',
+        { kind: 'HOUSING_PROVIDER_CHECK_DECISION', outcome: 'APPROVED' }
+      );
+    }
+
+    await recordStaffAction(req, 'HOUSING_PROVIDER_CHECKED', {
+      resourceType: 'HousingProviderVerification',
+      resourceId: after.id,
+      targetUserId: userId,
+      before: { status: before.status, expiresAt: before.expiresAt },
+      after: { status: after.status, expiresAt: after.expiresAt },
+      decision: decision.decision,
+      basis: decision.basis,
+      ...(decision.checks ? { checks: decision.checks } : {}),
+      ...(after.evidence ? { evidence: after.evidence } : {}),
+    });
+
+    res.json({ success: true, data: staffProviderRow(after, now) });
+  } catch (error) {
+    next(error);
+  }
+});
 
 // ===========================================
 // ADMIN: HOUSING SUPPLY
@@ -993,8 +1645,8 @@ router.post('/admin/listings', authenticate, requireRole('ADMIN'), async (req: A
     const input = staffInput(req.body);
     const safetyVerified = req.body?.safetyVerified === true;
     const checkNote = typeof req.body?.safetyCheckNote === 'string' ? req.body.safetyCheckNote.trim().slice(0, 1000) : '';
-    if (safetyVerified && !input.dvSafe) {
-      throw new ApiError(400, 'Only a DV-safe listing is marked as checked. Tick DV-safe, or leave the check off.');
+    if (safetyVerified && !isConfidentialListing(input)) {
+      throw new ApiError(400, 'Only a DV-safe, emergency or transitional listing is marked as checked. Tick DV-safe, or leave the check off.');
     }
     // Marking a listing checked is the promise the badge makes, so the person
     // making it says what she checked, and that goes in the audit row.
@@ -1003,6 +1655,10 @@ router.post('/admin/listings', authenticate, requireRole('ADMIN'), async (req: A
     }
 
     const lister = await resolveLister(req, req.body?.listerEmail);
+    // The badge is also a promise about whoever the place is listed under. A
+    // listing entered by staff is badged only while that member holds a
+    // standing provider check, the same rule as when staff check a member's own.
+    if (safetyVerified && !(await isProviderVerified(lister.id))) throw new ApiError(400, PROVIDER_CHECK_REQUIRED);
     const listing = await prisma.housingListing.create({ data: staffListingData(input, lister.id, { safetyVerified }) });
 
     if (!lister.isStaff) {
@@ -1057,6 +1713,8 @@ router.get('/admin/listings/import-template', authenticate, requireRole('ADMIN')
 });
 
 // POST /api/housing/admin/listings/import - A partner's spreadsheet: every row, or none
+// validated: csv must be non-empty text of at most 1,000,000 characters and is parsed row by row by
+//   planHousingImport, which writes nothing if any row is bad; dryRun is read as === true.
 router.post('/admin/listings/import', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const csv = typeof req.body?.csv === 'string' ? req.body.csv : '';
@@ -1078,7 +1736,7 @@ router.post('/admin/listings/import', authenticate, requireRole('ADMIN'), async 
     }
 
     const lister = await resolveLister(req, req.body?.listerEmail);
-    const held = plan.rows.filter((r) => r.input.dvSafe).length;
+    const held = plan.rows.filter((r) => isConfidentialListing(r.input)).length;
 
     if (req.body?.dryRun === true) {
       res.json({

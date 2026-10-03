@@ -177,7 +177,7 @@ export function WellnessMenuPanel({ onNavigate }: { onNavigate?: () => void }) {
         <div className="relative overflow-hidden rounded-2xl bg-[radial-gradient(120%_120%_at_0%_0%,rgba(254,205,211,0.9)_0%,rgba(233,213,255,0.75)_55%,rgba(254,243,199,0.7)_100%)] p-5 dark:bg-[radial-gradient(120%_120%_at_0%_0%,rgba(244,63,94,0.25)_0%,rgba(168,85,247,0.2)_55%,rgba(245,158,11,0.15)_100%)]">
           <p className="font-display text-sm italic text-rose-700 dark:text-rose-300">Health and wellbeing</p>
           <h3 className="font-display mt-1 text-2xl font-semibold leading-tight text-slate-900 dark:text-white">Looked after, on your terms.</h3>
-          <p className="mt-2 text-sm leading-6 text-slate-700 dark:text-slate-300">Track what matters, see what the days are saying, talk to women who get it, and find care that takes you seriously. Encrypted, and read only by you.</p>
+          <p className="mt-2 text-sm leading-6 text-slate-700 dark:text-slate-300">Track what matters, see what the days are saying, talk to women who get it, and find care that takes you seriously. What you log is encrypted before it is stored, and shown only to you unless you share it.</p>
           <div className="mt-4 flex flex-wrap gap-2">
             <Link href={isAuthenticated ? WELLNESS_TODAY : WELLNESS_HOME} onClick={onNavigate} className={cn('focusable inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold text-white shadow-[0_8px_24px_-10px_rgba(168,85,247,0.7)] transition hover:shadow-[0_10px_30px_-8px_rgba(244,63,94,0.7)]', GRADIENT)}>
               {isAuthenticated ? 'Open today' : 'See the whole map'} <ArrowRight className="h-3.5 w-3.5" />

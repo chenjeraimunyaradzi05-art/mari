@@ -30,15 +30,21 @@ import {
   Sun,
   Moon,
   Monitor,
+  ShieldAlert,
+  ShieldCheck,
   type LucideIcon,
 } from 'lucide-react';
 import Image from 'next/image';
 import { useAuth, useNotifications, useUnreadMessageCount } from '@/lib/hooks';
 import { useUIStore } from '@/lib/store';
+import { WomanGateRefusalNotice } from '@/components/safety/WomanGateRefusalNotice';
+import { AgeGateRefusalNotice } from '@/components/safety/AgeGateRefusalNotice';
 import { cn, getFullName, getInitials } from '@/lib/utils';
 import { trackEvent } from '@/lib/analytics';
 import { WellnessPanel, WellnessTrigger, useWellnessMenu } from '@/components/wellness/WellnessMenu';
 import { WELLNESS_PILLS, isWellnessPath } from '@/lib/wellness-nav';
+import { QuickExitButton } from './safety/QuickExit';
+import { EmergencyHelp } from '@/components/safety/EmergencyHelp';
 
 type AppMode = 'social' | 'professional' | 'learning';
 type NavigationItem = { name: string; href: string; icon: LucideIcon };
@@ -76,6 +82,10 @@ const secondaryNav = [
   { name: 'Messages', href: '/dashboard/messages', icon: MessageSquare },
   { name: 'Notifications', href: '/dashboard/notifications', icon: Bell },
   { name: 'Rewards', href: '/dashboard/rewards', icon: Trophy },
+  // Safety and privacy were two taps down, behind Settings, for the woman who
+  // most needs them quickly. This list is also the mobile menu.
+  { name: 'Safety', href: '/dashboard/safety', icon: ShieldAlert },
+  { name: 'Privacy', href: '/dashboard/settings/privacy', icon: ShieldCheck },
   { name: 'Settings', href: '/dashboard/settings', icon: Settings },
 ] satisfies NavigationItem[];
 
@@ -278,7 +288,7 @@ export default function DashboardLayout({
                 <span className="font-semibold">Upgrade to Pro</span>
               </div>
               <p className="text-sm text-white/90 mb-3">
-                Unlock AI tools, unlimited applications & more.
+                Unlock the AI tools and a bigger AI chat allowance.
               </p>
               <Link
                 href="/dashboard/settings/billing"
@@ -452,8 +462,21 @@ export default function DashboardLayout({
 
         {/* Page content. The id is where "Skip to main content" lands, past
             the header and the sidebar. */}
-        <main id="main-content" tabIndex={-1} className="min-h-[calc(100vh-4rem)]">{children}</main>
+        <main id="main-content" tabIndex={-1} className="min-h-[calc(100vh-4rem)]">
+          <WomanGateRefusalNotice />
+          <AgeGateRefusalNotice />
+          {children}
+        </main>
       </div>
+
+      {/* A way off every page beneath this shell, not only the safety ones: the
+          page someone walks in on is seldom the one built for it. Pages that
+          mount their own floating exit (wellness, housing) share this one. */}
+      <QuickExitButton variant="floating" className="print:hidden" />
+
+      {/* And the numbers to ring, beside it: the same corner, the same reach,
+          and nothing to load before it opens. */}
+      <EmergencyHelp region={user?.region} className="print:hidden" />
     </div>
   );
 }

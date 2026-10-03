@@ -4,14 +4,36 @@
  */
 
 import { Router, Response, NextFunction } from 'express';
-import { body, param, query, validationResult } from 'express-validator';
-import { authenticate, AuthRequest } from '../middleware/auth';
+import { body, param, validationResult } from 'express-validator';
+import { z } from 'zod';
+import { zodQuery } from '../middleware/validate';
+import { paginationQuery } from '../utils/schemas';
+import { clampLimit } from '../utils/pagination';
+import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
 import * as creatorService from '../services/creator.service';
+import { mayOpenMemberPage, notPrivateProfileWhere } from '../services/audience.service';
+import { hiddenMemberWhere, viewerContextFor } from '../services/search.service';
 import { prisma } from '../utils/prisma';
 import { bestEffort } from '../utils/best-effort';
+import { giftCeiling, payoutCeiling, startingAPayment } from '../middleware/moneyLimits';
+import { requireWomanVerifiedFor } from '../middleware/woman-gate-surfaces';
+import { requireAdultAccount, requireCreatorTerms } from '../middleware/account-gates';
+import { CREATOR_TERMS_VERSION } from '../config/creator-terms';
+import { GIFT_POINT_VALUE_AUD, MINIMUM_PAYOUT_AUD } from '../config/price-book';
 
 const router = Router();
+
+/**
+ * The signed-in member. Used only behind `authenticate`, which has already
+ * answered 401 before a handler runs, so this never refuses in practice: it
+ * narrows `req.user` for the compiler in place of a `!`. The optionalAuth
+ * routes read `req.user` directly, because there she may be absent.
+ */
+function member(req: AuthRequest) {
+  if (!req.user) throw new ApiError(401, 'Authentication required');
+  return req.user;
+}
 
 // ==========================================
 // CREATOR PROFILE
@@ -47,12 +69,17 @@ router.get('/profile', authenticate, async (req: AuthRequest, res, next) => {
 /**
  * GET /api/creator/profile/:userId
  * Get a creator's public profile
+ *
+ * It names her, with her picture and headline, so it is opened only by a viewer
+ * who may be shown her: not across a block, and not a member in Safe Mode to
+ * anyone who is neither her nor her verified connection. It answers as a page
+ * that does not exist.
  */
-router.get('/profile/:userId', async (req, res, next) => {
+router.get('/profile/:userId', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
     const profile = await creatorService.getCreatorProfile(req.params.userId);
     
-    if (!profile) {
+    if (!profile || !(await mayOpenMemberPage(req.user, profile.userId))) {
       throw new ApiError(404, 'Creator profile not found');
     }
     
@@ -76,26 +103,77 @@ router.get('/profile/:userId', async (req, res, next) => {
 /**
  * POST /api/creator/enable
  * Enable creator mode for current user
+ *
+ * Terms 5.1 makes being an adult and accepting the Creator Terms Addendum
+ * conditions of being paid, and this is where a creator starts being paid, so both
+ * are checked here on the server and not only by the screen: the date of birth the
+ * account holds must be an adult's, and the request must say she accepted the
+ * version of the addendum that is current. The acceptance is recorded on the
+ * profile in the same write that creates it. Checked before anything is created at
+ * Stripe, so a refusal leaves no half-made account behind.
  */
-router.post('/enable', authenticate, async (req: AuthRequest, res, next) => {
-  try {
-    const profile = await creatorService.enableCreatorMode(req.user!.id);
-    
-    res.status(201).json({
-      success: true,
-      message: 'Creator mode enabled',
-      data: profile,
-    });
-  } catch (error) {
-    next(error);
+router.post(
+  '/enable',
+  authenticate,
+  requireAdultAccount,
+  [
+    body('acceptCreatorTerms')
+      .custom((value) => value === true)
+      .withMessage('Read and accept the Creator Terms Addendum to turn on creator mode'),
+    body('termsVersion')
+      .equals(CREATOR_TERMS_VERSION)
+      .withMessage('The Creator Terms Addendum has changed since you opened it. Please reload it and read the current version.'),
+  ],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
+      const profile = await creatorService.enableCreatorMode(member(req).id, undefined, CREATOR_TERMS_VERSION);
+
+      res.status(201).json({
+        success: true,
+        message: 'Creator mode enabled',
+        data: profile,
+      });
+    } catch (error) {
+      next(error);
+    }
   }
-});
+);
+
+/**
+ * POST /api/creator/terms/accept
+ * A creator who enabled creator mode before the addendum existed, or before it
+ * was last rewritten, accepts the current version. Her next withdrawal is refused
+ * until she has (see requireCreatorTerms), and her earnings are untouched meanwhile.
+ */
+router.post(
+  '/terms/accept',
+  authenticate,
+  requireAdultAccount,
+  [body('version').isString().notEmpty().isLength({ max: 40 }).withMessage('Say which version of the addendum you read')],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+      const result = await creatorService.acceptCreatorTerms(member(req).id, req.body.version);
+      res.json({ success: true, message: 'Thank you. You have accepted the Creator Terms Addendum.', data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 /**
  * POST /api/creator/onboard
  * Generate Stripe Express onboarding link
  */
-router.post('/onboard', authenticate, async (req: AuthRequest, res, next) => {
+router.post('/onboard', authenticate, requireAdultAccount, requireCreatorTerms, async (req: AuthRequest, res, next) => {
   try {
     const url = await creatorService.generateStripeOnboardingLink(req.user!.id);
     res.json({ success: true, url });
@@ -139,6 +217,10 @@ router.get('/gifts', (_req, res) => {
 router.post(
   '/gifts/send',
   authenticate,
+  // A gift is money from an account to a creator's earnings, so it is asked of an
+  // adult account like every other way money moves here.
+  requireAdultAccount,
+  giftCeiling,
   [
     body('receiverId').isUUID().withMessage('Valid receiver ID required'),
     body('giftType').isString().notEmpty().isLength({ max: 50 }).withMessage('Gift type required'),
@@ -185,14 +267,13 @@ router.post(
 router.get(
   '/gifts/received',
   authenticate,
-  [
-    query('page').optional().isInt({ min: 1 }),
-    query('limit').optional().isInt({ min: 1, max: 100 }),
-  ],
+  // These two declared express-validator chains (limit at most 100) that
+  // nothing ever read, then took `parseInt(req.query.limit) || 20`: a limit of
+  // a million went to the database. The query is clamped before the handler.
+  zodQuery(paginationQuery()),
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
-      const page = parseInt(req.query.page as string) || 1;
-      const limit = parseInt(req.query.limit as string) || 20;
+      const { page, limit } = req.query as unknown as { page: number; limit: number };
 
       const [gifts, total] = await Promise.all([
         prisma.giftTransaction.findMany({
@@ -237,14 +318,13 @@ router.get(
 router.get(
   '/gifts/sent',
   authenticate,
-  [
-    query('page').optional().isInt({ min: 1 }),
-    query('limit').optional().isInt({ min: 1, max: 100 }),
-  ],
+  // These two declared express-validator chains (limit at most 100) that
+  // nothing ever read, then took `parseInt(req.query.limit) || 20`: a limit of
+  // a million went to the database. The query is clamped before the handler.
+  zodQuery(paginationQuery()),
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
-      const page = parseInt(req.query.page as string) || 1;
-      const limit = parseInt(req.query.limit as string) || 20;
+      const { page, limit } = req.query as unknown as { page: number; limit: number };
 
       const [gifts, total] = await Promise.all([
         prisma.giftTransaction.findMany({
@@ -298,7 +378,7 @@ router.get('/balance', authenticate, async (req: AuthRequest, res, next) => {
       success: true,
       data: {
         balance: user?.giftBalance || 0,
-        valueAud: (user?.giftBalance || 0) * 0.01,
+        valueAud: (user?.giftBalance || 0) * GIFT_POINT_VALUE_AUD,
       },
     });
   } catch (error) {
@@ -313,6 +393,7 @@ router.get('/balance', authenticate, async (req: AuthRequest, res, next) => {
 router.post(
   '/balance/purchase',
   authenticate,
+  startingAPayment,
   [body('amount').isFloat({ min: 5, max: 1000 }).withMessage('Amount must be between $5 and $1000')],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
@@ -373,10 +454,12 @@ router.post(
 router.get(
   '/analytics',
   authenticate,
-  [query('days').optional().isInt({ min: 7, max: 90 })],
+  // The validator here (7 to 90 days) was declared and never read either, so
+  // `?days=100000` asked the analytics query for two hundred and seventy years.
+  zodQuery(z.object({ days: z.unknown().transform((value) => clampLimit(value, 30, 90)) })),
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
-      const days = parseInt(req.query.days as string) || 30;
+      const days = Math.max(7, (req.query as unknown as { days: number }).days);
       const analytics = await creatorService.getCreatorAnalytics(req.user!.id, days);
 
       res.json({
@@ -431,11 +514,14 @@ router.get('/earnings', authenticate, async (req: AuthRequest, res, next) => {
     res.json({
       success: true,
       data: {
-        totalEarnings: profile.totalEarnings * 0.01,
-        pendingPayout: profile.pendingPayout * 0.01,
+        totalEarnings: profile.totalEarnings * GIFT_POINT_VALUE_AUD,
+        pendingPayout: profile.pendingPayout * GIFT_POINT_VALUE_AUD,
         recentPayouts: profile.payouts,
-        canRequestPayout: profile.pendingPayout * 0.01 >= 50,
-        minPayoutAmount: 50,
+        // Not while ATHENA is looking into a card payment connected to the gifts:
+        // requestPayout refuses, so the screen is told not to offer it.
+        payoutHold: profile.payoutHold,
+        canRequestPayout: !profile.payoutHold && profile.pendingPayout * GIFT_POINT_VALUE_AUD >= MINIMUM_PAYOUT_AUD,
+        minPayoutAmount: MINIMUM_PAYOUT_AUD,
       },
     });
   } catch (error) {
@@ -447,7 +533,12 @@ router.get('/earnings', authenticate, async (req: AuthRequest, res, next) => {
  * POST /api/creator/payouts/request
  * Request a payout
  */
-router.post('/payouts/request', authenticate, async (req: AuthRequest, res, next) => {
+// A completed women-only check is asked for here once the founder switches the
+// surface on (config/woman-gate-policy.ts): it is members' money being paid out.
+// The addendum and an adult account are asked here for every creator, and they are
+// asked of the ones who were already creators before either existed: it is her
+// next withdrawal that sends her to accept, not a silent assumption that she did.
+router.post('/payouts/request', authenticate, requireAdultAccount, requireCreatorTerms, requireWomanVerifiedFor('creator_payouts'), payoutCeiling, async (req: AuthRequest, res, next) => {
   try {
     const result = await creatorService.requestPayout(req.user!.id);
 
@@ -498,7 +589,7 @@ router.get('/payouts', authenticate, async (req: AuthRequest, res, next) => {
  * GET /api/creator/leaderboard
  * Get top creators
  */
-router.get('/leaderboard', async (req, res, next) => {
+router.get('/leaderboard', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
     const timeframe = (req.query.timeframe as string) || 'week';
     
@@ -517,11 +608,19 @@ router.get('/leaderboard', async (req, res, next) => {
         startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     }
 
-    // Get creators with most engagement in timeframe
+    // Get creators with most engagement in timeframe. This board is public and
+    // signed-out visitors read it, and it lists a creator's id, name, picture and
+    // headline, so it names only the members a stranger searching by name could
+    // find: not one who asked to be hidden from search, not one in Safe Mode, not
+    // one whose profile is private, and, for a signed-in viewer, not either side
+    // of a block with her (the engagement leaderboard takes those off as well).
+    // Read the way search reads them, in both block stores, and not best-effort:
+    // a list that could not be read must not become a board naming the man she
+    // blocked.
+    const viewer = await viewerContextFor(req.user?.id);
     const topCreators = await prisma.user.findMany({
       where: {
-        role: 'CREATOR',
-        creatorProfile: { isNot: null },
+        AND: [{ role: 'CREATOR', creatorProfile: { isNot: null } }, hiddenMemberWhere(viewer), notPrivateProfileWhere],
       },
       select: {
         id: true,

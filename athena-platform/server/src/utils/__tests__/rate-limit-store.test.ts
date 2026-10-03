@@ -97,6 +97,42 @@ describe('SharedRateLimitStore', () => {
     await request(app).get('/').expect(429);
   });
 
+  it('goes back to Redis as soon as the next call finds it working, without a restart', async () => {
+    const client = fakeRedis();
+    const store = new SharedRateLimitStore('rl:test:', { client, available: () => true });
+    const app = appWith(store, 100);
+
+    client.fail = true;
+    await request(app).get('/').expect(200);
+    await request(app).get('/').expect(200);
+    expect(client.keys.size).toBe(0);
+
+    client.fail = false;
+    await request(app).get('/').expect(200);
+
+    // Shared again: the count is in Redis, starting fresh, which is the cost of having been away.
+    expect(client.keys.get('rl:test:same-caller')?.value).toBe(1);
+  });
+
+  it('asks Redis whether it is available on every call, so an outage that ends is noticed and one that begins is too', async () => {
+    const client = fakeRedis();
+    let available = false;
+    const store = new SharedRateLimitStore('rl:test:', { client, available: () => available });
+    const app = appWith(store, 100);
+
+    await request(app).get('/').expect(200);
+    expect(client.keys.size).toBe(0);
+
+    available = true;
+    await request(app).get('/').expect(200);
+    await request(app).get('/').expect(200);
+    expect(client.keys.get('rl:test:same-caller')?.value).toBe(2);
+
+    available = false;
+    await request(app).get('/').expect(200);
+    expect(client.keys.get('rl:test:same-caller')?.value).toBe(2);
+  });
+
   it('counts in the process when Redis is not configured at all', async () => {
     const store = new SharedRateLimitStore('rl:test:');
     const app = appWith(store, 1);

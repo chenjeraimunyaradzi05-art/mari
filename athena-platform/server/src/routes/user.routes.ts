@@ -1,6 +1,7 @@
 import { Router, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
-import { Prisma, WomanVerificationStatus } from '@prisma/client';
+import { z } from 'zod';
+import { AuditAction, DSARType, JobType, Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
@@ -16,10 +17,16 @@ import { isSupportedLocale } from '../config/regions';
 import { logger } from '../utils/logger';
 import { parsePagination } from '../utils/pagination';
 import { notifySocial, socialLinks } from '../utils/social-notifications';
-import { getBlockedRelationshipIds } from '../utils/safety-store';
-import { approvesFollowers, profileAccess } from '../services/audience.service';
+import {
+  approvesFollowers,
+  isBlockedEitherWay,
+  notPrivateProfileWhere,
+  profileAccess,
+  seesOnlyTheCard,
+} from '../services/audience.service';
 import { hiddenMemberWhere, viewerContextFor, type ViewerContext } from '../services/search.service';
-import { followLimiter } from '../middleware/socialLimits';
+import { followLimiter, withinTargetLimit } from '../middleware/socialLimits';
+import { profileReadLimiter } from '../middleware/rateLimiter';
 import {
   DATE_OF_BIRTH_REFUSAL,
   WOMAN_GATE_PURPOSE,
@@ -29,8 +36,30 @@ import {
 } from '../middleware/account-gates';
 import { getStripe, isStripeConfigured } from '../utils/stripe';
 import { logAudit } from '../utils/audit';
+import {
+  documentCheckPassedAtOf,
+  recordWomanGateDocumentCheck,
+  sessionIdOf,
+} from '../services/identity-verification.service';
+import { httpUrl } from '../utils/http-url';
+import { gdprService, describeErasure } from '../services/gdpr.service';
+import { auditAfterCommit } from '../services/admin-audit.service';
+import { requireStepUp } from './auth.routes';
+import { isoDate, parseStrict } from '../utils/request-schema';
+import { maskLegalNames, maskLegalNamesInResponses, parseDisplayName, publicName } from '../utils/member-display';
 
 const router = Router();
+
+/**
+ * The signed-in member's id, for the routes that sit behind `authenticate`.
+ * A missing one means the route was wired without it, so it is refused rather
+ * than asserted away.
+ */
+function memberId(req: AuthRequest): string {
+  const id = req.user?.id;
+  if (!id) throw new ApiError(401, 'Authentication required');
+  return id;
+}
 
 const REGION_KEYS = ['ANZ', 'US', 'SEA', 'MEA', 'UK', 'EU', 'ROW'] as const;
 const CONSENT_FIELDS = [
@@ -141,6 +170,24 @@ async function pendingWomanGateBadge(userId: string) {
     },
     orderBy: { submittedAt: 'desc' },
     select: { id: true, metadata: true, submittedAt: true },
+  });
+}
+
+/**
+ * Her latest women-gate submission whatever its status. Coming back from Stripe
+ * has to find the badge even when the webhook has got there first or a reviewer
+ * has already decided, or the page answers "nothing is waiting" to a member
+ * whose check went perfectly well.
+ */
+async function latestWomanGateBadge(userId: string) {
+  return prisma.verificationBadge.findFirst({
+    where: {
+      userId,
+      type: 'IDENTITY',
+      metadata: { path: ['purpose'], equals: WOMAN_GATE_PURPOSE },
+    },
+    orderBy: { submittedAt: 'desc' },
+    select: { id: true, status: true, metadata: true, submittedAt: true },
   });
 }
 
@@ -362,10 +409,29 @@ router.post(
 router.post('/me/woman-verification/complete', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
-    const badge = await pendingWomanGateBadge(userId);
-    const sessionId = badge ? readWomanGateEvidence(badge.metadata)?.sessionId ?? sessionIdOf(badge.metadata) : null;
+    // The latest submission whatever its status. The webhook may have recorded
+    // the result before she got back, and a reviewer may even have decided
+    // already; neither is "nothing waiting", and answering 404 to a member
+    // whose check went well is what this used to do.
+    const badge = await latestWomanGateBadge(userId);
 
-    if (!badge || !sessionId) {
+    if (!badge) {
+      throw new ApiError(404, 'There is no document check waiting on your account');
+    }
+
+    // The gate's own word for where the badge stands, so a late visit to this
+    // page reports a decision rather than telling her it is still pending.
+    const gateStatus = badge.status === 'APPROVED' ? 'VERIFIED' : badge.status === 'REJECTED' ? 'REJECTED' : 'PENDING';
+
+    // Already recorded, by the webhook or by an earlier visit: say so again
+    // without asking Stripe anything. This is also what keeps a second call
+    // from writing the result and notifying her twice.
+    if (documentCheckPassedAtOf(badge.metadata)) {
+      return res.json({ success: true, status: gateStatus, data: { documentCheck: 'verified' } });
+    }
+
+    const sessionId = sessionIdOf(badge.metadata);
+    if (!sessionId || badge.status !== 'PENDING') {
       throw new ApiError(404, 'There is no document check waiting on your account');
     }
 
@@ -373,98 +439,21 @@ router.post('/me/woman-verification/complete', authenticate, async (req: AuthReq
       throw new ApiError(503, 'The document check is not set up on this server');
     }
 
-    // verified_outputs carries the document's own fields and is only returned
-    // when asked for by name, so the expand is what makes this call worth
-    // making at all.
-    const session = await getStripe().identity.verificationSessions.retrieve(sessionId, {
-      expand: ['verified_outputs'],
-    });
+    const check = await recordWomanGateDocumentCheck(userId, badge, sessionId);
 
-    if (session.status !== 'verified') {
+    if (check.outcome === 'not_ready') {
       return res.json({
         success: true,
         status: 'PENDING',
-        data: { documentCheck: session.status, reason: session.last_error?.reason ?? null },
+        data: { documentCheck: check.documentCheck, reason: check.reason },
       });
     }
-
-    const outputs = session.verified_outputs ?? null;
-    await applyWomanGateDocumentResult(userId, badge.id, badge.metadata, outputs);
 
     res.json({ success: true, status: 'PENDING', data: { documentCheck: 'verified' } });
   } catch (error) {
     next(error);
   }
 });
-
-/** The `sessionId` on a badge whose evidence is not yet readable as a finished submission. */
-function sessionIdOf(metadata: unknown): string | null {
-  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null;
-  const value = (metadata as Record<string, unknown>).sessionId;
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
-
-type StripeVerifiedOutputs = {
-  first_name?: string | null;
-  last_name?: string | null;
-  dob?: { day?: number | null; month?: number | null; year?: number | null } | null;
-  id_number_type?: string | null;
-} | null;
-
-/**
- * Writes a passed document check onto the member's record: the evidence the
- * reviewer will read, and the date of birth the platform has never had.
- *
- * The date of birth is the part worth having twice over. A member who
- * completes this check has proved her age against a government document, so
- * `ageVerifiedAt` is stamped alongside it and the account stops relying on
- * what she typed at sign-up. An account that already carries a date of birth
- * keeps it unless the document disagrees; the document wins, because it is the
- * better evidence.
- */
-export async function applyWomanGateDocumentResult(
-  userId: string,
-  badgeId: string,
-  metadata: unknown,
-  outputs: StripeVerifiedOutputs
-): Promise<void> {
-  const base = metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? (metadata as Record<string, unknown>) : {};
-  const name = [outputs?.first_name, outputs?.last_name].filter(Boolean).join(' ').trim();
-  const dob = outputs?.dob;
-  const documentDateOfBirth =
-    dob && dob.year && dob.month && dob.day ? new Date(Date.UTC(dob.year, dob.month - 1, dob.day)) : null;
-
-  await prisma.verificationBadge.update({
-    where: { id: badgeId },
-    data: {
-      metadata: {
-        ...base,
-        purpose: WOMAN_GATE_PURPOSE,
-        provider: 'stripe_identity',
-        documentCheckPassedAt: new Date().toISOString(),
-        ...(name ? { documentName: name } : {}),
-        ...(outputs?.id_number_type ? { documentType: outputs.id_number_type } : {}),
-      },
-    },
-  });
-
-  if (documentDateOfBirth) {
-    await prisma.user.update({
-      where: { id: userId },
-      data: { dateOfBirth: documentDateOfBirth, ageVerifiedAt: new Date() },
-    });
-  }
-
-  await prisma.notification.create({
-    data: {
-      userId,
-      type: 'SYSTEM',
-      title: 'Your document check passed',
-      message: 'Thank you. Your women-only verification is now with a reviewer, and you will hear from us shortly.',
-      link: '/dashboard/settings/profile',
-    },
-  });
-}
 
 // ===========================================
 // DATE OF BIRTH
@@ -599,6 +588,10 @@ router.get(
           headline: true,
           role: true,
           persona: true,
+          // What she told us, and whether a document check confirmed it: the
+          // age on her account is personal information held about her.
+          dateOfBirth: true,
+          ageVerifiedAt: true,
           city: true,
           state: true,
           country: true,
@@ -643,17 +636,23 @@ router.get(
         },
         orderBy: { createdAt: 'desc' },
       }),
+      // The other members in her export (who follows her, whom she follows, the
+      // mentor she booked) are named as the app names them to her: by their public
+      // name, never the legal surname (utils/member-display). It used to load
+      // `lastName` for each of them and hand the file over as it was, so a member's
+      // own download listed every follower's legal name, which is the one thing
+      // the public name exists to keep off the page.
       prisma.follow.findMany({
         where: { followingId: userId },
         include: {
-          follower: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+          follower: { select: { id: true, firstName: true, displayName: true, avatar: true } },
         },
         orderBy: { createdAt: 'desc' },
       }),
       prisma.follow.findMany({
         where: { followerId: userId },
         include: {
-          following: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+          following: { select: { id: true, firstName: true, displayName: true, avatar: true } },
         },
         orderBy: { createdAt: 'desc' },
       }),
@@ -707,7 +706,7 @@ router.get(
         include: {
           mentorProfile: {
             include: {
-              user: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+              user: { select: { id: true, firstName: true, displayName: true, avatar: true } },
             },
           },
         },
@@ -749,27 +748,33 @@ router.get(
       },
     });
 
+    // Her own record is hers to read whole; every other member's record in the
+    // file carries the public name and an empty surname, whatever a select above
+    // loads tomorrow.
     res.json({
       success: true,
-      data: {
-        exportedAt: new Date().toISOString(),
-        user,
-        profile,
-        skills,
-        education,
-        experience,
-        posts,
-        comments,
-        likes,
-        followers,
-        following,
-        jobApplications,
-        savedJobs,
-        courseEnrollments,
-        mentorSessions,
-        educationApplications,
-        organizationMemberships,
-      },
+      data: maskLegalNames(
+        {
+          exportedAt: new Date().toISOString(),
+          user,
+          profile,
+          skills,
+          education,
+          experience,
+          posts,
+          comments,
+          likes,
+          followers,
+          following,
+          jobApplications,
+          savedJobs,
+          courseEnrollments,
+          mentorSessions,
+          educationApplications,
+          organizationMemberships,
+        },
+        userId
+      ),
     });
   } catch (error) {
     next(error);
@@ -777,12 +782,39 @@ router.get(
 });
 
 // ===========================================
-// DELETE ACCOUNT (Minimal anonymization)
+// DELETE ACCOUNT
 // ===========================================
+/**
+ * Closing her own account, from Settings.
+ *
+ * This used to be a transaction of its own: a hand-written anonymisation of the
+ * User row and about ten tables. It left her posts, messages, health and safety
+ * records, bank connections and verification records where they were while the
+ * screen said all associated data was gone, and it deleted her local
+ * Subscription row, and with it the only copy of the Stripe subscription id, so
+ * the card went on being charged. Two doors that do different things to the same
+ * woman's data is not a privacy position, so this is now the data-rights
+ * erasure under another name: the same request row, the same walk of the
+ * personal-data register, the same refusal under a legal hold, and the same
+ * ending of her billing at Stripe (gdpr.service.ts, eraseUser). POST
+ * /api/gdpr/dsar/delete is the other door and does exactly the same.
+ *
+ * It cannot be undone, and it is also how someone who had got into the account
+ * would destroy the trail of it, so it asks again for her password, and for her
+ * second factor when that is on (requireStepUp). One that is refused, for a
+ * hold or for billing that could not be ended, is a 409 with nothing erased.
+ */
 router.delete(
   '/me',
   authenticate,
-  [body('confirm').isBoolean().custom((v) => v === true).withMessage('Confirmation required')],
+  // The same bucket as the data-rights route, so using this door is not a way
+  // round that route's limit.
+  dsarRateLimit(5, 60 * 60 * 1000, 'dsar-erasure'),
+  [
+    body('confirm').isBoolean().custom((v) => v === true).withMessage('Confirmation required'),
+    body('currentPassword').optional().isString().isLength({ max: 128 }),
+    body('code').optional().isString().isLength({ max: 32 }),
+  ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       const errors = validationResult(req);
@@ -792,127 +824,43 @@ router.delete(
 
       const userId = req.user!.id;
 
-      const user = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { id: true, email: true },
-      });
+      await requireStepUp(userId, { currentPassword: req.body.currentPassword, code: req.body.code });
 
-      if (!user) {
-        throw new ApiError(404, 'User not found');
+      const dsar = await gdprService.createDSARRequest({
+        userId,
+        type: DSARType.DELETION,
+        requestDetails: 'User-initiated account deletion',
+      });
+      const outcome = await gdprService.processDeletionRequest(dsar.id);
+
+      if (outcome.status === 'REJECTED') {
+        throw new ApiError(409, outcome.reason || 'Deletion cannot be carried out at this time');
       }
 
-      // We avoid hard-deleting the User row because some models reference userId
-      // with required relations (e.g. jobs posted). Instead we revoke access and
-      // anonymize PII while keeping referential integrity intact.
-      const tombstoneEmail = `deleted+${userId}+${Date.now()}@example.invalid`;
+      // Written after the erasure, so it only claims what happened, and without
+      // the member's id: see POST /api/gdpr/dsar/delete, which writes the same row.
+      await auditAfterCommit({
+        action: AuditAction.ACCOUNT_DELETE,
+        metadata: {
+          requestId: outcome.requestId,
+          accountRemoved: outcome.accountRemoved,
+          retainedSections: outcome.retainedSections,
+          rowsRemoved: outcome.rowsRemoved,
+          completedAt: new Date().toISOString(),
+        },
+      });
 
-      // What this used to leave behind, after telling her "Account deleted":
-      // a live TOTP secret, both OAuth subject identifiers, her gender
-      // verification record, her three consent flags and her Stripe Connect
-      // id. Access was refused because isSuspended was set, so nothing could
-      // be read through the app — but the rows were still there, and the
-      // women-gate record in particular is the single most sensitive thing a
-      // woman leaving a women-only platform would want gone.
-      //
-      // The erasure path in gdpr.service.ts already clears every one of them
-      // (tombstoneFields). The field list is repeated rather than imported
-      // because the two paths answer different questions — a DSAR erasure is
-      // a legal obligation with its own audit trail and retention carve-outs,
-      // a self-serve delete is a member closing her account — and coupling
-      // them would mean a change made for one silently changing the other.
-      // What they must not do is disagree about which columns are personal
-      // data. If you add a column to either list, add it to both.
-      //
-      // Two fields deliberately differ from the DSAR list. `country` is left
-      // alone: it is the jurisdiction whose retention rules govern the
-      // records we are keeping, and losing it would leave us unable to say
-      // how long to keep them. `isActive` is left alone because isSuspended
-      // is what every read path in this codebase checks.
-
-      await prisma.$transaction([
-        prisma.auditLog.create({
-          data: {
-            action: 'ACCOUNT_DELETE',
-            actorUserId: userId,
-            targetUserId: userId,
-            ipAddress: req.ip,
-            userAgent: req.get('user-agent') || undefined,
-            metadata: {
-              deletedAt: new Date().toISOString(),
-            },
-          },
-        }),
-        prisma.session.deleteMany({ where: { userId } }),
-        prisma.verificationToken.deleteMany({ where: { userId } }),
-        prisma.subscription.deleteMany({ where: { userId } }),
-        prisma.profile.deleteMany({ where: { userId } }),
-        prisma.userSkill.deleteMany({ where: { userId } }),
-        prisma.education.deleteMany({ where: { userId } }),
-        prisma.workExperience.deleteMany({ where: { userId } }),
-        prisma.courseEnrollment.deleteMany({ where: { userId } }),
-        prisma.savedJob.deleteMany({ where: { userId } }),
-        prisma.educationApplication.deleteMany({ where: { userId } }),
-        prisma.jobApplication.deleteMany({ where: { userId } }),
-        prisma.user.update({
-          where: { id: userId },
-          data: {
-            email: tombstoneEmail,
-            passwordHash: null,
-            emailVerified: false,
-            emailVerifiedAt: null,
-            firstName: 'Deleted',
-            lastName: 'User',
-            displayName: 'Deleted User',
-            avatar: null,
-            bio: null,
-            headline: null,
-            city: null,
-            state: null,
-            currentJobTitle: null,
-            currentCompany: null,
-            yearsExperience: null,
-            isPublic: false,
-            allowMessages: false,
-            isSuspended: true,
-            lastLoginAt: null,
-            referralCode: null,
-            referralCredits: 0,
-            // A live authenticator secret on a deleted account is a working
-            // second factor for a first factor that no longer exists.
-            twoFactorEnabled: false,
-            twoFactorSecret: null,
-            twoFactorEnabledAt: null,
-            twoFactorRecoveryCodes: { set: [] },
-            // Both OAuth subject identifiers. These are unique columns, so
-            // leaving them also meant the same Google or Facebook account
-            // could never sign up again — the deleted row still owned them.
-            googleId: null,
-            facebookId: null,
-            // Her gender verification. The status goes back to UNVERIFIED
-            // rather than being left at VERIFIED or REJECTED, because either
-            // of those is a finding about a person we have agreed to stop
-            // holding a record of.
-            womanSelfAttested: false,
-            womanVerificationStatus: WomanVerificationStatus.UNVERIFIED,
-            womanVerifiedAt: null,
-            // Consent is a record of a choice a person made. There is no
-            // person here any more to have made it.
-            consentMarketing: false,
-            consentDataProcessing: false,
-            consentCookies: false,
-            consentUpdatedAt: new Date(),
-            // The payout account. Kept clear of a row nobody can sign in to.
-            stripeConnectAccountId: null,
-            stripeConnectStatus: null,
-            notificationPreferences: Prisma.DbNull,
-            inviteCodeId: null,
-          },
-        }),
-      ]);
-
+      // Her sessions went with the erasure and the sockets were closed by it
+      // (gdpr.service.ts: processDeletionRequest).
       res.json({
         success: true,
-        message: 'Account deleted',
+        message: describeErasure(outcome),
+        data: {
+          requestId: outcome.requestId,
+          status: 'COMPLETED',
+          accountRemoved: outcome.accountRemoved,
+          retainedRecords: outcome.retainedSections,
+        },
       });
     } catch (error) {
       next(error);
@@ -944,15 +892,22 @@ router.get('/suggest', authenticate, async (req: AuthRequest, res, next) => {
 
     const me = req.user!.id;
     const viewer = await viewerContextFor(me);
-    const hidden = hiddenMemberWhere(viewer);
+    // Everyone people search leaves out, which includes a private profile: this
+    // box names members by what is typed of their name exactly as the search box
+    // does, so if it offered her, search hiding her would be a closed door with
+    // the next one standing open.
+    const hidden: Prisma.UserWhereInput = { AND: [hiddenMemberWhere(viewer), notPrivateProfileWhere] };
 
-    const select = { id: true, displayName: true, firstName: true, lastName: true, avatar: true, headline: true };
+    const select = { id: true, displayName: true, firstName: true, avatar: true, headline: true };
+    // Matched on the name a member is shown by: her public name, or, when she has
+    // not chosen one, her first name. Her legal first and last name are not
+    // searched: a member with a public name was otherwise found, and handed back
+    // under it, by typing the surname she had chosen not to show.
     const nameMatch: Prisma.UserWhereInput = {
       OR: [
         { displayName: { startsWith: q, mode: 'insensitive' as const } },
-        { firstName: { startsWith: q, mode: 'insensitive' as const } },
-        { lastName: { startsWith: q, mode: 'insensitive' as const } },
         { displayName: { contains: ` ${q}`, mode: 'insensitive' as const } },
+        { AND: [{ OR: [{ displayName: null }, { displayName: '' }] }, { firstName: { startsWith: q, mode: 'insensitive' as const } }] },
       ],
     };
 
@@ -976,7 +931,7 @@ router.get('/suggest', authenticate, async (req: AuthRequest, res, next) => {
       .slice(0, 8)
       .map((user) => ({
         id: user.id,
-        name: user.displayName?.trim() || [user.firstName, user.lastName].filter(Boolean).join(' ').trim() || 'Member',
+        name: publicName(user),
         avatar: user.avatar,
         headline: user.headline,
       }));
@@ -993,18 +948,32 @@ router.get('/suggest', authenticate, async (req: AuthRequest, res, next) => {
 // Members worth following, each with the honest reason they are here:
 // followed by people you follow, the same career stage, the same city, or
 // simply well followed. Never anyone you already follow or have blocked.
+//
+// This list used to read only the platform block list and nothing else, so a
+// woman in Safe Mode who had asked to be hidden from search was offered by
+// name, picture, headline and city ("Also in Brisbane") to everyone in her
+// city or career stage, and a member whose profile is private was offered as
+// well. It now asks the question search asks: nobody on either side of a block
+// in either store, nobody hidden from search, nobody in Safe Mode, and nobody
+// whose profile is private. The filter is in each candidate query and in the
+// final lookup, and the final lookup reads a pool larger than the page, so a
+// member who is filtered out leaves a gap that the next candidate fills rather
+// than a short list.
 router.get('/suggested', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const viewerId = req.user!.id;
     const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '6'), 10) || 6, 1), 20);
 
-    const [me, following, blockedIds] = await Promise.all([
+    // Not best-effort: if the block lists cannot be read the request fails,
+    // because an empty list standing in for one that could not be read would
+    // offer her a man she had blocked.
+    const [me, viewer] = await Promise.all([
       prisma.user.findUnique({ where: { id: viewerId }, select: { persona: true, city: true, state: true } }),
-      prisma.follow.findMany({ where: { followerId: viewerId }, select: { followingId: true } }),
-      getBlockedRelationshipIds(viewerId),
+      viewerContextFor(viewerId),
     ]);
-    const followingIds = following.map((f) => f.followingId);
-    const excluded = new Set<string>([viewerId, ...followingIds, ...blockedIds]);
+    const followingIds = viewer.followingIds;
+    const excluded = new Set<string>([viewerId, ...followingIds, ...viewer.blockedIds]);
+    const offerable: Prisma.UserWhereInput = { AND: [{ isActive: true }, hiddenMemberWhere(viewer), notPrivateProfileWhere] };
 
     type Candidate = { score: number; mutuals: string[]; reasons: string[] };
     const candidates = new Map<string, Candidate>();
@@ -1034,10 +1003,10 @@ router.get('/suggested', authenticate, async (req: AuthRequest, res, next) => {
     const select = { id: true, persona: true, city: true, state: true };
     const [samePersona, sameCity] = await Promise.all([
       me?.persona
-        ? prisma.user.findMany({ where: { isActive: true, persona: me.persona, id: { notIn: Array.from(excluded) } }, select, take: 60 })
+        ? prisma.user.findMany({ where: { AND: [{ persona: me.persona, id: { notIn: Array.from(excluded) } }, offerable] }, select, take: 60 })
         : Promise.resolve([] as Array<{ id: string; persona: string; city: string | null; state: string | null }>),
       me?.city
-        ? prisma.user.findMany({ where: { isActive: true, city: { equals: me.city, mode: 'insensitive' }, id: { notIn: Array.from(excluded) } }, select, take: 60 })
+        ? prisma.user.findMany({ where: { AND: [{ city: { equals: me.city, mode: 'insensitive' }, id: { notIn: Array.from(excluded) } }, offerable] }, select, take: 60 })
         : Promise.resolve([] as Array<{ id: string; persona: string; city: string | null; state: string | null }>),
     ]);
     for (const user of samePersona) bump(user.id, 2, 'Same career stage as you');
@@ -1055,17 +1024,20 @@ router.get('/suggested', authenticate, async (req: AuthRequest, res, next) => {
       for (const row of popular) bump(row.followingId, Math.min(3, row._count._all / 50), 'Widely followed');
     }
 
+    // The second-degree and popular candidates are bare ids, so the filter can
+    // only be applied to them here. The pool is wider than the page for that
+    // reason: the page is the first `limit` of the pool that came back.
     const ranked = Array.from(candidates.entries())
       .sort((a, b) => b[1].score - a[1].score)
-      .slice(0, limit);
+      .slice(0, Math.max(limit * 4, 24));
     if (ranked.length === 0) {
       res.json({ success: true, data: [] });
       return;
     }
 
     const users = await prisma.user.findMany({
-      where: { id: { in: ranked.map(([id]) => id) }, isActive: true },
-      select: { id: true, displayName: true, firstName: true, lastName: true, avatar: true, headline: true, persona: true, city: true },
+      where: { AND: [{ id: { in: ranked.map(([id]) => id) } }, offerable] },
+      select: { id: true, displayName: true, firstName: true, avatar: true, headline: true, persona: true, city: true },
     });
     const byId = new Map(users.map((u) => [u.id, u]));
 
@@ -1080,7 +1052,7 @@ router.get('/suggested', authenticate, async (req: AuthRequest, res, next) => {
         }
         return {
           id: user.id,
-          name: user.displayName?.trim() || [user.firstName, user.lastName].filter(Boolean).join(' ').trim() || 'Member',
+          name: publicName(user),
           avatar: user.avatar,
           headline: user.headline,
           city: user.city,
@@ -1088,7 +1060,8 @@ router.get('/suggested', authenticate, async (req: AuthRequest, res, next) => {
           reasons,
         };
       })
-      .filter((row): row is NonNullable<typeof row> => row !== null);
+      .filter((row): row is NonNullable<typeof row> => row !== null)
+      .slice(0, limit);
 
     res.json({ success: true, data });
   } catch (error) {
@@ -1099,9 +1072,31 @@ router.get('/suggested', authenticate, async (req: AuthRequest, res, next) => {
 // ===========================================
 // GET USER PROFILE (PUBLIC)
 // ===========================================
-router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
+//
+// What a visitor with no account reads here is the card (name, picture,
+// headline, counts) and not the record: see anonymousProfileDetail in
+// services/audience.service for why, and for the switch. A member who is signed
+// in reads the whole of any profile her owner has left public.
+//
+// Counted per account (profileReadLimiter), so walking the membership one profile
+// at a time runs into a wall long before the platform-wide budget does.
+// maskLegalNamesInResponses: the answer for anyone but its owner carries her public
+// name and no legal first or last name (utils/member-display). The owner reads her own
+// record whole.
+router.get('/:id', optionalAuth, profileReadLimiter, maskLegalNamesInResponses, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
+
+    // optionalAuth reads a token it cannot use (expired, revoked, a closed
+    // account) as no token at all, which is right for a page anyone may open and
+    // wrong here: a signed-in woman whose access token ran out a moment ago would
+    // be handed the signed-out card, and nothing would tell the app to refresh
+    // her session. When she presented credentials and they did not resolve,
+    // answer as every other signed-in route does, with the 401 the app's
+    // interceptor turns into a refresh and a retry.
+    if (!req.user && /^Bearer\s+\S+/i.test(req.headers.authorization ?? '') && seesOnlyTheCard(undefined)) {
+      throw new ApiError(401, 'Your session has ended. Please sign in again.');
+    }
 
     const user = await prisma.user.findUnique({
       where: { id },
@@ -1122,6 +1117,13 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
         currentCompany: true,
         yearsExperience: true,
         isPublic: true,
+        // The Verified mark, read from the column only an approved identity
+        // check sets (a reviewer's approval or Stripe's result). The profile
+        // page draws it from here and nowhere else.
+        isVerified: true,
+        // Read only to decide whether this profile exists for the viewer (see
+        // below); it is taken out of the answer before it is sent.
+        emailVerified: true,
         createdAt: true,
         profile: {
           select: {
@@ -1156,6 +1158,19 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
       throw new ApiError(404, 'User not found');
     }
 
+    // An account whose address nobody has confirmed has no public page, and the
+    // answer is the one a member who does not exist would get. It exists in the
+    // database from the moment of sign-up, with whatever name was typed into the
+    // form, and the person it names may not be the person who typed it. Only the
+    // account itself reads it (which cannot happen until it is confirmed, so this
+    // is a safeguard rather than a path). It is also left out of search and
+    // suggestions: see hiddenMemberWhere in services/search.service.ts.
+    if (user.emailVerified === false && req.user?.id !== id) {
+      throw new ApiError(404, 'User not found');
+    }
+    const { emailVerified: _confirmed, ...publicUser } = user;
+    void _confirmed;
+
     // Check if profile is private and viewer is not the owner
     if (!user.isPublic && req.user?.id !== id) {
       throw new ApiError(403, 'This profile is private');
@@ -1188,26 +1203,30 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
         const [mutualRows, count] = await Promise.all([
           prisma.follow.findMany({
             where: { followingId: id, followerId: { in: followingIds } },
-            select: { follower: { select: { displayName: true, firstName: true, lastName: true } } },
+            select: { follower: { select: { displayName: true, firstName: true } } },
             take: 3,
           }),
           prisma.follow.count({ where: { followingId: id, followerId: { in: followingIds } } }),
         ]);
         mutualFollowers = {
           count,
-          names: mutualRows.map(
-            (row) =>
-              row.follower.displayName?.trim() ||
-              [row.follower.firstName, row.follower.lastName].filter(Boolean).join(' ').trim() ||
-              'Member'
-          ),
+          names: mutualRows.map((row) => publicName(row.follower)),
         };
       }
     }
 
     const approvesFollowers = access.visibility !== 'public';
 
-    if (access.access === 'limited') {
+    // A visitor with no account is held to the card even where the profile is
+    // fully public. Her name stays on it, since it is on every public post she
+    // has written; what stays behind the sign-in is where she lives (city, state
+    // and country), the work and education history, the skills, the bio and the
+    // links.
+    const signedOut = !req.user;
+    const heldToCard = seesOnlyTheCard(req.user?.id);
+    const signedOutCard = heldToCard && access.access === 'full';
+
+    if (access.access === 'limited' || signedOutCard) {
       res.json({
         success: true,
         data: {
@@ -1218,12 +1237,15 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
           avatar: user.avatar,
           headline: user.headline,
           persona: user.persona,
-          city: user.city,
-          state: user.state,
-          country: user.country,
+          ...(heldToCard ? {} : { city: user.city, state: user.state, country: user.country }),
+          isVerified: user.isVerified,
           createdAt: user.createdAt,
           _count: user._count,
           isLimited: true,
+          // Set only for a visitor with no account: the page says "sign in to
+          // see more" for this, and "request to follow" for a member who is
+          // signed in and not yet a follower.
+          ...(signedOut ? { signInRequired: true } : {}),
           approvesFollowers,
           isFollowing,
           followRequested,
@@ -1236,7 +1258,7 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
     res.json({
       success: true,
       data: {
-        ...user,
+        ...publicUser,
         isFollowing,
         followRequested,
         approvesFollowers,
@@ -1280,6 +1302,7 @@ router.patch(
       if (!errors.isEmpty()) {
         throw new ApiError(400, errors.array()[0].msg);
       }
+      const userId = memberId(req);
 
       const allowedFields = [
         'firstName', 'lastName', 'displayName', 'bio', 'headline',
@@ -1294,8 +1317,32 @@ router.patch(
         }
       }
 
+      // The name other members see. It may be a pseudonym, and it must read as a name:
+      // no email address, phone number or web address, and nothing that claims to be
+      // staff. An empty one clears it, and she is then called by her first name alone.
+      //
+      // "Cleared" is stored as the first name, not as nothing. The routes that go
+      // through utils/member-display fall back to the first name for a member with no
+      // public name, but reels, channels, live chat and group chat read `displayName`
+      // alone, so a null there would print her as blank on exactly the surfaces the page
+      // told her she would be called by her first name. A first name of hers that is
+      // changed in the same request is the one used.
+      if (req.body.displayName !== undefined) {
+        const chosen = parseDisplayName(req.body.displayName);
+        if (!chosen.ok) throw new ApiError(400, chosen.message);
+        if (chosen.value === null) {
+          const first =
+            typeof updateData.firstName === 'string'
+              ? updateData.firstName.trim()
+              : (await prisma.user.findUnique({ where: { id: userId }, select: { firstName: true } }))?.firstName?.trim();
+          updateData.displayName = first || null;
+        } else {
+          updateData.displayName = chosen.value;
+        }
+      }
+
       const user = await prisma.user.update({
-        where: { id: req.user!.id },
+        where: { id: userId },
         data: updateData,
         select: {
           id: true,
@@ -1533,29 +1580,66 @@ router.patch(
 // ===========================================
 // UPDATE EXTENDED PROFILE
 // ===========================================
+// The body is read through a schema that names every field a member may set
+// here and refuses the rest. It used to go to Prisma as it arrived, and Prisma
+// accepts a nested write on the `user` relation, so `{ "user": { "update":
+// { "role": "SUPER_ADMIN" } } }` from any signed-in member rewrote that member's own
+// account row: role, verification, suspension, two-factor. The owner is set
+// from the token, after the member's fields, so no body can name another one.
+// An empty string clears a link, as it would in the form that sends it.
+const optionalLink = z
+  .union([z.literal('').transform(() => null), httpUrl(500)])
+  .nullable()
+  .optional();
+const salaryFigure = z.number().int().min(0).max(10_000_000);
+
+const extendedProfileSchema = z
+  .object({
+    aboutMe: z.string().trim().max(5000).nullable().optional(),
+    linkedinUrl: optionalLink,
+    websiteUrl: optionalLink,
+    twitterUrl: optionalLink,
+    openToWork: z.boolean().optional(),
+    salaryMin: salaryFigure.nullable().optional(),
+    salaryMax: salaryFigure.nullable().optional(),
+    remotePreference: z.enum(['remote', 'hybrid', 'onsite']).nullable().optional(),
+    preferredJobTypes: z.array(z.nativeEnum(JobType)).max(Object.keys(JobType).length).optional(),
+    isSafeMode: z.boolean().optional(),
+    hideFromSearch: z.boolean().optional(),
+  })
+  .strict()
+  .refine(
+    (value) => value.salaryMin == null || value.salaryMax == null || value.salaryMin <= value.salaryMax,
+    { message: 'salaryMin cannot be more than salaryMax', path: ['salaryMin'] }
+  );
+
 router.patch(
   '/me/profile',
   authenticate,
-  [
-    body('aboutMe').optional().trim(),
-    body('linkedinUrl').optional().isURL({ protocols: ['http', 'https'] }),
-    body('websiteUrl').optional().isURL({ protocols: ['http', 'https'] }),
-    body('twitterUrl').optional().isURL({ protocols: ['http', 'https'] }),
-    body('openToWork').optional().isBoolean(),
-    body('salaryMin').optional().isInt({ min: 0 }),
-    body('salaryMax').optional().isInt({ min: 0 }),
-    body('remotePreference').optional().isIn(['remote', 'hybrid', 'onsite']),
-  ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
+      const data = parseStrict(extendedProfileSchema, req.body);
+      const userId = memberId(req);
+
       const profile = await prisma.profile.upsert({
-        where: { userId: req.user!.id },
-        update: req.body,
-        create: {
-          userId: req.user!.id,
-          ...req.body,
-        },
+        where: { userId },
+        update: data,
+        create: { ...data, userId },
       });
+
+      // Safe Mode and hide-from-search are kept in two places, and the DV page
+      // reads and enforces its own copy as well as this one (see
+      // PATCH /api/safety/settings, which mirrors them the same way). A member
+      // who changed one here and not there would be shown, and treated as,
+      // something other than what she set. Only a copy that already exists is
+      // updated; this is not a way of making one.
+      const dvCopy = {
+        ...(typeof data.isSafeMode === 'boolean' ? { isSafeMode: data.isSafeMode } : {}),
+        ...(typeof data.hideFromSearch === 'boolean' ? { hideFromSearch: data.hideFromSearch } : {}),
+      };
+      if (Object.keys(dvCopy).length > 0) {
+        await prisma.dvSafetyProfile.updateMany({ where: { userId }, data: dvCopy });
+      }
 
       res.json({
         success: true,
@@ -1686,25 +1770,39 @@ router.delete('/me/skills/:skillId', authenticate, async (req: AuthRequest, res,
 // ===========================================
 // ADD WORK EXPERIENCE
 // ===========================================
+// Same rule as the profile above: the fields are named, anything else is
+// refused, and the owner comes from the token. `...req.body` here let a body
+// `userId` plant an entry on another member's public profile, and member ids
+// are public.
+const experienceSchema = z
+  .object({
+    company: z.string().trim().min(1).max(200),
+    title: z.string().trim().min(1).max(200),
+    location: z.string().trim().max(200).nullable().optional(),
+    startDate: isoDate(),
+    endDate: isoDate().nullable().optional(),
+    current: z.boolean().optional(),
+    description: z.string().trim().max(5000).nullable().optional(),
+  })
+  .strict()
+  .refine((value) => !value.endDate || value.endDate >= value.startDate, {
+    message: 'endDate cannot be before startDate',
+    path: ['endDate'],
+  });
+
 router.post(
   '/me/experience',
   authenticate,
-  [
-    body('company').notEmpty().trim(),
-    body('title').notEmpty().trim(),
-    body('startDate').isISO8601(),
-    body('endDate').optional().isISO8601(),
-    body('current').optional().isBoolean(),
-    body('description').optional().trim(),
-  ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
+      const data = parseStrict(experienceSchema, req.body);
+
       const experience = await prisma.workExperience.create({
         data: {
+          ...data,
+          // A role that is still current has no end date, whatever else was sent.
+          endDate: data.current ? null : data.endDate ?? null,
           userId: req.user!.id,
-          ...req.body,
-          startDate: new Date(req.body.startDate),
-          endDate: req.body.endDate ? new Date(req.body.endDate) : null,
         },
       });
 
@@ -1721,25 +1819,35 @@ router.post(
 // ===========================================
 // ADD EDUCATION
 // ===========================================
+const educationSchema = z
+  .object({
+    institution: z.string().trim().min(1).max(200),
+    degree: z.string().trim().max(200).nullable().optional(),
+    fieldOfStudy: z.string().trim().max(200).nullable().optional(),
+    startDate: isoDate().nullable().optional(),
+    endDate: isoDate().nullable().optional(),
+    current: z.boolean().optional(),
+    description: z.string().trim().max(5000).nullable().optional(),
+  })
+  .strict()
+  .refine((value) => !value.startDate || !value.endDate || value.endDate >= value.startDate, {
+    message: 'endDate cannot be before startDate',
+    path: ['endDate'],
+  });
+
 router.post(
   '/me/education',
   authenticate,
-  [
-    body('institution').notEmpty().trim(),
-    body('degree').optional().trim(),
-    body('fieldOfStudy').optional().trim(),
-    body('startDate').optional().isISO8601(),
-    body('endDate').optional().isISO8601(),
-    body('current').optional().isBoolean(),
-  ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
+      const data = parseStrict(educationSchema, req.body);
+
       const education = await prisma.education.create({
         data: {
+          ...data,
+          startDate: data.startDate ?? null,
+          endDate: data.current ? null : data.endDate ?? null,
           userId: req.user!.id,
-          ...req.body,
-          startDate: req.body.startDate ? new Date(req.body.startDate) : null,
-          endDate: req.body.endDate ? new Date(req.body.endDate) : null,
         },
       });
 
@@ -1759,14 +1867,27 @@ router.post(
 router.post('/:id/follow', authenticate, followLimiter, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
+    const followerId = memberId(req);
 
-    if (id === req.user!.id) {
+    if (id === followerId) {
       throw new ApiError(400, 'Cannot follow yourself');
     }
 
     // Check if user exists
     const userToFollow = await prisma.user.findUnique({ where: { id } });
-    if (!userToFollow) {
+    // An account nobody has confirmed the address of does not exist for anyone
+    // else yet, as it does not on its profile page (GET /:id above).
+    if (!userToFollow || userToFollow.emailVerified === false) {
+      throw new ApiError(404, 'User not found');
+    }
+
+    // Either side of a block gets the answer a member who does not exist would
+    // get, so the closed door does not say why it is closed. This route used to
+    // check nothing: a blocked account could follow, or ask to follow, the
+    // member who had blocked it, which created the row and rang her phone. The
+    // check fails the request if the block lists cannot be read, rather than
+    // answering "not blocked" on a guess.
+    if (await isBlockedEitherWay(followerId, id)) {
       throw new ApiError(404, 'User not found');
     }
 
@@ -1774,7 +1895,7 @@ router.post('/:id/follow', authenticate, followLimiter, async (req: AuthRequest,
     const existingFollow = await prisma.follow.findUnique({
       where: {
         followerId_followingId: {
-          followerId: req.user!.id,
+          followerId,
           followingId: id,
         },
       },
@@ -1788,19 +1909,27 @@ router.post('/:id/follow', authenticate, followLimiter, async (req: AuthRequest,
       return;
     }
 
+    // Follow, unfollow and follow again rings the same member's phone every
+    // time round, and the per-member limit above allows sixty a window. Only a
+    // press that would create something is counted, so pressing a button that
+    // is already on costs nothing.
+    if (!(await withinTargetLimit('follow', followerId, id))) {
+      throw new ApiError(429, 'You have asked to follow this member several times in the last hour. Please wait a while before trying again.');
+    }
+
     // Members who approve their followers get a request instead of a follow.
     if (await approvesFollowers(id)) {
       const request = await prisma.followRequest.upsert({
-        where: { requesterId_targetId: { requesterId: req.user!.id, targetId: id } },
+        where: { requesterId_targetId: { requesterId: followerId, targetId: id } },
         update: { status: 'PENDING' },
-        create: { requesterId: req.user!.id, targetId: id },
+        create: { requesterId: followerId, targetId: id },
         select: { id: true, status: true, updatedAt: true, createdAt: true },
       });
       // Only a fresh request rings the bell; a re-press of the button does not.
       if (request.createdAt.getTime() === request.updatedAt.getTime() || Date.now() - request.updatedAt.getTime() < 1500) {
         await notifySocial({
           recipientId: id,
-          actorId: req.user!.id,
+          actorId: followerId,
           type: 'FOLLOW_REQUEST',
           title: 'Follow request',
           message: (name) => `${name} asked to follow you`,
@@ -1813,7 +1942,7 @@ router.post('/:id/follow', authenticate, followLimiter, async (req: AuthRequest,
 
     await prisma.follow.create({
       data: {
-        followerId: req.user!.id,
+        followerId,
         followingId: id,
       },
     });
@@ -1822,11 +1951,11 @@ router.post('/:id/follow', authenticate, followLimiter, async (req: AuthRequest,
     // public profile rather than a /users route the web client has never had.
     await notifySocial({
       recipientId: id,
-      actorId: req.user!.id,
+      actorId: followerId,
       type: 'FOLLOW',
       title: 'New follower',
       message: (name) => `${name} started following you`,
-      link: socialLinks.profile(req.user!.id),
+      link: socialLinks.profile(followerId),
     });
 
     res.json({
@@ -1920,7 +2049,7 @@ function listedMemberWhere(viewer: ViewerContext, ownList: boolean): Prisma.User
 // ===========================================
 // GET USER'S FOLLOWERS
 // ===========================================
-router.get('/:id/followers', authenticate, async (req: AuthRequest, res, next) => {
+router.get('/:id/followers', authenticate, profileReadLimiter, maskLegalNamesInResponses, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
     const { page, limit } = parsePagination(req.query as { page?: string; limit?: string });
@@ -1934,7 +2063,6 @@ router.get('/:id/followers', authenticate, async (req: AuthRequest, res, next) =
           select: {
             id: true,
             firstName: true,
-            lastName: true,
             displayName: true,
             avatar: true,
             headline: true,
@@ -1966,7 +2094,7 @@ router.get('/:id/followers', authenticate, async (req: AuthRequest, res, next) =
 // ===========================================
 // GET USER'S FOLLOWING
 // ===========================================
-router.get('/:id/following', authenticate, async (req: AuthRequest, res, next) => {
+router.get('/:id/following', authenticate, profileReadLimiter, maskLegalNamesInResponses, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
     const { page, limit } = parsePagination(req.query as { page?: string; limit?: string });
@@ -1980,7 +2108,6 @@ router.get('/:id/following', authenticate, async (req: AuthRequest, res, next) =
           select: {
             id: true,
             firstName: true,
-            lastName: true,
             displayName: true,
             avatar: true,
             headline: true,

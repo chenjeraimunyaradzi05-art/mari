@@ -22,6 +22,7 @@ import { safetyApi } from '@/lib/api';
 import toast from 'react-hot-toast';
 import { InlineAlert } from '@/components/ui/alert';
 import { QuickExitButton } from '../dashboard/safety/QuickExit';
+import { ReportNextSteps } from '@/components/safety/ReportNextSteps';
 
 interface ReportRecord {
   id: string;
@@ -63,6 +64,10 @@ type ReportTargetType = 'post' | 'video' | 'user' | 'message' | 'channel';
 // "medium" and alert nobody, however serious it was.
 const REPORT_REASONS = [
   { value: 'harassment', label: 'Harassment or bullying' },
+  // Named so that she does not have to guess which of the others they come under;
+  // the server reads both first (critical, the 24-hour clock, hidden at once).
+  { value: 'intimate_image', label: 'An intimate image of someone, shared without consent' },
+  { value: 'threat', label: 'A threat to hurt someone' },
   { value: 'violence', label: 'Violence or threats' },
   { value: 'hate', label: 'Hate or discrimination' },
   { value: 'sexual', label: 'Sexual or explicit content' },
@@ -115,6 +120,9 @@ export default function SafetyCenterPage() {
   const [isReportOpen, setIsReportOpen] = useState(false);
   const [isBlockOpen, setIsBlockOpen] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  // The reason she has just filed, while the confirmation is up, so it can say
+  // where else to turn when there is somewhere (an intimate image, a threat).
+  const [filedReason, setFiledReason] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [reportForm, setReportForm] = useState<{
     targetType: ReportTargetType;
@@ -167,6 +175,7 @@ export default function SafetyCenterPage() {
       });
       const filed = created.data?.data as { reference?: string; reviewHours?: number } | undefined;
       setIsReportOpen(false);
+      setFiledReason(reportForm.reason);
       setReportForm({ targetType: 'post', targetId: '', reason: '', details: '' });
       // The server now gives every report a reference and a review clock; she
       // is told both rather than "soon".
@@ -204,6 +213,7 @@ export default function SafetyCenterPage() {
       setBlockedUsers(blocksRes.data.data || []);
       setIsBlockOpen(false);
       setBlockForm({ blockedUserId: '', reason: '' });
+      setFiledReason(null);
       setSuccessMessage('User blocked successfully.');
       setErrorMessage(null);
       toast.success('User blocked.');
@@ -219,6 +229,7 @@ export default function SafetyCenterPage() {
     try {
       await safetyApi.unblockUser(blockedUserId);
       setBlockedUsers((prev) => prev.filter((item) => item.blockedUserId !== blockedUserId));
+      setFiledReason(null);
       setSuccessMessage('User unblocked successfully.');
       setErrorMessage(null);
       toast.success('User unblocked.');
@@ -236,6 +247,7 @@ export default function SafetyCenterPage() {
     setSettings(next);
     try {
       await safetyApi.updateSettings(patch);
+      setFiledReason(null);
       setSuccessMessage('Safety settings updated.');
       setErrorMessage(null);
       toast.success('Settings saved.');
@@ -279,10 +291,17 @@ export default function SafetyCenterPage() {
         {(successMessage || errorMessage) && (
           <div className="mb-6 space-y-3">
             {successMessage && (
-              <InlineAlert tone="success" onDismiss={() => setSuccessMessage(null)}>
+              <InlineAlert
+                tone="success"
+                onDismiss={() => {
+                  setSuccessMessage(null);
+                  setFiledReason(null);
+                }}
+              >
                 {successMessage}
               </InlineAlert>
             )}
+            {successMessage && <ReportNextSteps reason={filedReason} />}
             {errorMessage && (
               <InlineAlert tone="error" onDismiss={() => setErrorMessage(null)}>
                 {errorMessage}

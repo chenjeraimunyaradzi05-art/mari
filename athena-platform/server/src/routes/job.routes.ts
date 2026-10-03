@@ -5,7 +5,8 @@ import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
-import { parsePagination } from '../utils/pagination';
+import { clampLimit, parsePagination } from '../utils/pagination';
+import { directoryReadLimiter } from '../middleware/rateLimiter';
 import { getRecommendedJobs, search as searchService } from '../services/search.service';
 import { notificationService, type NotificationChannel } from '../services/notification.service';
 import { assertOwnResumeUpload, hiringStaffUserIds } from '../services/hiring-access.service';
@@ -143,7 +144,7 @@ function experienceBandWhere(band: ExperienceBand): Prisma.JobWhereInput {
   return { AND: clauses };
 }
 
-router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
+router.get('/', optionalAuth, directoryReadLimiter, async (req: AuthRequest, res, next) => {
   try {
     const { page, limit } = parsePagination(req.query as { page?: string; limit?: string });
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
@@ -796,7 +797,9 @@ router.delete('/:id/save', authenticate, async (req: AuthRequest, res, next) => 
 // ===========================================
 router.get('/recommendations/for-me', authenticate, async (req: AuthRequest, res, next) => {
   try {
-    const limit = parseInt(req.query.limit as string) || 10;
+    // Bounded: this is the size of an OpenSearch query and of the rows read back
+    // for it, so `?limit=100000` was a heavy request for a short URL.
+    const limit = clampLimit(req.query.limit, 10, 50);
 
     // 1. Get IDs from OpenSearch (Selection & Ranking)
     const recommendations = await getRecommendedJobs(req.user!.id, limit);

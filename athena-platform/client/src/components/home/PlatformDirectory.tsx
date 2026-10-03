@@ -180,7 +180,7 @@ const GROUPS: Group[] = [
   {
     id: 'wellbeing',
     title: 'Health and wellbeing',
-    intro: 'Looked after, on your terms. Everything health-related is encrypted and read only by you.',
+    intro: 'Looked after, on your terms. What you log, your medications and your health notes are encrypted before they are stored, and shown only to you unless you share them.',
     icon: Heart,
     tint: 'from-rose-400 to-pink-500',
     items: [
@@ -267,7 +267,6 @@ const GROUPS: Group[] = [
       { href: '/blog', label: 'Blog', blurb: 'Longer writing' },
       { href: '/changelog', label: 'Changelog', blurb: 'What shipped, and when' },
       { href: '/status', label: 'Status', blurb: 'Whether anything is down right now' },
-      { href: '/developers', label: 'Developers', blurb: 'The API, and how to build on it' },
       { href: '/help', label: 'Help centre', blurb: 'Answers, and a way to reach a person' },
       { href: '/contact', label: 'Contact', blurb: 'Say hello' },
     ],

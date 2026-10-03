@@ -18,6 +18,17 @@ jest.mock('../../utils/prisma', () => ({
     notification: { create: jest.fn() },
     user: { findUnique: jest.fn(), update: jest.fn() },
     post: { update: jest.fn() },
+    event: { updateMany: jest.fn(async () => ({ count: 1 })) },
+    housingListing: { findUnique: jest.fn(async () => ({ features: ['Garden'] })), updateMany: jest.fn(async () => ({ count: 1 })) },
+    wellnessPost: { updateMany: jest.fn(async () => ({ count: 1 })) },
+    wellnessReply: { updateMany: jest.fn(async () => ({ count: 1 })) },
+    // A review of a practitioner, and the average its practitioner carries.
+    healthReview: {
+      findUnique: jest.fn(async ({ where }: any) => (where.id === 'review-1' ? { id: 'review-1', practitionerId: 'pr-1' } : null)),
+      update: jest.fn(async ({ where, data }: any) => ({ id: where.id, isHidden: data.isHidden })),
+      aggregate: jest.fn(async () => ({ _avg: { rating: 4 }, _count: { rating: 2 } })),
+    },
+    healthPractitioner: { update: jest.fn(async () => ({})) },
     bannedIdentity: { upsert: jest.fn(), deleteMany: jest.fn() },
   },
 }));
@@ -79,6 +90,127 @@ describe('Deciding a report', () => {
     expect(prismaAny.bannedIdentity.upsert).not.toHaveBeenCalled();
   });
 
+  // The decision told the reporter and nobody else. The member whose post came
+  // down heard nothing, so the appeal the platform offers was one she could not
+  // know she had cause to make, and could not name.
+  it('tells the member whose post was removed, with the reference to quote and the way to appeal', async () => {
+    prismaAny.contentReport.findUnique.mockResolvedValue({
+      ...REPORT,
+      evidence: { ticketId: 'RPT-ABC-1234' },
+    });
+
+    await processReportById('report-1', 'remove', 'moderator-1');
+
+    const notified = prismaAny.notification.create.mock.calls.map((call: any[]) => call[0].data);
+    const toAuthor = notified.find((data: any) => data.userId === 'reported-1');
+    expect(toAuthor).toMatchObject({
+      type: 'SYSTEM',
+      title: 'Something you shared was removed',
+      link: '/help/appeal?type=content_removal',
+      data: { reportId: 'report-1', reference: 'RPT-ABC-1234', contentType: 'POST' },
+    });
+    expect(toAuthor.message).toContain('your post');
+    expect(toAuthor.message).toContain('RPT-ABC-1234');
+    // Nothing of who reported, or what she said: the notice is for the author.
+    expect(JSON.stringify(toAuthor)).not.toContain('reporter-1');
+    expect(JSON.stringify(toAuthor)).not.toContain('She posted my address');
+  });
+
+  it('names a reel, an event or a listing as what it is, and says nothing where nothing was removed', async () => {
+    prismaAny.contentReport.findUnique.mockResolvedValue({ ...REPORT, contentType: 'VIDEO', contentId: 'reel-1' });
+    prismaAny.video = { update: jest.fn(async () => ({})) };
+    await processReportById('report-1', 'remove', 'moderator-1');
+    const reel = prismaAny.notification.create.mock.calls.map((c: any[]) => c[0].data).find((d: any) => d.userId === 'reported-1');
+    expect(reel.message).toContain('your reel');
+
+    // A profile is not taken down by "remove" (the account is suspended
+    // instead), so telling its owner that something was removed would be untrue.
+    prismaAny.notification.create.mockClear();
+    prismaAny.contentReport.findUnique.mockResolvedValue({ ...REPORT, contentType: 'PROFILE', contentId: 'reported-1' });
+    await processReportById('report-1', 'remove', 'moderator-1');
+    const afterProfile = prismaAny.notification.create.mock.calls.map((c: any[]) => c[0].data);
+    expect(afterProfile.some((d: any) => d.userId === 'reported-1')).toBe(false);
+  });
+
+  it('does not send the removal notice for a dismissal or a warning, which have their own words or none', async () => {
+    await processReportById('report-1', 'dismiss', 'moderator-1');
+    await processReportById('report-1', 'warn', 'moderator-1');
+
+    const titles = prismaAny.notification.create.mock.calls.map((c: any[]) => c[0].data.title);
+    expect(titles).not.toContain('Something you shared was removed');
+    expect(titles).toContain('Content Policy Warning');
+  });
+
+  it('still records the decision when the notice cannot be written', async () => {
+    prismaAny.notification.create.mockImplementation(async ({ data }: any) => {
+      if (data.userId === 'reported-1') throw new Error('no such member');
+      return { id: 'n' };
+    });
+
+    const outcome = await processReportById('report-1', 'remove', 'moderator-1');
+
+    expect(outcome.status).toBe('RESOLVED');
+    expect(prismaAny.moderationLog.create).toHaveBeenCalled();
+  });
+
+  // A report of an event could be filed, in the app and on the public form, and
+  // a moderator could choose "remove", and nothing happened to the event: the
+  // switch that carries removal out had no branch for it.
+  it('takes a reported event off the list when a moderator removes it, hiding it rather than deleting it', async () => {
+    prismaAny.contentReport.findUnique.mockResolvedValue({ ...REPORT, contentType: 'EVENT', contentId: 'event-1' });
+
+    await processReportById('report-1', 'remove', 'moderator-1');
+
+    expect(prismaAny.event.updateMany).toHaveBeenCalledWith({ where: { id: 'event-1' }, data: { isHidden: true } });
+  });
+
+  // A report of a mental health forum post or reply reached the queue, a
+  // moderator chose "remove", and the only thing that happened was a log line
+  // saying the type was unknown: the post stayed up.
+  it.each([
+    ['WELLNESS_POST', 'wellnessPost', { isHidden: true, hiddenReason: 'Removed by a moderator' }, 'forum post'],
+    ['WELLNESS_REPLY', 'wellnessReply', { isHidden: true }, 'forum reply'],
+  ])('hides a reported %s when a moderator removes it, and tells its author what it was', async (contentType, model, data, noun) => {
+    prismaAny.contentReport.findUnique.mockResolvedValue({ ...REPORT, contentType, contentId: 'thing-1', reason: 'self_harm' });
+
+    await processReportById('report-1', 'remove', 'moderator-1');
+
+    expect(prismaAny[model].updateMany).toHaveBeenCalledWith({ where: { id: 'thing-1' }, data });
+    const toAuthor = prismaAny.notification.create.mock.calls.map((c: any[]) => c[0].data).find((d: any) => d.userId === 'reported-1');
+    expect(toAuthor.message).toContain(`your ${noun}`);
+  });
+
+  it('does not hide a forum post when the report is dismissed', async () => {
+    prismaAny.contentReport.findUnique.mockResolvedValue({ ...REPORT, contentType: 'WELLNESS_POST', contentId: 'thing-1' });
+    await processReportById('report-1', 'dismiss', 'moderator-1');
+    expect(prismaAny.wellnessPost.updateMany).not.toHaveBeenCalled();
+  });
+
+  // A review of a practitioner can now be reported from the practitioner's page.
+  // Removing it hides it and brings the practitioner's average level with what
+  // still shows, the same two writes a moderator's Hide makes; the directory
+  // sorts on that average, so a hidden review left in it would still rank her.
+  it('hides a reported review when a moderator removes it, brings the average level, and tells its author', async () => {
+    prismaAny.contentReport.findUnique.mockResolvedValue({ ...REPORT, contentType: 'HEALTH_REVIEW', contentId: 'review-1' });
+
+    await processReportById('report-1', 'remove', 'moderator-1');
+
+    expect(prismaAny.healthReview.update).toHaveBeenCalledWith({ where: { id: 'review-1' }, data: { isHidden: true } });
+    expect(prismaAny.healthReview.aggregate).toHaveBeenCalledWith(expect.objectContaining({ where: { practitionerId: 'pr-1', isHidden: false } }));
+    expect(prismaAny.healthPractitioner.update).toHaveBeenCalledWith({ where: { id: 'pr-1' }, data: { ratingAvg: 4, ratingCount: 2 } });
+    const toAuthor = prismaAny.notification.create.mock.calls.map((c: any[]) => c[0].data).find((d: any) => d.userId === 'reported-1');
+    expect(toAuthor.message).toContain('your review of a practitioner');
+  });
+
+  it('records the decision on a review that has since gone, rather than failing it', async () => {
+    prismaAny.contentReport.findUnique.mockResolvedValue({ ...REPORT, contentType: 'HEALTH_REVIEW', contentId: 'review-gone' });
+
+    const outcome = await processReportById('report-1', 'remove', 'moderator-1');
+
+    expect(outcome.status).toBe('RESOLVED');
+    expect(prismaAny.healthReview.update).not.toHaveBeenCalled();
+  });
+
   it('gives a suspension without notes the report it was decided on as its reason', async () => {
     await processReportById('report-1', 'suspend', 'moderator-1');
 
@@ -135,6 +267,35 @@ describe('Deciding a report', () => {
       data: { isHidden: true },
     });
     expect(outcome.action).toBe('remove');
+  });
+
+  // A listing a moderator takes down for a report comes off the list and loses
+  // its safety check with it. Left checked, its lister could put it live again
+  // with "Checked by ATHENA staff" still on it: the take-down would last until
+  // the next edit of the status.
+  it('takes a reported housing listing down and ends its safety check', async () => {
+    prismaAny.contentReport.findUnique.mockResolvedValue({ ...REPORT, contentType: 'HOUSING_LISTING', contentId: 'listing-1' });
+
+    await processReportById('report-1', 'remove', 'moderator-1');
+
+    expect(prismaAny.housingListing.updateMany).toHaveBeenCalledWith({
+      where: { id: 'listing-1' },
+      data: { status: 'WITHDRAWN', safetyVerified: false, features: ['Garden', expect.stringMatching(/^staff-takedown:/)] },
+    });
+    expect(prismaAny.post.update).not.toHaveBeenCalled();
+  });
+
+  // The listing's status is a switch its lister can press, so a removal that
+  // only set the status was undone by one request for an ordinary listing, which
+  // has no check to go back through. The mark is what stops that.
+  it('marks the removed listing as taken down by staff, so its lister cannot put it back herself', async () => {
+    prismaAny.contentReport.findUnique.mockResolvedValue({ ...REPORT, contentType: 'HOUSING_LISTING', contentId: 'listing-1' });
+    prismaAny.housingListing.findUnique.mockResolvedValueOnce({ features: ['Garden', 'dv-safe-note:quiet street'] });
+
+    await processReportById('report-1', 'remove', 'moderator-1');
+
+    const data = prismaAny.housingListing.updateMany.mock.calls.at(-1)[0].data;
+    expect(data.features).toEqual(['Garden', 'dv-safe-note:quiet street', expect.stringMatching(/^staff-takedown:[0-9]{4}-/)]);
   });
 
   // A ban locks the account, marks it banned, and bars the address from
@@ -226,6 +387,42 @@ describe('Reversing enforcement on a successful appeal', () => {
     });
   });
 
+  it('puts a hidden event back, as it does a hidden post', async () => {
+    prismaAny.contentReport.findUnique.mockResolvedValue(null);
+    prismaAny.user.findUnique.mockResolvedValue({ isSuspended: false });
+
+    const result = await reverseEnforcement({ userId: 'host-1', contentType: 'EVENT', contentId: 'event-1' });
+
+    expect(result.contentRestored).toBe(true);
+    expect(prismaAny.event.updateMany).toHaveBeenCalledWith({ where: { id: 'event-1' }, data: { isHidden: false } });
+  });
+
+  it.each([
+    ['WELLNESS_POST', 'wellnessPost', { isHidden: false, hiddenReason: null }],
+    ['WELLNESS_REPLY', 'wellnessReply', { isHidden: false }],
+  ])('puts a hidden %s back on an upheld appeal', async (contentType, model, data) => {
+    prismaAny.contentReport.findUnique.mockResolvedValue(null);
+    prismaAny.user.findUnique.mockResolvedValue({ isSuspended: false });
+
+    const result = await reverseEnforcement({ userId: 'author-1', contentType, contentId: 'thing-1' });
+
+    expect(result.contentRestored).toBe(true);
+    expect(prismaAny[model].updateMany).toHaveBeenCalledWith({ where: { id: 'thing-1' }, data });
+  });
+
+  it('puts a hidden review back on an upheld appeal, and says nothing came back when the review is gone', async () => {
+    prismaAny.contentReport.findUnique.mockResolvedValue(null);
+    prismaAny.user.findUnique.mockResolvedValue({ isSuspended: false });
+
+    const result = await reverseEnforcement({ userId: 'author-1', contentType: 'HEALTH_REVIEW', contentId: 'review-1' });
+    expect(result.contentRestored).toBe(true);
+    expect(prismaAny.healthReview.update).toHaveBeenCalledWith({ where: { id: 'review-1' }, data: { isHidden: false } });
+    expect(prismaAny.healthPractitioner.update).toHaveBeenCalledWith({ where: { id: 'pr-1' }, data: { ratingAvg: 4, ratingCount: 2 } });
+
+    const gone = await reverseEnforcement({ userId: 'author-1', contentType: 'HEALTH_REVIEW', contentId: 'review-gone' });
+    expect(gone.contentRestored).toBe(false);
+  });
+
   it('does not claim to have lifted a suspension that was not there', async () => {
     prismaAny.contentReport.findUnique.mockResolvedValue(null);
     prismaAny.user.findUnique.mockResolvedValue({ isSuspended: false });
@@ -261,6 +458,28 @@ describe('Reversing enforcement on a successful appeal', () => {
 
     expect(result.reportCleared).toBe(false);
     expect(prismaAny.contentReport.update).not.toHaveBeenCalled();
+  });
+
+  it('does not put a taken-down housing listing back on appeal, because its check ended with it', async () => {
+    prismaAny.contentReport.findUnique.mockResolvedValue(null);
+    prismaAny.user.findUnique.mockResolvedValue({ isSuspended: false });
+
+    const result = await reverseEnforcement({ userId: 'reported-1', contentType: 'HOUSING_LISTING', contentId: 'listing-1' });
+
+    expect(result.contentRestored).toBe(false);
+    // Nothing to undo on a listing that carries no mark.
+    expect(prismaAny.housingListing.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('lets the lister put the listing back after an upheld appeal, without putting it back for her', async () => {
+    prismaAny.contentReport.findUnique.mockResolvedValue(null);
+    prismaAny.user.findUnique.mockResolvedValue({ isSuspended: false });
+    prismaAny.housingListing.findUnique.mockResolvedValueOnce({ features: ['Garden', 'staff-takedown:2026-10-01T00:00:00.000Z'] });
+
+    const result = await reverseEnforcement({ userId: 'reported-1', contentType: 'HOUSING_LISTING', contentId: 'listing-1' });
+
+    expect(result.contentRestored).toBe(false);
+    expect(prismaAny.housingListing.updateMany).toHaveBeenCalledWith({ where: { id: 'listing-1' }, data: { features: ['Garden'] } });
   });
 
   it('says a deleted message could not be restored rather than pretending it was', async () => {

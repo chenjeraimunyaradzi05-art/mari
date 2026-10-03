@@ -1,5 +1,8 @@
 /**
- * Two small things on the phone that must not fail quietly.
+ * Three small things on the phone that must not fail quietly.
+ *
+ * The Emergency help button in the header, which opens the numbers to ring from
+ * any screen without asking the API for anything.
  *
  * The quick exit on the wellness screens: one tap resets the app to the feed
  * and switches to a harmless page, the one she chose in her safety settings,
@@ -16,6 +19,7 @@ import { act } from 'react-test-renderer';
 const mockSettings = jest.fn<(...args: any[]) => any>();
 const mockFeedback = jest.fn<(...args: any[]) => any>();
 const mockReset = jest.fn();
+const mockNavigate = jest.fn();
 
 jest.mock('../../services/api', () => ({
   unwrapApiData: (payload: any) => payload?.data ?? payload,
@@ -25,10 +29,11 @@ jest.mock('../../services/api', () => ({
 }));
 
 jest.mock('@react-navigation/native', () => ({
-  useNavigation: () => ({ reset: mockReset, navigate: jest.fn() }),
+  useNavigation: () => ({ reset: mockReset, navigate: mockNavigate }),
 }));
 
 import { DEFAULT_EXIT_URL, QuickExitButton, forgetExitAddress } from '../../components/pillar/QuickExit';
+import { EmergencyHelpButton } from '../../components/pillar/EmergencyHelp';
 import { HelpSupportScreen } from '../HelpSupportScreen';
 import { byLabel, press, pressableWithText, renderScreen, settle, shows, unmountScreens } from './renderScreen';
 
@@ -73,6 +78,85 @@ describe('QuickExitButton', () => {
     await press(byLabel(screen, 'Quick exit')!);
 
     expect(Linking.openURL).toHaveBeenCalledWith(DEFAULT_EXIT_URL);
+  });
+});
+
+describe('EmergencyHelpButton', () => {
+  it('is a labelled button in the header, and the sheet stays shut until it is pressed', async () => {
+    const screen = await renderScreen(<EmergencyHelpButton />);
+
+    expect(byLabel(screen, 'Emergency help')).not.toBeNull();
+    expect(shows(screen, 'Help')).toBe(true);
+    expect(shows(screen, 'Lifeline')).toBe(false);
+  });
+
+  it('opens the numbers to ring, and says plainly that ATHENA cannot send anyone', async () => {
+    mockSettings.mockReturnValue(new Promise(() => undefined));
+
+    const screen = await renderScreen(<EmergencyHelpButton />);
+    await press(byLabel(screen, 'Emergency help')!);
+
+    expect(byLabel(screen, 'Call Emergency on 000')).not.toBeNull();
+    expect(byLabel(screen, 'Call 1800RESPECT on 1800 737 732')).not.toBeNull();
+    expect(byLabel(screen, 'Call Lifeline on 13 11 14')).not.toBeNull();
+    expect(shows(screen, 'ATHENA cannot send anyone to you')).toBe(true);
+    expect(shows(screen, 'New Zealand 111')).toBe(true);
+  });
+
+  it('dials the number she taps', async () => {
+    const screen = await renderScreen(<EmergencyHelpButton />);
+    await press(byLabel(screen, 'Emergency help')!);
+
+    await press(byLabel(screen, 'Call 1800RESPECT on 1800 737 732')!);
+
+    expect(Linking.openURL).toHaveBeenCalledWith('tel:1800737732');
+  });
+
+  it('leaves for the page she chose, from the sheet, and closes the sheet', async () => {
+    mockSettings.mockResolvedValue({ data: { success: true, data: { safeExitUrl: 'https://www.bom.gov.au' } } });
+
+    const screen = await renderScreen(<EmergencyHelpButton />);
+    await press(byLabel(screen, 'Emergency help')!);
+    await settle();
+    await press(byLabel(screen, 'Quick exit')!);
+
+    expect(mockReset).toHaveBeenCalledWith({ index: 0, routes: [{ name: 'Main' }] });
+    expect(Linking.openURL).toHaveBeenCalledWith('https://www.bom.gov.au');
+    expect(shows(screen, 'Lifeline')).toBe(false);
+  });
+
+  it('still opens, and still leaves for the default page, when her settings cannot be read', async () => {
+    mockSettings.mockRejectedValue(new Error('Network Error'));
+
+    const screen = await renderScreen(<EmergencyHelpButton />);
+    await press(byLabel(screen, 'Emergency help')!);
+    await press(byLabel(screen, 'Quick exit')!);
+
+    expect(Linking.openURL).toHaveBeenCalledWith(DEFAULT_EXIT_URL);
+    expect(mockReset).toHaveBeenCalled();
+  });
+
+  it('goes to the Safety centre, and opens the report form on the web', async () => {
+    const screen = await renderScreen(<EmergencyHelpButton />);
+
+    await press(byLabel(screen, 'Emergency help')!);
+    await press(byLabel(screen, 'Safety centre')!);
+    expect(mockNavigate).toHaveBeenCalledWith('Safety');
+    expect(shows(screen, 'Lifeline')).toBe(false);
+
+    await press(byLabel(screen, 'Emergency help')!);
+    await press(byLabel(screen, 'Report something on ATHENA')!);
+    expect(Linking.openURL).toHaveBeenCalledWith('https://athena.example/report');
+  });
+
+  it('closes from its own button', async () => {
+    const screen = await renderScreen(<EmergencyHelpButton />);
+    await press(byLabel(screen, 'Emergency help')!);
+    expect(shows(screen, 'Lifeline')).toBe(true);
+
+    await press(byLabel(screen, 'Close emergency help')!);
+
+    expect(shows(screen, 'Lifeline')).toBe(false);
   });
 });
 

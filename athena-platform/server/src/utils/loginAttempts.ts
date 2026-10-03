@@ -11,6 +11,7 @@
 
 import { getRedisClient } from './cache';
 import { logger } from './logger';
+import { noteRedisFallback, noteRedisRecovered } from './redis-fallback';
 
 const FAILED_KEY_PREFIX = 'login:fails';
 const LOCK_KEY_PREFIX = 'login:lock';
@@ -97,9 +98,11 @@ export function resetLoginAttemptMemory(): void {
   memoryLocks.clear();
 }
 
-// One line a minute when the fallback is carrying the lockout.
+// One line a minute when the fallback is carrying the lockout. The gauge and
+// the standing condition are set every time: they are what an alert reads.
 let lastFallbackWarning = 0;
 function noteFallback(reason: string): void {
+  noteRedisFallback('login_lockout', reason);
   const now = Date.now();
   if (now - lastFallbackWarning < 60_000) return;
   lastFallbackWarning = now;
@@ -134,6 +137,7 @@ export async function getLockoutStatus(
 
   try {
     const ttl = await client.ttl(lockKey(email, ipAddress));
+    noteRedisRecovered('login_lockout');
     if (ttl > 0) {
       return { locked: true, retryAfterSeconds: ttl };
     }
@@ -161,10 +165,17 @@ export async function recordFailedLogin(
 
   try {
     const key = failKey(email, ipAddress);
+    // The key is made with its expiry in one step, then counted. INCR followed
+    // by EXPIRE left a counter that never expired when the process stopped
+    // between the two, and an address that was one failure short of a lock
+    // stayed that way for ever. INCR keeps the expiry the first call set.
+    await client.set(key, '0', 'EX', FAILURE_WINDOW_SECONDS, 'NX');
     const count = await client.incr(key);
-    if (count === 1) {
+    // A counter written by the old two-step code can already be without one.
+    if (count > 1 && (await client.ttl(key)) === -1) {
       await client.expire(key, FAILURE_WINDOW_SECONDS);
     }
+    noteRedisRecovered('login_lockout');
 
     if (count >= MAX_FAILURES) {
       await client.set(lockKey(email, ipAddress), '1', 'EX', LOCK_DURATION_SECONDS);

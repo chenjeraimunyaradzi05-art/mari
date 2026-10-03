@@ -15,6 +15,8 @@
 
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
+import { authorsHiddenFrom } from './audience.service';
+import { PUBLIC_AUTHOR_SELECT } from '../utils/member-display';
 
 export const REACTION_TYPES = ['LIKE', 'CELEBRATE', 'SUPPORT', 'INSIGHTFUL', 'INSPIRED'] as const;
 export type ReactionType = (typeof REACTION_TYPES)[number];
@@ -131,8 +133,11 @@ export const REPOST_OF_INCLUDE = {
       commentCount: true,
       shareCount: true,
       repostCount: true,
+      // The same author columns every social surface loads (utils/member-display): no
+      // legal surname is read for a member whose post was reposted, whichever route
+      // carries the repost.
       author: {
-        select: { id: true, firstName: true, lastName: true, displayName: true, avatar: true, headline: true },
+        select: PUBLIC_AUTHOR_SELECT,
       },
     },
   },
@@ -180,6 +185,16 @@ export async function decoratePosts<T extends PostLike>(
   const originals = posts
     .map((p) => p.repostOf)
     .filter((o): o is RepostOfRow => Boolean(o) && !posts.some((p) => p.id === (o as RepostOfRow).id));
+  // The original inside a repost is its author's words, shown on the
+  // reposter's page. The reposter's audience does not widen the original's: a
+  // viewer who may not be shown the original author (across a block, a private
+  // or connections-only profile she is outside of, Safe Mode) sees the same
+  // marker a withdrawn original gets, rather than the words under someone
+  // else's name. Read only when a page carries a repost.
+  const hiddenOriginalAuthors = await authorsHiddenFrom(
+    viewerId,
+    originals.map((o) => (typeof o.authorId === 'string' ? o.authorId : ''))
+  );
   const rows: PostLike[] = [...posts, ...originals];
   const ids = Array.from(new Set(rows.map((p) => p.id)));
   const pollPostIds = rows.filter((p) => readPoll(p.poll)).map((p) => p.id);
@@ -273,7 +288,11 @@ export async function decoratePosts<T extends PostLike>(
     // A repost whose original is hidden, private or deleted shows a marker
     // rather than someone else's withdrawn words.
     const original = post.repostOf ?? null;
-    const originalGone = original ? Boolean(original.isHidden) || original.isPublic === false : false;
+    const originalGone = original
+      ? Boolean(original.isHidden) ||
+        original.isPublic === false ||
+        (typeof original.authorId === 'string' && hiddenOriginalAuthors.has(original.authorId))
+      : false;
     const repostUnavailable = Boolean(post.repostOfId) && (!original || originalGone);
     return {
       ...decorate(post),

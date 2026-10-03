@@ -37,7 +37,7 @@ const PRINCIPLES: Array<{ app: string; title: string; body: React.ReactNode[] }>
     app: 'APP 3 and APP 5',
     title: 'Collection, and telling you about it',
     body: [
-      'We collect what the platform needs to work: your account details, your profile and what you post, your applications and bookings, payment records held by Stripe, and technical logs. Sensitive information (for example, health information in DV Safe Mode, or a document used for identity verification) is collected only with your consent and only for the feature you used it in.',
+      'We collect what the platform needs to work: your account details, your profile and what you post, your applications and bookings, payment records held by Stripe, and technical logs. Sensitive information (for example, health information in DV Safe Mode, or a photo ID and selfie used for an identity check, which Stripe Identity takes and holds, not ATHENA) is collected only with your consent and only for the feature you used it in.',
       'Where information is collected from someone other than you (a referee you named, an employer you applied to), that person is told what it is for.',
     ],
   },
@@ -51,6 +51,7 @@ const PRINCIPLES: Array<{ app: string; title: string; body: React.ReactNode[] }>
         choose to share it with on the platform, and where the law requires it. The providers are listed on our{' '}
         {providersLink}; if that list has not been published yet, the page says so and tells you how to ask us instead.
       </>,
+      'Reports and blocks are used for a safety purpose you would expect: we keep a record of each report, what became of it, and that a block was made, and from those records and a few signs of good standing (how long the account has existed, a completed profile, activity, an approved identity or employer check, finished mentoring sessions) we work out an internal account-standing measure that decides which accounts our safety team looks at first. Only our staff see it. It is not shown to other members or to the member it is about, and it does not restrict anyone automatically: a person decides whether a report is upheld, each person who reports or blocks counts once, and checks that no person has made can only move it so far.',
     ],
   },
   {
@@ -76,7 +77,13 @@ const PRINCIPLES: Array<{ app: string; title: string; body: React.ReactNode[] }>
     app: 'APP 10 and APP 11',
     title: 'Quality and security',
     body: [
-      'You can correct your own profile at any time. We protect information with encryption in transit and at rest, access controls, audit logging of privileged actions, and security testing; DV Safe Mode data is additionally encrypted with its own key.',
+      'You can correct your own profile at any time. We protect information with encryption in transit and at rest, access controls, audit logging of privileged actions, and security testing. Safe-chat messages, health records, safety plans and two-factor secrets are also encrypted by us before they are stored, under a key kept apart from the database; our servers decrypt them to show them to you.',
+      <>
+        Direct messages and group chats are encrypted in transit and at rest, but they are not locked so that only the
+        people in the conversation can open them: our systems can read them. Message text may be checked automatically
+        by a content-safety provider (the providers are listed on our {providersLink}), and our staff read a message
+        only when it is reported to us or the law requires it.
+      </>,
       'When information is no longer needed for a purpose we are allowed to keep it for, it is deleted or de-identified on a fixed schedule that a nightly clean-up carries out, and the schedule we publish is the one it runs. Deleting your account removes your personal information within 30 days, apart from records the law requires us to keep.',
     ],
   },
@@ -84,7 +91,8 @@ const PRINCIPLES: Array<{ app: string; title: string; body: React.ReactNode[] }>
     app: 'APP 12 and APP 13',
     title: 'Access and correction',
     body: [
-      'You can see and download everything we hold about you from the Privacy Center, without charge. Where a request needs a person, we answer within 30 days and, if we refuse any part of it, we tell you why and how to complain.',
+      'You can see and download what we hold about you from the Privacy Center, without charge. Where a request needs a person, we answer within 30 days and, if we refuse any part of it, we tell you why and how to complain.',
+      'A copy leaves out what would identify another person or put them at risk (APP 12.3). In particular, if a report was made about you, the copy tells you it exists and what became of it, and does not name who made it or include what they wrote; a block is never announced to the person it is made against, so blocks are not listed. The export says so in its list of what it leaves out.',
       'If something we hold is wrong, tell us and we will correct it, or record your statement beside it if we disagree.',
     ],
   },

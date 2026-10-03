@@ -19,8 +19,10 @@ import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import { ApiError } from '../middleware/errorHandler';
 import { emitToUserRoom } from './socket.service';
+import { maskLegalNames, publicName } from '../utils/member-display';
 import { runExclusively } from '../utils/redis';
 import { sweepExpiredStories } from './story-expiry.service';
+import { deleteChatAttachmentFiles } from './chat-attachment-cleanup.service';
 
 /** 1 hour, 24 hours, 7 days, 90 days. */
 export const DISAPPEARING_TTL_OPTIONS = [3600, 86400, 604800, 7776000] as const;
@@ -87,17 +89,15 @@ export async function setDisappearingTtl(conversationId: string, userId: string,
   const [actor, participants] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId },
-      select: { displayName: true, firstName: true, lastName: true },
+      select: { displayName: true, firstName: true },
     }),
     prisma.conversationParticipant.findMany({
       where: { conversationId },
       select: { userId: true },
     }),
   ]);
-  const actorName =
-    actor?.displayName?.trim() ||
-    [actor?.firstName, actor?.lastName].filter(Boolean).join(' ').trim() ||
-    'Someone';
+  // Named as the other person in the thread sees her: her public name, else her first name.
+  const actorName = publicName(actor, 'Someone');
   const otherIds = participants.map((p) => p.userId).filter((id) => id !== userId);
 
   const content = ttl
@@ -119,7 +119,7 @@ export async function setDisappearingTtl(conversationId: string, userId: string,
         type: 'SYSTEM',
       },
       include: {
-        sender: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+        sender: { select: { id: true, firstName: true, displayName: true, avatar: true } },
       },
     }),
   ]);
@@ -127,7 +127,8 @@ export async function setDisappearingTtl(conversationId: string, userId: string,
   const payload = { conversationId, disappearingTtlSeconds: ttl, changedBy: userId };
   for (const participantId of participants.map((p) => p.userId)) {
     emitToUserRoom(participantId, 'messages:settings', payload);
-    emitToUserRoom(participantId, 'messages:new', notice);
+    // Each person is sent the notice as she may see it: the one who made the change reads her own record whole.
+    emitToUserRoom(participantId, 'messages:new', maskLegalNames(notice, participantId));
   }
 
   return { conversationId, disappearingTtlSeconds: ttl, message: notice };
@@ -151,13 +152,19 @@ export async function sweepExpiredMessages(now = new Date()): Promise<number> {
   for (;;) {
     const expired = await prisma.message.findMany({
       where: { expiresAt: { lte: now } },
-      select: { id: true, conversationId: true },
+      // metadata is what a message carried, read before it goes: the files.
+      select: { id: true, conversationId: true, metadata: true },
       take: SWEEP_BATCH,
     });
     if (expired.length === 0) break;
 
     await prisma.message.deleteMany({ where: { id: { in: expired.map((m) => m.id) } } });
     removed += expired.length;
+
+    // The row is gone; so are the pictures and recordings it carried. "Disappears
+    // after a day" used to be true of the row and of nothing it pointed at.
+    // Never throws, and keeps the file behind a message somebody reported.
+    await deleteChatAttachmentFiles(expired);
 
     const byConversation = new Map<string, string[]>();
     for (const message of expired) {

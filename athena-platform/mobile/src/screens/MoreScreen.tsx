@@ -74,6 +74,7 @@ const SECTIONS: Section[] = [
     title: 'You',
     rows: [
       { icon: 'shield-checkmark-outline', label: 'Safety', screen: (nav) => nav.navigate('Safety') },
+      { icon: 'key-outline', label: 'Sign-in and devices', hint: 'Where you are signed in, and your password', screen: (nav) => nav.navigate('Security') },
       { icon: 'star-outline', label: 'Membership', screen: (nav) => nav.navigate('Upgrade') },
       { icon: 'help-circle-outline', label: 'Help & Support', screen: (nav) => nav.navigate('HelpSupport') },
     ],

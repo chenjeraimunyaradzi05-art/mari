@@ -310,3 +310,23 @@ export function getPriceIdForTier(tier: SubscriptionTierKey, currency: string): 
 
   return AUD_PRICE_IDS[tier];
 }
+
+/**
+ * The tier a Stripe price id sells, whichever currency it is priced in.
+ *
+ * The webhook used to look a price up among the four Australian-dollar ids only,
+ * so a member whose membership was priced in another currency (or who switched
+ * to one of those prices) arrived as a subscription it could not place, and her
+ * tier was left as it was. Every currency's price is read from the same table
+ * checkout charges from. A currency with no price of its own for a tier shares
+ * the Australian-dollar id, so the same id appearing twice is the same tier.
+ */
+export function tierForPriceId(priceId: string | null | undefined): SubscriptionTierKey | null {
+  if (!priceId) return null;
+  const tiers = Object.keys(AUD_PRICE_IDS) as SubscriptionTierKey[];
+  for (const prices of Object.values(PRICE_ID_MAP) as Array<Record<SubscriptionTierKey, string>>) {
+    const tier = tiers.find((candidate) => prices[candidate] === priceId);
+    if (tier) return tier;
+  }
+  return null;
+}

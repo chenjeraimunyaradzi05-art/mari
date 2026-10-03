@@ -12,12 +12,17 @@ import {
   Eye,
   EyeOff,
   CheckCircle2,
+  Lock,
 } from 'lucide-react';
-import { useAuth, useDeleteAccount } from '@/lib/hooks';
+import { useAuth } from '@/lib/hooks';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
+import { describeDevice } from '@/lib/device-label';
 import toast from 'react-hot-toast';
+import { QrCode } from '@/components/security/QrCode';
+import { RecoveryCodes } from '@/components/security/RecoveryCodes';
+import { DeleteAccountDialog } from '@/components/account/DeleteAccountDialog';
 
 type PasswordFormData = {
   currentPassword: string;
@@ -30,7 +35,8 @@ type SessionItem = {
   device: string;
   isCurrent: boolean;
   location: string;
-  lastActive: string;
+  /** When this device signed in, or null when the server did not say. Not "last active": the API records no activity. */
+  signedInAt: string | null;
 };
 
 type TwoFactorStatus = {
@@ -54,6 +60,9 @@ export default function SecuritySettingsPage() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [twoFactorSetup, setTwoFactorSetup] = useState<TwoFactorSetup | null>(null);
   const [twoFactorCode, setTwoFactorCode] = useState('');
+  // Asked for when turning it on, as when turning it off: a session alone is not
+  // enough to put an authenticator on the account.
+  const [twoFactorPassword, setTwoFactorPassword] = useState('');
   const [disableTwoFactorCode, setDisableTwoFactorCode] = useState('');
   const [disableTwoFactorPassword, setDisableTwoFactorPassword] = useState('');
 
@@ -83,14 +92,17 @@ export default function SecuritySettingsPage() {
 
       return rawSessions.map((session) => ({
         id: session.id,
-        device: session.userAgent || 'Unknown device',
+        // "Chrome on Windows", not the raw user-agent string she cannot read.
+        device: describeDevice(session.userAgent),
         isCurrent: Boolean(session.isCurrent),
         location: session.ipAddress ? `IP ${session.ipAddress}` : 'Unknown location',
-        lastActive: session.createdAt || session.expiresAt || new Date().toISOString(),
+        // The sign-in time. It used to fall back to the expiry, and then to now,
+        // which showed a time nobody signed in at.
+        signedInAt: session.createdAt || null,
       }));
     },
   });
-  const deleteAccount = useDeleteAccount();
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const {
     data: twoFactorStatus,
@@ -109,6 +121,8 @@ export default function SecuritySettingsPage() {
     onSuccess: () => {
       toast.success('Password changed successfully');
       reset();
+      // The server signed every other device out; the list must say so.
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
     },
     onError: (error: unknown) => {
       const responseMessage = (
@@ -143,6 +157,42 @@ export default function SecuritySettingsPage() {
     },
   });
 
+  // Lock the account: beyond signing out everywhere, nobody can sign in again,
+  // with her password or with Google or Facebook, until she unlocks it from the
+  // link the server emails her. Signing out everywhere alone leaves the door
+  // open to anyone who has the password.
+  const [confirmingLock, setConfirmingLock] = useState(false);
+  const lockAccount = useMutation({
+    mutationFn: () => api.post('/auth/lock'),
+    onSuccess: (response) => {
+      const emailed = response.data?.data?.unlockEmailSent !== false;
+      toast.success(
+        emailed
+          ? 'Your account is locked. We have emailed you a link to unlock it.'
+          : 'Your account is locked, but we could not send the unlock email just now. Ask for a new one from the sign-in page.',
+        { duration: 12000 }
+      );
+      // The server has ended every session, this one too; this clears what the
+      // browser holds and puts her on the sign-in page.
+      logout();
+    },
+    onError: (error: unknown) => {
+      setConfirmingLock(false);
+      const response = (error as { response?: { status?: number; data?: { message?: string } } })?.response;
+      // A refusal is the server saying nothing happened. No answer at all, or a
+      // failure on our side, says nothing about whether the lock went through
+      // before the connection dropped, and "nothing has changed" would be a guess.
+      if (!response || (response.status ?? 0) >= 500) {
+        toast.error(
+          'We did not get an answer, so we cannot tell whether your account was locked. Try signing in: if it says the account is locked, it worked. If not, press Lock my account again.',
+          { duration: 12000 }
+        );
+        return;
+      }
+      toast.error(response.data?.message || 'Your account could not be locked. Nothing has changed; please try again.');
+    },
+  });
+
   const startTwoFactorSetup = useMutation({
     mutationFn: () => api.post('/auth/2fa/setup'),
     onSuccess: (response) => {
@@ -160,13 +210,25 @@ export default function SecuritySettingsPage() {
   });
 
   const enableTwoFactor = useMutation({
-    mutationFn: (code: string) => api.post('/auth/2fa/enable', { code }),
-    onSuccess: () => {
+    mutationFn: ({ code, currentPassword }: { code: string; currentPassword?: string }) =>
+      api.post('/auth/2fa/enable', { code, ...(currentPassword ? { currentPassword } : {}) }),
+    onSuccess: (response) => {
       setTwoFactorSetup(null);
       setTwoFactorCode('');
+      setTwoFactorPassword('');
+      // The ten recovery codes in this answer are the only time they exist in
+      // the clear: the server keeps hashes. They used to be thrown away here, so
+      // a member who enrolled had none until she found "Issue new codes", which
+      // asks for a live authenticator code, and lose the phone first and there
+      // was no way back. They are kept in state and shown until she says she has
+      // saved them.
+      const issued: unknown = response?.data?.data?.recoveryCodes;
+      if (Array.isArray(issued) && issued.length > 0) {
+        setRecoveryCodes(issued.filter((code): code is string => typeof code === 'string'));
+      }
       queryClient.invalidateQueries({ queryKey: ['two-factor-status'] });
       queryClient.invalidateQueries({ queryKey: ['auth'] });
-      toast.success('Two-factor authentication enabled');
+      toast.success('Two-factor authentication enabled. Save your recovery codes now.');
     },
     onError: (error: unknown) => {
       const responseMessage = (
@@ -400,6 +462,12 @@ export default function SecuritySettingsPage() {
           )}
         </div>
 
+        {recoveryCodes && (
+          <div className="mt-4">
+            <RecoveryCodes codes={recoveryCodes} onSaved={() => setRecoveryCodes(null)} />
+          </div>
+        )}
+
         {isLoadingTwoFactorStatus ? (
           <div className="mt-4 h-16 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />
         ) : isTwoFactorStatusError ? (
@@ -416,13 +484,7 @@ export default function SecuritySettingsPage() {
               <p className="text-sm font-medium text-slate-800 dark:text-slate-200">Recovery codes</p>
               <p className="text-xs text-slate-500">Each code signs you in once if you lose your authenticator. Issuing a new set replaces the old one.</p>
               {recoveryCodes ? (
-                <ul className="mt-2 grid grid-cols-2 gap-1 font-mono text-sm text-slate-800 dark:text-slate-100 sm:grid-cols-4">
-                  {recoveryCodes.map((code) => (
-                    <li key={code} className="rounded bg-white px-2 py-1 dark:bg-slate-900">
-                      {code}
-                    </li>
-                  ))}
-                </ul>
+                <p className="mt-2 text-xs text-slate-500">Your new codes are above. Save them, and this old set no longer works.</p>
               ) : (
                 <div className="mt-2 flex flex-wrap gap-2">
                   <input
@@ -455,7 +517,6 @@ export default function SecuritySettingsPage() {
                   </button>
                 </div>
               )}
-              {recoveryCodes && <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">Save these now. They are shown once.</p>}
             </div>
             <div className="grid gap-3 md:grid-cols-2">
               <input
@@ -464,17 +525,22 @@ export default function SecuritySettingsPage() {
                 onChange={(event) => setDisableTwoFactorPassword(event.target.value)}
                 className="input"
                 placeholder="Current password"
+                aria-label="Current password, to turn two-factor off"
                 autoComplete="current-password"
               />
+              {/* Up to 32 characters and not numeric: a recovery code is ten letters and numbers, and
+                  typing one here is how a member who has lost her phone turns two-factor off. */}
               <input
                 type="text"
                 value={disableTwoFactorCode}
                 onChange={(event) => setDisableTwoFactorCode(event.target.value)}
                 className="input"
-                inputMode="numeric"
+                inputMode="text"
                 autoComplete="one-time-code"
-                placeholder="Authenticator code"
-                maxLength={8}
+                placeholder="Authenticator or recovery code"
+                aria-label="Authenticator code or an unused recovery code, to turn two-factor off"
+                maxLength={32}
+                spellCheck={false}
               />
             </div>
             <button
@@ -499,6 +565,12 @@ export default function SecuritySettingsPage() {
               <p className="text-sm font-medium text-slate-900 dark:text-white">
                 {twoFactorSetup.issuer} / {twoFactorSetup.accountName}
               </p>
+              <div className="mt-3 flex flex-col items-start gap-3 sm:flex-row sm:items-center">
+                <QrCode value={twoFactorSetup.otpauthUrl} label="QR code for your authenticator app" />
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Scan this with your authenticator app. It is drawn on this page and sent nowhere. If you cannot scan it, type this key into the app instead.
+                </p>
+              </div>
               <p className="mt-2 break-all rounded-lg bg-slate-50 p-3 font-mono text-sm text-slate-700 dark:bg-slate-800 dark:text-slate-200">
                 {twoFactorSetup.secret}
               </p>
@@ -511,6 +583,15 @@ export default function SecuritySettingsPage() {
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">
               <input
+                type="password"
+                value={twoFactorPassword}
+                onChange={(event) => setTwoFactorPassword(event.target.value)}
+                className="input flex-1"
+                autoComplete="current-password"
+                placeholder="Current password"
+                aria-label="Current password, to turn two-factor on. Leave empty if you only sign in with Google or Facebook."
+              />
+              <input
                 type="text"
                 value={twoFactorCode}
                 onChange={(event) => setTwoFactorCode(event.target.value)}
@@ -522,7 +603,7 @@ export default function SecuritySettingsPage() {
               />
               <button
                 type="button"
-                onClick={() => enableTwoFactor.mutate(twoFactorCode)}
+                onClick={() => enableTwoFactor.mutate({ code: twoFactorCode, currentPassword: twoFactorPassword })}
                 disabled={enableTwoFactor.isPending || twoFactorCode.trim().length < 6}
                 className="btn-primary px-4 py-2"
               >
@@ -600,7 +681,7 @@ export default function SecuritySettingsPage() {
                       </span>
                       <span className="flex items-center">
                         <Clock className="w-3 h-3 mr-1" />
-                        {formatDate(session.lastActive)}
+                        {session.signedInAt ? `Signed in ${formatDate(session.signedInAt)}` : 'Sign-in time unknown'}
                       </span>
                     </div>
                   </div>
@@ -609,7 +690,8 @@ export default function SecuritySettingsPage() {
                   <button
                     onClick={() => revokeSession.mutate(session.id)}
                     disabled={revokeSession.isPending}
-                    className="text-sm text-red-600 hover:text-red-700"
+                    aria-label={`Revoke ${session.device || 'this device'}`}
+                    className="min-h-11 rounded-md px-3 text-sm text-red-600 hover:text-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:opacity-60"
                   >
                     Revoke
                   </button>
@@ -622,6 +704,57 @@ export default function SecuritySettingsPage() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Lock my account */}
+      <div className="card">
+        <div className="flex items-start space-x-4 mb-4">
+          <div className="p-2 bg-primary-50 dark:bg-primary-900/30 rounded-lg">
+            <Lock className="w-5 h-5 text-primary-600" aria-hidden="true" />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Lock my account</h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Think someone else has your account? Lock it. Every device is signed out, and nobody can sign in, with
+              your password or with Google or Facebook, until you unlock it from a link we email to you. Signing out
+              of all devices is gentler, but anyone who knows your password can sign straight back in.
+            </p>
+          </div>
+        </div>
+
+        {confirmingLock ? (
+          <div role="group" aria-label="Confirm locking your account" className="rounded-lg bg-slate-50 p-4 dark:bg-slate-800/60">
+            <p className="text-sm text-slate-700 dark:text-slate-200">
+              Lock it now? You will be signed out here too, and you will need the link we email you to get back in.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => lockAccount.mutate()}
+                disabled={lockAccount.isPending}
+                className="btn min-h-[44px] bg-red-600 px-4 text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {lockAccount.isPending ? 'Locking...' : 'Yes, lock my account'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmingLock(false)}
+                disabled={lockAccount.isPending}
+                className="btn-outline min-h-[44px] px-4 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setConfirmingLock(true)}
+            className="btn-outline min-h-[44px] px-4 text-sm font-medium"
+          >
+            Lock my account
+          </button>
+        )}
       </div>
 
       {/* Danger Zone */}
@@ -644,22 +777,20 @@ export default function SecuritySettingsPage() {
               Delete Account
             </p>
             <p className="text-sm text-slate-500 dark:text-slate-400">
-              Permanently delete your account and all data
+              Erases your personal information and ends any membership you pay for
             </p>
           </div>
           <button
-            className="btn bg-red-600 text-white hover:bg-red-700 px-4 py-2 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={deleteAccount.isPending}
-            onClick={() => {
-              if (confirm('This permanently deletes your account and all associated data. Continue?')) {
-                deleteAccount.mutate();
-              }
-            }}
+            type="button"
+            className="btn min-h-11 bg-red-600 text-white hover:bg-red-700 px-4 py-2"
+            onClick={() => setDeleteOpen(true)}
           >
-            {deleteAccount.isPending ? 'Deleting...' : 'Delete Account'}
+            Delete Account
           </button>
         </div>
       </div>
+
+      <DeleteAccountDialog open={deleteOpen} onClose={() => setDeleteOpen(false)} />
     </div>
   );
 }

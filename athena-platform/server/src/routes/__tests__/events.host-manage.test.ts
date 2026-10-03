@@ -50,6 +50,8 @@ jest.mock('../../utils/prisma', () => ({
     eventSave: { upsert: jest.fn(), delete: jest.fn() },
     contentReport: { findMany: jest.fn(async () => []), update: jest.fn(async () => ({})) },
     userSafetySettings: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
+    // The other store a block can be written to (the DV safety page's own list).
+    dvSafetyProfile: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },
     user: { findMany: jest.fn(async () => [{ id: 'admin-1' }]) },
     notification: { createMany: jest.fn(async () => ({ count: 1 })) },
     auditLog: { create: jest.fn(async () => ({})) },
@@ -113,6 +115,13 @@ const registrant = (id: string, over: Record<string, unknown> = {}) => ({
 describe('An event’s host: who is coming, changing it, calling it off', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    // clearAllMocks keeps an implementation a test set, so a block one test wrote
+    // would still be in force for the next. Nobody is blocked unless a test says so.
+    prisma.userSafetySettings.findUnique.mockResolvedValue(null);
+    prisma.userSafetySettings.findMany.mockResolvedValue([]);
+    prisma.dvSafetyProfile.findUnique.mockResolvedValue(null);
+    prisma.dvSafetyProfile.findMany.mockResolvedValue([]);
+    prisma.dvSafetyProfile.findFirst.mockResolvedValue(null);
     prisma.event.findUnique.mockResolvedValue(hostedEvent);
     prisma.eventRegistration.findMany.mockResolvedValue([
       registrant('u1'),
@@ -344,6 +353,157 @@ describe('An event’s host: who is coming, changing it, calling it off', () => 
       const res = await request(app).get('/api/events/ev1').expect(200);
       expect(res.body.data.attendees).toBe(3);
       expect(res.body.data.maxAttendees).toBe(100);
+    });
+  });
+
+  // A block ends contact, and an event is contact with its host: her name and
+  // picture are on the listing, a registration puts the registrant's name on the
+  // list the host reads, and registering is what gives a member the joining link.
+  describe('across a block', () => {
+    const withHost = (over: Record<string, unknown> = {}) => ({ ...hostedEvent, registrations: [], saves: [], ...over });
+
+    // The two ways a block is written, and the two directions it can run.
+    const blocks: Array<[string, () => void]> = [
+      ['the host has blocked her', () => prisma.userSafetySettings.findMany.mockResolvedValue([{ userId: 'host-1' }])],
+      ['she has blocked the host', () => prisma.userSafetySettings.findMany.mockResolvedValue([{ userId: 'u9' }])],
+      ['the host blocked her from the DV safety page alone', () => prisma.dvSafetyProfile.findFirst.mockResolvedValue({ userId: 'host-1' })],
+    ];
+
+    it.each(blocks)('refuses to register her, and stores and sends nothing, when %s', async (_name, block) => {
+      block();
+      prisma.event.findUnique.mockResolvedValue(withHost());
+
+      const res = await request(app).post('/api/events/ev1/register').set(as('u9')).expect(404);
+
+      // The answer for an event that is not there, so the closed door does not say why.
+      expect(res.body.message).toBe('Event not found');
+      expect(prisma.eventRegistration.upsert).not.toHaveBeenCalled();
+      expect(notificationService.notify).not.toHaveBeenCalled();
+    });
+
+    it.each(blocks)('does not show her the listing, or let her save it, when %s', async (_name, block) => {
+      block();
+      prisma.event.findUnique.mockResolvedValue(withHost());
+
+      await request(app).get('/api/events/ev1').set(as('u9')).expect(404);
+      await request(app).post('/api/events/ev1/save').set(as('u9')).expect(404);
+      expect(prisma.eventSave.upsert).not.toHaveBeenCalled();
+    });
+
+    // The routes that take a registration or a save away answer with the whole
+    // listing (the host's name and picture, the title, the place), so a blocked
+    // member who held an event id could read it from the response of a DELETE.
+    // The registration or the save is still removed: she may have made it before
+    // the block, and she is not to be stuck with it.
+    it.each(blocks)('removes her registration or save but does not send the listing back, when %s', async (_name, block) => {
+      block();
+      prisma.event.findUnique.mockResolvedValue(withHost());
+      prisma.eventRegistration.delete.mockResolvedValue({});
+      prisma.eventSave.delete.mockResolvedValue({});
+
+      const unregistered = await request(app).delete('/api/events/ev1/register').set(as('u9')).expect(404);
+      const unsaved = await request(app).delete('/api/events/ev1/save').set(as('u9')).expect(404);
+
+      expect(prisma.eventRegistration.delete).toHaveBeenCalledTimes(1);
+      expect(prisma.eventSave.delete).toHaveBeenCalledTimes(1);
+      for (const res of [unregistered, unsaved]) {
+        expect(res.body.message).toBe('Event not found');
+        expect(JSON.stringify(res.body)).not.toContain('Coffee and code');
+        expect(JSON.stringify(res.body)).not.toContain('Library meeting room 2');
+        expect(JSON.stringify(res.body)).not.toContain('Ana S.');
+      }
+    });
+
+    it('still answers a member who is not across a block with the listing when she takes her registration away', async () => {
+      prisma.event.findUnique.mockResolvedValue(withHost());
+      prisma.eventRegistration.delete.mockResolvedValue({});
+
+      const res = await request(app).delete('/api/events/ev1/register').set(as('u9')).expect(200);
+
+      expect(res.body.data).toMatchObject({ id: 'ev1', title: 'Coffee and code' });
+    });
+
+    // A registration made before the block is not a licence to keep the place and
+    // the joining link: the calendar file carries both.
+    it.each(blocks)('does not hand her the calendar file for an event she registered for before the block, when %s', async (_name, block) => {
+      block();
+      prisma.event.findUnique.mockResolvedValue(withHost({ registrations: [{ id: 'reg-u9' }] }));
+
+      const res = await request(app).get('/api/events/ev1/calendar.ics').set(as('u9')).expect(404);
+
+      expect(res.text).not.toContain('Library meeting room 2');
+      expect(res.text).not.toContain('BEGIN:VCALENDAR');
+    });
+
+    it('does not hold her to a block with an event ATHENA listed itself, which has no host', async () => {
+      prisma.userSafetySettings.findMany.mockResolvedValue([{ userId: 'anyone' }]);
+      prisma.event.findUnique.mockResolvedValue(withHost({ hostUserId: null }));
+
+      await request(app).post('/api/events/ev1/register').set(as('u9')).expect(200);
+
+      expect(prisma.eventRegistration.upsert).toHaveBeenCalled();
+    });
+
+    it('does not hold a signed-out visitor to anything: she has blocked nobody', async () => {
+      prisma.event.findUnique.mockResolvedValue(withHost());
+
+      await request(app).get('/api/events/ev1').expect(200);
+
+      expect(prisma.userSafetySettings.findMany).not.toHaveBeenCalled();
+      expect(prisma.dvSafetyProfile.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('does not register her on a guess when the block lists cannot be read', async () => {
+      prisma.dvSafetyProfile.findFirst.mockRejectedValue(new Error('database unavailable'));
+      prisma.event.findUnique.mockResolvedValue(withHost());
+
+      await request(app).post('/api/events/ev1/register').set(as('u9')).expect(500);
+
+      expect(prisma.eventRegistration.upsert).not.toHaveBeenCalled();
+    });
+
+    it("leaves the host’s events out of the catalogue for a member on either side of a block, and keeps ATHENA’s own", async () => {
+      prisma.userSafetySettings.findUnique.mockResolvedValue({ blockedUsers: ['host-1'] });
+      prisma.userSafetySettings.findMany.mockResolvedValue([{ userId: 'host-2' }]);
+      prisma.dvSafetyProfile.findUnique.mockResolvedValue({ blockedUserIds: ['host-3'] });
+      prisma.dvSafetyProfile.findMany.mockResolvedValue([{ userId: 'host-4' }]);
+
+      await request(app).get('/api/events').set(as('u9')).expect(200);
+
+      const filters = prisma.event.findMany.mock.calls[0][0].where.AND;
+      const notHosted = filters.find((f: any) => Array.isArray(f.OR) && f.OR.some((c: any) => c.hostUserId === null));
+      // A bare notIn would drop every listing with no host, because NOT IN is never true for a null.
+      expect(notHosted.OR[0]).toEqual({ hostUserId: null });
+      expect([...notHosted.OR[1].hostUserId.notIn].sort()).toEqual(['host-1', 'host-2', 'host-3', 'host-4']);
+    });
+
+    it('asks nothing of the block lists for a signed-out visitor, or for staff', async () => {
+      await request(app).get('/api/events').expect(200);
+      await request(app).get('/api/events').set(as('staff', 'ADMIN')).expect(200);
+
+      for (const [args] of prisma.event.findMany.mock.calls) {
+        expect(JSON.stringify(args.where)).not.toContain('notIn');
+      }
+      expect(prisma.dvSafetyProfile.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('leaves the events she is going to out of her own list when the host is across a block', async () => {
+      prisma.userSafetySettings.findMany.mockResolvedValue([{ userId: 'host-1' }]);
+      prisma.event.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+
+      await request(app).get('/api/events/mine').set(as('u9')).expect(200);
+
+      const attending = prisma.event.findMany.mock.calls[1][0].where.AND;
+      expect(JSON.stringify(attending)).toContain('"notIn":["host-1"]');
+    });
+
+    it('withholds the name of a registrant the host blocked from the DV page alone', async () => {
+      prisma.dvSafetyProfile.findUnique.mockResolvedValue({ blockedUserIds: ['u5'] });
+
+      const res = await request(app).get('/api/events/ev1/registrations').set(as('host-1')).expect(200);
+
+      const u5 = res.body.data.registrations[4];
+      expect(u5).toMatchObject({ name: null, nameWithheld: true });
     });
   });
 

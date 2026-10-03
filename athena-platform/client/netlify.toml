@@ -31,6 +31,16 @@
   #     without it in production (instrumentation.ts): without it every member
   #     shares one login budget, the lockout keys on this host, and new-device
   #     alerts never fire.
+  # MEDIA (set once the API has a CDN_URL):
+  #   NEXT_PUBLIC_MEDIA_HOST = the host of the API's CDN_URL, so next/image
+  #     loads avatars and logos from it. Baked in at build time.
+  # ERROR TRACKING (optional, but without it production errors are invisible):
+  #   NEXT_PUBLIC_SENTRY_DSN = the web project's DSN. Baked in at build time,
+  #     so deploy again after setting it.
+  #   SENTRY_ORG, SENTRY_PROJECT, SENTRY_AUTH_TOKEN = lets the build upload
+  #     source maps. The token is a Sentry organisation token and a secret
+  #     (Builds scope). With the DSN and no token, errors arrive but point at
+  #     minified code, and scripts/check-web-env.js warns in the build log.
   # SET TOGETHER WITH THE API'S TURNSTILE_SECRET_KEY:
   #   NEXT_PUBLIC_TURNSTILE_SITE_KEY = the site key of the same Turnstile
   #     widget. Shows the human check on the sign-up form. The secret on the API
@@ -108,7 +118,19 @@
     Content-Security-Policy = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https: wss:; media-src 'self' blob: https:; worker-src 'self' blob:; manifest-src 'self'; frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://accounts.google.com https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://challenges.cloudflare.com"
     Cross-Origin-Opener-Policy = "same-origin-allow-popups"
     X-XSS-Protection = "1; mode=block"
-    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=(), display-capture=()"
+    # Permissions-Policy is one string in three places: here, public/_headers
+    # and the headers() block in next.config.js. A browser given several
+    # policies enforces every one of them, so the strictest layer wins and a
+    # feature any layer refuses is refused everywhere. microphone=() in all
+    # three made every voice note and every interview-coach recording fail
+    # with a permission error while the buttons stayed on screen. Only this
+    # origin may use the microphone; the camera, location and screen capture
+    # stay off because nothing under src/ asks for them; payment=() blocked the
+    # wallet buttons inside Stripe's PaymentElement, so payment is delegated to
+    # Stripe's frame instead. Single quotes because the value itself contains
+    # double quotes (a TOML literal string). The client's
+    # src/__tests__/permissions-policy.test.ts fails if the layers drift.
+    Permissions-Policy = 'camera=(), microphone=(self), geolocation=(), payment=(self "https://js.stripe.com"), usb=(), magnetometer=(), gyroscope=(), accelerometer=(), display-capture=()'
     Strict-Transport-Security = "max-age=63072000; includeSubDomains; preload"
     X-DNS-Prefetch-Control = "on"
     X-Permitted-Cross-Domain-Policies = "none"

@@ -10,9 +10,10 @@
 
 import fs from 'fs';
 import path from 'path';
-import { HeadBucketCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { randomUUID } from 'crypto';
+import { DeleteObjectCommand, HeadBucketCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { logger } from './logger';
-import { recordCondition } from './ops-metrics';
+import { recordCondition, recordFailure } from './ops-metrics';
 
 const BUCKET_NAME = process.env.S3_BUCKET || 'athena-media';
 const CDN_URL = process.env.CDN_URL || `https://${BUCKET_NAME}.s3.amazonaws.com`;
@@ -25,6 +26,54 @@ let s3: S3Client | null = null;
 
 export function hasS3Credentials(): boolean {
   return !!process.env.AWS_ACCESS_KEY_ID && !!process.env.AWS_SECRET_ACCESS_KEY;
+}
+
+/**
+ * The top-level folders of the bucket that hold private files.
+ * Everything else the platform stores (avatars, covers, posts, videos,
+ * thumbnails, captions, sounds) is public by design: it is shown to other
+ * people, so it is served from the CDN. A résumé or a document is read only
+ * through the API, by its owner or by hiring staff on an application it was
+ * attached to (routes/media.routes.ts), and must never be reachable by its
+ * address alone. A file sent in a conversation (chat/) is read only by the
+ * people in that conversation, through a short-lived signed link the API mints
+ * for each of them (services/chat-attachment.service.ts).
+ *
+ * That is a statement about the bucket as much as about this code, so the same
+ * list is what the bucket policy has to agree with: public reads on the other
+ * folders only, none on these. infrastructure/README.md ("Media bucket") says
+ * how to set that up, and checkMediaExposure below proves it from the outside.
+ */
+export const PRIVATE_MEDIA_FOLDERS: ReadonlySet<string> = new Set(['resumes', 'documents', 'chat']);
+
+/** Whether a storage key sits in one of the private folders. */
+export function isPrivateMediaKey(key: string): boolean {
+  return PRIVATE_MEDIA_FOLDERS.has(normalizeKey(key).split('/')[0]);
+}
+
+/** The address of an object in the bucket itself, which is never publicly readable for the private folders. */
+export function bucketObjectUrl(key: string): string {
+  const region = process.env.AWS_REGION || 'ap-southeast-2';
+  return `https://${BUCKET_NAME}.s3.${region}.amazonaws.com/${normalizeKey(key)}`;
+}
+
+/** The address of an object through the CDN (or, with none configured, the bucket's own public address). */
+export function cdnObjectUrl(key: string): string {
+  return `${CDN_URL.replace(/\/+$/, '')}/${normalizeKey(key)}`;
+}
+
+/**
+ * The URL a stored object is known by, which is what lands in a database row.
+ *
+ * A public file is addressed through the CDN. A private one is addressed at the
+ * bucket itself: the URL still ends in its key, which is what the readers of
+ * these rows look for (uploadKeyFromUrl on the web, isHiringReaderOfResume in
+ * the media routes), but it is not a link anyone can open. It used to be
+ * `${CDN_URL}/key` for everything, so a CDN put in front of the whole bucket
+ * published every résumé to anybody holding the address.
+ */
+export function mediaUrlForKey(key: string): string {
+  return isPrivateMediaKey(key) ? bucketObjectUrl(key) : cdnObjectUrl(key);
 }
 
 /**
@@ -41,7 +90,7 @@ export function hasS3Credentials(): boolean {
  * upload as received with the reason attached. Outside production the disk is
  * where a developer's files live anyway, so the fallback stays.
  */
-function mayFallBackToLocalDisk(): boolean {
+export function mayFallBackToLocalDisk(): boolean {
   return process.env.NODE_ENV !== 'production';
 }
 
@@ -149,7 +198,7 @@ export async function storeBuffer(key: string, body: Buffer, contentType: string
       await s3Client().send(
         new PutObjectCommand({ Bucket: BUCKET_NAME, Key: normalized, Body: body, ContentType: contentType })
       );
-      return `${CDN_URL}/${normalized}`;
+      return mediaUrlForKey(normalized);
     } catch (error) {
       onS3WriteFailure(normalized, error);
     }
@@ -182,7 +231,7 @@ export async function storeFile(key: string, filePath: string, contentType: stri
           ContentType: contentType,
         })
       );
-      return `${CDN_URL}/${normalized}`;
+      return mediaUrlForKey(normalized);
     } catch (error) {
       onS3WriteFailure(normalized, error);
     }
@@ -192,6 +241,43 @@ export async function storeFile(key: string, filePath: string, contentType: stri
   await fs.promises.mkdir(path.dirname(target), { recursive: true });
   await fs.promises.copyFile(filePath, target);
   return localFileUrl(normalized);
+}
+
+/**
+ * Removes the object stored under a key, from the bucket and from this host's
+ * disk (where a development machine keeps it). True when something was removed.
+ *
+ * It never throws: a file already gone, or a bucket that refuses, must not stop
+ * the row that pointed at it being deleted, because the row is the part a
+ * member can still be identified from. A refusal is counted instead, so a
+ * bucket that has started refusing every delete shows in the ops snapshot and
+ * not as files that quietly stay.
+ */
+export async function deleteStoredKey(key: string): Promise<boolean> {
+  const normalized = normalizeKey(key);
+  let deleted = false;
+
+  if (hasS3Credentials()) {
+    try {
+      await s3Client().send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: normalized }));
+      deleted = true;
+    } catch (error) {
+      recordFailure('media-storage.delete', error);
+      logger.warn('A stored file could not be removed from the bucket', { key: normalized, error: messageOf(error) });
+    }
+  }
+
+  try {
+    const filePath = localFilePath(normalized);
+    if (fs.existsSync(filePath)) {
+      await fs.promises.unlink(filePath);
+      deleted = true;
+    }
+  } catch (error) {
+    recordFailure('media-storage.delete', error);
+  }
+
+  return deleted;
 }
 
 /**
@@ -227,5 +313,148 @@ export async function probeMediaStorage(): Promise<{ reachable: boolean; detail:
     recordCondition(MEDIA_STORAGE_CONDITION, 1, detail);
     logger.error('Media storage probe: ' + detail);
     return { reachable: false, detail };
+  }
+}
+
+/** What checkMediaExposure found, in the words launch-readiness reports it in. */
+export type MediaExposure =
+  | { status: 'not_applicable'; detail: string; problems: [] }
+  | { status: 'ok'; detail: string; problems: [] }
+  | { status: 'exposed' | 'public_unreadable' | 'unverified'; detail: string; problems: string[] };
+
+/** Written to the two probe objects, and looked for in what an anonymous request gets back. */
+const EXPOSURE_PROBE_TEXT = 'ATHENA media exposure check. Safe to delete.';
+const EXPOSURE_PROBE_FOLDER = '_exposure-check';
+
+/**
+ * Proves, from the outside, that the bucket and the CDN agree with the list of
+ * private folders above.
+ *
+ * The code can only decide which URL to hand out. Whether a file is reachable
+ * is decided by the bucket policy and by what the CDN is allowed to fetch, and
+ * neither is visible from here: a CDN given access to the whole bucket would
+ * publish every résumé to anybody who had its address, and a bucket kept fully
+ * private with no CDN would break every avatar, and in both cases the
+ * variables look right. So this writes one small probe object in a public
+ * folder and one in a private folder, asks for each the way a stranger would
+ * (no credentials, no cookie), and deletes both:
+ *
+ *   - the public probe must be readable at the address stored rows use;
+ *   - the private probe must not be readable through the CDN address, and must
+ *     not be readable at the bucket's own address.
+ *
+ * It needs the permissions the upload code already has (PutObject and
+ * DeleteObject). It is run on request, as /health/launch-readiness?probe=media
+ * behind the diagnostics token, and never on a request a member makes. A probe it cannot
+ * write or delete is reported as unverified, not as fine.
+ */
+export async function checkMediaExposure(
+  options: { fetchImpl?: typeof fetch; timeoutMs?: number } = {}
+): Promise<MediaExposure> {
+  if (!hasS3Credentials()) {
+    return {
+      status: 'not_applicable',
+      detail: 'No S3 credentials are configured, so there is no bucket whose exposure could be checked.',
+      problems: [],
+    };
+  }
+
+  const doFetch = options.fetchImpl ?? fetch;
+  const timeoutMs = options.timeoutMs ?? 5_000;
+  const id = randomUUID();
+  const publicKey = `avatars/${EXPOSURE_PROBE_FOLDER}/${id}.txt`;
+  const privateKey = `resumes/${EXPOSURE_PROBE_FOLDER}/${id}.txt`;
+  const written: string[] = [];
+
+  /**
+   * What an anonymous request gets: the probe's own text back, an answer that is
+   * not it (a refusal, an error page), or no answer at all. The last is its own
+   * outcome: a request that timed out says nothing about whether the file is
+   * readable, so it must never be taken for the file being safe.
+   */
+  const ask = async (url: string): Promise<'readable' | 'refused' | 'unreachable'> => {
+    try {
+      const response = await doFetch(url, { redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });
+      return response.ok && (await response.text()).includes(EXPOSURE_PROBE_TEXT) ? 'readable' : 'refused';
+    } catch {
+      return 'unreachable';
+    }
+  };
+
+  try {
+    for (const key of [publicKey, privateKey]) {
+      await s3Client().send(
+        new PutObjectCommand({ Bucket: BUCKET_NAME, Key: key, Body: EXPOSURE_PROBE_TEXT, ContentType: 'text/plain' })
+      );
+      written.push(key);
+    }
+
+    const problems: string[] = [];
+
+    const publicUrl = mediaUrlForKey(publicKey);
+    const publicAnswer = await ask(publicUrl);
+
+    // The CDN address and the bucket address, once each when they are the same
+    // thing (no CDN_URL set).
+    const privateUrls = Array.from(new Set([cdnObjectUrl(privateKey), bucketObjectUrl(privateKey)]));
+    const exposedAt: string[] = [];
+    const notReached: string[] = [];
+    if (publicAnswer === 'unreachable') notReached.push(publicUrl.replace(id, '<probe>'));
+    for (const url of privateUrls) {
+      const answer = await ask(url);
+      if (answer === 'readable') exposedAt.push(url.replace(id, '<probe>'));
+      else if (answer === 'unreachable') notReached.push(url.replace(id, '<probe>'));
+    }
+
+    if (exposedAt.length > 0) {
+      problems.push(
+        `Private files can be read by anyone who has the address: a probe in the ${Array.from(PRIVATE_MEDIA_FOLDERS).join('/')} ` +
+          `folders was readable without signing in at ${exposedAt.join(' and ')}. Restrict the CDN and the bucket policy to the ` +
+          'public folders only (infrastructure/README.md, "Media bucket").'
+      );
+    }
+    if (notReached.length > 0) {
+      problems.push(
+        `No answer from ${notReached.join(' and ')} (the request failed or timed out), so what a stranger can read there is not known. ` +
+          'Run the check again; if it keeps failing, check that this host can reach the CDN and the bucket.'
+      );
+    }
+    if (publicAnswer === 'refused') {
+      problems.push(
+        `Public files cannot be read at the address stored rows use: a probe in a public folder was not readable at ${publicUrl.replace(id, '<probe>')}. ` +
+          'Avatars, covers, post pictures and reels will not load until the CDN (or a bucket policy for the public folders) allows it.'
+      );
+    }
+
+    // An exposed private folder outranks everything: it is the one finding that is
+    // urgent whatever else could not be asked.
+    if (exposedAt.length > 0) {
+      return { status: 'exposed', detail: problems.join(' '), problems };
+    }
+    if (notReached.length > 0) {
+      return { status: 'unverified', detail: problems.join(' '), problems };
+    }
+    if (publicAnswer === 'refused') {
+      return { status: 'public_unreadable', detail: problems.join(' '), problems };
+    }
+    return {
+      status: 'ok',
+      detail: 'Public folders are readable at the address stored rows use, and the private folders are not readable without signing in.',
+      problems: [],
+    };
+  } catch (error) {
+    const detail = `The check could not be completed: ${messageOf(error)}. It needs the upload credentials to be able to write and delete a small probe object.`;
+    return { status: 'unverified', detail, problems: [detail] };
+  } finally {
+    for (const key of written) {
+      try {
+        await s3Client().send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
+      } catch (error) {
+        logger.warn('Media exposure check: could not remove a probe object; it is safe to delete by hand', {
+          key,
+          error: messageOf(error),
+        });
+      }
+    }
   }
 }

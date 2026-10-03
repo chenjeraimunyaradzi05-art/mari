@@ -8,21 +8,26 @@
  * DvPanicAlert.
  *
  * Safe chat messages are encrypted at rest with AES-256-GCM under
- * DV_ENCRYPTION_KEY and decrypted only when the owner opens the chat. A chat's
- * PIN is stored as a salted scrypt hash and compared in constant time. A
+ * DV_ENCRYPTION_KEY and decrypted only when the owner opens the chat. That is
+ * encryption at rest, not end-to-end: ATHENA's server holds the key and
+ * decrypts a message to show it to her, so what it protects against is a copy
+ * of the database, not the platform itself (docs/runbooks/ENCRYPTION.md). A
+ * chat's PIN is stored as a salted scrypt hash and compared in constant time. A
  * message with an auto-delete time is removed the first time the chat is
  * opened after that time passes.
  */
 
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync, timingSafeEqual } from 'crypto';
+import { randomBytes, scryptSync, timingSafeEqual } from 'crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import { bestEffort } from '../utils/best-effort';
 import { sendEmail } from '../utils/email';
+import { escapeHtml } from '../utils/escape-html';
 import { isSmsConfigured, sendSms } from './dv-sms.service';
 import { ApiError } from '../middleware/errorHandler';
-import { blockUser as platformBlockUser } from '../utils/safety-store';
+import { applyBlock } from './block.service';
+import { openText, sealText } from '../utils/encryption-key';
 
 export interface SafetySettings {
   userId: string;
@@ -140,17 +145,52 @@ async function profileFor(userId: string): Promise<ProfileRow> {
   return prisma.dvSafetyProfile.upsert({
     where: { userId },
     update: {},
-    create: { userId },
+    // Said here as well as in the column default: the row a member gets by
+    // changing one switch must not also be the row that rewrites every
+    // notification she is sent.
+    create: { userId, notificationsSafe: false },
   }) as Promise<ProfileRow>;
 }
 
+/**
+ * The three switches this page shows that the rest of the platform reads from
+ * somewhere else, as the platform will act on them.
+ *
+ * DvSafetyProfile.allowMessages is read by nothing: messaging is closed by
+ * User.allowMessages, and Safe Mode and search each read both Profile and
+ * DvSafetyProfile. The page used to show its own copy, so a member who opened
+ * her messages in the Safety Centre was still shown "messages closed" here
+ * while anyone could write to her, and one who had turned Safe Mode off there
+ * was shown it on. What she is shown is what is enforced.
+ */
+async function enforcedSwitches(userId: string): Promise<{
+  allowMessages: boolean;
+  isSafeMode: boolean;
+  hideFromSearch: boolean;
+} | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { allowMessages: true, profile: { select: { isSafeMode: true, hideFromSearch: true } } },
+  });
+  if (!user) return null;
+  return {
+    allowMessages: user.allowMessages,
+    isSafeMode: Boolean(user.profile?.isSafeMode),
+    hideFromSearch: Boolean(user.profile?.hideFromSearch),
+  };
+}
+
 async function toSettings(profile: ProfileRow): Promise<SafetySettings> {
-  const chats = await prisma.dvSafeChat.findMany({ where: { profileId: profile.id }, select: { id: true } });
+  const [chats, enforced] = await Promise.all([
+    prisma.dvSafeChat.findMany({ where: { profileId: profile.id }, select: { id: true } }),
+    enforcedSwitches(profile.userId),
+  ]);
+  const isSafeMode = profile.isSafeMode || Boolean(enforced?.isSafeMode);
   return {
     userId: profile.userId,
-    isSafeMode: profile.isSafeMode,
-    hideFromSearch: profile.hideFromSearch,
-    allowMessages: profile.allowMessages,
+    isSafeMode,
+    hideFromSearch: profile.hideFromSearch || Boolean(enforced?.hideFromSearch),
+    allowMessages: enforced ? enforced.allowMessages : profile.allowMessages,
     safeExitEnabled: profile.safeExitEnabled,
     safeExitUrl: profile.safeExitUrl,
     hiddenChats: chats.map((c) => c.id),
@@ -159,12 +199,55 @@ async function toSettings(profile: ProfileRow): Promise<SafetySettings> {
     panicButtonEnabled: profile.panicButtonEnabled,
     activityLogEnabled: profile.activityLogEnabled,
     disguisedAppIcon: profile.disguisedAppIcon,
-    notificationsSafe: profile.notificationsSafe,
+    // Safe Mode keeps notifications vague whatever this switch says (see
+    // safeNotificationFor), so the page says so rather than showing it off.
+    notificationsSafe: profile.notificationsSafe || isSafeMode,
   };
 }
 
+/**
+ * What a member who has never touched her DV safety settings is on: the column
+ * defaults of DvSafetyProfile, with no row behind them, and the switches the
+ * Safety Centre keeps for her, which are enforced whether or not she has a row.
+ */
+async function defaultSettings(userId: string): Promise<SafetySettings> {
+  const enforced = await enforcedSwitches(userId);
+  const isSafeMode = Boolean(enforced?.isSafeMode);
+  return {
+    userId,
+    isSafeMode,
+    hideFromSearch: Boolean(enforced?.hideFromSearch),
+    allowMessages: enforced ? enforced.allowMessages : true,
+    safeExitEnabled: false,
+    safeExitUrl: 'https://www.google.com',
+    hiddenChats: [],
+    blockedUsers: [],
+    emergencyContacts: [],
+    panicButtonEnabled: false,
+    activityLogEnabled: true,
+    disguisedAppIcon: false,
+    notificationsSafe: isSafeMode,
+  };
+}
+
+/**
+ * Her settings, read, never created.
+ *
+ * This used to upsert the row, so that reading it was also how a member got
+ * one. That was harmless while only the safety pages asked. The quick exit now
+ * sits in the dashboard shell and asks for her exit address on every member's
+ * first page, so the read is made by everyone, and a row made by it was not
+ * harmless: its column default once meant "keep notifications vague", which put
+ * every member who opened the dashboard on "New Update" without a choice, and
+ * marked her to the breach notifier (resolveNoticeAudience) as someone who must
+ * not be emailed. A member with no row is answered with what a new row would
+ * hold, with nothing protective on; the row is made when she changes something
+ * (updateSafetySettings), which is when she has asked to be treated as someone
+ * who needs it.
+ */
 export async function getSafetySettings(userId: string): Promise<SafetySettings> {
-  return toSettings(await profileFor(userId));
+  const profile = (await prisma.dvSafetyProfile.findUnique({ where: { userId } })) as ProfileRow | null;
+  return profile ? toSettings(profile) : defaultSettings(userId);
 }
 
 /**
@@ -650,7 +733,11 @@ export async function triggerPanicButton(userId: string): Promise<PanicResult> {
           to: contact.email,
           subject: `Safety alert from ${memberName}`,
           text: `${contact.name},\n\n${memberName} has pressed the safety alert button in ATHENA at ${when} (Brisbane time) and asked for you to be told.\n\nPlease try to reach them now. If you believe they are in immediate danger, call 000 (Australia) or your local emergency number.\n\nATHENA`,
-          html: `<p>${contact.name},</p><p><strong>${memberName}</strong> has pressed the safety alert button in ATHENA at ${when} (Brisbane time) and asked for you to be told.</p><p>Please try to reach them now. If you believe they are in immediate danger, call <strong>000</strong> (Australia) or your local emergency number.</p><p>ATHENA</p>`,
+          // Both names are typed by members: hers (a display name) and the
+          // contact's (written into her emergency list). This message is the one
+          // a contact trusts most and acts on fastest, so neither may arrive as
+          // markup.
+          html: `<p>${escapeHtml(contact.name)},</p><p><strong>${escapeHtml(memberName)}</strong> has pressed the safety alert button in ATHENA at ${when} (Brisbane time) and asked for you to be told.</p><p>Please try to reach them now. If you believe they are in immediate danger, call <strong>000</strong> (Australia) or your local emergency number.</p><p>ATHENA</p>`,
         });
       } catch (error) {
         logger.error('Panic alert email failed', { userId, error: error instanceof Error ? error.message : String(error) });
@@ -739,7 +826,10 @@ export async function blockUser(userId: string, blockedUserId: string): Promise<
   const profile = await profileFor(userId);
 
   try {
-    await platformBlockUser(userId, blockedUserId);
+    // The same block, and the same consequences, as the Safety Centre's. What
+    // follows the block is best effort inside applyBlock and cannot fail it;
+    // what is caught here is the block itself not being written.
+    await applyBlock(userId, blockedUserId, { source: 'dv-safe' });
   } catch (error) {
     logger.error('Safety block refused: the platform-wide block could not be written', {
       userId,
@@ -776,43 +866,59 @@ export function getSafeNotificationContent(
 }
 
 /**
- * The same shaping, for a member we have only the id of.
+ * Whether this member's notifications must say nothing about their content, on
+ * any channel that can be read by somebody else.
  *
  * "Keep notifications vague" was saved, shown back on the settings page as
  * though it were in force, and consulted by nothing but a preview endpoint —
  * so a woman who turned it on because her partner reads her lock screen went
- * on receiving "Message from Rachel: are you safe tonight?" in full. This is
- * what push.service calls on the way out, which is the single door every
- * notification leaves by.
+ * on receiving "Message from Rachel: are you safe tonight?" in full. The push
+ * sender and the email sender both ask this, so the two cannot disagree.
+ *
+ * It is true for a member who turned the switch on, and for a member who is in
+ * Safe Mode in either of the two places it can be turned on: the Safety Centre
+ * writes Profile.isSafeMode, the DV page writes DvSafetyProfile.isSafeMode, and
+ * both are described to her as keeping notifications vague.
  *
  * Two deliberate answers in the edge cases:
  *
- * A member with no DvSafetyProfile row reads as NOT safe-mode, even though the
- * column's own default is true. The row is created the first time she opens
- * anything DV-related, so "no row" means she has never been near this feature,
- * and defaulting those members to vague would replace every notification on
- * the platform with "New Update".
+ * A member with no DvSafetyProfile row and no Safe Mode is NOT vague. The row
+ * is made when she changes a DV setting, and its column default is off, so
+ * "no row" means she has never asked for this, and defaulting those members to
+ * vague would replace every notification on the platform with "New Update".
  *
- * A lookup that FAILS reads as safe-mode. That is the opposite direction and
- * also on purpose: the cost of being wrong is a vague notification for someone
- * who did not ask for one, against a lock screen in a house where that is the
- * thing she was trying to prevent.
+ * A lookup that FAILS reads as vague. That is the opposite direction and also
+ * on purpose: the cost of being wrong is a vague notification for someone who
+ * did not ask for one, against a lock screen in a house where that is the thing
+ * she was trying to prevent.
  */
+export async function wantsVagueNotifications(userId: string): Promise<boolean> {
+  return bestEffort(
+    'dv-safe.notification-privacy-lookup',
+    async () => {
+      const [dv, profile] = await Promise.all([
+        prisma.dvSafetyProfile.findUnique({ where: { userId }, select: { notificationsSafe: true, isSafeMode: true } }),
+        prisma.profile.findUnique({ where: { userId }, select: { isSafeMode: true } }),
+      ]);
+      return Boolean(dv?.notificationsSafe || dv?.isSafeMode || profile?.isSafeMode);
+    },
+    true
+  );
+}
+
+/** What a lock screen is shown in place of the real words. */
+export const VAGUE_NOTIFICATION = { title: 'New Update', message: 'You have a new update. Open app to view.' } as const;
+
+/** The same shaping, for a member we have only the id of; what push.service calls on the way out. */
 export async function safeNotificationFor(
   userId: string,
   originalTitle: string,
   originalMessage: string
 ): Promise<{ title: string; message: string }> {
-  const row = await bestEffort(
-    'dv-safe.notification-privacy-lookup',
-    () => prisma.dvSafetyProfile.findUnique({ where: { userId }, select: { notificationsSafe: true } }),
-    { notificationsSafe: true }
-  );
-
-  if (!row?.notificationsSafe) {
+  if (!(await wantsVagueNotifications(userId))) {
     return { title: originalTitle, message: originalMessage };
   }
-  return { title: 'New Update', message: 'You have a new update. Open app to view.' };
+  return { ...VAGUE_NOTIFICATION };
 }
 
 // ---------------------------------------------------------------- resources
@@ -996,43 +1102,24 @@ export async function getDVResources(region: string = 'AU'): Promise<DVResource[
 
 // ---------------------------------------------------------------- encryption
 
-const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
-const IV_LENGTH = 12; // 96-bit IV recommended for GCM
-const AUTH_TAG_LENGTH = 16;
+// The key, and what makes it acceptable, are in utils/encryption-key.ts: in
+// production it throws here unless DV_ENCRYPTION_KEY is a random 64-character
+// hex key, so a message is never stored under a placeholder.
 
-function getDVEncryptionKey(): Buffer {
-  const keyHex = process.env.DV_ENCRYPTION_KEY;
-  const isValidKey = Boolean(keyHex && /^[0-9a-fA-F]{64}$/.test(keyHex));
-
-  if (!isValidKey) {
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error('DV_ENCRYPTION_KEY must be a 64-character hex key in production');
-    }
-    return scryptSync('dev-only-insecure-key', 'athena-dv-salt', 32);
-  }
-
-  return Buffer.from(keyHex!, 'hex');
-}
-
+/** A message as stored: `enc:v1:` and base64 of the IV, the tag and the ciphertext. */
 export function encryptMessage(content: string): string {
-  const key = getDVEncryptionKey();
-  const iv = randomBytes(IV_LENGTH);
-  const cipher = createCipheriv(ENCRYPTION_ALGORITHM, key, iv, { authTagLength: AUTH_TAG_LENGTH });
-  const encrypted = Buffer.concat([cipher.update(content, 'utf8'), cipher.final()]);
-  const authTag = cipher.getAuthTag();
-  // Format: base64(iv + authTag + ciphertext)
-  return Buffer.concat([iv, authTag, encrypted]).toString('base64');
+  return sealText('safe-chat', content);
 }
 
+/**
+ * Opens a stored message, whether it was written with the version mark or
+ * before there was one. Throws when nothing opens it; safeDecrypt below is what
+ * a reader of a chat uses.
+ */
 export function decryptMessage(encrypted: string): string {
-  const key = getDVEncryptionKey();
-  const data = Buffer.from(encrypted, 'base64');
-  const iv = data.subarray(0, IV_LENGTH);
-  const authTag = data.subarray(IV_LENGTH, IV_LENGTH + AUTH_TAG_LENGTH);
-  const ciphertext = data.subarray(IV_LENGTH + AUTH_TAG_LENGTH);
-  const decipher = createDecipheriv(ENCRYPTION_ALGORITHM, key, iv, { authTagLength: AUTH_TAG_LENGTH });
-  decipher.setAuthTag(authTag);
-  return decipher.update(ciphertext) + decipher.final('utf8');
+  const text = openText('safe-chat', encrypted);
+  if (text === null) throw new Error('This message cannot be opened with the keys this host has');
+  return text;
 }
 
 /** A message written under a key this host no longer has is shown as unreadable, never as an error. */

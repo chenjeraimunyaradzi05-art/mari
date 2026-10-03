@@ -18,7 +18,8 @@
 
 ### 1.2 DPIA (Data Protection Impact Assessments)
 - [x] **DPIA Template:** Standard template with risk assessment & mitigation plan.
-- [x] **High‑Risk Features:** SafetyScore, verification, AI profiling, targeted recommendations.
+- [x] **High‑Risk Features:** SafetyScore, verification, AI profiling, targeted recommendations are named as high risk in the register.
+- [ ] **SafetyScore assessment re-approved:** the assessment has to describe what the score really uses (reports, blocks, upheld decisions, account age, profile completeness, activity, approved verification badges and completed mentor sessions, not only signals a moderator can already see) and who sees it (staff only; no member is shown it). Re-approve it in `/admin/dpia` once that text is in.
 - [x] **Approvals Workflow:** Legal + DPO sign-off flow and retention of approvals.
 
 ### 1.3 DSAR / Rights Management
@@ -90,7 +91,7 @@
 ### 3.3 Product Readiness
 - [x] **Region Routing:** Default region set to UK/EU by user profile.
 - [x] **Content Moderation:** UK‑specific escalation policy.
-- [x] **Safety Tooling:** SafetyScore fully enabled in UK/EU.
+- [x] **Safety Tooling:** SafetyScore runs for every member in every region; there is no UK/EU switch for it. Staff alone see it (the moderation queue), it decides in what order staff look at accounts, and it restricts nobody automatically. The privacy statement says so.
 
 ### 3.4 Partnerships & GTM
 - [ ] **Launch Partners:** Employers, universities, NGOs.

@@ -61,6 +61,7 @@ router.get('/', ...adminOnly, async (req: AuthRequest, res: Response, next: Next
 });
 
 /** PATCH /api/admin/feedback/:id { status } */
+// validated: status must be one of STATUSES (NEW, SEEN, DONE); nothing else of the body is read.
 router.patch('/:id', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const status = req.body?.status;

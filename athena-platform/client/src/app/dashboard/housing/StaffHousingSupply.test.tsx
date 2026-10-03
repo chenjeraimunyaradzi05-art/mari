@@ -71,7 +71,7 @@ describe('StaffHousingSupply', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Check the sheet' }));
 
     expect(await screen.findByText('2 rows ready.')).toBeInTheDocument();
-    expect(screen.getByText(/1 claims to be DV-safe/)).toBeInTheDocument();
+    expect(screen.getByText(/1 DV-safe, emergency or transitional place will wait for a safety check/)).toBeInTheDocument();
     expect(http.post.mock.calls[0][1]).toEqual({ csv: 'title,description,type\nA,B,RENTAL\n', dryRun: true });
 
     fireEvent.click(screen.getByRole('button', { name: 'Import 2 places' }));

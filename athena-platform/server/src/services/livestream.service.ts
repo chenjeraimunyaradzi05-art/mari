@@ -25,8 +25,10 @@ import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
 import { bestEffort } from '../utils/best-effort';
-import { blockUser, getBlockedRelationshipIds, isBlockedRelationship } from '../utils/safety-store';
+import { getBlockedRelationshipIds, isBlockedRelationship } from '../utils/safety-store';
+import { applyBlock } from './block.service';
 import { GIFT_TYPES, getCreatorTier } from './creator.service';
+import { GIFT_POINT_VALUE_AUD } from '../config/price-book';
 import { assertContentAllowed } from './moderation.service';
 import { emitToLiveRoom, emitToUserRoom, liveRoomSize, removeFromLiveRoom, sendNotification } from './socket.service';
 
@@ -86,14 +88,20 @@ type StreamRow = Prisma.LiveStreamGetPayload<{ include: { host: { select: typeof
 export function publicView(stream: StreamRow, viewerId?: string) {
   const isHost = Boolean(viewerId && viewerId === stream.hostId);
   const live = stream.status === 'LIVE';
-  const { streamKey, ingestUrl, ...rest } = stream;
+  // Who in staff took a stream down, and what they wrote about it, is theirs:
+  // a viewer, or the host, is told that it was ended and nothing more.
+  const { streamKey, ingestUrl, suspendedAt, suspendedById, suspendedReason, ...rest } = stream;
   return {
     ...rest,
+    suspended: Boolean(suspendedAt),
     viewerCount: live ? Math.max(stream.viewerCount, liveRoomSize(stream.id)) : 0,
     isHost,
     ...(isHost ? { streamKey, ingestUrl, ingestConfigured: Boolean(ingestUrl) } : {}),
   };
 }
+
+/** What a member is told when a stream was ended by ATHENA's team. */
+const SUSPENDED_MESSAGE = 'This stream was ended by the ATHENA team and cannot be restarted.';
 
 export interface StreamInput {
   title: string;
@@ -219,6 +227,10 @@ async function notifyFollowersLive(stream: StreamRow) {
 
 export async function startStream(streamId: string, hostId: string) {
   const stream = await loadOwnStream(streamId, hostId);
+  // Ahead of the ENDED check below, because a suspended stream is ENDED and
+  // "prepare a new one" is the wrong advice for a stream staff took down: it
+  // would read as though going live again were just a matter of a fresh key.
+  if (stream.suspendedAt) throw new ApiError(403, SUSPENDED_MESSAGE);
   if (stream.status === 'ENDED') {
     throw new ApiError(409, 'This stream has ended. Prepare a new one to go live again.');
   }
@@ -269,9 +281,11 @@ export async function endStream(streamId: string, hostId: string) {
 export async function validateStreamKey(key: string) {
   const stream = await prisma.liveStream.findUnique({
     where: { streamKey: key },
-    select: { id: true, hostId: true, status: true },
+    select: { id: true, hostId: true, status: true, suspendedAt: true },
   });
-  if (!stream || stream.status === 'ENDED') {
+  // A suspended stream is ENDED already; naming it keeps the refusal from
+  // depending on that, so the key of a stream staff took down can never push.
+  if (!stream || stream.status === 'ENDED' || stream.suspendedAt) {
     return { valid: false as const };
   }
   return { valid: true as const, streamId: stream.id, hostId: stream.hostId };
@@ -305,13 +319,36 @@ export async function listStreams(options: {
 }) {
   const limit = Math.min(Math.max(options.limit ?? 20, 1), 50);
   const status = options.status ?? 'LIVE';
+  // A host she blocked, or who blocked her, is not in her list: the one place
+  // the platform would otherwise put the two in front of each other again.
+  const hidden = options.viewerId ? await getBlockedRelationshipIds(options.viewerId) : [];
   const streams = await prisma.liveStream.findMany({
-    where: { status, ...(options.category ? { category: options.category } : {}) },
+    where: {
+      status,
+      // Taken down by staff: never listed, whoever is asking.
+      suspendedAt: null,
+      ...(hidden.length ? { hostId: { notIn: hidden } } : {}),
+      ...(options.category ? { category: options.category } : {}),
+    },
     include: { host: { select: HOST_SELECT } },
     orderBy: status === 'LIVE' ? [{ viewerCount: 'desc' }, { startedAt: 'desc' }] : [{ endedAt: 'desc' }],
     take: limit,
   });
   return streams.map((stream) => publicView(stream, options.viewerId));
+}
+
+/**
+ * Whether this viewer may open the stream at all. A stream staff took down is
+ * the host's to see and nobody else's, and across a block it does not exist:
+ * 404 rather than 403, as for a blocked profile, so the page neither shows the
+ * playback URL nor says why. The host always passes.
+ */
+async function assertStreamVisible(stream: { hostId: string; suspendedAt: Date | null }, viewerId?: string) {
+  if (viewerId && viewerId === stream.hostId) return;
+  if (stream.suspendedAt) throw new ApiError(404, 'Stream not found');
+  if (viewerId && (await isBlockedRelationship(viewerId, stream.hostId))) {
+    throw new ApiError(404, 'Stream not found');
+  }
 }
 
 export async function getStream(streamId: string, viewerId?: string) {
@@ -320,6 +357,7 @@ export async function getStream(streamId: string, viewerId?: string) {
     include: { host: { select: HOST_SELECT } },
   });
   if (!stream) throw new ApiError(404, 'Stream not found');
+  await assertStreamVisible(stream, viewerId);
   return publicView(stream, viewerId);
 }
 
@@ -348,9 +386,11 @@ export async function myStreams(hostId: string, limit = 20) {
 export async function postChatMessage(streamId: string, userId: string, content: string) {
   const stream = await prisma.liveStream.findUnique({
     where: { id: streamId },
-    select: { id: true, status: true, hostId: true },
+    select: { id: true, status: true, hostId: true, slowModeSeconds: true, suspendedAt: true },
   });
   if (!stream) throw new ApiError(404, 'Stream not found');
+  // Not even the host: a stream staff took down has no chat left to speak in.
+  if (stream.suspendedAt) throw new ApiError(409, SUSPENDED_MESSAGE);
   if (stream.status !== 'LIVE' && stream.hostId !== userId) {
     throw new ApiError(409, 'This stream is not live');
   }
@@ -360,10 +400,23 @@ export async function postChatMessage(streamId: string, userId: string, content:
   if (await isBlockedRelationship(userId, stream.hostId)) {
     throw new ApiError(403, 'You cannot take part in this stream.');
   }
+
+  // The host's own controls are for her audience; she is never muted or slowed
+  // in her own room.
+  if (userId !== stream.hostId) {
+    await assertNotMuted(streamId, userId);
+    await assertSlowModeAllows(stream, userId);
+  }
+
   // 'live_chat', not 'message': both are held to the conversational line, but
   // the kind is what a reviewer reads when something was let through, and a
   // line said in front of a stream's whole audience is not a direct message.
   await assertContentAllowed(content, { kind: 'live_chat', userId });
+
+  // Read before the write, not after: if this fails the line is not sent and
+  // she is told so, where reading it afterwards would leave a stored line that
+  // was never shown to anyone, her own screen included.
+  const hidden = await getBlockedRelationshipIds(userId);
 
   const [message] = await prisma.$transaction([
     prisma.liveStreamMessage.create({
@@ -373,8 +426,56 @@ export async function postChatMessage(streamId: string, userId: string, content:
     prisma.liveStream.update({ where: { id: streamId }, data: { messageCount: { increment: 1 } } }),
   ]);
 
-  emitToLiveRoom(streamId, 'live:message', { streamId, message: { ...message, isHost: userId === stream.hostId } });
+  // The room is not one audience. A viewer who blocked her, or whom she
+  // blocked, is not sent the line, exactly as the backlog leaves her out.
+  emitToLiveRoom(
+    streamId,
+    'live:message',
+    { streamId, message: { ...message, isHost: userId === stream.hostId } },
+    { exceptUserIds: hidden }
+  );
   return message;
+}
+
+/** "about 4 more minutes", for a mute that has not run out yet. */
+function minutesLeft(until: Date): string {
+  const minutes = Math.max(1, Math.ceil((until.getTime() - Date.now()) / 60_000));
+  return minutes === 1 ? 'about 1 more minute' : `about ${minutes} more minutes`;
+}
+
+async function assertNotMuted(streamId: string, userId: string) {
+  const mute = await prisma.liveStreamMute.findUnique({
+    where: { streamId_userId: { streamId, userId } },
+    select: { until: true },
+  });
+  if (mute && mute.until.getTime() > Date.now()) {
+    // Said plainly, and to her alone: a mute is the host's choice, she can keep
+    // watching, and she is owed a reason the chat box stopped working.
+    throw new ApiError(403, `The host has muted you in this chat for ${minutesLeft(mute.until)}. You can keep watching.`);
+  }
+}
+
+/**
+ * Slow mode: one line from a viewer per window. The last line she wrote is the
+ * clock, so it needs no state of its own. Two lines sent in the same instant can
+ * both pass this read; the per-account chat throttle in front of both doors is
+ * what bounds that, and a host's slow mode is a pace, not a guarantee.
+ */
+async function assertSlowModeAllows(stream: { id: string; slowModeSeconds: number | null }, userId: string) {
+  if (!stream.slowModeSeconds) return;
+  const last = await prisma.liveStreamMessage.findFirst({
+    where: { streamId: stream.id, userId },
+    orderBy: { createdAt: 'desc' },
+    select: { createdAt: true },
+  });
+  if (!last) return;
+  const waitMs = last.createdAt.getTime() + stream.slowModeSeconds * 1000 - Date.now();
+  if (waitMs > 0) {
+    throw new ApiError(
+      429,
+      `Slow mode is on. You can send another message in ${Math.ceil(waitMs / 1000)} seconds.`
+    );
+  }
 }
 
 /**
@@ -385,8 +486,12 @@ export async function postChatMessage(streamId: string, userId: string, content:
  * reloads.
  */
 export async function recentMessages(streamId: string, limit = 100, viewerId?: string) {
-  const stream = await prisma.liveStream.findUnique({ where: { id: streamId }, select: { hostId: true } });
+  const stream = await prisma.liveStream.findUnique({
+    where: { id: streamId },
+    select: { hostId: true, suspendedAt: true },
+  });
   if (!stream) throw new ApiError(404, 'Stream not found');
+  await assertStreamVisible(stream, viewerId);
   const hidden = viewerId ? await getBlockedRelationshipIds(viewerId) : [];
   const rows = await prisma.liveStreamMessage.findMany({
     where: { streamId, ...(hidden.length ? { userId: { notIn: hidden } } : {}) },
@@ -426,19 +531,89 @@ export async function deleteChatMessage(streamId: string, messageId: string, hos
   });
   if (!message || message.streamId !== stream.id) throw new ApiError(404, 'Message not found');
 
+  await dropChatMessage(stream.id, message.id);
+  return { removed: message.id };
+}
+
+/** The delete behind both a host's and a moderator's removal of one line. */
+async function dropChatMessage(streamId: string, messageId: string) {
   await prisma.$transaction([
-    prisma.liveStreamMessage.delete({ where: { id: message.id } }),
+    prisma.liveStreamMessage.delete({ where: { id: messageId } }),
     // messageCount is what the stream summary reports, so a removed message
     // must stop counting; the floor keeps a stream whose count drifted from a
     // failed write from going negative.
     prisma.liveStream.updateMany({
-      where: { id: stream.id, messageCount: { gt: 0 } },
+      where: { id: streamId, messageCount: { gt: 0 } },
       data: { messageCount: { decrement: 1 } },
     }),
   ]);
 
-  emitToLiveRoom(streamId, 'live:message_removed', { streamId, messageId: message.id });
-  return { removed: message.id };
+  emitToLiveRoom(streamId, 'live:message_removed', { streamId, messageId });
+}
+
+/** Longest a host can silence a viewer in one go. */
+export const LIVE_MUTE_MAX_MINUTES = 24 * 60;
+/** Longest gap slow mode can ask for between one viewer's lines. */
+export const LIVE_SLOW_MODE_MAX_SECONDS = 600;
+
+/**
+ * Silence a viewer's chat for a while without putting her out of the room.
+ *
+ * Removing someone is a block and lasts; this is the proportionate answer to
+ * a viewer who is being a nuisance rather than abusive, and it ends by itself.
+ * The mute is a row keyed by (stream, viewer), so muting again moves the end of
+ * it, and `postChatMessage` reads it at the one place both doors share. She is
+ * told on her own sockets, so her chat box can say why it stopped working.
+ */
+export async function muteViewer(streamId: string, hostId: string, targetUserId: string, minutes: number) {
+  const stream = await loadOwnStream(streamId, hostId);
+  if (targetUserId === hostId) throw new ApiError(400, 'You cannot mute yourself in your own stream');
+  if (!Number.isInteger(minutes) || minutes < 1 || minutes > LIVE_MUTE_MAX_MINUTES) {
+    throw new ApiError(400, `Choose a mute of between 1 minute and ${LIVE_MUTE_MAX_MINUTES / 60} hours`);
+  }
+
+  const target = await prisma.user.findUnique({ where: { id: targetUserId }, select: { id: true } });
+  if (!target) throw new ApiError(404, 'Member not found');
+
+  const until = new Date(Date.now() + minutes * 60_000);
+  await prisma.liveStreamMute.upsert({
+    where: { streamId_userId: { streamId: stream.id, userId: target.id } },
+    create: { streamId: stream.id, userId: target.id, mutedById: hostId, until },
+    update: { until, mutedById: hostId },
+  });
+
+  emitToUserRoom(target.id, 'live:muted', { streamId: stream.id, until: until.toISOString() });
+  return { muted: target.id, until: until.toISOString() };
+}
+
+export async function unmuteViewer(streamId: string, hostId: string, targetUserId: string) {
+  const stream = await loadOwnStream(streamId, hostId);
+  await prisma.liveStreamMute.deleteMany({ where: { streamId: stream.id, userId: targetUserId } });
+  emitToUserRoom(targetUserId, 'live:unmuted', { streamId: stream.id });
+  return { unmuted: targetUserId };
+}
+
+/**
+ * Slow mode on or off. `null` or 0 turns it off. The room is told, so every
+ * viewer's chat box shows the pace before she is refused for going faster.
+ */
+export async function setSlowMode(streamId: string, hostId: string, seconds: number | null) {
+  const stream = await loadOwnStream(streamId, hostId);
+  if (stream.suspendedAt || stream.status === 'ENDED') throw new ApiError(409, 'This stream has ended');
+
+  const value = seconds === null || seconds === 0 ? null : seconds;
+  if (value !== null && (!Number.isInteger(value) || value < 1 || value > LIVE_SLOW_MODE_MAX_SECONDS)) {
+    throw new ApiError(400, `Slow mode can be off, or between 1 and ${LIVE_SLOW_MODE_MAX_SECONDS} seconds`);
+  }
+
+  const updated = await prisma.liveStream.update({
+    where: { id: stream.id },
+    data: { slowModeSeconds: value },
+    include: { host: { select: HOST_SELECT } },
+  });
+
+  emitToLiveRoom(stream.id, 'live:slow_mode', { streamId: stream.id, seconds: value });
+  return publicView(updated, hostId);
 }
 
 /**
@@ -467,7 +642,10 @@ export async function removeViewer(streamId: string, hostId: string, targetUserI
   });
   if (!target) throw new ApiError(404, 'Member not found');
 
-  await blockUser(hostId, target.id);
+  // Counted like any other block (services/block.service): a host removing the
+  // same person from stream after stream is one of the signals a moderator is
+  // shown, and she is not asked to press a second button for it.
+  await applyBlock(hostId, target.id, { source: 'live-stream' });
 
   const removed = await prisma.liveStreamMessage.findMany({
     where: { streamId: stream.id, userId: target.id },
@@ -493,6 +671,144 @@ export async function removeViewer(streamId: string, hostId: string, targetUserI
     messagesRemoved: removed.length,
     blocked: true,
   };
+}
+
+// ===========================================
+// Staff controls
+// ===========================================
+//
+// Until these, a stream that broke the rules could be stopped by one person
+// only: its host. A moderator who had a report in front of her could decide it
+// was upheld and then do nothing to the broadcast it was about.
+
+/**
+ * End a stream for good, on staff's say.
+ *
+ * It is ENDED, as when a host ends it, and also stamped as suspended, which is
+ * what makes it different: it cannot be restarted, `listStreams` and
+ * `getStream` stop showing it to anyone but its host, and the ingest key check
+ * refuses its key, so the encoder cannot simply reconnect. The room is told it
+ * ended, and the host is told it was staff who ended it. The caller records the
+ * audit row; this holds no opinion about who is allowed to ask.
+ *
+ * Idempotent: suspending a suspended stream changes nothing, so a second
+ * moderator working the same report does not overwrite who did it first.
+ */
+export async function suspendStream(streamId: string, staffId: string, reason: string) {
+  const stream = await prisma.liveStream.findUnique({
+    where: { id: streamId },
+    select: { id: true, hostId: true, title: true, status: true, endedAt: true, suspendedAt: true },
+  });
+  if (!stream) throw new ApiError(404, 'Stream not found');
+  if (stream.suspendedAt) {
+    return { id: stream.id, hostId: stream.hostId, status: stream.status, suspendedAt: stream.suspendedAt, changed: false };
+  }
+
+  const now = new Date();
+  let updated: { id: string; hostId: string; status: LiveStreamStatus; suspendedAt: Date | null };
+  try {
+    updated = await prisma.liveStream.update({
+      // The filter is what makes "who did it first" true: two moderators who both
+      // read the stream as not yet suspended cannot both write, so the second
+      // finds nothing to update and neither overwrites the first one's name and
+      // reason nor files a second audit row.
+      where: { id: streamId, suspendedAt: null },
+      data: {
+        status: 'ENDED',
+        endedAt: stream.endedAt ?? now,
+        viewerCount: 0,
+        suspendedAt: now,
+        suspendedById: staffId,
+        suspendedReason: reason,
+      },
+      select: { id: true, hostId: true, status: true, suspendedAt: true },
+    });
+  } catch (error) {
+    if ((error as { code?: string })?.code !== 'P2025') throw error;
+    return { id: stream.id, hostId: stream.hostId, status: stream.status, suspendedAt: stream.suspendedAt, changed: false };
+  }
+
+  emitToLiveRoom(streamId, 'live:status', { streamId, status: 'ENDED', suspended: true });
+  emitToLiveRoom('index', 'live:index_changed', { streamId, status: 'ENDED' });
+
+  void bestEffort('notification.livestream-suspended', () =>
+    sendNotification({
+      userId: stream.hostId,
+      type: 'SYSTEM',
+      title: 'Your live stream was ended',
+      message: `Our team ended your stream "${stream.title}" because it did not meet the community guidelines. If you think this was a mistake, please contact support.`,
+      link: '/live',
+    })
+  );
+
+  return { ...updated, changed: true };
+}
+
+/**
+ * Undo a suspension, for a decision reversed on appeal or a mistake. The stream
+ * stays ENDED: the broadcast is over and the host prepares a new one. What comes
+ * back is that it is listed and open again, and that its key may push again.
+ */
+export async function liftStreamSuspension(streamId: string) {
+  const stream = await prisma.liveStream.findUnique({
+    where: { id: streamId },
+    select: { id: true, hostId: true, suspendedAt: true },
+  });
+  if (!stream) throw new ApiError(404, 'Stream not found');
+  if (!stream.suspendedAt) return { id: stream.id, hostId: stream.hostId, changed: false };
+  await prisma.liveStream.update({
+    where: { id: streamId },
+    data: { suspendedAt: null, suspendedById: null, suspendedReason: null },
+  });
+  return { id: stream.id, hostId: stream.hostId, changed: true };
+}
+
+/**
+ * Streams for the moderation console: what is live now, and what was taken
+ * down. No key, no ingest URL and no playback URL: a moderator watches a
+ * stream on its own page, and the key is a credential.
+ */
+export async function listStreamsForStaff(options: { status?: LiveStreamStatus; suspended?: boolean; limit?: number }) {
+  const limit = Math.min(Math.max(options.limit ?? 30, 1), 100);
+  const rows = await prisma.liveStream.findMany({
+    where: {
+      status: options.suspended ? undefined : options.status ?? 'LIVE',
+      ...(options.suspended ? { suspendedAt: { not: null } } : {}),
+    },
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      viewerCount: true,
+      messageCount: true,
+      startedAt: true,
+      endedAt: true,
+      suspendedAt: true,
+      suspendedReason: true,
+      host: { select: { id: true, displayName: true } },
+    },
+    orderBy: options.suspended ? { suspendedAt: 'desc' } : [{ viewerCount: 'desc' }, { startedAt: 'desc' }],
+    take: limit,
+  });
+  return rows.map((row) => ({
+    ...row,
+    viewerCount: row.status === 'LIVE' ? Math.max(row.viewerCount, liveRoomSize(row.id)) : 0,
+  }));
+}
+
+/**
+ * Take one line out of a room because a report about it was upheld. Quiet when
+ * it is already gone — the host may have deleted it, which is the common case —
+ * because the report holds its own copy of the words.
+ */
+export async function removeChatMessageAsStaff(messageId: string): Promise<boolean> {
+  const message = await prisma.liveStreamMessage.findUnique({
+    where: { id: messageId },
+    select: { id: true, streamId: true },
+  });
+  if (!message) return false;
+  await dropChatMessage(message.streamId, message.id);
+  return true;
 }
 
 // ===========================================
@@ -527,7 +843,7 @@ export function giftCatalog() {
 export async function walletBalance(userId: string) {
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { giftBalance: true } });
   const balance = user?.giftBalance ?? 0;
-  return { balance, valueAud: balance * 0.01 };
+  return { balance, valueAud: balance * GIFT_POINT_VALUE_AUD };
 }
 
 export async function sendStreamGift(streamId: string, senderId: string, giftType: string, message?: string) {
@@ -544,6 +860,10 @@ export async function sendStreamGift(streamId: string, senderId: string, giftTyp
   if (await isBlockedRelationship(senderId, stream.hostId)) {
     throw new ApiError(403, 'You cannot take part in this stream.');
   }
+  // The gift names its sender to the whole room, so it is kept from anyone who
+  // blocked her or whom she blocked, as a chat line is. Read before any money
+  // moves, so a failure here costs her nothing.
+  const hidden = await getBlockedRelationshipIds(senderId);
 
   const sender = await prisma.user.findUnique({
     where: { id: senderId },
@@ -616,7 +936,7 @@ export async function sendStreamGift(streamId: string, senderId: string, giftTyp
     totalGiftPoints: updatedStream.totalGiftPoints,
     at: transaction.createdAt,
   };
-  emitToLiveRoom(streamId, 'live:gift', payload);
+  emitToLiveRoom(streamId, 'live:gift', payload, { exceptUserIds: hidden });
 
   // Not awaited, and that part was always right: the gift transaction has
   // committed, the sender's balance is already down and the room has already
@@ -641,10 +961,22 @@ export async function sendStreamGift(streamId: string, senderId: string, giftTyp
   return { transaction, totalGiftPoints: updatedStream.totalGiftPoints, balance };
 }
 
-export async function giftLeaderboard(streamId: string, limit = 10) {
+export async function giftLeaderboard(streamId: string, limit = 10, viewerId?: string) {
+  // The board names the people who gifted, so it is held to the same rule as the
+  // room it belongs to: a stream staff took down is the host's alone, across a
+  // block with the host it does not exist, and someone she blocked (or who
+  // blocked her) is not on her board.
+  const stream = await prisma.liveStream.findUnique({
+    where: { id: streamId },
+    select: { hostId: true, suspendedAt: true },
+  });
+  if (!stream) throw new ApiError(404, 'Stream not found');
+  await assertStreamVisible(stream, viewerId);
+  const hidden = viewerId ? await getBlockedRelationshipIds(viewerId) : [];
+
   const rows = await prisma.giftTransaction.groupBy({
     by: ['senderId'],
-    where: { streamId },
+    where: { streamId, ...(hidden.length ? { senderId: { notIn: hidden } } : {}) },
     _sum: { giftValue: true },
     _count: { _all: true },
     orderBy: { _sum: { giftValue: 'desc' } },

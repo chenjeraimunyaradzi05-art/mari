@@ -11,6 +11,8 @@ jest.mock('../../utils/prisma', () => ({
     user: { findUnique: jest.fn(async () => ({ displayName: 'Sarah D.' })), findMany: jest.fn(async () => []) },
     notification: { create: jest.fn() },
     userSafetySettings: { findMany: jest.fn(async () => []), findUnique: jest.fn(async () => null) },
+    // A notification is never sent across a block, in either store.
+    dvSafetyProfile: { findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
     follow: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
     $transaction: jest.fn(async (ops: any) => Promise.all(ops)),
   },

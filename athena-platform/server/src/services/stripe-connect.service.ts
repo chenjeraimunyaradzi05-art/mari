@@ -5,14 +5,20 @@
  */
 
 import type Stripe from 'stripe';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import { ApiError } from '../middleware/errorHandler';
 import { getStripe, isStripeConfigured } from '../utils/stripe';
 import { bestEffort } from '../utils/best-effort';
+import { isBlockedRelationship } from '../utils/safety-store';
+import { ESCROW_DEFAULT_FEE_PERCENT } from '../config/price-book';
+import { assertRoomForAnotherHold } from '../middleware/moneyLimits';
+import { assertPaymentsOpen, getPaymentsPause } from './feature-flags.service';
 
-// Platform fee percentage (e.g., 15% of mentor/creator earnings)
-const PLATFORM_FEE_PERCENT = 15;
+// What ATHENA keeps of an escrow hold when the caller names no fee of its own.
+// The number lives in the price book with the rest.
+const PLATFORM_FEE_PERCENT = ESCROW_DEFAULT_FEE_PERCENT;
 
 /**
  * Whether this deployment should fall back to the development mocks below.
@@ -49,6 +55,25 @@ function canUseMockStripe(feature: string): boolean {
  */
 function mockOnboardingUrl(): string {
   return `${process.env.CLIENT_URL}/dashboard/earnings`;
+}
+
+/**
+ * What a new connected account is created with beyond the capabilities, from
+ * configuration.
+ *
+ * An Express account is paid out on Stripe's automatic schedule unless told
+ * otherwise, while ATHENA also offers a Withdraw button that creates a payout by
+ * hand (createPayout). Whether the two sit together, or the account has to be
+ * created on a manual schedule so that a member's balance stays until she asks for
+ * it, is decided by running both in test mode (docs/runbooks/STRIPE-CONNECT.md),
+ * so it is a setting and not a guess. Unset, nothing is sent and Stripe's own
+ * default stands; STRIPE_CONNECT_PAYOUT_SCHEDULE=manual creates accounts on a
+ * manual schedule. It only affects accounts created after it is set.
+ */
+function connectedAccountSettings(): Pick<Stripe.AccountCreateParams, 'settings'> {
+  const schedule = (process.env.STRIPE_CONNECT_PAYOUT_SCHEDULE ?? '').trim().toLowerCase();
+  if (schedule !== 'manual') return {};
+  return { settings: { payouts: { schedule: { interval: 'manual' } } } };
 }
 
 export interface ConnectedAccountInput {
@@ -114,7 +139,16 @@ export interface EscrowPaymentInput {
   currency: string;
   description: string;
   metadata?: Record<string, string>;
-  sessionType?: 'mentor_session' | 'course_purchase' | 'creator_content' | 'service_order' | 'vehicle_purchase' | 'car_service' | 'vehicle_inspection';
+  sessionType?:
+    | 'mentor_session'
+    | 'course_purchase'
+    | 'creator_content'
+    | 'service_order'
+    | 'service_booking'
+    | 'custom_request'
+    | 'vehicle_purchase'
+    | 'car_service'
+    | 'vehicle_inspection';
   /** The platform's cut for this hold, when it differs from the default (a car sale carries a smaller percentage than a session). */
   platformFeePercent?: number;
   /**
@@ -131,6 +165,13 @@ export interface EscrowPaymentInput {
    * Element, which needs this.
    */
   automaticPaymentMethods?: boolean;
+  /**
+   * A key derived from the row this hold is for, such as `mentor-hold-<session
+   * id>`, so that two requests for the same booking that arrive together (a
+   * double tap, a retry after a timeout) create one hold and not two. The SDK's
+   * own per-request key only covers one request's network retries.
+   */
+  idempotencyKey?: string;
 }
 
 /**
@@ -180,10 +221,25 @@ export async function resolveConnectedAccountId(userId: string): Promise<string 
   return adopted;
 }
 
+/**
+ * Whether the account can receive a transfer.
+ *
+ * A booking, an order and a car purchase are all paid as a destination charge,
+ * which sends the seller's share to her connected account as a transfer, and
+ * Stripe refuses the transfer to an account whose `transfers` capability is not
+ * active. That capability is requested when the account is created and switched
+ * on separately from payouts, so an account can be verified and able to pay out
+ * while a hold made for it fails at the capture, after the buyer has paid. It is
+ * asked of every account here so the status that gates a hold is true.
+ */
+function canReceiveTransfers(account: Stripe.Account): boolean {
+  return account.capabilities?.transfers === 'active';
+}
+
 /** How Stripe's capability flags map onto the status column the platform gates on. */
 function connectStatusFor(account: Stripe.Account): 'PENDING' | 'RESTRICTED' | 'ACTIVE' {
   if (!account.details_submitted) return 'PENDING';
-  return account.payouts_enabled ? 'ACTIVE' : 'RESTRICTED';
+  return account.payouts_enabled && canReceiveTransfers(account) ? 'ACTIVE' : 'RESTRICTED';
 }
 
 /**
@@ -254,7 +310,7 @@ export async function applyAccountState(userId: string, account: Stripe.Account)
     userId,
     account.id,
     connectStatusFor(account),
-    Boolean(account.charges_enabled && account.payouts_enabled)
+    Boolean(account.charges_enabled && account.payouts_enabled && canReceiveTransfers(account))
   );
 }
 
@@ -267,9 +323,15 @@ export async function applyAccountState(userId: string, account: Stripe.Account)
  * tab.
  */
 export async function refreshConnectedAccount(userId: string, accountId: string): Promise<void> {
-  if (!isStripeConfigured()) {
-    // A deployment with no Stripe key has nothing to verify against, and every
-    // mocked path below answers "onboarded". Leaving isMonetized false here
+  // The same test every other mock path here makes, and not a bare key check:
+  // in production it refuses with a 503 instead of answering. This used to write
+  // the account ACTIVE and monetised whenever the key was missing, with no look at
+  // the environment, so a deployment that booted without its key, or had it
+  // revoked, told every stored connected account it was verified and able to be
+  // paid, and the booking, order and payout gates all believed it.
+  if (canUseMockStripe('Refreshing a connected account')) {
+    // A development machine with no Stripe key has nothing to verify against, and
+    // every mocked path below answers "onboarded". Leaving isMonetized false here
     // would make local work look like a Stripe restriction and hide the real
     // behaviour behind a fake one.
     await writeAccountState(userId, accountId, 'ACTIVE', true);
@@ -290,10 +352,13 @@ export async function syncConnectedAccountFromStripe(account: Stripe.Account): P
   const metadataUserId = typeof account.metadata?.userId === 'string' ? account.metadata.userId : null;
 
   const owner = metadataUserId
-    ? await prisma.user.findUnique({ where: { id: metadataUserId }, select: { id: true } })
+    ? await prisma.user.findUnique({
+        where: { id: metadataUserId },
+        select: { id: true, stripeConnectStatus: true, stripeConnectAccountId: true },
+      })
     : await prisma.user.findFirst({
         where: { stripeConnectAccountId: account.id },
-        select: { id: true },
+        select: { id: true, stripeConnectStatus: true, stripeConnectAccountId: true },
       });
 
   if (!owner) {
@@ -301,8 +366,64 @@ export async function syncConnectedAccountFromStripe(account: Stripe.Account): P
     return false;
   }
 
+  // A member is paid through the account on her own row. Stripe goes on telling
+  // us about every account ever created with her id in its metadata, including a
+  // duplicate that an older path minted and the member has since moved off, and
+  // applying that event wrote the old account back over the one she is paid
+  // through: her next payout and her next hold went to an account nobody was
+  // watching. The event is for somebody the platform no longer pays through, so
+  // it is left alone and said so.
+  if (owner.stripeConnectAccountId && owner.stripeConnectAccountId !== account.id) {
+    logger.warn('Stripe account event for an account the member is no longer paid through; not applied', {
+      userId: owner.id,
+      eventAccountId: account.id,
+      connectedAccountId: owner.stripeConnectAccountId,
+    });
+    return false;
+  }
+
+  const before = owner.stripeConnectStatus;
   await applyAccountState(owner.id, account);
+
+  // A seller whose account was paying out and has stopped is told, once, at the
+  // moment the status moves. Stripe pauses an account when a document expires,
+  // a check fails or a rule changes, and until this nothing said so: she found
+  // out when a payout or a booking was refused. The status was written just
+  // above, so a redelivery of the same event sees RESTRICTED already and says
+  // nothing a second time. Best effort: the account's state is the part that
+  // must not be lost, and a notice that fails to write is logged, not retried
+  // into a second one.
+  if (before === 'ACTIVE' && connectStatusFor(account) !== 'ACTIVE') {
+    await bestEffort(
+      'stripe-connect.notify-account-paused',
+      () => notifyAccountPaused(owner.id, account),
+      null
+    );
+  }
+
   return true;
+}
+
+/** Tells a member that Stripe has stopped paying her account out, and what it is waiting for. */
+async function notifyAccountPaused(userId: string, account: Stripe.Account): Promise<void> {
+  const due = account.requirements?.currently_due?.length ?? 0;
+  const waitingOn =
+    due > 0
+      ? `Stripe needs ${due === 1 ? 'one more detail' : `${due} more details`} from you.`
+      : 'Stripe needs to check some details with you.';
+
+  await prisma.notification.create({
+    data: {
+      userId,
+      type: 'SYSTEM',
+      title: 'Stripe has paused payouts to your account',
+      message:
+        `${waitingOn} Nothing you have earned is lost; it stays in your balance and is paid out once the details are in. ` +
+        'Open your earnings page to finish.',
+      link: '/dashboard/earnings',
+      data: { kind: 'CONNECT_ACCOUNT_PAUSED', accountId: account.id } as Prisma.InputJsonValue,
+    },
+  });
 }
 
 /**
@@ -345,20 +466,27 @@ export async function createConnectedAccount(input: ConnectedAccountInput): Prom
 
   try {
     // Create the Express connected account
-    const account = await getStripe().accounts.create({
-      type: 'express',
-      country: input.country,
-      email: input.email,
-      capabilities: {
-        card_payments: { requested: true },
-        transfers: { requested: true },
+    const account = await getStripe().accounts.create(
+      {
+        type: 'express',
+        country: input.country,
+        email: input.email,
+        capabilities: {
+          card_payments: { requested: true },
+          transfers: { requested: true },
+        },
+        business_type: input.businessType || 'individual',
+        ...connectedAccountSettings(),
+        metadata: {
+          userId: input.userId,
+          accountType: input.type,
+        },
       },
-      business_type: input.businessType || 'individual',
-      metadata: {
-        userId: input.userId,
-        accountType: input.type,
-      },
-    });
+      // One member, one account, even when two requests arrive together: the
+      // resolve above reads a column that is only written afterwards, so both
+      // could get past it. Stripe returns the first account to the second call.
+      { idempotencyKey: `connect-account-${input.userId}` }
+    );
 
     // Store the connected account ID in the database, along with the state a
     // brand-new Express account is genuinely in: nothing submitted, nothing
@@ -472,6 +600,13 @@ export async function createEscrowPayment(input: EscrowPaymentInput): Promise<{
   amount: number;
   platformFee: number;
 }> {
+  // No new hold on a card while payments are paused.
+  await assertPaymentsOpen();
+
+  // However the hold was asked for, one buyer cannot have an unbounded run of
+  // them recorded in an hour: card testing starts a hold per card.
+  await assertRoomForAnotherHold(input.buyerId);
+
   const sellerAccountId = await resolveConnectedAccountId(input.sellerId);
 
   if (!sellerAccountId) {
@@ -480,11 +615,26 @@ export async function createEscrowPayment(input: EscrowPaymentInput): Promise<{
 
   const seller = await prisma.user.findUnique({
     where: { id: input.sellerId },
-    select: { stripeConnectStatus: true },
+    select: { stripeConnectStatus: true, isSuspended: true, bannedAt: true },
   });
 
   if (seller?.stripeConnectStatus !== 'ACTIVE') {
     throw new ApiError(400, 'Seller payment account is not fully verified');
+  }
+
+  // A seller staff have suspended or banned is not somebody to put a buyer's money
+  // in front of. Her sign-in is already refused, so she could not deliver, answer
+  // or be reached about the payment, and the hold would sit on the buyer's card
+  // until it lapsed. Nothing says why she is unavailable: that is not the buyer's
+  // to know.
+  if (seller.isSuspended || seller.bannedAt) {
+    throw new ApiError(409, 'This seller is not available right now, so a payment cannot be made to them.');
+  }
+
+  // Nor across a block, in either direction. A payment tells the seller who paid
+  // and puts the two in a relationship they chose to end.
+  if (await isBlockedRelationship(input.buyerId, input.sellerId)) {
+    throw new ApiError(403, 'You cannot make a payment to this member.');
   }
 
   const platformFee =
@@ -523,12 +673,21 @@ export async function createEscrowPayment(input: EscrowPaymentInput): Promise<{
 
   try {
     // Create payment intent with manual capture (escrow)
-    paymentIntent = await getStripe().paymentIntents.create({
+    const intentParams: Stripe.PaymentIntentCreateParams = {
       amount: input.amount,
       currency: input.currency,
       capture_method: 'manual', // Don't capture immediately - hold in escrow
       application_fee_amount: platformFee,
       ...(input.automaticPaymentMethods ? { automatic_payment_methods: { enabled: true } } : {}),
+      // Ask the card network for a longer authorisation where the account and the
+      // card are eligible, and carry on with the ordinary one where they are not
+      // ('if_available' never fails a payment). Off unless the owner has checked
+      // with Stripe that it applies to this account and what it costs; see the
+      // launch checklist. The deadline Stripe actually grants is read back from
+      // the charge when the card is authorised, so nothing here assumes it.
+      ...(process.env.ESCROW_REQUEST_EXTENDED_AUTHORISATION === 'true'
+        ? { payment_method_options: { card: { request_extended_authorization: 'if_available' as const } } }
+        : {}),
       transfer_data: {
         destination: sellerAccountId,
       },
@@ -542,7 +701,12 @@ export async function createEscrowPayment(input: EscrowPaymentInput): Promise<{
         sessionType: input.sessionType || 'mentor_session',
       },
       description: input.description,
-    });
+    };
+    // A key only when the caller has a row to derive one from; the second
+    // argument is left off otherwise, as it always was.
+    paymentIntent = input.idempotencyKey
+      ? await getStripe().paymentIntents.create(intentParams, { idempotencyKey: input.idempotencyKey })
+      : await getStripe().paymentIntents.create(intentParams);
   } catch (error) {
     logger.error('Failed to create escrow payment', { error, input });
     throw new ApiError(500, 'Failed to create payment');
@@ -587,6 +751,33 @@ export async function createEscrowPayment(input: EscrowPaymentInput): Promise<{
       platformFee,
     };
   } catch (error) {
+    // Two requests that carry the same idempotency key (a double tap on a
+    // renewal, a retry after a timeout) are handed the same intent by Stripe, and
+    // the second one's insert is refused because the first has already recorded
+    // it. That intent is live and belongs to the other request, so cancelling it
+    // below would kill the hold the first request just handed its buyer a secret
+    // for. Returned as the row it is instead, when it is this buyer's own.
+    if (input.idempotencyKey && (error as { code?: unknown } | null)?.code === 'P2002') {
+      const recorded = await bestEffort(
+        'stripe-connect.recorded-hold-lookup',
+        () =>
+          prisma.escrowPayment.findUnique({
+            where: { paymentIntentId: paymentIntent.id },
+            select: { id: true, buyerId: true, sellerId: true, amount: true, platformFee: true },
+          }),
+        null
+      );
+      if (recorded && recorded.buyerId === input.buyerId && recorded.sellerId === input.sellerId) {
+        return {
+          escrowId: recorded.id,
+          paymentIntentId: paymentIntent.id,
+          clientSecret: paymentIntent.client_secret!,
+          amount: recorded.amount,
+          platformFee: recorded.platformFee,
+        };
+      }
+    }
+
     // bestEffort rather than a bare catch: the cancel is allowed to fail — the
     // intent may already have been confirmed by a buyer who was quick — but it
     // must not fail silently, because an intent that survives this is money
@@ -620,6 +811,10 @@ export async function createEscrowPayment(input: EscrowPaymentInput): Promise<{
  * authorised, captured or cancelled.
  */
 export async function getEscrowClientSecret(paymentIntentId: string): Promise<string | null> {
+  // The secret is what lets a buyer complete the payment, so it is not handed
+  // out while payments are paused. Null rather than a refusal: pages ask for it
+  // while they draw an order, and an order should still open.
+  if ((await getPaymentsPause()).paused) return null;
   if (paymentIntentId.startsWith('pi_mock_')) return `${paymentIntentId}_secret_mock`;
   if (!isStripeConfigured()) return null;
   const intent = await getStripe().paymentIntents.retrieve(paymentIntentId);
@@ -707,6 +902,11 @@ export async function captureEscrowPayment(
   status: string;
   amountCaptured: number;
 }> {
+  // A capture takes money off the buyer's card and sends it to the seller. While
+  // payments are paused it waits: the hold stays on the card, and releasing it
+  // back to the buyer (cancelEscrowPayment) is left open on purpose.
+  await assertPaymentsOpen();
+
   const escrow = await prisma.escrowPayment.findUnique({
     where: { paymentIntentId },
   });
@@ -867,6 +1067,25 @@ async function readReturnStateAtStripe(
 }
 
 /**
+ * The card dispute (chargeback) still open on a payment, if there is one.
+ *
+ * Read from PaymentDispute, which the Stripe webhook keeps, by the payment
+ * intent. While the buyer's bank is deciding, the money is already out of
+ * ATHENA's balance: a refund on top of it can return it twice, and the seller's
+ * transfer is not reversed by a dispute either way. So nothing here refunds a
+ * payment under dispute; the team answers or settles the dispute at Stripe
+ * first, and the order, booking or session it belongs to is decided after.
+ */
+export async function openCardDisputeOn(
+  paymentIntentId: string
+): Promise<{ stripeDisputeId: string; evidenceDueBy: Date | null } | null> {
+  return prisma.paymentDispute.findFirst({
+    where: { paymentIntentId, outcome: 'OPEN' },
+    select: { stripeDisputeId: true, evidenceDueBy: true },
+  });
+}
+
+/**
  * Cancel/refund escrowed payment (if service not delivered or disputed)
  */
 export async function cancelEscrowPayment(
@@ -929,6 +1148,16 @@ export async function cancelEscrowPayment(
       409,
       'This payment has already been released to the seller, so it cannot be cancelled here. If something went wrong, contact ATHENA support and the team will look at a refund with you.'
     );
+  }
+
+  if (at.state === 'refundable') {
+    const cardDispute = await openCardDisputeOn(paymentIntentId);
+    if (cardDispute) {
+      throw new ApiError(
+        409,
+        `The buyer's bank has disputed this payment (${cardDispute.stripeDisputeId}), so it cannot be refunded here as well: that could return the money twice. Answer or settle the dispute in Stripe first.`
+      );
+    }
   }
 
   try {
@@ -1497,6 +1726,9 @@ function isInsufficientBalance(error: unknown): boolean {
 export async function createPayout(
   input: PayoutInput
 ): Promise<{ payoutId: string; status: string; amount: number; currency: string }> {
+  // No payout leaves while payments are paused.
+  await assertPaymentsOpen();
+
   const currency = input.currency.trim().toLowerCase();
   // Converted before the mock branch as well, so a unit mistake fails on a
   // developer's machine instead of first showing up against a live account.
@@ -1563,6 +1795,61 @@ export async function requireConnectedAccountId(userId: string): Promise<string>
   }
 
   return accountId;
+}
+
+/**
+ * The caller's connected account, for a withdrawal: only when Stripe has
+ * verified it and switched it on for payouts.
+ *
+ * The withdrawal route asked only that an account id existed. An account that had
+ * not finished Stripe's checks, or that Stripe had since paused, was sent a
+ * payout, refused, and reported to the member as a generic "Failed to create
+ * payout" with no word that her setup was what was wrong. The creator withdrawal
+ * already turns her away first (creator.service requestPayout); this is the same
+ * rule for the mentor and generic route, before anything is sent.
+ *
+ * The status is kept by Stripe's account.updated events, so one that is not ACTIVE
+ * may only be behind (an account verified a minute ago, or one adopted before the
+ * status was written). Stripe is asked once before she is turned away. A deployment
+ * with no Stripe key says so, because "finish setting up" would be the wrong thing
+ * to tell a member of a platform that cannot pay anybody yet.
+ */
+export async function requirePayableAccountId(userId: string): Promise<string> {
+  const accountId = await resolveConnectedAccountId(userId);
+  if (!accountId) {
+    throw new ApiError(409, 'Connect a payout account before withdrawing. You can do that from your earnings page.');
+  }
+
+  const readStatus = async () =>
+    (await prisma.user.findUnique({ where: { id: userId }, select: { stripeConnectStatus: true } }))?.stripeConnectStatus ?? null;
+
+  let status = await readStatus();
+  if (status !== 'ACTIVE') {
+    try {
+      await refreshConnectedAccount(userId, accountId);
+    } catch (error) {
+      if (error instanceof ApiError && error.statusCode === 503) throw error;
+      logger.warn('Could not refresh a connected account before a withdrawal; going on what is stored', {
+        userId,
+        error: (error as Error).message,
+      });
+    }
+    status = await readStatus();
+  }
+
+  if (status === 'ACTIVE') return accountId;
+
+  if (status === 'RESTRICTED' || status === 'DISABLED') {
+    throw new ApiError(
+      409,
+      'Stripe has paused payouts to your account, so this withdrawal has not been started. Open your earnings page to see what Stripe needs. Your balance is unchanged.'
+    );
+  }
+
+  throw new ApiError(
+    409,
+    'Your payout account is not ready yet. Finish setting it up from your earnings page, and then you can withdraw. Your balance is unchanged.'
+  );
 }
 
 /**
@@ -1681,6 +1968,7 @@ export const stripeConnectService = {
   getEarningsDashboard,
   createPayout,
   requireConnectedAccountId,
+  requirePayableAccountId,
   resolveConnectedAccountId,
   refreshConnectedAccount,
   syncConnectedAccountFromStripe,

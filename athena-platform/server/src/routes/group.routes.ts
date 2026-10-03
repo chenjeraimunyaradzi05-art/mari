@@ -7,14 +7,21 @@ import { decoratePosts } from '../services/post-decoration.service';
 import { viewerContextFor } from '../services/search.service';
 import { assertContentAllowed } from '../services/moderation.service';
 import { enrichPostLinkPreview } from '../services/link-preview.service';
-import { resolveMentionedUserIds } from '../utils/mentions';
+import { MENTION_LIMIT, resolveMentionedUserIds } from '../utils/mentions';
 import { actorDisplayName, notifySocial, socialLinks } from '../utils/social-notifications';
 import { CONTENT_LIMITS, normalizeMediaUrls, normalizeUserText } from '../utils/contentSafety';
 import { postLimiter } from '../middleware/socialLimits';
 import { sendNotification } from '../services/socket.service';
 import { logger } from '../utils/logger';
+import { PUBLIC_AUTHOR_SELECT, maskLegalNamesInResponses } from '../utils/member-display';
+import { ADMISSION_REFUSED_MESSAGE, mayBeAdmittedTo, womanVerifiedRefusal } from '../middleware/woman-gate-surfaces';
 
 const router = Router();
+
+// Every answer from here goes to other members, so a member who is not the reader is
+// named by her public name and her legal first and last name are never sent (see
+// utils/member-display: the pseudonymous display name). Members, join requests and group posts are all covered.
+router.use(maskLegalNamesInResponses);
 
 type GroupPrivacy = 'public' | 'private';
 type GroupRole = 'admin' | 'moderator' | 'member';
@@ -271,6 +278,8 @@ router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
 /**
  * POST /api/groups
  */
+// validated: name and description must be text of the lengths the update route allows, and privacy
+//   is read as private or public.
 router.post('/', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
@@ -279,6 +288,12 @@ router.post('/', authenticate, async (req: AuthRequest, res, next) => {
 
     if (!name || name.length < 3) throw new ApiError(400, 'Group name is required');
     if (!description) throw new ApiError(400, 'Group description is required');
+    // The update route below measures both against these; create did not, so a
+    // group could be made with a name of any length and then never edited.
+    if (name.length > GROUP_NAME_MAX) throw new ApiError(400, `Name must be ${GROUP_NAME_MAX} characters or fewer`);
+    if (description.length > GROUP_DESCRIPTION_MAX) {
+      throw new ApiError(400, `Description must be ${GROUP_DESCRIPTION_MAX} characters or fewer`);
+    }
 
     const group = await prisma.group.create({
       data: {
@@ -325,6 +340,8 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
  * A group's own admins tend its name, description and privacy. Featuring,
  * pinning and hiding stay with the operator console (admin.routes.ts).
  */
+// validated: name and description go through normalizeUserText with their limits, and privacy must
+//   be public or private.
 router.patch('/:id', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const group = await ensureVisibleGroup(req.params.id, req.user?.role);
@@ -390,20 +407,27 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res, next) => {
  */
 router.post('/:id/join', authenticate, async (req: AuthRequest, res, next) => {
   try {
-    const group = await ensureVisibleGroup(req.params.id, req.user?.role);
+    if (!req.user) throw new ApiError(401, 'Authentication required');
+    const group = await ensureVisibleGroup(req.params.id, req.user.role);
 
-    const membership = await getMembership(group.id, req.user!.id);
+    const membership = await getMembership(group.id, req.user.id);
     // A ban outlives leaving: the row is kept so this refuses after Leave too.
     if (membership?.isBanned) throw new ApiError(403, 'You cannot join this group');
 
     // If already a member, keep existing behavior.
     if (membership) {
-      return res.json({ success: true, data: await getGroupView(group.id, req.user!.id) });
+      return res.json({ success: true, data: await getGroupView(group.id, req.user.id) });
     }
 
     // Private groups require approval.
     if (String(group.privacy).toUpperCase() === 'PRIVATE') {
-      const existing = await getJoinRequestForUser(group.id, req.user!.id);
+      // A closed room's admins approve whoever asks, so a completed women-only
+      // check is asked for here when the founder has switched the surface on
+      // (config/woman-gate-policy.ts); it costs nothing while it is off.
+      const notChecked = await womanVerifiedRefusal(req.user.id, 'private_groups');
+      if (notChecked) return res.status(403).json(notChecked);
+
+      const existing = await getJoinRequestForUser(group.id, req.user.id);
       if (existing && String(existing.status).toUpperCase() === 'PENDING') {
         return res.status(202).json({ success: true, data: { status: 'pending' } });
       }
@@ -417,13 +441,13 @@ router.post('/:id/join', authenticate, async (req: AuthRequest, res, next) => {
       }
 
       const request = await prisma.groupJoinRequest.upsert({
-        where: { groupId_userId: { groupId: group.id, userId: req.user!.id } },
+        where: { groupId_userId: { groupId: group.id, userId: req.user.id } },
         update: { status: 'PENDING', reviewedAt: null, reviewedById: null },
-        create: { groupId: group.id, userId: req.user!.id, status: 'PENDING' },
+        create: { groupId: group.id, userId: req.user.id, status: 'PENDING' },
       });
 
       // The admins hear about it now rather than when they next open the group.
-      const requesterId = req.user!.id;
+      const requesterId = req.user.id;
       void actorDisplayName(requesterId)
         .then((name) =>
           notifyGroupStaff(group.id, {
@@ -446,12 +470,12 @@ router.post('/:id/join', authenticate, async (req: AuthRequest, res, next) => {
     }
 
     await prisma.groupMember.upsert({
-      where: { groupId_userId: { groupId: group.id, userId: req.user!.id } },
+      where: { groupId_userId: { groupId: group.id, userId: req.user.id } },
       update: {},
-      create: { groupId: group.id, userId: req.user!.id, role: 'MEMBER' },
+      create: { groupId: group.id, userId: req.user.id, role: 'MEMBER' },
     });
 
-    res.json({ success: true, data: await getGroupView(group.id, req.user!.id) });
+    res.json({ success: true, data: await getGroupView(group.id, req.user.id) });
   } catch (err) {
     next(err);
   }
@@ -535,7 +559,7 @@ router.get('/:id/join-requests', authenticate, async (req: AuthRequest, res, nex
         userId: true,
         status: true,
         createdAt: true,
-        user: { select: { id: true, firstName: true, lastName: true, displayName: true, avatar: true, headline: true } },
+        user: { select: PUBLIC_AUTHOR_SELECT },
       },
     });
 
@@ -550,11 +574,21 @@ async function updateJoinRequestStatus(opts: {
   requestId: string;
   reviewerId: string;
   status: 'APPROVED' | 'DENIED';
+  /** The group is private, so a completed women-only check may be asked of whoever is let in. */
+  privateRoom?: boolean;
 }) {
-  const { groupId, requestId, reviewerId, status } = opts;
+  const { groupId, requestId, reviewerId, status, privateRoom } = opts;
   return await prisma.$transaction(async (tx) => {
     const reqRow = await tx.groupJoinRequest.findUnique({ where: { id: requestId } });
     if (!reqRow || reqRow.groupId !== groupId) throw new ApiError(404, 'Join request not found');
+
+    // The request may have been filed by another member on the requester's
+    // behalf (a suggestion), which never asked them for the check the room asks
+    // of whoever joins it, so the admission is where it is held. Nothing is read
+    // while the surface is not switched on, and a denial is never refused.
+    if (status === 'APPROVED' && privateRoom && !(await mayBeAdmittedTo(reqRow.userId, 'private_groups'))) {
+      throw new ApiError(409, ADMISSION_REFUSED_MESSAGE);
+    }
 
     const updated = await tx.groupJoinRequest.update({
       where: { id: requestId },
@@ -593,6 +627,7 @@ router.post('/:id/join-requests/:requestId/approve', authenticate, async (req: A
       requestId: req.params.requestId,
       reviewerId: req.user!.id,
       status: 'APPROVED',
+      privateRoom: String(group.privacy).toUpperCase() === 'PRIVATE',
     });
 
     notifyQuietly({
@@ -690,7 +725,7 @@ router.post('/:id/leave', authenticate, async (req: AuthRequest, res, next) => {
 
 const GROUP_POST_AUTHOR = {
   author: {
-    select: { id: true, firstName: true, lastName: true, displayName: true, avatar: true, headline: true },
+    select: PUBLIC_AUTHOR_SELECT,
   },
 };
 
@@ -738,11 +773,15 @@ router.get('/:id/posts', optionalAuth, async (req: AuthRequest, res, next) => {
 /**
  * POST /api/groups/:id/posts
  */
+// validated: content goes through normalizeUserText with the post limit and moderation, mediaUrls
+//   through normalizeMediaUrls, mediaAlt is cut to 300 characters each, isSensitive is read as ===
+//   true.
 router.post('/:id/posts', authenticate, postLimiter, async (req: AuthRequest, res, next) => {
   try {
-    const group = await ensureVisibleGroup(req.params.id, req.user?.role);
+    if (!req.user) throw new ApiError(401, 'Authentication required');
+    const group = await ensureVisibleGroup(req.params.id, req.user.role);
     const member = await prisma.groupMember.findUnique({
-      where: { groupId_userId: { groupId: group.id, userId: req.user!.id } },
+      where: { groupId_userId: { groupId: group.id, userId: req.user.id } },
       select: { id: true, isBanned: true, isMuted: true, mutedUntil: true },
     });
     if (!member || member.isBanned) throw new ApiError(403, 'Join the group to post');
@@ -755,13 +794,14 @@ router.post('/:id/posts', authenticate, postLimiter, async (req: AuthRequest, re
     const mediaAlt = Array.isArray(req.body?.mediaAlt)
       ? req.body.mediaAlt.slice(0, mediaUrls.length).map((a: unknown) => (typeof a === 'string' ? a.trim().slice(0, 300) : ''))
       : undefined;
-    await assertContentAllowed(content, { kind: 'post', userId: req.user!.id });
-    const mentionedUserIds = (await resolveMentionedUserIds(content)).filter((id) => id !== req.user!.id);
+    await assertContentAllowed(content, { kind: 'post', userId: req.user.id });
+    const authorId = req.user.id;
+    const mentionedUserIds = (await resolveMentionedUserIds(content, MENTION_LIMIT, authorId)).filter((id) => id !== authorId);
 
     const post = await prisma.post.create({
       data: {
         groupId: group.id,
-        authorId: req.user!.id,
+        authorId,
         content,
         type: mediaUrls.length ? (/\.(mp4|webm|mov|m4v)(\?|$)/i.test(String(mediaUrls[0])) ? 'VIDEO' : 'IMAGE') : 'TEXT',
         mediaUrls,
@@ -776,7 +816,7 @@ router.post('/:id/posts', authenticate, postLimiter, async (req: AuthRequest, re
     for (const userId of mentionedUserIds) {
       await notifySocial({
         recipientId: userId,
-        actorId: req.user!.id,
+        actorId: authorId,
         type: 'MENTION',
         title: 'You were mentioned',
         message: (name) => `${name} mentioned you in ${group.name}`,
@@ -785,7 +825,7 @@ router.post('/:id/posts', authenticate, postLimiter, async (req: AuthRequest, re
     }
     enrichPostLinkPreview(post.id, content);
 
-    res.status(201).json({ success: true, data: (await decoratePosts([post], req.user!.id))[0] });
+    res.status(201).json({ success: true, data: (await decoratePosts([post], authorId))[0] });
   } catch (err) {
     next(err);
   }

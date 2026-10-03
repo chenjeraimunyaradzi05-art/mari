@@ -15,6 +15,7 @@ can supply. Review cadence: quarterly, or after any material change._
 | [trust-claims-register.md](trust-claims-register.md) | Every public claim, with its evidence status |
 | [repository-inventory.md](repository-inventory.md) | Every code line in this workspace and its status |
 | [privacy-impact-assessment.md](privacy-impact-assessment.md) | Privacy risks and mitigations |
+| [host-employer-checks.md](host-employer-checks.md) | What ATHENA checks about an apprenticeship host, and what it deliberately does not |
 | [ai-system-card.md](ai-system-card.md) | AI features, their data, limits, and safeguards |
 
 Related: `/SECURITY.md` (disclosure policy), `athena-platform/client/public/.well-known/security.txt`

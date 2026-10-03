@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/button';
 import { TopUpModal } from '@/components/creator/TopUpModal';
 import { creatorApi } from '@/lib/api';
 import { apiMessage } from '@/lib/strategy-api';
+import { CREATOR_SHARE_PERCENT, CREATOR_SHARE_RANGE_PERCENT } from '@/lib/pricing';
 import { cn } from '@/lib/utils';
 
 export interface GiftOption {
@@ -68,6 +69,28 @@ export function SendGiftSheet({ isOpen, onClose, receiverId, receiverName }: Sen
     select: (res) => Number(res.data?.data?.balance) || 0,
   });
 
+  // What this creator keeps of the gift, at her tier, from her public profile.
+  // The sheet used to say creators keep "most" of a gift; the share is a published
+  // figure and the sender is told it. When her tier cannot be read the range the
+  // tiers pay is quoted, never a share she was not told.
+  const { data: receiverShare } = useQuery({
+    queryKey: ['creator-public-profile', receiverId],
+    queryFn: () => creatorApi.getPublicProfile(receiverId),
+    enabled: isOpen,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+    select: (res): number | null => {
+      const tier = res.data?.data?.tier as { name?: unknown; revShare?: unknown } | string | null | undefined;
+      if (tier && typeof tier === 'object' && typeof tier.revShare === 'number') return tier.revShare;
+      const name = typeof tier === 'string' ? tier : tier && typeof tier === 'object' && typeof tier.name === 'string' ? tier.name : null;
+      return name && name in CREATOR_SHARE_PERCENT ? CREATOR_SHARE_PERCENT[name as keyof typeof CREATOR_SHARE_PERCENT] : null;
+    },
+  });
+  const shareLine =
+    typeof receiverShare === 'number'
+      ? `${receiverName} keeps ${receiverShare}% of what a gift is worth; the rest is ATHENA’s fee.`
+      : `Creators keep ${CREATOR_SHARE_RANGE_PERCENT.min}% to ${CREATOR_SHARE_RANGE_PERCENT.max}% of what a gift is worth, by creator tier; the rest is ATHENA’s fee.`;
+
   const points = balance ?? 0;
   const short = selected ? Math.max(0, selected.value - points) : 0;
   const ready = !balanceLoading && !balanceFailed;
@@ -102,7 +125,7 @@ export function SendGiftSheet({ isOpen, onClose, receiverId, receiverName }: Sen
         isOpen={isOpen}
         onClose={onClose}
         title={`A gift for ${receiverName}`}
-        description="A small thank-you that lands in her earnings. Creators keep most of what a gift is worth; the rest is the platform fee."
+        description={`A small thank-you that lands in her earnings. ${shareLine}`}
       >
         <ModalContent className="space-y-4">
           <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800/60">

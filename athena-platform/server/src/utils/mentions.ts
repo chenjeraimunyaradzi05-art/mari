@@ -9,6 +9,10 @@
  */
 
 import { prisma } from './prisma';
+import { blockedEitherWayIds } from '../services/audience.service';
+
+/** How many people one post or comment can name; the rest of the markup is left as text. */
+export const MENTION_LIMIT = 20;
 
 export const MENTION_PATTERN = /@\[([^\]\n]{1,80})\]\(([0-9a-fA-F-]{36})\)/g;
 
@@ -30,18 +34,36 @@ export function extractMentions(text: string | null | undefined): Mention[] {
   return mentions;
 }
 
-/** The mentioned ids that name real members, capped so a post cannot page everyone. */
-export async function resolveMentionedUserIds(text: string | null | undefined, limit = 20): Promise<string[]> {
+/**
+ * The mentioned ids that name real members, capped so a post cannot page everyone.
+ *
+ * Pass the author, and a member on either side of a block with her is not among
+ * them: a mention is how somebody else's post or comment reaches a woman who
+ * has closed her own door, so naming her was a way round a block. What is left
+ * out here is not stored on the post either (mentionedUserIds is what the
+ * "posts mentioning me" list reads), and nothing is sent to her. The text is
+ * left as the author wrote it. Not best-effort: if the block lists cannot be
+ * read the post fails, rather than mentioning someone who may have blocked her.
+ */
+export async function resolveMentionedUserIds(
+  text: string | null | undefined,
+  limit = MENTION_LIMIT,
+  authorId?: string
+): Promise<string[]> {
   const ids = extractMentions(text)
     .map((m) => m.userId)
     .slice(0, limit);
   if (ids.length === 0) return [];
-  const users = await prisma.user.findMany({
-    where: { id: { in: ids }, isActive: true },
-    select: { id: true },
-  });
+  const [users, blocked] = await Promise.all([
+    prisma.user.findMany({
+      where: { id: { in: ids }, isActive: true },
+      select: { id: true },
+    }),
+    authorId ? blockedEitherWayIds(authorId) : Promise.resolve([] as string[]),
+  ]);
   const valid = new Set(users.map((u) => u.id));
-  return ids.filter((id) => valid.has(id));
+  const barred = new Set(blocked);
+  return ids.filter((id) => valid.has(id) && !barred.has(id));
 }
 
 /** The text as it reads aloud: "@[Mei Chen](id)" becomes "@Mei Chen". */

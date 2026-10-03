@@ -12,7 +12,7 @@
  * not set.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -722,18 +722,79 @@ function NotifyRegulatorForm({ breach, onDone }: { breach: Breach; onDone: () =>
  * would be its own harm — so the recipients are supplied here, from whatever
  * the investigation identified. The form says that plainly rather than
  * pretending the product can work the list out.
+ *
+ * Some of those people use Safe Mode or have reported someone to us, and may
+ * share a phone or an inbox with the person they are protecting themselves from.
+ * An email saying their data was exposed can be the harm. So before anything is
+ * sent the form asks the server how the list divides, says how many will be
+ * told in the app only, and will not send until it has an answer. Emailing that
+ * group as well is possible, and needs a tick that privacy counsel has approved
+ * it and the neutral subject they approved; the server refuses without both.
  */
+type NoticeAudience = { requested: number; found: number; safetyMembers: number; ordinaryMembers: number };
+type NoticeOutcome = {
+  requested: number;
+  emailed: number;
+  inApp: number;
+  safetyMembersInAppOnly: number;
+  failedUserIds: string[];
+};
+
 function NotifyAffectedPeopleForm({ breach, onDone }: { breach: Breach; onDone: () => void }) {
   const [recipients, setRecipients] = useState('');
   const [content, setContent] = useState('');
   const [steps, setSteps] = useState(breach.statementRecommendedSteps ?? '');
+  const [safetyContent, setSafetyContent] = useState('');
+  const [emailThem, setEmailThem] = useState(false);
+  const [counselConsulted, setCounselConsulted] = useState(false);
+  const [neutralSubject, setNeutralSubject] = useState('');
 
   const ids = Array.from(new Set(recipients.split(/[\s,]+/).map((v) => v.trim()).filter(Boolean)));
+  const idsKey = ids.join(',');
   const ndb = underNdb(breach);
+
+  // How this list would be told, asked of the server whenever the list changes.
+  // Until it answers for the list on screen, nothing can be sent.
+  const [audience, setAudience] = useState<{ key: string; counts: NoticeAudience | null; failed: boolean } | null>(null);
+  useEffect(() => {
+    if (ids.length === 0) {
+      setAudience(null);
+      return;
+    }
+    let current = true;
+    const timer = setTimeout(() => {
+      api
+        .post(`/admin/breaches/${breach.id}/notify-users/preview`, { userIds: ids })
+        .then((res) => {
+          if (current) setAudience({ key: idsKey, counts: res.data as NoticeAudience, failed: false });
+        })
+        .catch(() => {
+          if (current) setAudience({ key: idsKey, counts: null, failed: true });
+        });
+    }, 400);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+    // ids is derived from idsKey; the key is what says the list changed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idsKey, breach.id]);
+
+  const counts = audience && audience.key === idsKey ? audience.counts : null;
+  const checking = ids.length > 0 && (!audience || audience.key !== idsKey);
+  const checkFailed = ids.length > 0 && audience?.key === idsKey && audience.failed;
+  const safetyMembers = counts?.safetyMembers ?? 0;
+
   // s 26WL: an Australian breach must tell people what they can do. The server
   // refuses without it, so the button does too rather than sending a request
   // that is going to bounce mid-incident.
-  const ready = ids.length > 0 && content.trim().length > 0 && (!ndb || steps.trim().length > 0 || Boolean(breach.statementRecommendedSteps));
+  const emailApproved = !emailThem || (counselConsulted && neutralSubject.trim().length > 0);
+  const ready =
+    counts !== null &&
+    counts.found > 0 &&
+    content.trim().length > 0 &&
+    (!ndb || steps.trim().length > 0 || Boolean(breach.statementRecommendedSteps)) &&
+    (safetyMembers === 0 || emailApproved);
 
   const notify = useMutation({
     mutationFn: () =>
@@ -741,18 +802,36 @@ function NotifyAffectedPeopleForm({ breach, onDone }: { breach: Breach; onDone: 
         userIds: ids,
         notificationContent: content.trim(),
         ...(steps.trim() ? { recommendedSteps: steps.trim() } : {}),
+        ...(safetyMembers > 0 && safetyContent.trim() ? { safetyNotificationContent: safetyContent.trim() } : {}),
+        ...(safetyMembers > 0 && emailThem
+          ? { emailSafetyMembers: true, counselConsulted, neutralSubject: neutralSubject.trim() }
+          : {}),
       }),
     onSuccess: (res) => {
       onDone();
-      const requested = (res.data as { requested?: number } | undefined)?.requested ?? ids.length;
-      setRecipients('');
-      setContent('');
-      toast.success(`${requested} ${requested === 1 ? 'person' : 'people'} notified.`);
+      const outcome = res.data as Partial<NoticeOutcome> | undefined;
+      const emailed = outcome?.emailed ?? 0;
+      const inApp = outcome?.inApp ?? 0;
+      const notReached = outcome?.failedUserIds ?? [];
+      if (notReached.length > 0) {
+        // Leave the ones who did not get it in the box, with the wording they
+        // were to be sent, so pressing the button again tells them and nobody
+        // else, in the same words as everyone who was reached.
+        setRecipients(notReached.join('\n'));
+        toast.error(`${notReached.length} ${notReached.length === 1 ? 'person was' : 'people were'} not reached. Their ids and the wording are back in the form to try again.`);
+      } else {
+        setRecipients('');
+        setContent('');
+        setSafetyContent('');
+      }
+      toast.success(`${emailed} emailed, ${inApp} told in the app.`);
     },
     onError: (e: unknown) => toast.error(errorMessage(e) || 'That did not send'),
   });
 
   const field = (name: string) => `affected-${name}-${breach.id}`;
+  const emailTo = counts ? counts.ordinaryMembers + (emailThem ? safetyMembers : 0) : 0;
+  const reachable = counts?.found ?? ids.length;
 
   return (
     <div className="space-y-2 border-t border-slate-100 pt-3 dark:border-slate-800">
@@ -784,6 +863,32 @@ function NotifyAffectedPeopleForm({ breach, onDone }: { breach: Breach; onDone: 
         </p>
       )}
 
+      {checking && (
+        <p role="status" className="text-xs text-slate-500">
+          Checking how these members should be told…
+        </p>
+      )}
+      {checkFailed && (
+        <p role="alert" className="text-xs text-red-700 dark:text-red-300">
+          Could not check how these members should be told, so nothing can be sent yet. Change the list or reload, then try again.
+        </p>
+      )}
+      {counts && (
+        <div role="status" className="rounded-lg border border-slate-200 p-3 text-xs text-slate-700 dark:border-slate-700 dark:text-slate-300">
+          <p>
+            {counts.found} of {ids.length} {ids.length === 1 ? 'id is' : 'ids are'} a member
+            {counts.found < ids.length ? `; ${ids.length - counts.found} matched no account and will be skipped` : ''}.
+          </p>
+          <p>{counts.ordinaryMembers} will be emailed.</p>
+          {safetyMembers > 0 && (
+            <p className="font-medium text-amber-800 dark:text-amber-300">
+              {safetyMembers} {safetyMembers === 1 ? 'uses' : 'use'} Safe Mode or {safetyMembers === 1 ? 'has' : 'have'} reported someone to us.{' '}
+              {emailThem ? 'They will be told in the app and emailed under the subject counsel approved.' : 'They will be told in the app only, under a neutral title, and not emailed.'}
+            </p>
+          )}
+        </div>
+      )}
+
       <label htmlFor={field('content')} className="block text-xs text-slate-500">
         What happened, in the words they will read
       </label>
@@ -811,17 +916,61 @@ function NotifyAffectedPeopleForm({ breach, onDone }: { breach: Breach; onDone: 
         <p className="text-xs text-slate-500">Prefilled from the OAIC statement. Edit it and this notification uses the edited wording.</p>
       )}
 
+      {safetyMembers > 0 && (
+        <fieldset className="space-y-2 rounded-lg border border-amber-200 p-3 dark:border-amber-800">
+          <legend className="px-1 text-xs font-semibold text-amber-800 dark:text-amber-300">Members who use Safe Mode or have reported someone</legend>
+          <p className="text-xs text-slate-500">
+            They may share a phone or an inbox with the person they are protecting themselves from. Write for them as if anyone could read it: say nothing about Safe Mode, safety reports or violence. Leave this blank to use the wording above, and the server will refuse to send if that wording mentions those things. A template is in docs/security/templates/safety-breach-notice.md.
+          </p>
+          <label htmlFor={field('safety-content')} className="block text-xs text-slate-500">
+            Neutral wording for them (optional)
+          </label>
+          <textarea
+            id={field('safety-content')}
+            value={safetyContent}
+            onChange={(e) => setSafetyContent(e.target.value)}
+            rows={3}
+            placeholder="We found and fixed a problem that may have let some account details be read. Please review your sign-in details."
+            className="input w-full text-sm"
+          />
+          <label className="flex min-h-[44px] items-center gap-2 text-xs text-slate-700 dark:text-slate-300">
+            <input type="checkbox" checked={emailThem} onChange={(e) => setEmailThem(e.target.checked)} className="h-4 w-4 rounded border-slate-300 focus-visible:ring-2 focus-visible:ring-offset-2" />
+            Email them as well as telling them in the app
+          </label>
+          {emailThem && (
+            <div className="space-y-2 pl-6">
+              <label className="flex min-h-[44px] items-center gap-2 text-xs text-slate-700 dark:text-slate-300">
+                <input type="checkbox" checked={counselConsulted} onChange={(e) => setCounselConsulted(e.target.checked)} className="h-4 w-4 rounded border-slate-300 focus-visible:ring-2 focus-visible:ring-offset-2" />
+                Privacy counsel has approved this wording and emailing these members
+              </label>
+              <label htmlFor={field('safety-subject')} className="block text-xs text-slate-500">
+                The neutral subject counsel approved
+              </label>
+              <input
+                id={field('safety-subject')}
+                value={neutralSubject}
+                onChange={(e) => setNeutralSubject(e.target.value)}
+                maxLength={120}
+                placeholder="Account security update"
+                className="input w-full text-sm"
+              />
+            </div>
+          )}
+        </fieldset>
+      )}
+
       <button
         type="button"
         onClick={() => {
-          if (window.confirm(`Email ${ids.length} ${ids.length === 1 ? 'person' : 'people'} about this breach and stamp the time? This cannot be undone.`)) {
+          const told = counts ? `Email ${emailTo} ${emailTo === 1 ? 'person' : 'people'}${safetyMembers > 0 ? ` and tell ${safetyMembers} in the app` : ''}` : 'Notify';
+          if (window.confirm(`${told} about this breach and stamp the time? This cannot be undone.`)) {
             notify.mutate();
           }
         }}
         disabled={notify.isPending || !ready}
         className="btn-primary w-full text-sm"
       >
-        {notify.isPending ? 'Sending…' : `Notify ${ids.length || ''} ${ids.length === 1 ? 'person' : 'people'}`.trim()}
+        {notify.isPending ? 'Sending…' : `Notify ${reachable > 0 ? reachable : ''} ${reachable === 1 ? 'person' : 'people'}`.replace(/\s+/g, ' ').trim()}
       </button>
     </div>
   );

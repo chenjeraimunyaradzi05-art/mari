@@ -11,7 +11,9 @@ jest.mock('../../utils/prisma', () => ({
     like: { findMany: jest.fn(async () => []), groupBy: jest.fn(async () => []) },
     postSave: { findMany: jest.fn(async () => []) },
     pollVote: { groupBy: jest.fn(async () => []), findMany: jest.fn(async () => []) },
-    user: { findUnique: jest.fn(async () => ({ displayName: 'Sarah D.' })), findMany: jest.fn(async () => []) },
+    // Whether a member is in Safe Mode is asked of the user table with findFirst
+    // (audience.service isDiscreet); nobody is in it here.
+    user: { findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => ({ displayName: 'Sarah D.' })), findMany: jest.fn(async () => []) },
     notification: { create: jest.fn() },
     userSafetySettings: { findMany: jest.fn(async () => []), findUnique: jest.fn(async () => null) },
     follow: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },

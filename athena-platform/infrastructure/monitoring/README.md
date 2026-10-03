@@ -9,7 +9,7 @@ out" — and none of them wakes a person.
 
 | File | What it is |
 |---|---|
-| [`alerts.yml`](alerts.yml) | Prometheus alert rules for the API: down, missing, failing, slow, blocked, crash-looping, running out of memory. Each reads a metric the API really produces. |
+| [`alerts.yml`](alerts.yml) | Prometheus alert rules for the API: down, missing, failing, slow, blocked, crash-looping, running out of memory, sign-up and password-reset emails failing, the sign-in lockout and rate limits counting per instance because Redis is gone, and requests refused with 429 at a sustained rate (a crawler, or a limit set too tight). Each reads a metric the API really produces. |
 | [`alerts.test.yml`](alerts.test.yml) | Unit tests for those rules. CI runs `promtool check rules` and `promtool test rules` on every push, so the rules cannot drift into something that no longer parses or no longer fires. |
 | [`scrape.yml`](scrape.yml) | The scrape job the rules expect (`job_name: athena-api`, bearer token, one-minute interval). |
 
@@ -29,8 +29,9 @@ out" — and none of them wakes a person.
    the stack's Prometheus with `mimirtool rules load alerts.yml` (the stack's
    details page gives the address, the instance id and how to make the key).
 4. **Route by severity.** `severity: page` (API down, errors above 5%, a crash
-   loop) goes to a phone, day and night. `severity: ticket` (slow, blocked
-   event loop, memory, the scrape job missing) goes to email.
+   loop, sign-up and password-reset emails failing) goes to a phone, day and night. `severity: ticket` (slow, blocked
+   event loop, memory, the scrape job missing, Redis lost so the limits count
+   per instance, requests refused with 429 for a quarter of an hour) goes to email.
 5. **Fire it once.** With the scrape working, change the scraper's token to a
    wrong one for five minutes. `AthenaApiDown` should reach the phone within
    about three minutes of the change; put the right token back, and it should

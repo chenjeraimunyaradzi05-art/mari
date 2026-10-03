@@ -4,8 +4,10 @@
  * Phase 2: Backend Logic & Integrations
  */
 
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
+import { deleteChatAttachmentFiles } from './chat-attachment-cleanup.service';
 
 // ==========================================
 // CONFIGURATION
@@ -60,6 +62,14 @@ export interface MessageQuery {
   after?: Date;
   limit?: number;
   includeDeleted?: boolean;
+  /**
+   * Members whose messages this reader is not shown: whoever is on either side
+   * of a block with her. Left out in the query, before the page is cut, so a
+   * page is full and the cursor only moves past messages she could have read;
+   * and wiped from the rest, because a message of somebody else's can still
+   * carry theirs (the line it quotes, the reactions on it).
+   */
+  excludeSenderIds?: string[];
 }
 
 export interface MessageStats {
@@ -148,7 +158,7 @@ export async function getMessages(query: MessageQuery): Promise<{
   hasMore: boolean;
   oldestDate?: Date;
 }> {
-  const { conversationId, before, after, limit = 50, includeDeleted = false } = query;
+  const { conversationId, before, after, limit = 50, includeDeleted = false, excludeSenderIds = [] } = query;
   
   const effectiveLimit = Math.min(limit, MAX_MESSAGES_PER_QUERY);
   
@@ -156,6 +166,7 @@ export async function getMessages(query: MessageQuery): Promise<{
     const where: any = {
       conversationId,
       ...(includeDeleted ? {} : { deletedAt: null }),
+      ...(excludeSenderIds.length > 0 ? { senderId: { notIn: excludeSenderIds } } : {}),
     };
     
     if (before) {
@@ -195,8 +206,22 @@ export async function getMessages(query: MessageQuery): Promise<{
     });
     
     const hasMore = messages.length > effectiveLimit;
-    const resultMessages = hasMore ? messages.slice(0, effectiveLimit) : messages;
-    
+    const page = hasMore ? messages.slice(0, effectiveLimit) : messages;
+
+    // A message from someone she has not blocked can still carry something of
+    // someone she has: the line it replies to, and the reactions on it.
+    const hidden = new Set(excludeSenderIds);
+    const resultMessages =
+      hidden.size === 0
+        ? page
+        : page.map((message) => ({
+            ...message,
+            replyTo: message.replyTo && hidden.has(message.replyTo.senderId) ? { ...message.replyTo, content: '' } : message.replyTo,
+            reactions: Array.isArray(message.reactions)
+              ? message.reactions.filter((reaction) => !hidden.has(reaction.userId))
+              : message.reactions,
+          }));
+
     // Return in chronological order
     return {
       messages: resultMessages.reverse(),
@@ -250,14 +275,26 @@ export async function deleteMessage(
       return false;
     }
     
+    // The files go with the words: what the message carried is taken off the row
+    // (the group it was said in stays, which the room's own reads use) and
+    // the files themselves are removed once that is done, unless somebody has
+    // reported the message (services/chat-attachment-cleanup).
+    const { attachments: carried, ...kept } =
+      message.metadata && typeof message.metadata === 'object' && !Array.isArray(message.metadata)
+        ? (message.metadata as Record<string, unknown>)
+        : ({} as Record<string, unknown>);
+
     await prisma.message.update({
       where: { id: messageId },
       data: {
         deletedAt: new Date(),
         content: '', // Clear content for privacy
+        ...(carried !== undefined ? { metadata: kept as Prisma.InputJsonObject } : {}),
       },
     });
-    
+
+    await deleteChatAttachmentFiles([{ id: messageId, metadata: message.metadata }]);
+
     return true;
   } catch (error) {
     logger.error('Failed to delete message', { error, messageId });

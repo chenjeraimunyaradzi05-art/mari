@@ -29,6 +29,7 @@ import { videoApi, VideoPost, type VideoFeedKind } from '../services/api-extensi
 import { unwrapApiData, webUrl } from '../services/api';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { LoadingError } from '../components/ErrorBoundary';
+import { EmergencyHelpButton } from '../components/pillar/EmergencyHelp';
 import { advanceWatch, startWatch, viewToRecord, type WatchState } from '../utils/watchTime';
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -440,6 +441,11 @@ export function VideoFeedScreen() {
         />
       )}
 
+      {/* The reels have no header, so Emergency help sits over the corner of the feed. */}
+      <View style={styles.helpCorner} pointerEvents="box-none">
+        <EmergencyHelpButton />
+      </View>
+
       {/* Feed tabs */}
       <View style={styles.categoryTabs}>
         {FEED_TABS.map((tab) => (
@@ -601,6 +607,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 4,
     textAlign: 'center',
+  },
+  helpCorner: {
+    position: 'absolute',
+    top: 50,
+    right: 12,
+    zIndex: 2,
   },
   categoryTabs: {
     position: 'absolute',

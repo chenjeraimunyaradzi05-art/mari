@@ -8,6 +8,9 @@ jest.mock('../../utils/prisma', () => ({
     // Staff reach an application through membership of the RTO or the host
     // employer named on the apprenticeship, never through their role alone.
     organizationMember: { findFirst: jest.fn(async () => null) },
+    // The host check: an organisation places apprentices only while it is
+    // verified and holds an approved, unexpired host safety attestation.
+    organization: { findMany: jest.fn(async () => []) },
   },
 }));
 
@@ -67,6 +70,20 @@ function mockApprenticeship(overrides: Record<string, unknown> = {}) {
   });
 }
 
+/**
+ * How the host named on the listing stands. `checked` is verified with an
+ * approved attestation; the others are each one half missing.
+ */
+function hostIs(standing: 'checked' | 'unverified' | 'unattested') {
+  prisma.organization.findMany.mockImplementation(async ({ where }: any) =>
+    (where.id.in as string[]).map((id) => ({
+      id,
+      isVerified: standing !== 'unverified',
+      hostSafetyAttestations: standing === 'unattested' ? [] : [{ id: 'att-1' }],
+    }))
+  );
+}
+
 /** The membership lookup findApprenticeshipForStaff makes for a non-admin. */
 function staffOf(...userIds: string[]) {
   prisma.organizationMember.findFirst.mockImplementation(async ({ where }: any) =>
@@ -88,6 +105,7 @@ describe('Deciding an apprenticeship application', () => {
     mockApplication();
     mockApprenticeship();
     staffOf(COORDINATOR);
+    hostIs('checked');
   });
 
   it('lets the provider move an application along, and tells the applicant', async () => {
@@ -127,6 +145,41 @@ describe('Deciding an apprenticeship application', () => {
       .expect(409);
 
     expect(prisma.apprenticeshipApplication.update).not.toHaveBeenCalled();
+  });
+
+  // An offer and a confirmed placement are the two promises that put an
+  // apprentice in a workplace. They are refused for a host ATHENA has not
+  // checked, and nothing is claimed or written when they are.
+  describe.each([
+    ['is not verified', 'unverified'],
+    ['has no approved safety attestation', 'unattested'],
+  ] as const)('when the host %s', (_what, standing) => {
+    beforeEach(() => hostIs(standing));
+
+    it.each(['OFFERED', 'ACCEPTED'])('refuses %s, claims no seat, and tells staff what to do', async (status) => {
+      const res = await request(app).patch('/api/apprenticeships/applications/app-1').set(as(COORDINATOR)).send({ status }).expect(409);
+
+      expect(res.body.message).toContain('verified and its host safety attestation approved');
+      expect(prisma.apprenticeship.updateMany).not.toHaveBeenCalled();
+      expect(prisma.apprenticeshipApplication.update).not.toHaveBeenCalled();
+      expect(notify).not.toHaveBeenCalled();
+    });
+
+    it.each(['SCREENING', 'INTERVIEW', 'REJECTED'])('still lets the provider record %s, which promises nothing', async (status) => {
+      await request(app).patch('/api/apprenticeships/applications/app-1').set(as(COORDINATOR)).send({ status }).expect(200);
+      expect(prisma.apprenticeshipApplication.update).toHaveBeenCalled();
+    });
+  });
+
+  it('asks about the host named on the listing, not the training provider, when both are named', async () => {
+    mockApprenticeship({ rtoId: 'rto-1', hostEmployerId: 'host-1' });
+    prisma.organization.findMany.mockImplementation(async ({ where }: any) =>
+      (where.id.in as string[]).map((id) => ({ id, isVerified: id === 'rto-1', hostSafetyAttestations: id === 'rto-1' ? [{ id: 'att-1' }] : [] }))
+    );
+
+    // The RTO is checked and the host is not: the apprentice would be working at the host.
+    await request(app).patch('/api/apprenticeships/applications/app-1').set(as(COORDINATOR)).send({ status: 'ACCEPTED' }).expect(409);
+    expect(prisma.organization.findMany.mock.calls[0][0].where).toEqual({ id: { in: ['host-1'] } });
   });
 
   it('gives the seat back when a confirmed placement is later rejected', async () => {

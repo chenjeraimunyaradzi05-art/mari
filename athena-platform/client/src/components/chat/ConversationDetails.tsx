@@ -1,18 +1,22 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
-import { Info, Search, ShieldCheck, Timer, User } from 'lucide-react';
+import { Ban, Flag, Info, Search, ShieldCheck, Timer, User } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
-import { useChatStore } from '@/lib/stores/chat.store';
+import { useChatStore, type ChatMessageAttachment } from '@/lib/stores/chat.store';
 import { usePresenceStore } from '@/lib/stores/presence.store';
 import { DISAPPEARING_MESSAGE_OPTIONS, messageApi } from '@/lib/api';
+import { isChatAttachmentKey, useChatAttachmentUrl } from '@/lib/chat-attachments';
 import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { safeHref } from '@/lib/safe-href';
+import { ReportDialog } from '@/components/safety/ReportDialog';
+import { blockMemberFromThread } from './member-safety';
 
 export default function ConversationDetails() {
   const { activeConversationId, conversations, messages, setDisappearingTtl } = useChatStore();
@@ -21,6 +25,9 @@ export default function ConversationDetails() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Array<{ id: string; senderId: string; content: string; createdAt: string }> | null>(null);
   const [searching, setSearching] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [blocking, setBlocking] = useState(false);
+  const router = useRouter();
 
   const conversation = conversations.find((c) => c.id === activeConversationId);
   const participant = conversation?.participants?.[0];
@@ -72,6 +79,17 @@ export default function ConversationDetails() {
   }
 
   const ttl = conversation.disappearingTtlSeconds ?? null;
+
+  const blockParticipant = async () => {
+    setBlocking(true);
+    try {
+      if (await blockMemberFromThread(participant.id, participant.name || 'This member')) {
+        router.push('/dashboard/messages');
+      }
+    } finally {
+      setBlocking(false);
+    }
+  };
 
   // Either side may set the timer. The server writes a system message into
   // the thread naming who changed it and pushes the new setting to both
@@ -137,6 +155,21 @@ export default function ConversationDetails() {
             >
               <User className="w-4 h-4 mr-2" /> View Profile
             </Link>
+            <button
+              type="button"
+              onClick={() => setReportOpen(true)}
+              className={cn(buttonVariants({ variant: 'outline' }), 'w-full justify-start')}
+            >
+              <Flag className="w-4 h-4 mr-2" /> Report member
+            </button>
+            <button
+              type="button"
+              onClick={() => void blockParticipant()}
+              disabled={blocking}
+              className={cn(buttonVariants({ variant: 'outline' }), 'w-full justify-start text-red-600 dark:text-red-400')}
+            >
+              <Ban className="w-4 h-4 mr-2" /> Block member
+            </button>
           </div>
         </div>
 
@@ -216,29 +249,49 @@ export default function ConversationDetails() {
           ) : (
             <div className="mt-3 grid grid-cols-3 gap-2">
               {sharedMedia.map((attachment) => (
-                <a
-                  key={attachment.id}
-                  href={safeHref(attachment.url)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="aspect-square overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700"
-                >
-                  {attachment.type === 'image' ? (
-                    // eslint-disable-next-line @next/next/no-img-element -- served from the media CDN, outside the image config
-                    <img
-                      src={attachment.url}
-                      alt={attachment.name || 'Shared image'}
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <video src={attachment.url} className="h-full w-full object-cover" />
-                  )}
-                </a>
+                <SharedMediaTile key={attachment.id} attachment={attachment} />
               ))}
             </div>
           )}
         </div>
       </div>
+
+      <ReportDialog
+        open={reportOpen}
+        onClose={() => setReportOpen(false)}
+        targetType="user"
+        targetId={participant.id}
+        targetLabel={participant.name || 'this member'}
+      />
     </div>
+  );
+}
+
+/**
+ * One picture or clip in the shared-media grid. A file in the private chat
+ * folder is shown once a link has been minted for the person looking
+ * (lib/chat-attachments); one from before chat files were private has the
+ * public link it always had. A tile with nothing to show yet, or nothing it
+ * may show any more, is left blank rather than drawn as a broken picture.
+ */
+function SharedMediaTile({ attachment }: { attachment: ChatMessageAttachment }) {
+  const link = useChatAttachmentUrl(isChatAttachmentKey(attachment.key) ? attachment.key : undefined);
+  const url = isChatAttachmentKey(attachment.key) ? link.url ?? undefined : attachment.url;
+  const href = safeHref(url);
+  const frame = 'aspect-square overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700';
+
+  if (!url || !href) {
+    return <div className={cn(frame, 'bg-slate-100 dark:bg-slate-800')} aria-hidden />;
+  }
+
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className={frame}>
+      {attachment.type === 'image' ? (
+        // eslint-disable-next-line @next/next/no-img-element -- served from the media CDN or a signed link, outside the image config
+        <img src={url} alt={attachment.name || 'Shared image'} className="h-full w-full object-cover" />
+      ) : (
+        <video src={url} className="h-full w-full object-cover" />
+      )}
+    </a>
   );
 }

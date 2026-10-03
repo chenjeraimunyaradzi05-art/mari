@@ -12,16 +12,20 @@
  * "configured or not") and lib/contact (what the web build knows about the
  * organisation). Where the server does not know, the page says so.
  *
- * Nothing here is editable: settings are environment variables. Maintenance
- * mode and feature flags are changed on /admin/feature-flags.
+ * Settings are environment variables, so almost nothing here is editable.
+ * Maintenance mode and feature flags are changed on /admin/feature-flags. The
+ * one switch on this page is the payments pause, because the incident runbook
+ * sends whoever is on call here to stop new payments, and it has to be one click
+ * and a confirmation away, not a deploy.
  */
 
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
-import { Building2, ChevronLeft, GitCommit, Loader2, Plug, Shield, ShieldAlert, Wrench, HardDrive } from 'lucide-react';
-import { adminOpsApi, type OpsSummary, type RuntimeConfig } from '@/lib/admin-ops-api';
+import { Building2, ChevronLeft, CreditCard, GitCommit, Loader2, Plug, Shield, ShieldAlert, Wrench, HardDrive } from 'lucide-react';
+import { adminOpsApi, type OpsSummary, type PaymentsPauseState, type RuntimeConfig } from '@/lib/admin-ops-api';
 import { contactEmail, HAS_LEGAL_IDENTITY, HAS_OWNED_DOMAIN, ORGANISATION } from '@/lib/contact';
 import { cn } from '@/lib/utils';
 
@@ -113,6 +117,132 @@ const WHEN_UNSCREENED: Record<'off' | 'public' | 'all', string> = {
   public: 'Posts, profiles and images refused; conversations stay open',
   all: 'Everything refused, conversations included',
 };
+
+const PAUSE_MESSAGE_MAX = 500;
+
+/**
+ * Stops, and restarts, every new payment: a charge, a hold, a capture, a payout, a
+ * transfer. Takes effect within a few seconds with no deploy. Refunds, giving a
+ * hold back to a buyer and Stripe's own notices carry on, and members can still
+ * sign in and read. A payment already started on a card form or a Stripe page can
+ * still be completed there, and is recorded as usual.
+ *
+ * Two steps for either direction, because each is a decision about every
+ * member's money and the confirmation says what it will do.
+ */
+function PaymentsPauseCard() {
+  const queryClient = useQueryClient();
+  const state = useQuery({
+    queryKey: ['admin-payments-pause'],
+    queryFn: () => adminOpsApi.paymentsPause(),
+    select: (r) => r.data as PaymentsPauseState,
+  });
+  const [message, setMessage] = useState('');
+  const [confirming, setConfirming] = useState(false);
+
+  const change = useMutation({
+    mutationFn: (enabled: boolean) =>
+      adminOpsApi.setPaymentsPause(enabled ? { enabled, ...(message.trim() ? { message: message.trim() } : {}) } : { enabled }),
+    onSuccess: (response) => {
+      const next = response.data as PaymentsPauseState;
+      queryClient.setQueryData(['admin-payments-pause'], response);
+      void queryClient.invalidateQueries({ queryKey: ['admin-ops-summary'] });
+      setConfirming(false);
+      setMessage('');
+      toast.success(next.paused ? 'Payments are paused.' : 'Payments are open again.');
+    },
+    onError: (error) => toast.error(errorMessage(error) || 'That did not save. Payments are as they were.'),
+  });
+
+  const current = state.data;
+  const paused = current?.paused === true;
+
+  return (
+    <Card icon={CreditCard} title="Payments" description="Stops every new charge, hold, payout and transfer, with no deploy">
+      <Row label="State">
+        {state.isLoading ? (
+          <Loader2 className="ml-auto h-4 w-4 animate-spin text-slate-400" aria-label="Loading" />
+        ) : state.isError || !current ? (
+          NOT_RECORDED
+        ) : paused ? (
+          <span className="text-amber-700 dark:text-amber-300">
+            Paused{current.startedAt ? `, since ${formatDistanceToNow(new Date(current.startedAt), { addSuffix: true })}` : ''}
+          </span>
+        ) : (
+          'Open, members can pay'
+        )}
+      </Row>
+      {paused && current && (
+        <Row label="What members see">
+          <span className="font-normal">{current.message}</span>
+        </Row>
+      )}
+
+      {current && !paused && (
+        <div className="py-3">
+          <label htmlFor="payments-pause-message" className="block text-sm text-slate-600 dark:text-slate-400">
+            What members see while payments are paused
+          </label>
+          <textarea
+            id="payments-pause-message"
+            value={message}
+            onChange={(event) => setMessage(event.target.value.slice(0, PAUSE_MESSAGE_MAX))}
+            rows={3}
+            maxLength={PAUSE_MESSAGE_MAX}
+            placeholder="Leave blank to use the standard wording"
+            className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
+          />
+          <p className="mt-1 text-xs text-slate-500">{message.length} of {PAUSE_MESSAGE_MAX} characters. Plain words, no promises about when it will end.</p>
+        </div>
+      )}
+
+      {current && (
+        <div className="py-3">
+          {confirming ? (
+            <div role="alertdialog" aria-labelledby="payments-pause-confirm" className="rounded-md border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/50 dark:bg-amber-900/20">
+              <p id="payments-pause-confirm" className="text-sm text-amber-900 dark:text-amber-100">
+                {paused
+                  ? 'This opens payments again within a few seconds: new charges, holds, payouts and transfers can start.'
+                  : 'This stops every new charge, hold, payout and transfer within a few seconds. Refunds, handing a hold back to a buyer and Stripe\u2019s own notices carry on. A payment already started on a card form can still be completed.'}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => change.mutate(!paused)}
+                  disabled={change.isPending}
+                  className="min-h-[44px] rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2"
+                >
+                  {change.isPending ? 'Saving…' : paused ? 'Yes, open payments' : 'Yes, pause payments'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirming(false)}
+                  disabled={change.isPending}
+                  className="min-h-[44px] rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700"
+                >
+                  Not now
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirming(true)}
+              className={cn(
+                'min-h-[44px] rounded-md px-4 py-2 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
+                paused
+                  ? 'bg-emerald-600 text-white hover:bg-emerald-700 focus-visible:ring-emerald-500'
+                  : 'bg-amber-600 text-white hover:bg-amber-700 focus-visible:ring-amber-500'
+              )}
+            >
+              {paused ? 'Open payments again' : 'Pause payments'}
+            </button>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
 
 export default function AdminSettingsPage() {
   const summary = useQuery({
@@ -206,6 +336,8 @@ export default function AdminSettingsPage() {
                 {flags.data === null || flags.data === undefined ? NOT_RECORDED : flags.data}
               </Row>
             </Card>
+
+            <PaymentsPauseCard />
 
             <Card icon={GitCommit} title="Build" description="The API process that answered this page">
               <Row label="Version">{c?.build.version ?? NOT_RECORDED}</Row>
@@ -307,8 +439,8 @@ export default function AdminSettingsPage() {
         <div className="mt-8 rounded-lg bg-amber-50 p-6 dark:bg-amber-900/20">
           <h2 className="mb-2 font-semibold text-amber-800 dark:text-amber-200">Changing any of this</h2>
           <p className="text-sm text-amber-700 dark:text-amber-300">
-            Settings are environment variables on the API and web hosts; nothing on this page is editable here, and the values above are what the running process reported when the page loaded.
-            Maintenance mode and feature flags are the exceptions and live on <Link href="/admin/feature-flags" className="underline">Feature flags</Link>.
+            Settings are environment variables on the API and web hosts; apart from the payments switch, nothing on this page is editable here, and the values above are what the running process reported when the page loaded.
+            Maintenance mode and feature flags are the other exceptions and live on <Link href="/admin/feature-flags" className="underline">Feature flags</Link>.
           </p>
         </div>
       </main>

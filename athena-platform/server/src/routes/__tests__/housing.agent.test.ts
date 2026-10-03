@@ -6,6 +6,9 @@ jest.mock('../../utils/prisma', () => ({
     housingListing: { findMany: jest.fn(async () => []), findUnique: jest.fn(), update: jest.fn(async () => ({})) },
     housingInquiry: { findUnique: jest.fn(), update: jest.fn(async () => ({})) },
     notification: { create: jest.fn(async () => ({})) },
+    // Read when a notice is written, for the member's "keep notifications vague".
+    dvSafetyProfile: { findUnique: jest.fn(async () => null) },
+    profile: { findUnique: jest.fn(async () => null) },
   },
 }));
 
@@ -82,5 +85,61 @@ describe('The agent’s side of housing', () => {
     await request(app).patch('/api/housing/listings/l1').set(as('stranger')).send({ status: 'LEASED' }).expect(403);
     await request(app).patch('/api/housing/listings/l1').set(as('agent')).send({ status: 'LEASED', rentWeekly: '420' }).expect(200);
     expect(prisma.housingListing.update.mock.calls[0][0].data).toEqual({ status: 'LEASED', rentWeekly: 420 });
+  });
+});
+
+/**
+ * The address is released by the lister's answer and nothing else. The asker's
+ * route used to write whatever status it was sent, and APPLICATION_SUBMITTED is
+ * one of the states that releases the address: a pending inquiry on a DV-safe
+ * place could be moved there by the asker alone, and the route's own answer
+ * carried the street address, with the lister never having said a word.
+ */
+describe('What the asker can move an inquiry to', () => {
+  const safeListing = { id: 'l1', title: 'Quiet unit', agentId: 'agent', dvSafe: true, type: 'RENTAL', status: 'ACTIVE', safetyVerified: true, address: '7 Hidden Lane', suburb: 'Ashgrove', city: 'Brisbane', state: 'QLD', postcode: '4060', features: [] };
+  const at = (status: string) => ({ ...inquiry, status, notes: null, listing: safeListing });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.housingInquiry.update.mockImplementation(async ({ data }: any) => ({ ...at(data.status ?? 'PENDING'), ...data }));
+  });
+
+  it('cannot say she has applied while the lister has not answered, and is handed no address', async () => {
+    prisma.housingInquiry.findUnique.mockResolvedValue(at('PENDING'));
+
+    const res = await request(app).patch('/api/housing/inquiries/i1').set(as('seeker')).send({ status: 'APPLICATION_SUBMITTED' }).expect(409);
+
+    expect(res.body.message).toContain('once the lister has been in touch');
+    expect(JSON.stringify(res.body)).not.toContain('Hidden Lane');
+    expect(prisma.housingInquiry.update).not.toHaveBeenCalled();
+  });
+
+  it('can say so once the lister has been in touch, and the address comes with the answer', async () => {
+    prisma.housingInquiry.findUnique.mockResolvedValue(at('CONTACTED'));
+
+    const res = await request(app).patch('/api/housing/inquiries/i1').set(as('seeker')).send({ status: 'APPLICATION_SUBMITTED' }).expect(200);
+
+    expect(prisma.housingInquiry.update.mock.calls[0][0].data).toMatchObject({ status: 'APPLICATION_SUBMITTED' });
+    expect(res.body.data.listing.address).toBe('7 Hidden Lane');
+  });
+
+  it('does not reopen a declined or withdrawn inquiry: not by applying, withdrawing or writing', async () => {
+    for (const status of ['DECLINED', 'WITHDRAWN']) {
+      prisma.housingInquiry.findUnique.mockResolvedValue(at(status));
+      const res = await request(app).patch('/api/housing/inquiries/i1').set(as('seeker')).send({ status: 'APPLICATION_SUBMITTED' }).expect(409);
+      expect(res.body.message).toBe('This inquiry is closed');
+      await request(app).patch('/api/housing/inquiries/i1').set(as('seeker')).send({ status: 'WITHDRAWN' }).expect(409);
+      await request(app).patch('/api/housing/inquiries/i1').set(as('seeker')).send({ reply: 'Still interested' }).expect(400);
+    }
+    expect(prisma.housingInquiry.update).not.toHaveBeenCalled();
+  });
+
+  it('can withdraw from any open state, which releases nothing', async () => {
+    for (const status of ['PENDING', 'CONTACTED', 'VIEWING_SCHEDULED', 'APPLICATION_SUBMITTED', 'APPROVED']) {
+      prisma.housingInquiry.findUnique.mockResolvedValue(at(status));
+      const res = await request(app).patch('/api/housing/inquiries/i1').set(as('seeker')).send({ status: 'WITHDRAWN' }).expect(200);
+      expect(res.body.data.listing.address).toBeNull();
+    }
+    expect(prisma.housingInquiry.update).toHaveBeenCalledTimes(5);
   });
 });

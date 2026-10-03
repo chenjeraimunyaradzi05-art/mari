@@ -159,8 +159,13 @@ export function proxy(request: NextRequest) {
     }
   }
 
+  // The safety centre is a static page of call-this-number links with no
+  // sign-in and no API behind it, so closing the site for maintenance leaves it
+  // standing: a visitor who is not safe should find a number here, not a
+  // notice. The maintenance page links to it.
   const maintenanceMode = process.env.NEXT_PUBLIC_MAINTENANCE_MODE === 'true';
-  if (maintenanceMode && !pathname.startsWith('/maintenance')) {
+  const staysOpenInMaintenance = pathname.startsWith('/maintenance') || pathname === '/help/safety-center' || pathname.startsWith('/help/safety-center/');
+  if (maintenanceMode && !staysOpenInMaintenance) {
     const url = request.nextUrl.clone();
     url.pathname = '/maintenance';
     return withPolicy(NextResponse.rewrite(url, { request: { headers: requestHeaders } }));

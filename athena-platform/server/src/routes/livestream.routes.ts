@@ -14,6 +14,9 @@
  *   POST   /api/livestream/:id/messages    say something (REST path; the socket is the live one)
  *   DELETE /api/livestream/:id/messages/:messageId  host takes a message out of the room
  *   DELETE /api/livestream/:id/viewers/:userId      host removes someone from her stream
+ *   POST   /api/livestream/:id/viewers/:userId/mute host silences a viewer's chat for a while
+ *   DELETE /api/livestream/:id/viewers/:userId/mute host lifts that
+ *   PUT    /api/livestream/:id/slow-mode   host sets the gap between a viewer's lines (0 is off)
  *   POST   /api/livestream/:id/gift        send a gift
  *   GET    /api/livestream/:id/leaderboard top gifters
  *   POST   /api/livestream/key/validate    RTMP publish hook: may this key push?
@@ -26,10 +29,23 @@ import { body, validationResult } from 'express-validator';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { liveChatLimiter } from '../middleware/socialLimits';
+import { giftCeiling } from '../middleware/moneyLimits';
 import { normalizeOptionalUserText, normalizeSafeUrl, normalizeUserText } from '../utils/contentSafety';
 import * as live from '../services/livestream.service';
+import { clampLimit } from '../utils/pagination';
 
 const router = Router();
+
+/**
+ * The signed-in member's id, for the routes that sit behind `authenticate`.
+ * A missing one means the route was wired without it, so it is refused rather
+ * than asserted away.
+ */
+function memberId(req: AuthRequest): string {
+  const id = req.user?.id;
+  if (!id) throw new ApiError(401, 'Authentication required');
+  return id;
+}
 
 function validationError(req: Request) {
   const errors = validationResult(req);
@@ -165,7 +181,7 @@ router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
     const status = req.query.status === 'ENDED' ? 'ENDED' : 'LIVE';
     const category = typeof req.query.category === 'string' ? optionalCategory(req.query.category) ?? undefined : undefined;
-    const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : undefined;
+    const limit = clampLimit(req.query.limit, 20, 50);
     const streams = await live.listStreams({ status, category, limit, viewerId: req.user?.id });
     res.json({ success: true, data: streams, ingestConfigured: Boolean(live.ingestConfig().ingestUrl) });
   } catch (error) {
@@ -278,7 +294,7 @@ router.post('/:id/end', authenticate, async (req: AuthRequest, res, next) => {
 // someone who blocked her.
 router.get('/:id/messages', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
-    const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) || 100 : 100;
+    const limit = clampLimit(req.query.limit, 100, 200);
     res.json({ success: true, data: await live.recentMessages(req.params.id, limit, req.user?.id) });
   } catch (error) {
     next(error);
@@ -331,9 +347,53 @@ router.delete('/:id/viewers/:userId', authenticate, async (req: AuthRequest, res
   }
 });
 
+// A mute is the lighter answer: she stays in the room and can watch, and her
+// chat comes back by itself when it runs out.
+router.post(
+  '/:id/viewers/:userId/mute',
+  authenticate,
+  [body('minutes').isInt({ min: 1, max: live.LIVE_MUTE_MAX_MINUTES }).toInt()],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      validationError(req);
+      res.json({
+        success: true,
+        data: await live.muteViewer(req.params.id, memberId(req), req.params.userId, req.body.minutes),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+router.delete('/:id/viewers/:userId/mute', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    res.json({ success: true, data: await live.unmuteViewer(req.params.id, memberId(req), req.params.userId) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// seconds: 0 or null is off.
+router.put(
+  '/:id/slow-mode',
+  authenticate,
+  [body('seconds').optional({ values: 'null' }).isInt({ min: 0, max: live.LIVE_SLOW_MODE_MAX_SECONDS }).toInt()],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      validationError(req);
+      const seconds = typeof req.body.seconds === 'number' ? req.body.seconds : null;
+      res.json({ success: true, data: await live.setSlowMode(req.params.id, memberId(req), seconds) });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 router.post(
   '/:id/gift',
   authenticate,
+  giftCeiling,
   [
     body('giftType').isString().notEmpty().isLength({ max: 50 }),
     body('message').optional({ values: 'null' }).isString().isLength({ max: 200 }),
@@ -354,10 +414,12 @@ router.post(
   }
 );
 
-router.get('/:id/leaderboard', async (req, res, next) => {
+// optionalAuth, so the board can be kept from anyone who may not see the stream
+// and filtered for whoever is reading it. It stays open to a signed-out viewer.
+router.get('/:id/leaderboard', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
-    const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) || 10 : 10;
-    res.json({ success: true, data: await live.giftLeaderboard(req.params.id, limit) });
+    const limit = clampLimit(req.query.limit, 10, 50);
+    res.json({ success: true, data: await live.giftLeaderboard(req.params.id, limit, req.user?.id) });
   } catch (error) {
     next(error);
   }

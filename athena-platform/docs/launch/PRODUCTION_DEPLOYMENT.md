@@ -67,8 +67,25 @@ sudo certbot --nginx -d athena.com -d www.athena.com -d api.athena.com
 2. Copy your **Live** Secret Key (sk_live_...)
 3. Copy your **Live** Publishable Key (pk_live_...)
 4. Set up webhook: Developers → Webhooks → Add endpoint
-   - URL: `https://api.athena.com/api/webhooks/stripe`
-   - Events: `checkout.session.completed`, `customer.subscription.*`, `invoice.*`
+   - URL: `https://<your API host>/api/webhooks/stripe` (the API service's own host, not the web app's; ATHENA does not own athena.com)
+   - Events: every one the server acts on, not only the subscription ones.
+     Memberships: `checkout.session.completed`, `customer.subscription.updated`,
+     `customer.subscription.deleted`, `customer.subscription.trial_will_end`
+     (the reminder email before a trial's first charge), `invoice.paid`,
+     `invoice.payment_failed`. Payments, holds and gifts: `payment_intent.succeeded`,
+     `payment_intent.payment_failed`, `payment_intent.canceled`,
+     `payment_intent.amount_capturable_updated`. Money going back: `charge.refunded`
+     and all five dispute events, `charge.dispute.created`, `charge.dispute.updated`,
+     `charge.dispute.closed`, `charge.dispute.funds_withdrawn` and
+     `charge.dispute.funds_reinstated` (a dispute is recorded and acted on from
+     whichever arrives first, so subscribing to only some of them leaves it half
+     known). Creator payouts:
+     `transfer.created`, `transfer.reversed`. Identity checks:
+     `identity.verification_session.verified`,
+     `identity.verification_session.requires_input`.
+   - A second endpoint with "Listen to events on Connected accounts" ticked, for
+     `account.updated`, `payout.paid` and `payout.failed`, signed with its own secret
+     (`STRIPE_CONNECT_WEBHOOK_SECRET`).
 
 #### OpenAI
 1. Go to https://platform.openai.com/api-keys
@@ -159,7 +176,11 @@ pm2 start npm --name athena-web -- start
 # Check health endpoints
 curl https://api.your-domain.com/health
 curl https://api.your-domain.com/readyz
-curl https://api.your-domain.com/health/auth-diag
+
+# These two answer 404 without the diagnostics token (HEALTH_DIAGNOSTICS_TOKEN).
+# launch-readiness must say "ready": it lists every setting still missing.
+curl -H "Authorization: Bearer $HEALTH_DIAGNOSTICS_TOKEN" https://api.your-domain.com/health/launch-readiness
+curl -H "Authorization: Bearer $HEALTH_DIAGNOSTICS_TOKEN" https://api.your-domain.com/health/auth-diag
 
 # Check frontend
 curl https://athena-empress.netlify.app
@@ -176,7 +197,7 @@ curl https://athena-empress.netlify.app
 - [ ] Rate limiting enabled
 - [ ] Helmet security headers active
 - [ ] Stripe webhook secret configured
-- [ ] Error pages don't leak stack traces
+- [x] Error pages don't leak stack traces (the API answers a generic message and a request id in production; `debugMessage` and `debugStack` appear only with a valid `X-Debug-Auth` header. The web error pages show no error text outside development. The ML service answers a generic detail and logs the exception. `/health/ready` and the emergency start-up server carry no error text. Tested in `errorHandler.test.ts`, `health.probes.test.ts`, `error.test.tsx` and the ML `test_main.py`)
 
 ---
 

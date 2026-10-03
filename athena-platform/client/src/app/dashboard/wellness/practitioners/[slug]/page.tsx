@@ -10,7 +10,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
-import { CalendarCheck, Globe, Phone, Star, Stethoscope, Video } from 'lucide-react';
+import { CalendarCheck, Flag, Globe, Phone, Star, Stethoscope, Video } from 'lucide-react';
 import { wellnessApi, wellnessError } from '@/lib/wellness-api';
 import { Chip, ErrorBox, HealthDisclaimer, Loading, PageTitle, WellnessNav, fmtDay, useLoad } from '@/components/wellness/WellnessUi';
 import { Check, Field, Panel, SelectInput, inputClass } from '@/components/strategy/StrategyUi';
@@ -20,6 +20,18 @@ import { safeHref } from '@/lib/safe-href';
 type Practitioner = { id: string; slug: string; name: string; kind: string; kindLabel: string; headline: string; bio: string; qualifications: string[]; modalities: string[]; specialties: string[]; languages: string[]; suburb: string | null; city: string | null; state: string | null; telehealth: boolean; inPerson: boolean; bulkBilling: boolean; medicareRebate: boolean; privateHealth: boolean; feeFrom: number | null; feeNote: string | null; ahpraNumber: string | null; website: string | null; phone: string | null; bookingUrl: string | null; acceptsBookings: boolean; isVerified: boolean; ratingAvg: number; ratingCount: number; slotMinutes: number; isOwner: boolean; canModerate?: boolean; reviews: Array<{ id: string; rating: number; comment: string | null; isHidden?: boolean; createdAt: string; by: string }>; nextAvailable: Array<{ day: string; slots: number }>; timezone: string };
 type Slots = { day: string; slots: Array<{ start: string; end: string; label: string }>; timezone: string };
 type Reference = { shareScopes: Array<{ key: string; label: string }> };
+
+// The reasons the report intake knows, in the words a member reading a review
+// would use. A review goes to the same queue as a forum post or reply.
+const REVIEW_REPORT_REASONS = [
+  { value: 'INAPPROPRIATE', label: 'Not about a visit to this practitioner' },
+  { value: 'HARASSMENT', label: 'Names or attacks a person' },
+  { value: 'MISINFORMATION', label: 'Dangerous health claims' },
+  { value: 'HATE_SPEECH', label: 'Hate speech' },
+  { value: 'SPAM', label: 'Spam or advertising' },
+  { value: 'OTHER', label: 'Something else' },
+];
+type Reporting = { id: string; reason: string; description: string };
 
 export default function PractitionerPage() {
   const params = useParams<{ slug: string }>();
@@ -37,6 +49,19 @@ export default function PractitionerPage() {
 
   const moderate = async (id: string, isHidden: boolean) => {
     try { await wellnessApi.moderateReview(id, isHidden); toast.success(isHidden ? 'Taken out of the average' : 'Back in the average'); data.reload(); } catch (err) { toast.error(wellnessError(err, 'That could not be changed.')); }
+  };
+
+  // Which review is being reported, and what has been chosen so far. One at a time.
+  const [reporting, setReporting] = useState<Reporting | null>(null);
+  const report = async () => {
+    if (!reporting) return;
+    try {
+      const res = await wellnessApi.reportReview(reporting.id, { reason: reporting.reason, description: reporting.description.trim() || undefined });
+      const sent = res.data?.data as { reference?: string; reviewHours?: number } | undefined;
+      setReporting(null);
+      // The reference is hers to quote, and the hours are the clock the report runs on.
+      toast.success(sent?.reference ? `Reported. A moderator will look within ${sent.reviewHours ?? 48} hours. Your reference is ${sent.reference}.` : 'Reported. A moderator will look.');
+    } catch (err) { toast.error(wellnessError(err, 'That could not be reported.')); }
   };
 
   const book = async () => {
@@ -75,8 +100,33 @@ export default function PractitionerPage() {
                 </dl>
                 <div className="mt-4 flex flex-wrap gap-3 text-sm">{p.phone && <a href={`tel:${p.phone.replace(/\s+/g, '')}`} className="inline-flex items-center gap-1.5 text-rose-600"><Phone className="h-4 w-4" /> {p.phone}</a>}{p.website && <a href={safeHref(p.website)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-rose-600"><Globe className="h-4 w-4" /> Website</a>}{!p.acceptsBookings && p.bookingUrl && <a href={safeHref(p.bookingUrl)} target="_blank" rel="noopener noreferrer" className="btn-secondary text-sm">Contact or book on their site</a>}</div>
               </Panel>
-              {p.reviews.length > 0 && <Panel title="From women who went" intro="Only a completed visit can leave one of these.">
-                <ul className="space-y-3">{p.reviews.map((r) => <li key={r.id} className={cn('text-sm', r.isHidden && 'opacity-60')}><p className="inline-flex flex-wrap items-center gap-1 text-amber-600">{Array.from({ length: r.rating }).map((_, i) => <Star key={i} className="h-3.5 w-3.5 fill-current" />)}<span className="ml-2 text-xs text-slate-500">{r.by} · {new Date(r.createdAt).toLocaleDateString('en-AU')}</span>{r.isHidden && <Chip tone="rose">Hidden</Chip>}{p.canModerate && <button type="button" onClick={() => moderate(r.id, !r.isHidden)} className="ml-2 text-xs text-slate-500 underline-offset-2 hover:underline">{r.isHidden ? 'Show it' : 'Hide it'}</button>}</p>{r.comment && <p className="mt-1 text-slate-700 dark:text-slate-300">{r.comment}</p>}</li>)}</ul>
+              {p.reviews.length > 0 && <Panel title="From women who went" intro="Only a completed visit can leave one of these. If one is not about a visit, or says something it should not, report it and a moderator will look.">
+                <ul className="space-y-3">{p.reviews.map((r) => (
+                  <li key={r.id} className={cn('text-sm', r.isHidden && 'opacity-60')}>
+                    <p className="inline-flex flex-wrap items-center gap-1 text-amber-600">
+                      {Array.from({ length: r.rating }).map((_, i) => <Star key={i} className="h-3.5 w-3.5 fill-current" />)}
+                      <span className="ml-2 text-xs text-slate-500">{r.by} · {new Date(r.createdAt).toLocaleDateString('en-AU')}</span>
+                      {r.isHidden && <Chip tone="rose">Hidden</Chip>}
+                      {p.canModerate && <button type="button" onClick={() => moderate(r.id, !r.isHidden)} className="ml-2 inline-flex min-h-[44px] items-center text-xs text-slate-500 underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400">{r.isHidden ? 'Show it' : 'Hide it'}</button>}
+                      {!r.isHidden && (
+                        <button type="button" onClick={() => setReporting((cur) => (cur?.id === r.id ? null : { id: r.id, reason: 'INAPPROPRIATE', description: '' }))} aria-expanded={reporting?.id === r.id} aria-label={`Report this review by ${r.by}`} className="ml-2 inline-flex min-h-[44px] items-center gap-1 text-xs text-slate-500 underline-offset-2 hover:text-rose-600 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400">
+                          <Flag className="h-3 w-3" /> Report
+                        </button>
+                      )}
+                    </p>
+                    {r.comment && <p className="mt-1 text-slate-700 dark:text-slate-300">{r.comment}</p>}
+                    {reporting?.id === r.id && (
+                      <div className="mt-2 space-y-2 rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+                        <Field label="What is wrong with it"><SelectInput value={reporting.reason} onChange={(reason) => setReporting({ ...reporting, reason })} options={REVIEW_REPORT_REASONS} /></Field>
+                        <Field label="Anything a moderator should know (optional)"><textarea value={reporting.description} onChange={(e) => setReporting({ ...reporting, description: e.target.value })} rows={2} maxLength={1000} className={inputClass} /></Field>
+                        <div className="flex flex-wrap gap-2">
+                          <button type="button" onClick={report} className="btn-primary min-h-[44px] text-xs">Send the report</button>
+                          <button type="button" onClick={() => setReporting(null)} className="min-h-[44px] px-2 text-xs text-slate-500 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400">Cancel</button>
+                        </div>
+                      </div>
+                    )}
+                  </li>
+                ))}</ul>
               </Panel>}
             </div>
             <div>
@@ -89,7 +139,7 @@ export default function PractitionerPage() {
                       {slot && (
                         <>
                           <Field label="How"><SelectInput value={mode} onChange={setMode} options={[...(p.telehealth ? [{ value: 'TELEHEALTH', label: 'Video or phone' }] : []), ...(p.inPerson ? [{ value: 'IN_PERSON', label: 'In person' }] : [])]} /></Field>
-                          <Field label="What it is about" hint="Encrypted; read by you and this practitioner only."><textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} maxLength={1000} className={inputClass} /></Field>
+                          <Field label="What it is about" hint="Encrypted before it is stored. You and this practitioner can read it."><textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} maxLength={1000} className={inputClass} /></Field>
                           <div><span className="text-xs font-medium uppercase tracking-wide text-slate-500">Share ahead of the visit</span><p className="text-xs text-slate-500">A link to your summary that expires a week after the appointment.</p><div className="mt-2 space-y-1.5">{(ref.data?.shareScopes ?? []).map((s) => <Check key={s.key} label={s.label} checked={share.includes(s.key)} onChange={(v) => setShare((x) => (v ? [...x, s.key] : x.filter((k) => k !== s.key)))} />)}</div></div>
                           <button type="button" onClick={book} disabled={busy} className="btn-primary w-full text-sm disabled:opacity-50">Request this appointment</button>
                         </>

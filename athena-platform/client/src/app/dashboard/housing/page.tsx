@@ -9,22 +9,26 @@
  * The safety rules the server keeps, shown honestly here: an address appears
  * only once the lister has answered; DV-safe, emergency and transitional
  * listings are for members with Safe Mode on or a verified account; a DV-safe
- * claim is checked by ATHENA staff before the listing goes live; and on a
- * DV-safe listing the lister sees the asker as an alias, with the
- * conversation carried on the inquiry rather than in messages, until she is
- * approved and chooses to share her details.
+ * claim, and every emergency or transitional place, is checked by ATHENA staff
+ * before the listing goes live, and shows as checked only while whoever listed
+ * it holds a provider check; and on a DV-safe listing the lister sees the
+ * asker as an alias, with the conversation carried on the inquiry rather than
+ * in messages, until she is approved and chooses to share her details. Any
+ * listing can be reported.
  */
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import toast from 'react-hot-toast';
-import { Home, Loader2, MapPin, BedDouble, ShieldCheck, Heart, Search, Plus, Lock } from 'lucide-react';
+import { Home, Loader2, MapPin, BedDouble, ShieldCheck, Heart, Search, Plus, Lock, Flag } from 'lucide-react';
 import { housingApi } from '@/lib/api';
 import { useAuthStore } from '@/lib/hooks';
 import { EmptyState } from '@/components/layout/PageShell';
 import { formatCurrency, formatDate } from '@/lib/utils';
+import { ReportDialog } from '@/components/safety/ReportDialog';
 import { QuickExitButton } from '../safety/QuickExit';
+import { ProviderCheckPanel } from './ProviderCheckPanel';
 import { StaffHousingSupply } from './StaffHousingSupply';
 
 const listingTypes = [
@@ -73,6 +77,8 @@ type HousingListing = {
   dvSafe?: boolean;
   dvSafeNote?: string | null;
   awaitingSafetyCheck?: boolean;
+  /** Staff took it down; only staff put it back. */
+  takenDownByStaff?: boolean;
   petFriendly?: boolean;
   accessibleUnit?: boolean;
   availableFrom?: string | null;
@@ -113,6 +119,18 @@ const isConfidential = (l?: Pick<HousingListing, 'dvSafe' | 'type'> | null) => B
 const whenShort = (iso: string) => new Date(iso).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' });
 const releasedAddress = (l?: HousingListing | null) => (l?.addressReleased && l.address ? [l.address, l.suburb, l.state, l.postcode].filter(Boolean).join(', ') : null);
 
+/**
+ * What "Checked by ATHENA staff" means, in words that match what is checked. A
+ * confidential place (DV-safe, emergency or transitional) is looked at by a
+ * member of staff who records what they checked, and shows as checked only while
+ * whoever listed it holds a provider check. ATHENA does not run police or
+ * background checks, so the badge does not say it did.
+ */
+const CHECKED_MEANING_CONFIDENTIAL =
+  'A member of ATHENA staff looked at this place and wrote down what they checked, and the person offering it has been checked as a provider. ATHENA does not run police or background checks.';
+const CHECKED_MEANING_ORDINARY = 'A member of ATHENA staff looked at this listing and wrote down what they checked.';
+const checkedMeaning = (l: Pick<HousingListing, 'dvSafe' | 'type'>) => (isConfidential(l) ? CHECKED_MEANING_CONFIDENTIAL : CHECKED_MEANING_ORDINARY);
+
 const emptyListing = { title: '', description: '', type: 'RENTAL', suburb: '', city: '', state: 'QLD', rentWeekly: '', bedrooms: '', bathrooms: '', dvSafe: false, dvSafeNote: '', petFriendly: false, accessibleUnit: false, availableFrom: '' };
 
 function Thread({ inquiry, me }: { inquiry: HousingInquiry; me: 'ASKER' | 'LISTER' }) {
@@ -150,6 +168,18 @@ function HousingContent() {
   const [bedrooms, setBedrooms] = useState('');
   // The safety pages link here with ?dvSafe=true.
   const [dvSafe, setDvSafe] = useState(searchParams.get('dvSafe') === 'true');
+  // Read once, then taken off the address. On a computer someone else uses, a
+  // history entry that says "dvSafe=true" says what she was looking for; the
+  // filter itself stays on, in the page, until she clears it.
+  useEffect(() => {
+    if (searchParams.get('dvSafe') === null) return;
+    try {
+      window.history.replaceState(window.history.state, '', window.location.pathname + window.location.hash);
+    } catch {
+      // Some browsers refuse; the filter has still been read.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [petFriendly, setPetFriendly] = useState(false);
   const [accessible, setAccessible] = useState(false);
 
@@ -182,6 +212,9 @@ function HousingContent() {
   // Replying to the lister from your own inquiry.
   const [replyFor, setReplyFor] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
+
+  // Reporting a listing that is not what it says.
+  const [reportListing, setReportListing] = useState<HousingListing | null>(null);
 
   const hasHousingFilters = Boolean(type || city || state || minRent || maxRent || bedrooms || dvSafe || petFriendly || accessible);
 
@@ -261,6 +294,22 @@ function HousingContent() {
       await loadData();
     } catch (err) {
       toast.error(errorMessage(err) || 'Could not update the inquiry');
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  // Withdrawing only closes an inquiry: what she asked and the thread stay on this
+  // list. This takes it all away, and tells nobody.
+  const removeMyInquiry = async (inquiryId: string) => {
+    if (!window.confirm('Remove this inquiry and everything you wrote in it? The lister will not be told, and it cannot be brought back.')) return;
+    setSavingId(inquiryId);
+    try {
+      await housingApi.removeInquiry(inquiryId);
+      toast.success('Removed');
+      await loadData();
+    } catch (err) {
+      toast.error(errorMessage(err) || 'Could not remove that');
     } finally {
       setSavingId(null);
     }
@@ -431,7 +480,7 @@ function HousingContent() {
             <span className="text-sm font-semibold uppercase tracking-wider">Housing</span>
           </div>
           <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">Safe, flexible housing for women</h1>
-          <p className="text-slate-500 dark:text-slate-400 mt-1">{headerLabel}. Addresses stay hidden until the lister answers you; DV-safe listings are checked by ATHENA staff before they show.</p>
+          <p className="text-slate-500 dark:text-slate-400 mt-1">{headerLabel}. Addresses stay hidden until the lister answers you; DV-safe, emergency and transitional listings are checked by ATHENA staff before they show.</p>
           <p className="mt-2 text-sm text-slate-600 dark:text-slate-400"><Link href="/dashboard/safety" className="font-medium text-rose-600 hover:underline dark:text-rose-400">Leaving violence? Emergency help and a safety plan</Link>, and 1800RESPECT on 1800 737 732, any hour.</p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -574,7 +623,7 @@ function HousingContent() {
                 </div>
                 <div className="flex flex-wrap gap-2 text-xs">
                   {item.safetyVerified && (
-                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-50 text-emerald-700" title="A person at ATHENA looked at this listing and the lister before it went live">
+                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-50 text-emerald-700" title={checkedMeaning(item)}>
                       <ShieldCheck className="h-3 w-3" /> Checked by ATHENA staff
                     </span>
                   )}
@@ -587,17 +636,31 @@ function HousingContent() {
                 {myListings.some((m) => m.id === item.id) ? (
                   <p className="text-center text-xs text-slate-500">Your listing</p>
                 ) : (
-                  <button onClick={() => handleInquire(item.id)} disabled={savingId === item.id} className="btn-primary w-full">
-                    {savingId === item.id ? 'Sending...' : 'Inquire'}
-                  </button>
+                  <>
+                    <button onClick={() => handleInquire(item.id)} disabled={savingId === item.id} className="btn-primary w-full">
+                      {savingId === item.id ? 'Sending...' : 'Inquire'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReportListing(item)}
+                      className="inline-flex min-h-[44px] items-center justify-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:hover:text-slate-300"
+                    >
+                      <Flag className="h-3.5 w-3.5" aria-hidden="true" /> Report this listing
+                    </button>
+                  </>
                 )}
               </div>
             ))}
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            &ldquo;Checked by ATHENA staff&rdquo; means a person at ATHENA looked at the listing and the lister before it went live. An address is shown once the lister has answered you.
+            &ldquo;Checked by ATHENA staff&rdquo; on a DV-safe, emergency or transitional place means a member of staff looked at it and wrote down what they checked, and the person offering it has been checked as a provider. ATHENA does not run police or background checks. An address is shown once the lister has answered you.
           </p>
         </>
+      )}
+
+      {/* The same dialog every other report uses: the report goes to the member who listed the place. */}
+      {reportListing && (
+        <ReportDialog open onClose={() => setReportListing(null)} targetType="housing_listing" targetId={reportListing.id} targetLabel={`"${reportListing.title}"`} />
       )}
 
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-4">
@@ -658,7 +721,8 @@ function HousingContent() {
                           Share my details with the lister
                         </button>
                       )}
-                      {!['APPLICATION_SUBMITTED', 'APPROVED'].includes(inquiry.status) && (
+                      {/* Offered once the lister has been in touch, which is when the server allows it: saying so is one of the states that releases the address, so it cannot be the asker's move alone. */}
+                      {['CONTACTED', 'VIEWING_SCHEDULED'].includes(inquiry.status) && (
                         <button type="button" disabled={savingId === inquiry.id} onClick={() => updateMyInquiry(inquiry.id, 'APPLICATION_SUBMITTED')} className="text-primary-600 hover:underline">
                           I have applied
                         </button>
@@ -670,6 +734,11 @@ function HousingContent() {
                       )}
                     </div>
                   )}
+                  <div className="mt-2 text-xs">
+                    <button type="button" disabled={savingId === inquiry.id} onClick={() => removeMyInquiry(inquiry.id)} className="inline-flex min-h-[44px] items-center rounded text-slate-500 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500">
+                      Remove this inquiry from my list
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -689,6 +758,8 @@ function HousingContent() {
             </button>
           )}
         </div>
+
+        <ProviderCheckPanel />
 
         {showListForm && (
           <div className="grid gap-3 md:grid-cols-2 rounded-lg border border-slate-200 p-4 dark:border-slate-700">
@@ -729,6 +800,11 @@ function HousingContent() {
                 <input type="checkbox" checked={listing.accessibleUnit} onChange={(e) => setListing({ ...listing, accessibleUnit: e.target.checked })} className="rounded border-slate-300" /> Accessible
               </label>
             </div>
+            {!listing.dvSafe && (listing.type === 'EMERGENCY' || listing.type === 'TRANSITIONAL') && (
+              <p className="md:col-span-2 rounded-lg bg-purple-50 p-3 text-xs text-purple-800 dark:bg-purple-900/20 dark:text-purple-200">
+                Emergency and transitional places are offered to women in a hard moment, so ATHENA staff look at each one before it goes live. Until then it is not on the list, and it can show as checked only once your provider check, above, has been approved.
+              </p>
+            )}
             {listing.dvSafe && (
               <div className="md:col-span-2 space-y-2 rounded-lg bg-purple-50 p-3 text-sm dark:bg-purple-900/20">
                 <label htmlFor="dv-safe-note" className="block font-medium text-purple-900 dark:text-purple-100">Why is this place safe for a woman leaving violence?</label>
@@ -738,7 +814,7 @@ function HousingContent() {
             )}
             <div className="flex gap-2 md:col-span-2">
               <button type="button" onClick={createListing} disabled={listingSaving} className="btn-primary text-sm">
-                {listingSaving ? 'Listing...' : listing.dvSafe ? 'Send for a safety check' : 'Publish listing'}
+                {listingSaving ? 'Listing...' : isConfidential(listing) ? 'Send for a safety check' : 'Publish listing'}
               </button>
               <button type="button" onClick={() => setShowListForm(false)} className="text-sm text-slate-500 hover:underline">
                 Cancel
@@ -768,11 +844,16 @@ function HousingContent() {
                     <div className="mt-1 flex flex-wrap gap-2 text-xs">
                       {mine.safetyVerified && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-emerald-700"><ShieldCheck className="h-3 w-3" /> Checked by ATHENA staff</span>}
                       {mine.dvSafe && !mine.awaitingSafetyCheck && <span className="rounded-full bg-purple-50 px-2 py-0.5 text-purple-700">DV-safe</span>}
-                      {mine.awaitingSafetyCheck && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-800">Waiting for a safety check</span>}
+                      {mine.awaitingSafetyCheck && !mine.takenDownByStaff && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-800">Waiting for a safety check</span>}
+                      {mine.takenDownByStaff && <span className="rounded-full bg-red-50 px-2 py-0.5 text-red-800">Taken down by ATHENA staff</span>}
                     </div>
                   </div>
-                  {mine.awaitingSafetyCheck ? (
-                    <p className="max-w-xs text-xs text-slate-500">ATHENA staff look at DV-safe listings before they go live. You will be told when it does.</p>
+                  {mine.takenDownByStaff ? (
+                    <p className="max-w-xs text-xs text-slate-500">
+                      ATHENA staff took this listing down, so it cannot be put back on the list from here. If you think that was a mistake, you can <Link href="/help/appeal" className="font-medium underline">appeal the decision</Link>.
+                    </p>
+                  ) : mine.awaitingSafetyCheck ? (
+                    <p className="max-w-xs text-xs text-slate-500">ATHENA staff look at DV-safe, emergency and transitional listings before they go live. You will be told when it does.</p>
                   ) : (
                     <select value={mine.status} onChange={(e) => setListingStatus(mine.id, e.target.value)} disabled={savingId === mine.id} aria-label={`Status for ${mine.title}`} className="bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1 text-xs">
                       {LISTING_STATUS.map(([v, l]) => (

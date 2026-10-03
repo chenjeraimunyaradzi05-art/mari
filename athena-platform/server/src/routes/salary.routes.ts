@@ -37,6 +37,9 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../middleware/auth';
+import { z } from 'zod';
+import { zodBody } from '../middleware/validate';
+import { audMoney, audMoneyOrZero, numeric, text } from '../utils/schemas';
 import salaryEquityService from '../services/salary-equity.service';
 
 const router = Router();
@@ -49,30 +52,25 @@ const router = Router();
  * 
  * Scenario must be one of: 'new_job', 'raise', 'promotion', 'counter_offer'
  */
-router.post('/negotiation-script', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+// The role and the achievements are written into the script's sentences, and the
+// salaries are formatted into them with toLocaleString(), so each is the kind of
+// value that belongs there: "$abc" as a salary used to make the script say so.
+const negotiationBody = z.object({
+  currentSalary: audMoneyOrZero(10_000_000).optional(),
+  targetSalary: audMoney(10_000_000),
+  role: text(120),
+  scenario: z.enum(['new_job', 'raise', 'promotion', 'counter_offer'], {
+    errorMap: () => ({ message: 'Scenario must be one of: new_job, raise, promotion, counter_offer' }),
+  }),
+  achievements: z.array(text(300)).max(20).optional(),
+  yearsAtCompany: numeric.pipe(z.number().min(0).max(80)).optional(),
+});
+
+router.post('/negotiation-script', authenticate, zodBody(negotiationBody), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { 
-      currentSalary, 
-      targetSalary, 
-      role, 
-      scenario, 
-      achievements,
-      yearsAtCompany
-    } = req.body;
-
-    if (!targetSalary || !role || !scenario) {
-      return res.status(400).json({ 
-        error: 'Target salary, role, and scenario are required' 
-      });
-    }
-
-    // Validate scenario
-    const validScenarios = ['new_job', 'raise', 'promotion', 'counter_offer'] as const;
-    if (!validScenarios.includes(scenario)) {
-      return res.status(400).json({
-        error: `Scenario must be one of: ${validScenarios.join(', ')}`
-      });
-    }
+    const { currentSalary, targetSalary, role, scenario, achievements, yearsAtCompany } = req.body as z.output<
+      typeof negotiationBody
+    >;
 
     // Call with correct signature: generateNegotiationScript(situation, context)
     const context = {
@@ -83,10 +81,7 @@ router.post('/negotiation-script', authenticate, async (req: Request, res: Respo
       yearsAtCompany,
     };
 
-    const script = salaryEquityService.generateNegotiationScript(
-      scenario as 'new_job' | 'raise' | 'promotion' | 'counter_offer',
-      context
-    );
+    const script = salaryEquityService.generateNegotiationScript(scenario, context);
 
     res.json(script);
   } catch (error) {

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { authApi } from '@/lib/api';
 import { useAuthStore } from '@/lib/store';
+import { SecondFactorPrompt, asksForSecondFactor } from './SecondFactorPrompt';
 
 type FacebookAuthResponse = {
   accessToken?: string;
@@ -121,6 +122,10 @@ export function FacebookSignInButton({
   const [isReady, setIsReady] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [scriptError, setScriptError] = useState<string | null>(null);
+  // Set when the account Facebook found has two-factor on: the token Facebook
+  // gave, held until she has typed her code so both can be sent together.
+  const [awaitingCode, setAwaitingCode] = useState<string | null>(null);
+  const [codeError, setCodeError] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
   const facebookMutation = useMutation({
@@ -164,7 +169,7 @@ export function FacebookSignInButton({
   );
 
   const exchangeToken = useCallback(
-    async (accessToken: string) => {
+    async (accessToken: string, twoFactorCode?: string) => {
       try {
         const response = await facebookMutation.mutateAsync({
           accessToken,
@@ -173,18 +178,33 @@ export function FacebookSignInButton({
           ...(typeof womanSelfAttested === 'boolean' ? { womanSelfAttested } : {}),
           ...(dateOfBirth ? { dateOfBirth } : {}),
           ...(inviteCode ? { inviteCode } : {}),
+          ...(twoFactorCode ? { twoFactorCode } : {}),
         });
         const { user, accessToken: jwt } = response.data.data;
+        setAwaitingCode(null);
+        setCodeError(null);
         login(user, jwt, '');
         queryClient.invalidateQueries();
         toast.success(mode === 'register' ? 'Welcome to ATHENA!' : 'Welcome back!');
         onSuccess?.();
       } catch (error) {
+        const failure = (error as { response?: { status?: number; data?: { message?: string } } })?.response;
         const message =
-          (error as { response?: { data?: { message?: string } } })?.response?.data?.message ||
+          failure?.data?.message ||
           (mode === 'register'
             ? 'Facebook sign-up failed. Please try again.'
             : 'Facebook sign-in failed. Please try again.');
+
+        // Two-factor is on for this account: ask for the code and send it with
+        // the same token. See SecondFactorPrompt.
+        if (asksForSecondFactor(failure?.status, failure?.data?.message)) {
+          setAwaitingCode(accessToken);
+          setCodeError(twoFactorCode ? message : null);
+          return;
+        }
+
+        setAwaitingCode(null);
+        setCodeError(null);
         handleError(message);
       } finally {
         if (mountedRef.current) setIsLoading(false);
@@ -223,6 +243,21 @@ export function FacebookSignInButton({
       { scope: 'public_profile,email' }
     );
   }, [appId, isReady, scriptError, exchangeToken, handleError, onError]);
+
+  if (awaitingCode) {
+    return (
+      <SecondFactorPrompt
+        provider="Facebook"
+        pending={facebookMutation.isPending}
+        error={codeError}
+        onSubmit={(code) => void exchangeToken(awaitingCode, code)}
+        onCancel={() => {
+          setAwaitingCode(null);
+          setCodeError(null);
+        }}
+      />
+    );
+  }
 
   if (facebookMutation.isPending || isLoading) {
     return (

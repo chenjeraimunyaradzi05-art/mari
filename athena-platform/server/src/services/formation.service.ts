@@ -12,6 +12,9 @@ import { logger } from '../utils/logger';
 import { getStripe, isStripeConfigured } from '../utils/stripe';
 import { FormationState, canTransition, transition } from './formation-state-machine.service';
 import { notifyAdmins } from './admin-notify.service';
+import { FORMATION_FEES_CENTS } from '../config/price-book';
+import { assertPaymentsOpen } from './feature-flags.service';
+import { minorUnitScale } from './stripe-connect.service';
 
 // Stripe comes from the one shared client in utils/stripe, so this module cannot
 // drift onto a different API version from the rest of the server. Whether a key
@@ -22,15 +25,18 @@ import { notifyAdmins } from './admin-notify.service';
 const isProduction =
   process.env.NODE_ENV === 'production' ||
   process.env.VERCEL_ENV === 'production';
-const allowStripeSimulation = process.env.ALLOW_STRIPE_SIMULATION === 'true';
+// Never in production. This was read from the environment whatever the
+// environment was, so a production deployment with the flag on and no Stripe key
+// was handed a mock_pi_ intent, and confirming it marked the registration paid
+// with nothing charged: a business registration received for free, and an
+// applicant told she had paid. The flag is a development convenience, it is off in
+// every deploy file, and a production process with it on will not start (see
+// utils/env.ts), but the service does not depend on that having been read.
+const allowStripeSimulation = !isProduction && process.env.ALLOW_STRIPE_SIMULATION === 'true';
 
-// Formation fee amounts in cents by business type
-const FORMATION_FEES: Record<BusinessType, number> = {
-  SOLE_TRADER: 4900,   // $49 AUD
-  PARTNERSHIP: 9900,   // $99 AUD
-  COMPANY: 49900,      // $499 AUD
-  TRUST: 69900,        // $699 AUD
-};
+// Formation fee amounts in cents of Australian dollars by business type. They
+// are held in the price book with every other fee.
+const FORMATION_FEES: Record<BusinessType, number> = FORMATION_FEES_CENTS;
 
 // Formation fees are quoted in AUD only, so a payment in any other currency
 // is a mismatch rather than something to convert.
@@ -41,6 +47,18 @@ export const FORMATION_PAYMENT_TYPE = 'business_formation';
 
 const formatAud = (cents: number) =>
   new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(cents / 100);
+
+/**
+ * An amount with its currency code after it ("499.00 AUD"), for the notice staff
+ * read when a payment is the wrong amount. The code is written out rather than
+ * left to a symbol because a wrong currency is one of the ways a payment can be
+ * wrong, and "$499.00" is the same on the page for several of them.
+ */
+function formatMoneyIn(minorUnits: number, currency: string): string {
+  const code = currency.toUpperCase();
+  const scale = minorUnitScale(code);
+  return `${(minorUnits / scale).toFixed(String(scale).length - 1)} ${code}`;
+}
 
 function asRecord(value: unknown): Record<string, any> {
   if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, any>;
@@ -240,6 +258,11 @@ async function ensureFormationPaymentIntent(registration: {
   businessName: string | null;
   data: Prisma.JsonValue | null;
 }): Promise<FormationPaymentIntent> {
+  // Asked before an existing intent is reused as well as before one is made: the
+  // intent's client secret is what lets the applicant pay it, so handing it out
+  // while payments are paused would be a way round the pause.
+  await assertPaymentsOpen();
+
   const amountCents = FORMATION_FEES[registration.type];
   const existingId = nonEmptyString(asRecord(registration.data).stripePaymentIntentId);
 
@@ -279,21 +302,29 @@ async function ensureFormationPaymentIntent(registration: {
 
   try {
     const user = await prisma.user.findUnique({ where: { id: registration.userId } });
-    const paymentIntent = await getStripe().paymentIntents.create({
-      amount: amountCents,
-      currency: FORMATION_FEE_CURRENCY,
-      metadata: {
-        // `type` is what the Stripe webhook routes on; without it a successful
-        // payment lands nowhere and the registration stalls at PAYMENT_PENDING.
-        type: FORMATION_PAYMENT_TYPE,
-        registrationId: registration.id,
-        userId: registration.userId,
-        businessType: registration.type,
-        businessName: registration.businessName || 'Unknown',
+    const paymentIntent = await getStripe().paymentIntents.create(
+      {
+        amount: amountCents,
+        currency: FORMATION_FEE_CURRENCY,
+        metadata: {
+          // `type` is what the Stripe webhook routes on; without it a successful
+          // payment lands nowhere and the registration stalls at PAYMENT_PENDING.
+          type: FORMATION_PAYMENT_TYPE,
+          registrationId: registration.id,
+          userId: registration.userId,
+          businessType: registration.type,
+          businessName: registration.businessName || 'Unknown',
+        },
+        description: `Business Formation: ${registration.type} - ${registration.businessName}`,
+        receipt_email: user?.email || undefined,
       },
-      description: `Business Formation: ${registration.type} - ${registration.businessName}`,
-      receipt_email: user?.email || undefined,
-    });
+      // Two submits that arrive together both find no intent to reuse and both
+      // get here; the same key hands the second the intent the first made. The
+      // intent this one replaces is part of the key, so that once it has been
+      // cancelled or has failed, asking again makes a new one instead of being
+      // handed the dead one back for the next day.
+      { idempotencyKey: `formation-fee-${registration.id}-${amountCents}-${existingId ?? 'first'}` }
+    );
 
     logger.info('Created formation payment intent', {
       registrationId: registration.id,
@@ -444,6 +475,20 @@ async function markFormationPaid(
       receivedCents: payment.amountCents,
       currency: payment.currency,
     });
+
+    // The applicant is told "Support has been notified" (confirmFormationPayment),
+    // and until this call nobody was: the line above reached a log and the
+    // money sat taken, with the registration still waiting on a fee that Stripe
+    // says was paid. This is what makes that sentence true. The webhook returns
+    // the outcome rather than throwing, so a replayed event notifies again; the
+    // notice is cheap and the reconciliation is not, so that is the right way round.
+    await notifyAdmins({
+      title: 'A formation payment does not match the fee',
+      message: `${registration.businessName || 'An untitled registration'} (${registration.type.replace(/_/g, ' ').toLowerCase()}) was paid ${formatMoneyIn(payment.amountCents, payment.currency)} against a fee of ${formatMoneyIn(expectedCents, FORMATION_FEE_CURRENCY)}. The registration has not moved. Refund it or settle the difference in Stripe, then put the registration right.`,
+      link: '/admin/formation',
+      data: { kind: 'FORMATION_PAYMENT_MISMATCH', id: registration.id },
+    });
+
     return { status: 'amount_mismatch', registrationId: registration.id };
   }
 

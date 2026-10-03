@@ -8,6 +8,10 @@ import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import { ApiError } from '../middleware/errorHandler';
 import { sendNotification } from './socket.service';
+import { publicName } from '../utils/member-display';
+import { viewerContextFor } from './search.service';
+import { isBlockedEitherWay } from './audience.service';
+import { ADMISSION_REFUSED_MESSAGE, mayBeAdmittedTo } from '../middleware/woman-gate-surfaces';
 
 // ==========================================
 // TYPES
@@ -54,16 +58,15 @@ async function requireActiveMember(groupId: string, userId: string) {
   return member;
 }
 
-/** Who to name in a notification: display name, full name, or "Someone". */
+/** Who to name in a notification: her public name, else her first name, or "Someone". */
 async function displayNamesFor(userIds: string[]): Promise<Map<string, string>> {
   const users = await prisma.user.findMany({
     where: { id: { in: userIds } },
-    select: { id: true, displayName: true, firstName: true, lastName: true },
+    select: { id: true, displayName: true, firstName: true },
   });
   const names = new Map<string, string>();
   for (const user of users) {
-    const full = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
-    names.set(user.id, user.displayName?.trim() || full || 'Someone');
+    names.set(user.id, publicName(user, 'Someone'));
   }
   return names;
 }
@@ -285,9 +288,27 @@ export async function addMember(
       throw new ApiError(400, 'They are already a member');
     }
 
+    // Bringing somebody into a room is contact with everyone in it, and a block is
+    // the end of contact: nobody adds a woman who has blocked her, or whom she has
+    // blocked, to a group, as a member or as a suggestion for the admins. The
+    // answer does not say why. Not best-effort: if the block lists cannot be read
+    // the request fails rather than adding her.
+    if (await isBlockedEitherWay(inviterId, userId)) {
+      throw new ApiError(403, 'You cannot add that person to this group.');
+    }
+
     // Only admins can add moderators/admins
     if (role !== 'MEMBER' && !hasPermission(inviterRole, 'manage_roles')) {
       throw new ApiError(403, "You don't have permission to manage roles");
+    }
+
+    // A private group may ask a completed women-only check of everyone in it
+    // (config/woman-gate-policy.ts). The member who asks to join is held to it
+    // at the join route; this is the other way in, an admin adding someone or a
+    // member suggesting them, which would otherwise bring in an account the
+    // room does not admit. Nothing is read while the surface is not switched on.
+    if (group.privacy === 'PRIVATE' && !(await mayBeAdmittedTo(userId, 'private_groups'))) {
+      throw new ApiError(409, ADMISSION_REFUSED_MESSAGE);
     }
 
     const inviterIsStaff = GROUP_STAFF.includes(inviterRole);
@@ -701,6 +722,20 @@ export async function getBannedMembers(
 
 /**
  * Get group members with roles
+ *
+ * Nobody on either side of a block with the requester is on the list. It used
+ * to name every member of the group, so a man she had blocked who sat in the
+ * same group was handed her id, name and picture, and the id is the key to
+ * everything else about her. The block lists are read the way search reads
+ * them, in both stores and in both directions, and a failed read fails the
+ * request rather than answering with the whole roster.
+ *
+ * A member in Safe Mode is deliberately not left out here, unlike in search
+ * and the suggestions. A group is a room she chose to be in: her name and
+ * picture are on every message and post she writes in it, and a roster that
+ * left her out would show a group of five as four to the other four while she
+ * went on speaking in it. Whoever she does not want in that room has the block
+ * above, and the group's own ban.
  */
 export async function getGroupMembers(
   groupId: string,
@@ -709,10 +744,15 @@ export async function getGroupMembers(
   // Verify requester is a member; a banned row does not count.
   await requireActiveMember(groupId, userId);
 
+  const viewer = await viewerContextFor(userId);
   const members = await prisma.groupMember.findMany({
     where: {
       groupId,
       isBanned: false,
+      ...(viewer.blockedIds.length > 0 ? { userId: { notIn: viewer.blockedIds } } : {}),
+      // A block made from her DV safety page before it reached the
+      // platform-wide list: the id list above cannot name that direction.
+      user: { NOT: { dvSafetyProfile: { is: { blockedUserIds: { has: userId } } } } },
     },
     include: {
       user: {

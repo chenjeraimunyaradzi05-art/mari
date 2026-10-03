@@ -18,6 +18,14 @@ jest.mock('../../utils/prisma', () => ({
     conversationParticipant: { updateMany: jest.fn() },
     message: { create: jest.fn(), findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
     user: { findUnique: jest.fn(), findMany: jest.fn(async () => []) },
+    // The member list is read for blocks, in both stores and both directions.
+    userSafetySettings: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
+    dvSafetyProfile: {
+      findUnique: jest.fn(async () => null),
+      findMany: jest.fn(async () => []),
+      findFirst: jest.fn(async () => null),
+    },
+    follow: { findMany: jest.fn(async () => []) },
     notification: { create: jest.fn(async () => ({ id: 'n1' })) },
     like: { findMany: jest.fn(async () => []), groupBy: jest.fn(async () => []) },
     postSave: { findMany: jest.fn(async () => []) },
@@ -57,6 +65,10 @@ import { emitToGroupRoom } from '../../services/socket.service';
 const prisma: any = prismaTyped;
 const GROUP = 'g1';
 const as = (userId: string) => ({ 'x-test-user': userId });
+
+// The key of a file member-1 uploaded to the room: it names the room and the member.
+const roomKey = (name: string, room = GROUP, sender = 'member-1') =>
+  `chat/${room}/${sender}_0b0a1c2e-3f4a-4b5c-8d6e-7f8091a2b3c4.${name.split('.').pop()}`;
 
 // Notifications are fired after the response, never awaited into it.
 const flush = async () => {
@@ -99,7 +111,8 @@ describe('Group chat', () => {
     expect(emitToGroupRoom).toHaveBeenCalledWith(
       GROUP,
       'groups:message',
-      expect.objectContaining({ groupId: GROUP, message: expect.objectContaining({ content: 'Live one' }) })
+      expect.objectContaining({ groupId: GROUP, message: expect.objectContaining({ content: 'Live one' }) }),
+      { exceptUserIds: [] }
     );
   });
 
@@ -108,7 +121,8 @@ describe('Group chat', () => {
   it('labels a message by what it carries, not by whether it carries anything', async () => {
     const send = (body: Record<string, unknown>) =>
       request(app).post(`/api/groups/${GROUP}/chat/message`).set(as('member-1')).send(body).expect(200);
-    const file = (name: string, contentType: string) => ({ url: `/uploads/posts/member-1/${name}`, name, contentType });
+    // A file in a room is uploaded to it first and carried by its key (utils/chat-attachments).
+    const file = (name: string, contentType: string) => ({ key: roomKey(name), name, contentType });
 
     await send({ content: 'Just words', attachments: [] });
     await send({ attachments: [file('agenda.pdf', 'application/pdf')] });
@@ -117,6 +131,47 @@ describe('Group chat', () => {
     await send({ attachments: [file('a.webp', 'image/webp'), file('b.webp', 'image/webp')] });
 
     expect(prisma.message.create.mock.calls.map((call: any[]) => call[0].data.type)).toEqual(['TEXT', 'FILE', 'AUDIO', 'VIDEO', 'IMAGE']);
+  });
+
+  // A file in a room is one she uploaded to that room, by key. A link, however
+  // well formed, is somebody's public picture or reel; a key from another room
+  // shows that room's file here; a key somebody else uploaded is not hers to send.
+  describe('a file has to be one she uploaded to this room', () => {
+    const send = (attachment: Record<string, unknown>) =>
+      request(app).post(`/api/groups/${GROUP}/chat/message`).set(as('member-1')).send({ content: 'look', attachments: [attachment] });
+
+    const refused = async (attachment: Record<string, unknown>) => {
+      const res = await send(attachment).expect(400);
+      expect(res.body.message).toMatch(/not sent from this conversation/i);
+      expect(prisma.message.create).not.toHaveBeenCalled();
+      expect(emitToGroupRoom).not.toHaveBeenCalled();
+    };
+
+    it('stores the key and what she said about the file, and no link', async () => {
+      await send({ key: roomKey('a.webp'), url: 'https://bucket.example/anything', name: 'a.webp', contentType: 'image/webp', size: 1200 }).expect(200);
+
+      expect(prisma.message.create.mock.calls[0][0].data.metadata.attachments).toEqual([
+        { key: roomKey('a.webp'), name: 'a.webp', contentType: 'image/webp', size: 1200 },
+      ]);
+    });
+
+    it('refuses a link to a public post picture', async () => {
+      await refused({ url: '/uploads/posts/member-1/a.webp', name: 'a.webp', contentType: 'image/webp' });
+    });
+
+    it('refuses a key under another room', async () => {
+      await refused({ key: roomKey('a.webp', 'g2'), contentType: 'image/webp' });
+    });
+
+    it('refuses a key another member uploaded', async () => {
+      await refused({ key: roomKey('a.webp', GROUP, 'member-2'), contentType: 'image/webp' });
+    });
+
+    it('is asked after membership, so a non-member learns nothing about keys', async () => {
+      prisma.groupMember.findUnique.mockResolvedValue(null);
+
+      await send({ key: roomKey('a.webp', 'g2'), contentType: 'image/webp' }).expect(403);
+    });
   });
 
   it('refuses a non-member, and never creates a conversation for them', async () => {
@@ -142,6 +197,66 @@ describe('Group chat', () => {
     ]);
   });
 
+  describe('the member list and blocks', () => {
+    beforeEach(() => {
+      // Nobody blocked on the platform-wide list unless a test says so.
+      prisma.userSafetySettings.findUnique.mockResolvedValue(null);
+      prisma.userSafetySettings.findMany.mockResolvedValue([]);
+      prisma.dvSafetyProfile.findUnique.mockResolvedValue(null);
+      prisma.follow.findMany.mockResolvedValue([]);
+      prisma.groupMember.findMany.mockResolvedValue([]);
+    });
+
+    const askedFor = () => prisma.groupMember.findMany.mock.calls[0][0].where;
+
+    it('leaves out a member she blocked and one who blocked her, in the query so the list is not short', async () => {
+      prisma.userSafetySettings.findUnique.mockResolvedValue({ blockedUsers: ['him'] });
+      prisma.userSafetySettings.findMany.mockResolvedValue([{ userId: 'blocked-her' }]);
+
+      await request(app).get(`/api/groups/${GROUP}/members`).set(as('member-1')).expect(200);
+
+      expect(askedFor().userId.notIn.sort()).toEqual(['blocked-her', 'him']);
+      expect(askedFor()).toMatchObject({ groupId: GROUP, isBanned: false });
+    });
+
+    it('reads a block she made from the DV safety page, before it reached the platform list', async () => {
+      prisma.dvSafetyProfile.findUnique.mockResolvedValue({ blockedUserIds: ['dv-only'] });
+
+      await request(app).get(`/api/groups/${GROUP}/members`).set(as('member-1')).expect(200);
+
+      expect(askedFor().userId.notIn).toEqual(['dv-only']);
+    });
+
+    it('leaves out a member who blocked her from the DV page only, which the id list cannot name', async () => {
+      await request(app).get(`/api/groups/${GROUP}/members`).set(as('member-1')).expect(200);
+
+      expect(askedFor().user).toEqual({ NOT: { dvSafetyProfile: { is: { blockedUserIds: { has: 'member-1' } } } } });
+    });
+
+    it('does not narrow the list when nobody is blocked', async () => {
+      await request(app).get(`/api/groups/${GROUP}/members`).set(as('member-1')).expect(200);
+
+      expect(askedFor().userId).toBeUndefined();
+    });
+
+    it('does not answer with the whole roster when the block lists cannot be read', async () => {
+      prisma.userSafetySettings.findMany.mockRejectedValue(new Error('connection reset'));
+
+      const res = await request(app).get(`/api/groups/${GROUP}/members`).set(as('member-1'));
+
+      expect(res.status).toBeGreaterThanOrEqual(500);
+      expect(res.body.data).toBeUndefined();
+      expect(prisma.groupMember.findMany).not.toHaveBeenCalled();
+    });
+
+    it('does not take a member in Safe Mode off the list: the room is one she chose, and her name is on everything she writes there', async () => {
+      await request(app).get(`/api/groups/${GROUP}/members`).set(as('member-1')).expect(200);
+
+      expect(JSON.stringify(askedFor())).not.toContain('isSafeMode');
+      expect(JSON.stringify(askedFor())).not.toContain('hideFromSearch');
+    });
+  });
+
   it('a moderator pins and unpins; a member may not', async () => {
     prisma.message.findUnique.mockResolvedValue({ conversationId: GROUP, deletedAt: null, metadata: { attachments: [] } });
     prisma.message.update.mockResolvedValue({});
@@ -161,7 +276,195 @@ describe('Group chat', () => {
     prisma.message.findMany.mockResolvedValue([{ id: 'm9', content: 'Rules', metadata: { pinned: true }, sender: { id: 'mod-1', displayName: 'Ana', avatar: null } }]);
     const res = await request(app).get(`/api/groups/${GROUP}/chat/pinned`).set(as('member-1')).expect(200);
     expect(prisma.message.findMany.mock.calls[0][0].where).toMatchObject({ conversationId: GROUP, deletedAt: null, metadata: { path: ['pinned'], equals: true } });
+    expect(prisma.message.findMany.mock.calls[0][0].where.senderId).toBeUndefined();
     expect(res.body.data[0].id).toBe('m9');
+  });
+});
+
+/**
+ * A block ends contact, and a group chat is contact with everyone in the room at
+ * once. The group's posts list and its member list already held to it; the chat
+ * (the history, the pinned messages and the live push) read no block list, so two
+ * members who had blocked each other still read each other in real time. The
+ * assertions are on the query, in both stores and both directions, for the reason
+ * the rest of the block tests give: applied to the page afterwards they would
+ * shorten it.
+ */
+describe('Group chat and blocks', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.groupMember.findUnique.mockResolvedValue(memberRow('member-1', 'MEMBER'));
+    prisma.conversation.upsert.mockResolvedValue({ id: GROUP });
+    prisma.conversation.update.mockResolvedValue({});
+    prisma.conversationParticipant.updateMany.mockResolvedValue({ count: 0 });
+    prisma.message.create.mockImplementation(async (args: any) => ({ id: 'm1', ...args.data, sender: { id: 'member-1', displayName: 'Mei', avatar: null }, replyTo: null }));
+    prisma.message.findMany.mockResolvedValue([]);
+    // Nobody is blocked unless a test says so.
+    prisma.userSafetySettings.findUnique.mockResolvedValue(null);
+    prisma.userSafetySettings.findMany.mockResolvedValue([]);
+    prisma.dvSafetyProfile.findUnique.mockResolvedValue(null);
+    prisma.dvSafetyProfile.findMany.mockResolvedValue([]);
+  });
+
+  /** She blocked 'him'; 'blocked-her' blocked her; she blocked 'dv-only' from the DV page; 'dv-blocked-her' blocked her from it. */
+  const blockEveryWay = () => {
+    prisma.userSafetySettings.findUnique.mockResolvedValue({ blockedUsers: ['him'] });
+    prisma.userSafetySettings.findMany.mockResolvedValue([{ userId: 'blocked-her' }]);
+    prisma.dvSafetyProfile.findUnique.mockResolvedValue({ blockedUserIds: ['dv-only'] });
+    prisma.dvSafetyProfile.findMany.mockResolvedValue([{ userId: 'dv-blocked-her' }]);
+  };
+  const EVERYONE_BLOCKED = ['blocked-her', 'dv-blocked-her', 'dv-only', 'him'];
+
+  describe('the history', () => {
+    it('leaves a blocked member’s messages out in the query, whichever side blocked and whichever store holds the block', async () => {
+      blockEveryWay();
+
+      await request(app).get(`/api/groups/${GROUP}/chat/messages`).set(as('member-1')).expect(200);
+
+      const { where } = prisma.message.findMany.mock.calls[0][0];
+      expect(where.conversationId).toBe(GROUP);
+      expect([...where.senderId.notIn].sort()).toEqual(EVERYONE_BLOCKED);
+    });
+
+    it('asks for no sender clause when nobody is blocked', async () => {
+      await request(app).get(`/api/groups/${GROUP}/chat/messages`).set(as('member-1')).expect(200);
+
+      expect(prisma.message.findMany.mock.calls[0][0].where.senderId).toBeUndefined();
+    });
+
+    it('wipes what a blocked member said from the line a reply quotes and from the reactions on a message she can read', async () => {
+      blockEveryWay();
+      prisma.message.findMany.mockResolvedValue([
+        {
+          id: 'm2',
+          senderId: 'priya',
+          content: 'A reply',
+          createdAt: new Date('2026-10-01T00:00:00Z'),
+          replyTo: { id: 'm1', senderId: 'him', content: 'What he said' },
+          reactions: [
+            { emoji: 'x', userId: 'him' },
+            { emoji: 'y', userId: 'priya' },
+          ],
+        },
+        {
+          id: 'm3',
+          senderId: 'priya',
+          content: 'Another reply',
+          createdAt: new Date('2026-10-01T00:01:00Z'),
+          replyTo: { id: 'm0', senderId: 'ana', content: 'Fine to read' },
+          reactions: [],
+        },
+      ]);
+
+      const res = await request(app).get(`/api/groups/${GROUP}/chat/messages`).set(as('member-1')).expect(200);
+
+      const byId = Object.fromEntries(res.body.data.messages.map((message: any) => [message.id, message]));
+      expect(byId.m2.replyTo).toEqual({ id: 'm1', senderId: 'him', content: '' });
+      expect(byId.m2.reactions).toEqual([{ emoji: 'y', userId: 'priya' }]);
+      expect(JSON.stringify(res.body)).not.toContain('What he said');
+      // A line from somebody she has not blocked is quoted as it was written.
+      expect(byId.m3.replyTo.content).toBe('Fine to read');
+    });
+
+    it('does not answer with the whole history when the block lists cannot be read', async () => {
+      prisma.userSafetySettings.findMany.mockRejectedValue(new Error('connection reset'));
+
+      const res = await request(app).get(`/api/groups/${GROUP}/chat/messages`).set(as('member-1'));
+
+      expect(res.status).toBeGreaterThanOrEqual(500);
+      expect(res.body.data).toBeUndefined();
+      expect(prisma.message.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('the pinned messages', () => {
+    it('leaves a blocked member’s pinned message out in the query', async () => {
+      blockEveryWay();
+
+      await request(app).get(`/api/groups/${GROUP}/chat/pinned`).set(as('member-1')).expect(200);
+
+      const { where } = prisma.message.findMany.mock.calls[0][0];
+      expect(where).toMatchObject({ conversationId: GROUP, metadata: { path: ['pinned'], equals: true } });
+      expect([...where.senderId.notIn].sort()).toEqual(EVERYONE_BLOCKED);
+    });
+  });
+
+  describe('the live push', () => {
+    it('is not pushed to a member on either side of a block with the sender, in either store', async () => {
+      blockEveryWay();
+
+      await request(app).post(`/api/groups/${GROUP}/chat/message`).set(as('member-1')).send({ content: 'Hello room' }).expect(200);
+
+      const [, , , options] = (emitToGroupRoom as any).mock.calls[0];
+      expect([...options.exceptUserIds].sort()).toEqual(EVERYONE_BLOCKED);
+    });
+
+    it('pushes nothing, rather than everything, when the sender’s block lists cannot be read; the message is still stored', async () => {
+      prisma.dvSafetyProfile.findMany.mockRejectedValue(new Error('connection reset'));
+
+      const res = await request(app).post(`/api/groups/${GROUP}/chat/message`).set(as('member-1')).send({ content: 'Hello room' }).expect(200);
+
+      expect(res.body.data.content).toBe('Hello room');
+      expect(prisma.message.create).toHaveBeenCalledTimes(1);
+      expect(emitToGroupRoom).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a reply, which carries the line it answers', () => {
+    const asReplyTo = (senderId: string) => {
+      prisma.message.findUnique.mockResolvedValue({ conversationId: GROUP, deletedAt: null, senderId });
+      prisma.message.create.mockImplementation(async (args: any) => ({
+        id: 'm2',
+        ...args.data,
+        sender: { id: 'member-1', displayName: 'Mei', avatar: null },
+        replyTo: { id: 'm1', senderId, content: `What ${senderId} said` },
+      }));
+    };
+
+    it('is not pushed to a member across a block with the author of the quoted line, who the sender has no block with', async () => {
+      asReplyTo('ana');
+      // Ana blocked Carol; the sender has blocked nobody and nobody has blocked her.
+      prisma.userSafetySettings.findUnique.mockImplementation(async ({ where }: any) =>
+        where.userId === 'ana' ? { blockedUsers: ['carol'] } : null
+      );
+
+      await request(app)
+        .post(`/api/groups/${GROUP}/chat/message`)
+        .set(as('member-1'))
+        .send({ content: 'Agreed', replyToId: 'm1' })
+        .expect(200);
+
+      const [, , , options] = (emitToGroupRoom as any).mock.calls[0];
+      expect(options.exceptUserIds).toEqual(['carol']);
+    });
+
+    it('is pushed to the room as usual when its quoted author is the sender, or nobody is blocked', async () => {
+      asReplyTo('member-1');
+
+      await request(app)
+        .post(`/api/groups/${GROUP}/chat/message`)
+        .set(as('member-1'))
+        .send({ content: 'Adding to that', replyToId: 'm1' })
+        .expect(200);
+
+      const [, , , options] = (emitToGroupRoom as any).mock.calls[0];
+      expect(options.exceptUserIds).toEqual([]);
+    });
+
+    it('is refused when the line it answers is from either side of a block with the sender, and is not stored', async () => {
+      blockEveryWay();
+      asReplyTo('him');
+
+      const res = await request(app)
+        .post(`/api/groups/${GROUP}/chat/message`)
+        .set(as('member-1'))
+        .send({ content: 'Replying anyway', replyToId: 'm1' })
+        .expect(400);
+
+      expect(res.body.message ?? res.body.error?.message ?? JSON.stringify(res.body)).toMatch(/reply target/i);
+      expect(prisma.message.create).not.toHaveBeenCalled();
+      expect(emitToGroupRoom).not.toHaveBeenCalled();
+    });
   });
 });
 
@@ -178,6 +481,12 @@ describe('Adding someone by name', () => {
     prisma.groupMember.findMany.mockResolvedValue([{ userId: 'admin-1' }]);
     prisma.groupMember.create.mockResolvedValue({ userId: 'u9', role: 'MEMBER', joinedAt: new Date(), user: { id: 'u9', displayName: 'Zara Okoro', avatar: null } });
     prisma.groupJoinRequest.upsert.mockResolvedValue({ id: 'r1' });
+    // Nobody is blocked unless a test says so (an earlier suite's mocks do not carry over).
+    prisma.userSafetySettings.findUnique.mockResolvedValue(null);
+    prisma.userSafetySettings.findMany.mockResolvedValue([]);
+    prisma.dvSafetyProfile.findUnique.mockResolvedValue(null);
+    prisma.dvSafetyProfile.findMany.mockResolvedValue([]);
+    prisma.dvSafetyProfile.findFirst.mockResolvedValue(null);
   });
 
   it('a moderator adds her straight away and she is told, with a link the app serves', async () => {
@@ -210,6 +519,28 @@ describe('Adding someone by name', () => {
     expect(prisma.notification.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ userId: 'admin-1', link: `/dashboard/groups/${GROUP}?tab=requests` }) })
     );
+  });
+
+  it('nobody adds, or suggests, a member on either side of a block with her, in either store, and nothing is written', async () => {
+    const add = () => {
+      prisma.groupMember.findUnique
+        .mockResolvedValueOnce(memberRow('mod-1', 'MODERATOR')) // the person adding
+        .mockResolvedValueOnce(null); // not yet a member
+      return request(app).post(`/api/groups/${GROUP}/members`).set(as('mod-1')).send({ userId: 'u9' });
+    };
+
+    // She blocked u9 in the Safety Centre, or u9 blocked her.
+    prisma.userSafetySettings.findMany.mockResolvedValueOnce([{ userId: 'u9' }]);
+    await add().expect(403);
+
+    // Or the block is on the DV safety page alone, in either direction.
+    prisma.dvSafetyProfile.findFirst.mockResolvedValueOnce({ userId: 'u9' });
+    const res = await add().expect(403);
+
+    expect(res.body.message).toBe('You cannot add that person to this group.');
+    expect(prisma.groupMember.create).not.toHaveBeenCalled();
+    expect(prisma.groupJoinRequest.upsert).not.toHaveBeenCalled();
+    expect(prisma.notification.create).not.toHaveBeenCalled();
   });
 
   it('a member may not add when the group has switched invites off', async () => {

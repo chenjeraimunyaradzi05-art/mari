@@ -29,6 +29,9 @@ jest.mock('../../utils/prisma', () => ({
     },
     dvSafetyProfile: {
       findUnique: jest.fn(),
+      // Read by blockedEitherWayIds (audience.service) for the members who blocked
+      // her from the DV safety page.
+      findMany: jest.fn(),
     },
     follow: {
       findMany: jest.fn(),
@@ -75,6 +78,7 @@ describe('Algorithm Routes', () => {
     prismaAny.userSafetySettings.findUnique.mockResolvedValue(null);
     prismaAny.userSafetySettings.findMany.mockResolvedValue([]);
     prismaAny.dvSafetyProfile.findUnique.mockResolvedValue(null);
+    prismaAny.dvSafetyProfile.findMany.mockResolvedValue([]);
     prismaAny.follow.findMany.mockResolvedValue([]);
   });
 
@@ -124,6 +128,60 @@ describe('Algorithm Routes', () => {
     // A called-off event keeps its row for the women who registered, and is
     // not advertised to anyone else as something coming up.
     expect(prismaAny.event.findMany.mock.calls[0][0].where).toMatchObject({ isHidden: false, cancelledAt: null });
+  });
+
+  describe('opportunity-scan across a block', () => {
+    const scan = () => {
+      prismaAny.job.findMany.mockResolvedValue([]);
+      prismaAny.course.findMany.mockResolvedValue([]);
+      prismaAny.event.findMany.mockResolvedValue([]);
+      return request(app).get('/api/algorithms/opportunity-scan').set('x-test-auth', '1');
+    };
+    // A bare notIn would drop an ATHENA listing, which has no host: SQL's NOT IN is never true for a null.
+    const hostNotBlocked = (ids: string[]) => ({ OR: [{ hostUserId: null }, { hostUserId: { notIn: ids } }] });
+
+    it('leaves out the events of a member she blocked, and keeps the listings that have no host', async () => {
+      prismaAny.userSafetySettings.findUnique.mockResolvedValue({ blockedUsers: ['host-she-blocked'] });
+
+      await scan().expect(200);
+
+      expect(prismaAny.event.findMany.mock.calls[0][0].where).toMatchObject(hostNotBlocked(['host-she-blocked']));
+    });
+
+    it('leaves out the events of a member who blocked her, in the platform list', async () => {
+      prismaAny.userSafetySettings.findMany.mockResolvedValue([{ userId: 'host-who-blocked-her' }]);
+
+      await scan().expect(200);
+
+      expect(prismaAny.event.findMany.mock.calls[0][0].where).toMatchObject(hostNotBlocked(['host-who-blocked-her']));
+    });
+
+    it('leaves out the events of a member who blocked her from the DV safety page alone', async () => {
+      prismaAny.dvSafetyProfile.findMany.mockResolvedValue([{ userId: 'host-dv-only' }]);
+
+      await scan().expect(200);
+
+      expect(prismaAny.event.findMany.mock.calls[0][0].where).toMatchObject(hostNotBlocked(['host-dv-only']));
+    });
+
+    it('adds nothing for a member with no blocks, or for a signed-out visitor', async () => {
+      await scan().expect(200);
+      expect(prismaAny.event.findMany.mock.calls[0][0].where).not.toHaveProperty('OR');
+
+      prismaAny.event.findMany.mockClear();
+      prismaAny.event.findMany.mockResolvedValue([]);
+      await request(app).get('/api/algorithms/opportunity-scan').expect(200);
+      expect(prismaAny.event.findMany.mock.calls[0][0].where).not.toHaveProperty('OR');
+    });
+
+    it('fails the request, and lists nothing, when the block lists cannot be read', async () => {
+      prismaAny.userSafetySettings.findUnique.mockRejectedValue(new Error('database unavailable'));
+
+      const response = await scan();
+
+      expect(response.status).toBeGreaterThanOrEqual(500);
+      expect(prismaAny.event.findMany).not.toHaveBeenCalled();
+    });
   });
 
   it('GET /api/algorithms/salary-equity returns market median', async () => {

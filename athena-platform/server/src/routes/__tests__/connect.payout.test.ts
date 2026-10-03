@@ -17,6 +17,10 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 jest.mock('../../utils/prisma', () => ({
   prisma: {
     user: { findUnique: jest.fn(), update: jest.fn(async () => ({})) },
+    // Written when an account is brought up to date from Stripe's own answer.
+    mentorProfile: { updateMany: jest.fn(async () => ({ count: 0 })) },
+    creatorProfile: { updateMany: jest.fn(async () => ({ count: 0 })) },
+    $transaction: jest.fn(async (operations: unknown) => operations),
   },
 }));
 
@@ -42,6 +46,8 @@ const stripeClient = {
     })),
   },
   accounts: {
+    // What Stripe says about the account when the stored status is not ACTIVE.
+    retrieve: jest.fn(async (id: string): Promise<any> => ({ id, details_submitted: false, payouts_enabled: false })),
     listExternalAccounts: jest.fn(async (): Promise<any> => ({ data: [] })),
     updateExternalAccount: jest.fn(async (): Promise<any> => ({})),
   },
@@ -58,20 +64,29 @@ jest.mock('../../utils/logger', () => ({
 }));
 
 import { app } from '../../index';
+import { resetMemoryRateLimits } from '../../middleware/rateLimiter';
 import { prisma as prismaTyped } from '../../utils/prisma';
 
 const prisma: any = prismaTyped;
 
-function memberHasAccount(accountId: string | null = 'acct_ana') {
+// ACTIVE unless a test says otherwise: only an account Stripe has verified and
+// switched on for payouts is paid.
+function memberHasAccount(accountId: string | null = 'acct_ana', stripeConnectStatus: string | null = 'ACTIVE') {
   prisma.user.findUnique.mockResolvedValue({
     stripeConnectAccountId: accountId,
+    stripeConnectStatus,
     mentorProfile: null,
     creatorProfile: null,
+    // The withdrawal route is behind the age gate, which reads the same row.
+    dateOfBirth: new Date('1990-05-01T00:00:00.000Z'),
   });
 }
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // One member makes every request here, and a member may ask for only so many
+  // withdrawals a day (middleware/moneyLimits.ts), so the window starts empty.
+  resetMemoryRateLimits();
   currentUser = { id: 'mentor-1', role: 'USER', email: 'ana@example.com', twoFactorEnabled: false };
   memberHasAccount();
 });
@@ -151,6 +166,66 @@ describe('POST /api/connect/payout', () => {
 
     await request(app).post('/api/connect/payout').send({ amount: 10, currency: 'aud' }).expect(409);
     expect(stripeClient.payouts.create).not.toHaveBeenCalled();
+  });
+
+  // The route asked only that an account id existed. An account that had not
+  // finished Stripe's checks was sent a payout, refused, and reported as "Failed
+  // to create payout" with no word that her setup was what was wrong.
+  describe('a payout account Stripe has not switched on', () => {
+    it.each([['PENDING'], ['RESTRICTED'], [null]])(
+      'turns away an account whose status is %s, tells her what to do, and never calls Stripe to pay',
+      async (status) => {
+        memberHasAccount('acct_ana', status);
+
+        const res = await request(app).post('/api/connect/payout').send({ amount: 10, currency: 'aud' }).expect(409);
+
+        expect(JSON.stringify(res.body)).toMatch(/earnings page/i);
+        expect(JSON.stringify(res.body)).toMatch(/balance is unchanged/i);
+        expect(stripeClient.payouts.create).not.toHaveBeenCalled();
+      }
+    );
+
+    it('says Stripe has paused payouts, rather than that setup is unfinished, for an account that was paying out', async () => {
+      memberHasAccount('acct_ana', 'RESTRICTED');
+
+      const res = await request(app).post('/api/connect/payout').send({ amount: 10, currency: 'aud' }).expect(409);
+
+      expect(JSON.stringify(res.body)).toMatch(/Stripe has paused payouts/);
+    });
+
+    it('asks Stripe once before turning her away, so an account verified a minute ago is not refused on a stale row', async () => {
+      // The row says PENDING; the first read finds it so, Stripe says the account is
+      // ready, and the second read finds what the refresh wrote.
+      const adult = { dateOfBirth: new Date('1990-05-01T00:00:00.000Z'), mentorProfile: null, creatorProfile: null };
+      prisma.user.findUnique
+        .mockResolvedValueOnce(adult) // the age gate
+        .mockResolvedValueOnce({ ...adult, stripeConnectAccountId: 'acct_ana', stripeConnectStatus: 'PENDING' }) // her account
+        .mockResolvedValueOnce({ ...adult, stripeConnectAccountId: 'acct_ana', stripeConnectStatus: 'PENDING' }) // her status
+        .mockResolvedValue({ ...adult, stripeConnectAccountId: 'acct_ana', stripeConnectStatus: 'ACTIVE' });
+      stripeClient.accounts.retrieve.mockResolvedValueOnce({
+        id: 'acct_ana',
+        details_submitted: true,
+        charges_enabled: true,
+        payouts_enabled: true,
+        capabilities: { transfers: 'active' },
+      });
+
+      await request(app).post('/api/connect/payout').send({ amount: 10, currency: 'aud' }).expect(200);
+
+      expect(stripeClient.accounts.retrieve).toHaveBeenCalledWith('acct_ana');
+      // What Stripe said is what was written, and it is what let the payout through.
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'mentor-1' },
+        data: { stripeConnectAccountId: 'acct_ana', stripeConnectStatus: 'ACTIVE' },
+      });
+      expect(stripeClient.payouts.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not ask Stripe at all for an account that is already ACTIVE', async () => {
+      await request(app).post('/api/connect/payout').send({ amount: 10, currency: 'aud' }).expect(200);
+
+      expect(stripeClient.accounts.retrieve).not.toHaveBeenCalled();
+    });
   });
 
   it('keys the payout so a double-tap cannot send the money twice', async () => {

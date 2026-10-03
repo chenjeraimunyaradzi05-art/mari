@@ -10,8 +10,8 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { Copy, Plus, Scale as ScaleIcon, Share2, Trash2 } from 'lucide-react';
-import { localDay, wellnessApi, wellnessError } from '@/lib/wellness-api';
-import { Chip, Empty, ErrorBox, HealthDisclaimer, Loading, PageTitle, Ring, WellnessNav, fmtDay, useLoad } from '@/components/wellness/WellnessUi';
+import { localDay, wellnessApi, wellnessError, type CrisisAnswer, type CrisisLine } from '@/lib/wellness-api';
+import { Chip, CrisisNotice, CrisisStrip, Empty, ErrorBox, HealthDisclaimer, Loading, PageTitle, Ring, WellnessNav, crisisOf, fmtDay, useLoad } from '@/components/wellness/WellnessUi';
 import { Bars, Field, LineChart, Notes, NumberInput, Panel, SelectInput, Stat, inputClass, num } from '@/components/strategy/StrategyUi';
 import { shareOrCopy } from '@/lib/download';
 import { cn } from '@/lib/utils';
@@ -20,6 +20,7 @@ type Data = {
   today: string; entries: Array<{ id: string; day: string; category: string; task: string; minutes: number; carriedBy: string }>;
   analysis: { window: { from: string; to: string; weeks: number }; totalHours: number; myHours: number; myShare: number; invisibleShare: number; byCategory: Array<{ category: string; label: string; invisible: boolean; hours: number; myHours: number; share: number; tasks: string[] }>; byCarrier: Array<{ carrier: string; label: string; hours: number; share: number }>; weekly: Array<{ weekStart: string; myHours: number; totalHours: number }>; impactScore: number; impactLabel: string; burnout: { level: string; title: string; reasons: string[]; advice: string }; delegation: Array<{ category: string; label: string; hours: number; ask: string; handover: string[]; boundary: string }>; conversationCard: string; notes: string[] };
   categories: Array<{ key: string; label: string; invisible: boolean; examples: string }>;
+  crisisLines?: CrisisLine[];
 };
 
 const CARRIERS = [{ value: 'ME', label: 'Me' }, { value: 'SHARED', label: 'Shared' }, { value: 'PARTNER', label: 'My partner' }, { value: 'OTHER', label: 'Someone else' }];
@@ -29,12 +30,14 @@ export default function MentalLoadPage() {
   const data = useLoad<Data>(() => wellnessApi.mentalLoad(Number(weeks)), [weeks]);
   const [form, setForm] = useState({ day: localDay(), category: 'PLANNING', task: '', minutes: '30', carriedBy: 'ME' });
   const [busy, setBusy] = useState(false);
+  // Said back to her when a task she logged sounds like crisis. Nobody else is told: this page is hers alone.
+  const [crisis, setCrisis] = useState<CrisisAnswer | null>(null);
   const a = data.data?.analysis;
 
   const add = async () => {
     if (!form.task.trim()) return;
     setBusy(true);
-    try { await wellnessApi.addLoad({ day: form.day, category: form.category, task: form.task.trim(), minutes: num(form.minutes, 30), carriedBy: form.carriedBy }); setForm((f) => ({ ...f, task: '' })); data.reload(); } catch (err) { toast.error(wellnessError(err, 'That could not be logged.')); } finally { setBusy(false); }
+    try { const res = await wellnessApi.addLoad({ day: form.day, category: form.category, task: form.task.trim(), minutes: num(form.minutes, 30), carriedBy: form.carriedBy }); setCrisis(crisisOf(res)); setForm((f) => ({ ...f, task: '' })); data.reload(); } catch (err) { toast.error(wellnessError(err, 'That could not be logged.')); } finally { setBusy(false); }
   };
   const remove = async (id: string) => { try { await wellnessApi.deleteLoad(id); data.reload(); } catch (err) { toast.error(wellnessError(err, 'That could not be removed.')); } };
   const copyCard = async () => { if (!a?.conversationCard) return; try { await navigator.clipboard.writeText(a.conversationCard); toast.success('Copied'); } catch { toast.error('Copy did not work; select the text instead.'); } };
@@ -48,6 +51,10 @@ export default function MentalLoadPage() {
     <div className="mx-auto max-w-5xl space-y-6 p-6">
       <PageTitle icon={ScaleIcon} kicker="Wellness" title="The mental load" blurb="The planning, remembering, admin and emotional work that nobody sees. Log it as it happens and the picture builds on its own." action={<div className="w-40"><SelectInput value={weeks} onChange={setWeeks} options={[{ value: '1', label: 'This week' }, { value: '4', label: 'Last 4 weeks' }, { value: '12', label: 'Last 12 weeks' }]} /></div>} />
       <WellnessNav current="/dashboard/wellness/mental-load" />
+      <CrisisNotice crisis={crisis} onClose={() => setCrisis(null)} />
+      {/* A burnout level of high is not a crisis, but it is the point at which a woman is most likely to be running on empty, and
+          the page used to say nothing but "Act now". The lines are the ones every other wellness page shows. */}
+      {a?.burnout.level === 'high' && <CrisisStrip lines={data.data?.crisisLines} title="If it is all too much" />}
 
       <Panel icon={Plus} title="Log it" intro="Five minutes counts. Who carried it is the point of the exercise.">
         <div className="grid gap-3 sm:grid-cols-[1fr_1fr_2fr_1fr_1fr_auto] sm:items-end">

@@ -14,8 +14,8 @@
  *
  * This runs every six hours and pages through what Stripe holds for the
  * window a hold can still be moving in, comparing it with EscrowPayment,
- * Payment, Invoice, CreatorPayout and Subscription. It sorts what it finds in
- * two:
+ * Payment, Invoice, CreatorPayout, Subscription and PaymentDispute. It sorts
+ * what it finds in two:
  *
  *  - `repaired`: the row was simply behind Stripe, in a direction the webhook
  *    for that event would have moved it, and it has been moved. Nothing is
@@ -70,6 +70,13 @@ const MAX_SINGLE_LOOKUPS = 50;
 /** Findings kept in the stored report. The counts are always complete. */
 const MAX_FINDINGS_KEPT = 200;
 
+/**
+ * How far back disputes are read. A card dispute stays open for weeks and its
+ * outcome arrives long after the charge, so it is looked at over a far longer
+ * window than the payment intents it came from.
+ */
+export const DISPUTE_LOOKBACK_DAYS = 90;
+
 /** One-off payments that should each have a Payment row, by the intent's metadata `type`. */
 const PAYMENT_ROW_TYPES = new Set<string>([
   'gift_balance_purchase',
@@ -94,7 +101,10 @@ export type ReconciliationFindingKind =
   | 'CREATOR_PAYOUT_REVERSED'
   | 'CREATOR_PAYOUT_NO_TRANSFER'
   | 'SUBSCRIPTION_STATUS_CONFLICT'
-  | 'SUBSCRIPTION_MISSING_AT_STRIPE';
+  | 'SUBSCRIPTION_MISSING_AT_STRIPE'
+  | 'REFUND_AMOUNT_CONFLICT'
+  | 'DISPUTE_MISSING'
+  | 'DISPUTE_STATUS_CONFLICT';
 
 export interface ReconciliationFinding {
   kind: ReconciliationFindingKind;
@@ -116,6 +126,7 @@ export interface ReconciliationReport {
     paymentRows: number;
     creatorPayouts: number;
     subscriptions: number;
+    disputes: number;
   };
   repaired: number;
   needsAttention: number;
@@ -166,6 +177,17 @@ function metadataValue(metadata: Stripe.Metadata | null | undefined, key: string
 function fullyRefunded(intent: Stripe.PaymentIntent): boolean {
   const charge = intent.latest_charge;
   return charge !== null && typeof charge === 'object' ? charge.refunded === true : false;
+}
+
+/**
+ * How much of the charge Stripe says has been refunded so far, in minor units, or
+ * null when the charge was not expanded or carries no figure. Cumulative, so it is
+ * comparable with the figure the refund webhook keeps on our rows.
+ */
+function refundedCentsAtStripe(intent: Stripe.PaymentIntent): number | null {
+  const charge = intent.latest_charge;
+  if (charge === null || typeof charge !== 'object') return null;
+  return typeof charge.amount_refunded === 'number' ? charge.amount_refunded : null;
 }
 
 /** What an escrow row should say for an intent in this state, or null when PENDING and FAILED are both fair. */
@@ -234,7 +256,7 @@ async function reconcileEscrowRows(
 
   const rows = await prisma.escrowPayment.findMany({
     where: { paymentIntentId: { in: escrowIntents.map(i => i.id) } },
-    select: { id: true, paymentIntentId: true, status: true, capturedAt: true },
+    select: { id: true, paymentIntentId: true, status: true, capturedAt: true, refundedAmount: true },
   });
   const byIntent = new Map(rows.map(r => [r.paymentIntentId, r]));
 
@@ -256,6 +278,40 @@ async function reconcileEscrowRows(
         });
       }
       continue;
+    }
+
+    // How much of the sale has gone back to the buyer. A part refund leaves the
+    // row CAPTURED and records the figure beside it (the charge.refunded
+    // webhook), so a row whose figure is behind Stripe's missed that event. Moved
+    // up to Stripe's figure, in the one direction the webhook would have moved
+    // it; a row that claims more than Stripe knows of is a conflict. A full
+    // refund is the status check below.
+    const stripeRefunded = refundedCentsAtStripe(intent);
+    if (intent.status === 'succeeded' && expected !== 'REFUNDED' && stripeRefunded !== null) {
+      const recorded = row.refundedAmount ?? 0;
+      if (stripeRefunded > recorded) {
+        const { count } = await prisma.escrowPayment.updateMany({
+          where: { id: row.id, refundedAmount: { lt: stripeRefunded } },
+          data: { refundedAmount: stripeRefunded },
+        });
+        if (count > 0) {
+          findings.add({
+            kind: 'REFUND_AMOUNT_CONFLICT',
+            outcome: 'repaired',
+            stripeId: intent.id,
+            localId: row.id,
+            detail: `Stripe has refunded ${money(stripeRefunded, intent.currency)} of this payment and the row said ${money(recorded, intent.currency)}; it now says what Stripe does.`,
+          });
+        }
+      } else if (stripeRefunded < recorded) {
+        findings.add({
+          kind: 'REFUND_AMOUNT_CONFLICT',
+          outcome: 'needs_attention',
+          stripeId: intent.id,
+          localId: row.id,
+          detail: `ATHENA's row says ${money(recorded, intent.currency)} was refunded and Stripe says ${money(stripeRefunded, intent.currency)}. Decide which is right before the seller's statement is relied on.`,
+        });
+      }
     }
 
     if (expected === null) {
@@ -290,7 +346,13 @@ async function reconcileEscrowRows(
                       ? 'The card authorisation lapsed before the payment was released'
                       : `Cancelled at Stripe (${intent.cancellation_reason ?? 'no reason given'})`,
                 }
-              : { status: 'REFUNDED', canceledAt: new Date() };
+              : {
+                  status: 'REFUNDED',
+                  canceledAt: new Date(),
+                  // The figure goes with the status, or the amount check above
+                  // would report this very row on the next run.
+                  ...(stripeRefunded !== null ? { refundedAmount: stripeRefunded } : {}),
+                };
 
       // Conditional on the status just read, so a release or cancellation
       // that lands at the same moment is not overwritten.
@@ -335,7 +397,7 @@ async function reconcilePaymentRows(
 
   const rows = await prisma.payment.findMany({
     where: { stripePaymentIntentId: { in: paymentIntents.map(i => i.id) } },
-    select: { id: true, stripePaymentIntentId: true, status: true },
+    select: { id: true, stripePaymentIntentId: true, status: true, refundedAmount: true },
   });
   const byIntent = new Map(rows.map(r => [r.stripePaymentIntentId, r]));
   const completed: string[] = [];
@@ -376,6 +438,25 @@ async function reconcilePaymentRows(
     }
 
     const expected = refunded ? 'REFUNDED' : 'COMPLETED';
+    const stripeRefunded = refundedCentsAtStripe(intent);
+
+    // The same check as for a hold, with one difference: it is reported and not
+    // repaired. A refund also takes back gift points and credits the invoice, and
+    // only the webhook for the refund does those, so the cure is to run it again.
+    if (expected !== 'REFUNDED' && stripeRefunded !== null) {
+      const scale = minorUnitScale(intent.currency);
+      const recorded = Math.round(Number(row.refundedAmount ?? 0) * scale);
+      if (stripeRefunded !== recorded) {
+        findings.add({
+          kind: 'REFUND_AMOUNT_CONFLICT',
+          outcome: 'needs_attention',
+          stripeId: intent.id,
+          localId: row.id,
+          detail: `Stripe has refunded ${money(stripeRefunded, intent.currency)} of this payment and ATHENA's Payment row says ${money(recorded, intent.currency)}. Resend the charge.refunded event for this payment from the Stripe dashboard so the row, the invoice and any gift points are brought into line.`,
+        });
+      }
+    }
+
     if (row.status === expected) {
       if (expected === 'COMPLETED') completed.push(row.id);
       continue;
@@ -388,7 +469,14 @@ async function reconcilePaymentRows(
     if (behind) {
       const { count } = await prisma.payment.updateMany({
         where: { id: row.id, status: row.status },
-        data: { status: expected },
+        data: {
+          status: expected,
+          // A full refund is the whole of the payment. The figure goes with the
+          // status, in the row's own dollars, when Stripe gave one.
+          ...(expected === 'REFUNDED' && stripeRefunded !== null
+            ? { refundedAmount: new Prisma.Decimal(stripeRefunded).div(minorUnitScale(intent.currency)) }
+            : {}),
+        },
       });
       if (count > 0) {
         findings.add({
@@ -586,6 +674,105 @@ async function reconcileCreatorPayouts(
 }
 
 // ---------------------------------------------------------------------------
+// Disputes
+// ---------------------------------------------------------------------------
+
+/** The outcome a Stripe dispute status stands for; the same mapping the webhook writes. */
+function disputeOutcomeFor(status: string): 'OPEN' | 'WON' | 'LOST' | 'CLOSED' {
+  switch (status) {
+    case 'won':
+      return 'WON';
+    case 'lost':
+      return 'LOST';
+    case 'warning_closed':
+    case 'charge_refunded':
+    case 'prevented':
+      return 'CLOSED';
+    default:
+      return 'OPEN';
+  }
+}
+
+/**
+ * Card disputes Stripe has that ATHENA has no record of, or has recorded at a
+ * different stage.
+ *
+ * A dispute that never reached the webhook is the costly kind of silence: the
+ * evidence deadline passes in Stripe and nobody here knew there was one. Reported
+ * and not repaired, the way a missing Payment row is: recording it from here
+ * would skip what the events do about a dispute (the membership, the gift points,
+ * the pause on creators), and resending the event runs all of it.
+ */
+async function reconcileDisputes(
+  stripe: Stripe,
+  now: Date,
+  findings: Findings,
+  incomplete: string[]
+): Promise<number> {
+  const since = Math.floor((now.getTime() - DISPUTE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000) / 1000);
+
+  let items: Stripe.Dispute[];
+  let complete: boolean;
+  try {
+    ({ items, complete } = await readAll<Stripe.Dispute>(startingAfter =>
+      stripe.disputes.list({
+        created: { gte: since },
+        limit: 100,
+        ...(startingAfter ? { starting_after: startingAfter } : {}),
+      })
+    ));
+  } catch (error) {
+    // A restricted key that cannot read disputes must not take the rest of the
+    // run down with it. Said in the report, so it is not silent.
+    incomplete.push(`disputes: Stripe would not list them (${(error as Error).message})`);
+    return 0;
+  }
+  if (!complete) incomplete.push('disputes: Stripe has more than one run reads');
+  if (items.length === 0) return 0;
+
+  const rows = await prisma.paymentDispute.findMany({
+    where: { stripeDisputeId: { in: items.map(d => d.id) } },
+    select: { id: true, stripeDisputeId: true, outcome: true },
+  });
+  const byId = new Map(rows.map(r => [r.stripeDisputeId, r]));
+  const settledBefore = now.getTime() - SETTLE_MARGIN_MS;
+
+  for (const dispute of items) {
+    const row = byId.get(dispute.id);
+    const amount = money(dispute.amount, dispute.currency);
+
+    if (!row) {
+      // A dispute opened a moment ago may be waiting on its webhook.
+      if (dispute.created * 1000 <= settledBefore) {
+        findings.add({
+          kind: 'DISPUTE_MISSING',
+          outcome: 'needs_attention',
+          stripeId: dispute.id,
+          localId: null,
+          detail: `Stripe has a ${dispute.status.replace(/_/g, ' ')} dispute of ${amount} (${dispute.reason}) that ATHENA has no record of. Resend the charge.dispute.created event for it from the Stripe dashboard, and respond before the evidence deadline.`,
+        });
+      }
+      continue;
+    }
+
+    // A decided dispute stays decided here, as in the webhook, so only a row
+    // that is behind is reported.
+    const atStripe = disputeOutcomeFor(dispute.status);
+    if (row.outcome === 'OPEN' && atStripe !== 'OPEN') {
+      findings.add({
+        kind: 'DISPUTE_STATUS_CONFLICT',
+        outcome: 'needs_attention',
+        stripeId: dispute.id,
+        localId: row.id,
+        detail: `ATHENA still has this ${amount} dispute open and Stripe says it was ${dispute.status}. Resend the charge.dispute.closed event for it from the Stripe dashboard.`,
+      });
+    }
+  }
+
+  return items.length;
+}
+
+// ---------------------------------------------------------------------------
 // Memberships
 // ---------------------------------------------------------------------------
 
@@ -731,7 +918,7 @@ export async function runStripeReconciliation(now = new Date()): Promise<Reconci
     ranAt: now.toISOString(),
     windowStart: windowStart.toISOString(),
     windowEnd: windowEnd.toISOString(),
-    checked: { paymentIntents: 0, escrowRows: 0, paymentRows: 0, creatorPayouts: 0, subscriptions: 0 },
+    checked: { paymentIntents: 0, escrowRows: 0, paymentRows: 0, creatorPayouts: 0, subscriptions: 0, disputes: 0 },
     repaired: 0,
     needsAttention: 0,
     findings: [],
@@ -764,6 +951,7 @@ export async function runStripeReconciliation(now = new Date()): Promise<Reconci
   report.checked.paymentRows = await reconcilePaymentRows(intents, findings, windowEnd);
   report.checked.creatorPayouts = await reconcileCreatorPayouts(stripe, now, findings, report.incomplete);
   report.checked.subscriptions = await reconcileSubscriptions(stripe, findings, report.incomplete);
+  report.checked.disputes = await reconcileDisputes(stripe, now, findings, report.incomplete);
 
   report.findings = findings.kept();
   report.repaired = findings.repaired.length;

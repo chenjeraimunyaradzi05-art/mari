@@ -11,7 +11,7 @@
  */
 
 import { Suspense, useMemo, useState } from 'react';
-import { Lock, Users } from 'lucide-react';
+import { Flag, Lock, Users } from 'lucide-react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { groupsApi } from '@/lib/api';
@@ -32,6 +32,7 @@ import { GroupChat } from '@/components/community/GroupChat';
 import { GroupMembers } from '@/components/community/GroupMembers';
 import { GroupJoinRequests } from '@/components/community/GroupJoinRequests';
 import { GroupSettings } from '@/components/community/GroupSettings';
+import { ReportDialog } from '@/components/safety/ReportDialog';
 
 type Tab = 'posts' | 'chat' | 'members' | 'requests' | 'settings';
 const TABS: readonly Tab[] = ['posts', 'chat', 'members', 'requests', 'settings'];
@@ -53,6 +54,7 @@ function GroupDetailContent() {
   const cancelRequest = useCancelMyGroupJoinRequest();
   const deletePost = useDeleteGroupPost();
   const [tab, setTab] = useState<Tab>(() => (isTab(requestedTab) ? requestedTab : 'posts'));
+  const [reportOpen, setReportOpen] = useState(false);
 
   // The requests tab shows how many are waiting, so an admin sees it at once.
   const canModerateGroup = group?.role === 'admin' || group?.role === 'moderator';
@@ -176,6 +178,18 @@ function GroupDetailContent() {
                 Ask to join
               </button>
             )}
+            {/* A group as a whole can be reported, not only a post in it. An admin
+                is looking at her own group's settings, so she is not offered it
+                (the server refuses the creator in any case). */}
+            {user && group.role !== 'admin' && (
+              <button
+                type="button"
+                onClick={() => setReportOpen(true)}
+                className="inline-flex min-h-[32px] items-center gap-1 text-xs text-slate-500 hover:text-red-600 dark:text-slate-400"
+              >
+                <Flag className="h-3.5 w-3.5" /> Report group
+              </button>
+            )}
           </div>
         </div>
 
@@ -226,6 +240,14 @@ function GroupDetailContent() {
           posts.map((post) => <PostCard key={post.id} post={post} source="group" onModeratorRemove={removeFor(post)} />)
         )}
       </div>
+
+      <ReportDialog
+        open={reportOpen}
+        onClose={() => setReportOpen(false)}
+        targetType="group"
+        targetId={group.id}
+        targetLabel={group.name}
+      />
     </div>
   );
 }

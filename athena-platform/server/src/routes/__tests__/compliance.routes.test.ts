@@ -139,6 +139,22 @@ describe('Compliance routes for a Queensland company', () => {
       expect(res.body.data.regime.regulator.name).toBe('Ofcom');
     });
 
+    // There is no member-to-member mute: what exists is asking to see fewer posts
+    // and reels from someone, which is the feeds and reels only and tells nobody.
+    // The list used to say "mute users", which a reader takes to cover everything
+    // a block does short of the block.
+    it('describes what a member can do about someone without blocking them as exactly that, and not as a mute', async () => {
+      const res = await request(app).get('/api/compliance/online-safety');
+
+      const features = res.body.data.safetyFeatures as Array<{ name: string; description: string }>;
+      const names = features.map((feature) => feature.name);
+      expect(names).toEqual(expect.arrayContaining(['Content Reporting', 'User Blocking', 'Seeing less of someone', 'Muted words']));
+      expect(JSON.stringify(features)).not.toMatch(/mute users|user muting/i);
+      const seeingLess = features.find((feature) => feature.name === 'Seeing less of someone');
+      expect(seeingLess?.description).toMatch(/fewer posts and reels/);
+      expect(seeingLess?.description).toMatch(/not told/);
+    });
+
     it('keeps /uk-safety answering as before and pointing at its replacement', async () => {
       const res = await request(app).get('/api/compliance/uk-safety');
 

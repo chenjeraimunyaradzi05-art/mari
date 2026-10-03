@@ -1,11 +1,12 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { z, ZodError, type ZodTypeAny } from 'zod';
-import type { SupportProgramStatus } from '@prisma/client';
+import { LanguageProficiency, type SupportProgramStatus } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
-import { buildPaginationMeta, parsePagination } from '../utils/pagination';
+import { buildPaginationMeta, clampLimit, parsePagination } from '../utils/pagination';
+import { httpUrl } from '../utils/http-url';
 import {
   ASSESSING_BODIES_AS_AT,
   englishSupportFor,
@@ -57,11 +58,10 @@ function cataloguePage(query: Request['query']) {
   const text = (value: unknown) => (typeof value === 'string' ? value : undefined);
   // parsePagination defaults to 20 when it cannot read a limit; these
   // catalogues want 50, so an absent or unusable limit is replaced here first.
-  // parseInt is what keeps a fractional limit away from Prisma: "7.5" truncates
-  // to 7 and "abc" becomes NaN, which falls through to the default, so take and
-  // skip are always non-negative integers.
-  const requested = Number.parseInt(text(query.limit) ?? '', 10);
-  const limit = Number.isFinite(requested) && requested > 0 ? requested : CATALOGUE_PAGE_SIZE;
+  // clampLimit keeps a fractional or negative limit away from Prisma ("7.5"
+  // truncates to 7, "abc" falls through to the default), so take and skip are
+  // always non-negative integers.
+  const limit = clampLimit(query.limit, CATALOGUE_PAGE_SIZE);
   const requestedPage = Number.parseInt(text(query.page) ?? '', 10);
   const page = Number.isFinite(requestedPage) && requestedPage > 0 ? Math.min(requestedPage, MAX_CATALOGUE_PAGE) : 1;
   return parsePagination({ page: String(page), limit: String(limit) });
@@ -164,6 +164,8 @@ router.get('/programs/:id', async (req: Request, res: Response, next: NextFuncti
 });
 
 // POST /api/community-support/programs/:id/enroll - Enroll in a program
+// validated: goalsSet must be a list of at most 20 non-empty strings of at most 300 characters;
+//   nothing else of the body is read.
 router.post('/programs/:id/enroll', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -700,6 +702,29 @@ router.get('/language-profile', authenticate, async (req: AuthRequest, res: Resp
 });
 
 // POST /api/community-support/language-profile - Create/update language profile
+// What a member may say about her languages. This route took the body as it
+// came and handed each field to Prisma: a proficiency that is not one of the six
+// levels was a 500, `otherLanguages` was any JSON of any size, and the language
+// names had no length.
+const languageProfileSchema = z.object({
+  primaryLanguage: z.string().trim().min(1, 'Primary language is required').max(80),
+  primaryProficiency: z.nativeEnum(LanguageProficiency).optional(),
+  englishProficiency: z.nativeEnum(LanguageProficiency).optional(),
+  otherLanguages: z
+    .array(
+      z.object({
+        language: z.string().trim().min(1).max(80),
+        proficiency: z.nativeEnum(LanguageProficiency).optional(),
+      })
+    )
+    .max(20)
+    .optional(),
+  needsInterpreter: z.boolean().optional(),
+  preferredInterpreterLang: z.string().trim().max(80).nullable().optional(),
+// Strict: the body goes to the database, so a key that is not hers to set (userId,
+// say) is refused and named instead of dropped.
+}).strict();
+
 router.post('/language-profile', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
@@ -710,11 +735,7 @@ router.post('/language-profile', authenticate, async (req: AuthRequest, res: Res
       otherLanguages,
       needsInterpreter,
       preferredInterpreterLang,
-    } = req.body;
-
-    if (!primaryLanguage) {
-      return res.status(400).json({ success: false, error: 'Primary language is required' });
-    }
+    } = parse(languageProfileSchema, req.body);
 
     const profile = await prisma.languageProfile.upsert({
       where: { userId },
@@ -760,6 +781,23 @@ router.get('/credentials', authenticate, async (req: AuthRequest, res: Response,
 });
 
 // POST /api/community-support/credentials - Add international credential
+// An overseas qualification, as she describes it. `parseInt(yearObtained)` of
+// "abc" was NaN, which Prisma refuses with a 500, and every text field was
+// stored at whatever length it arrived. The document link is shown to staff
+// who review the credential, so it has to be a web address and nothing else.
+const credentialSchema = z.object({
+  originalCountry: z.string().trim().min(1, 'originalCountry is required').max(80),
+  credentialType: z.string().trim().min(1, 'credentialType is required').max(40),
+  credentialName: z.string().trim().min(1, 'credentialName is required').max(200),
+  institution: z.string().trim().min(1, 'institution is required').max(200),
+  yearObtained: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() !== '' ? Number(value) : value === '' ? undefined : value),
+    z.number().int().min(1900).max(new Date().getFullYear()).nullable().optional()
+  ),
+  fieldOfStudy: z.string().trim().max(200).nullable().optional(),
+  documentUrl: httpUrl(2000).nullable().optional(),
+}).strict();
+
 router.post('/credentials', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
@@ -771,11 +809,7 @@ router.post('/credentials', authenticate, async (req: AuthRequest, res: Response
       yearObtained,
       fieldOfStudy,
       documentUrl,
-    } = req.body;
-
-    if (!originalCountry || !credentialType || !credentialName || !institution) {
-      return res.status(400).json({ success: false, error: 'Missing required fields' });
-    }
+    } = parse(credentialSchema, req.body);
 
     const credential = await prisma.internationalCredential.create({
       data: {
@@ -784,7 +818,7 @@ router.post('/credentials', authenticate, async (req: AuthRequest, res: Response
         credentialType,
         credentialName,
         institution,
-        yearObtained: yearObtained ? parseInt(yearObtained) : null,
+        yearObtained: yearObtained ?? null,
         fieldOfStudy,
         documentUrl,
       },
@@ -958,6 +992,8 @@ router.get('/bridging-programs', async (req: Request, res: Response, next: NextF
 });
 
 // POST /api/community-support/bridging-programs/:id/enroll - Enroll in bridging program
+// validated: credentialId must be text, and is then looked up among her own credentials; nothing
+//   else of the body is read.
 router.post('/bridging-programs/:id/enroll', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;

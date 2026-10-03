@@ -11,8 +11,14 @@ jest.mock('../../utils/prisma', () => {
       update: jest.fn(),
       updateMany: jest.fn(async () => ({ count: 1 })),
     },
+    liveStreamMute: {
+      findUnique: jest.fn(async () => null),
+      upsert: jest.fn(async () => ({})),
+      deleteMany: jest.fn(async () => ({ count: 1 })),
+    },
     liveStreamMessage: {
       create: jest.fn(),
+      findFirst: jest.fn(async () => null),
       findMany: jest.fn(async () => []),
       findUnique: jest.fn(),
       delete: jest.fn(async () => ({})),
@@ -114,6 +120,8 @@ describe('Live streams', () => {
     prisma.liveStream.updateMany.mockResolvedValue({ count: 1 });
     prisma.liveStreamMessage.deleteMany.mockResolvedValue({ count: 0 });
     prisma.liveStreamMessage.findMany.mockResolvedValue([]);
+    prisma.liveStreamMessage.findFirst.mockResolvedValue(null);
+    prisma.liveStreamMute.findUnique.mockResolvedValue(null);
   });
 
   it('prepares a stream with a key the host can see', async () => {
@@ -271,11 +279,110 @@ describe('Live streams', () => {
     await request(app).post('/api/livestream/s1/gift').set(as(VIEWER)).send({ giftType: 'star' }).expect(403);
     expect(prisma.giftTransaction.create).not.toHaveBeenCalled();
 
+    // Across a block with the host the stream is not found at all: no backlog
+    // and no playback URL, rather than a stream she can read but not speak in.
+    await request(app).get('/api/livestream/s1/messages').set(as(VIEWER)).expect(404);
+    const detail = await request(app).get('/api/livestream/s1').set(as(VIEWER)).expect(404);
+    expect(JSON.stringify(detail.body)).not.toContain('index.m3u8');
+
+    // A block between two viewers leaves the room open and filters the lines.
+    blocked.mockResolvedValue(false);
     blockedIds.mockResolvedValue(['troll-1']);
     await request(app).get('/api/livestream/s1/messages').set(as(VIEWER)).expect(200);
     expect(prisma.liveStreamMessage.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { streamId: 's1', userId: { notIn: ['troll-1'] } } })
     );
+  });
+
+  it('a stream staff took down is not found for viewers, not listed, and cannot be restarted by its host', async () => {
+    prisma.liveStream.findUnique.mockResolvedValue(
+      streamRow({ status: 'ENDED', suspendedAt: new Date(), suspendedById: 'mod-1', suspendedReason: 'Threats' })
+    );
+
+    await request(app).get('/api/livestream/s1').set(as(VIEWER)).expect(404);
+    await request(app).get('/api/livestream/s1').expect(404);
+
+    // The host can still open it, and is told it was suspended, not by whom.
+    const own = await request(app).get('/api/livestream/s1').set(as(HOST)).expect(200);
+    expect(own.body.data.suspended).toBe(true);
+    expect(own.body.data.suspendedById).toBeUndefined();
+    expect(own.body.data.suspendedReason).toBeUndefined();
+
+    const restart = await request(app).post('/api/livestream/s1/start').set(as(HOST)).expect(403);
+    expect(restart.body.message).toMatch(/ended by the ATHENA team/);
+    expect(prisma.liveStream.update).not.toHaveBeenCalled();
+
+    prisma.liveStream.findMany.mockResolvedValue([]);
+    await request(app).get('/api/livestream').expect(200);
+    expect(prisma.liveStream.findMany.mock.calls[0][0].where).toMatchObject({ suspendedAt: null });
+  });
+
+  it('the host can mute a viewer for a number of minutes, and nobody else can', async () => {
+    prisma.liveStream.findUnique.mockResolvedValue(streamRow({ status: 'LIVE' }));
+    prisma.user.findUnique.mockResolvedValue({ id: VIEWER });
+
+    await request(app).post(`/api/livestream/s1/viewers/${VIEWER}/mute`).set(as(VIEWER)).send({ minutes: 10 }).expect(403);
+    expect(prisma.liveStreamMute.upsert).not.toHaveBeenCalled();
+
+    const res = await request(app)
+      .post(`/api/livestream/s1/viewers/${VIEWER}/mute`)
+      .set(as(HOST))
+      .send({ minutes: 10 })
+      .expect(200);
+    expect(res.body.data.muted).toBe(VIEWER);
+    expect(new Date(res.body.data.until).getTime()).toBeGreaterThan(Date.now());
+    expect(prisma.liveStreamMute.upsert).toHaveBeenCalledTimes(1);
+
+    // The length is required and bounded, and is a whole number.
+    for (const minutes of [undefined, 0, -1, 1.5, 'soon', 24 * 60 + 1]) {
+      await request(app).post(`/api/livestream/s1/viewers/${VIEWER}/mute`).set(as(HOST)).send({ minutes }).expect(400);
+    }
+    expect(prisma.liveStreamMute.upsert).toHaveBeenCalledTimes(1);
+
+    await request(app).delete(`/api/livestream/s1/viewers/${VIEWER}/mute`).set(as(VIEWER)).expect(403);
+    await request(app).delete(`/api/livestream/s1/viewers/${VIEWER}/mute`).set(as(HOST)).expect(200);
+    expect(prisma.liveStreamMute.deleteMany).toHaveBeenCalledWith({ where: { streamId: 's1', userId: VIEWER } });
+  });
+
+  it('a muted viewer is refused in the chat, in words that say it is a mute', async () => {
+    prisma.liveStream.findUnique.mockResolvedValue(streamRow({ status: 'LIVE' }));
+    prisma.liveStreamMute.findUnique.mockResolvedValue({ until: new Date(Date.now() + 5 * 60_000) });
+
+    const res = await request(app).post('/api/livestream/s1/messages').set(as(VIEWER)).send({ content: 'hi' }).expect(403);
+
+    expect(res.body.message).toMatch(/muted you in this chat/);
+    expect(prisma.liveStreamMessage.create).not.toHaveBeenCalled();
+  });
+
+  it('slow mode is the host\'s to set, between 1 and 600 seconds, and 0 turns it off', async () => {
+    prisma.liveStream.findUnique.mockResolvedValue(streamRow({ status: 'LIVE' }));
+    prisma.liveStream.update.mockImplementation(async ({ data }: any) => streamRow({ status: 'LIVE', ...data }));
+
+    await request(app).put('/api/livestream/s1/slow-mode').set(as(VIEWER)).send({ seconds: 10 }).expect(403);
+    expect(prisma.liveStream.update).not.toHaveBeenCalled();
+
+    const on = await request(app).put('/api/livestream/s1/slow-mode').set(as(HOST)).send({ seconds: 10 }).expect(200);
+    expect(on.body.data.slowModeSeconds).toBe(10);
+
+    const off = await request(app).put('/api/livestream/s1/slow-mode').set(as(HOST)).send({ seconds: 0 }).expect(200);
+    expect(off.body.data.slowModeSeconds).toBeNull();
+    const none = await request(app).put('/api/livestream/s1/slow-mode').set(as(HOST)).send({ seconds: null }).expect(200);
+    expect(none.body.data.slowModeSeconds).toBeNull();
+
+    for (const seconds of [601, -1, 2.5, 'fast']) {
+      await request(app).put('/api/livestream/s1/slow-mode').set(as(HOST)).send({ seconds }).expect(400);
+    }
+    expect(prisma.liveStream.update).toHaveBeenCalledTimes(3);
+  });
+
+  it('slow mode refuses a second line inside the window with a 429 that says how long', async () => {
+    prisma.liveStream.findUnique.mockResolvedValue(streamRow({ status: 'LIVE', slowModeSeconds: 30 }));
+    prisma.liveStreamMessage.findFirst.mockResolvedValue({ createdAt: new Date(Date.now() - 5_000) });
+
+    const res = await request(app).post('/api/livestream/s1/messages').set(as(VIEWER)).send({ content: 'again' }).expect(429);
+
+    expect(res.body.message).toMatch(/Slow mode is on/);
+    expect(prisma.liveStreamMessage.create).not.toHaveBeenCalled();
   });
 
   it('the host can take a message out of the room, and nobody else can', async () => {

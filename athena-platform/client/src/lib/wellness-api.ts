@@ -69,6 +69,7 @@ export const wellnessApi = {
   reply: (id: string, data: Body) => api.post(`/wellness/forum-posts/${id}/replies`, data),
   support: (id: string) => api.post(`/wellness/forum-posts/${id}/support`),
   reportPost: (id: string, data: Body) => api.post(`/wellness/forum-posts/${id}/report`, data),
+  reportReply: (id: string, data: Body) => api.post(`/wellness/forum-replies/${id}/report`, data),
   updatePost: (id: string, data: Body) => api.patch(`/wellness/forum-posts/${id}`, data),
   deletePost: (id: string) => api.delete(`/wellness/forum-posts/${id}`),
   updateReply: (id: string, data: Body) => api.patch(`/wellness/forum-replies/${id}`, data),
@@ -90,8 +91,12 @@ export const wellnessApi = {
   book: (id: string, data: Body) => api.post(`/wellness/practitioners/${id}/bookings`, data),
   // Admin: the profiles waiting to be checked, and the decision on one.
   // `isActive: false` hides a profile from the queue as well as the directory.
+  // Verifying says where the admin looked the practitioner up (AHPRA, or the
+  // professional body by name) and what they found; the server refuses a
+  // verification without that record.
   pendingPractitioners: () => api.get('/wellness/practitioners/pending'),
-  verifyPractitioner: (id: string, data: { isVerified: boolean; isActive?: boolean }) => api.patch(`/wellness/practitioners/${id}/verify`, data),
+  verifyPractitioner: (id: string, data: { isVerified: boolean; isActive?: boolean; checkedAgainst?: 'AHPRA' | 'PROFESSIONAL_BODY'; registerName?: string; checkNote?: string }) =>
+    api.patch(`/wellness/practitioners/${id}/verify`, data),
 
   practice: () => api.get('/wellness/practice'),
   savePractice: (data: Body) => api.put('/wellness/practice', data),
@@ -105,6 +110,8 @@ export const wellnessApi = {
   bookingIcs: (id: string) => api.get(`/wellness/bookings/${id}/ics`, { responseType: 'text' }),
   circleIcs: (id: string) => api.get(`/wellness/circles/${id}/ics`, { responseType: 'text' }),
   moderateReview: (id: string, isHidden: boolean) => api.patch(`/wellness/reviews/${id}`, { isHidden }),
+  // A review of a practitioner goes to the same queue as a forum post or reply.
+  reportReview: (id: string, data: Body) => api.post(`/wellness/reviews/${id}/report`, data),
 
   badges: () => api.get('/wellness/badges'),
 
@@ -133,6 +140,8 @@ export function wellnessError(err: unknown, fallback: string): string {
 }
 
 export type CrisisLine = { key: string; name: string; phone: string; url: string; when: string; who: string };
+/** What the server answers with when it screened words she wrote: nothing, or the lines and who has been told. */
+export type CrisisAnswer = { flagged: boolean; message?: string; lines?: CrisisLine[] };
 export type Insight = { key: string; kind: 'pattern' | 'trend' | 'risk' | 'recommendation'; title: string; body: string; strength?: string; source?: { name: string; url: string }; action?: { label: string; href: string }; crisis?: boolean };
 export type Entry = { id: string; kind: string; day: string; at: string; refId: string | null; payload: Record<string, unknown> | null };
 export type Author = { id: string | null; name: string; avatar: string | null; isAnonymous: boolean; isYou: boolean; isModerator: boolean; isPractitioner?: boolean; practitionerKind?: string | null };

@@ -3,10 +3,13 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 
 jest.mock('../../utils/prisma', () => ({
   prisma: {
-    user: { findUnique: jest.fn() },
+    // findFirst answers "is she in Safe Mode?", which decides whether following her needs her approval.
+    user: { findUnique: jest.fn(), findFirst: jest.fn(async () => null) },
     follow: { findUnique: jest.fn(), create: jest.fn(), deleteMany: jest.fn(), findMany: jest.fn(async () => []), count: jest.fn(async () => 0) },
     followRequest: { findUnique: jest.fn(async () => null), upsert: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
     userSafetySettings: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
+    // Both stores are read when a follow, and the notification it sends, are checked for a block.
+    dvSafetyProfile: { findFirst: jest.fn(async () => null) },
     notification: { create: jest.fn() },
   },
 }));
@@ -77,5 +80,67 @@ describe('Following a member', () => {
   it('refuses to follow yourself', async () => {
     await request(app).post('/api/users/follower-1/follow').expect(400);
     expect(prisma.follow.create).not.toHaveBeenCalled();
+  });
+});
+
+// A block closes every way one member can reach the other, and a follow is one: it
+// creates a row, it can be a request that waits in her inbox, and it rings her
+// phone with the follower's name. This route checked nothing, so the account she
+// had blocked could follow her again the same afternoon.
+describe('Following a member across a block', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    // mockReset, not clear: the tests above leave a queue of one-time answers behind.
+    prisma.user.findUnique.mockReset();
+    prisma.user.findUnique.mockResolvedValue({ id: 'target-1' });
+    prisma.follow.findUnique.mockResolvedValue(null);
+    prisma.user.findFirst.mockResolvedValue(null); // not in Safe Mode
+    prisma.userSafetySettings.findMany.mockResolvedValue([]);
+    prisma.dvSafetyProfile.findFirst.mockResolvedValue(null);
+  });
+
+  const blocks: Array<[string, () => void]> = [
+    ['she has blocked the follower', () => prisma.userSafetySettings.findMany.mockResolvedValue([{ userId: 'target-1' }])],
+    ['the follower has blocked her', () => prisma.userSafetySettings.findMany.mockResolvedValue([{ userId: 'follower-1' }])],
+    ['she blocked the follower from the DV safety page alone', () => prisma.dvSafetyProfile.findFirst.mockResolvedValue({ userId: 'target-1' })],
+  ];
+
+  it.each(blocks)('is refused as though she did not exist, and stores and sends nothing, when %s', async (_name, block) => {
+    block();
+
+    const res = await request(app).post('/api/users/target-1/follow').expect(404);
+
+    expect(res.body.message).toBe('User not found');
+    expect(prisma.follow.create).not.toHaveBeenCalled();
+    expect(prisma.followRequest.upsert).not.toHaveBeenCalled();
+    expect(prisma.notification.create).not.toHaveBeenCalled();
+  });
+
+  it('is refused too when the member would have had to approve the follow: no request is left waiting', async () => {
+    // She is in Safe Mode, which makes every follow a request; the request is the way in.
+    prisma.user.findFirst.mockResolvedValue({ id: 'target-1' });
+    prisma.dvSafetyProfile.findFirst.mockResolvedValue({ userId: 'target-1' });
+
+    await request(app).post('/api/users/target-1/follow').expect(404);
+
+    expect(prisma.followRequest.upsert).not.toHaveBeenCalled();
+    expect(prisma.notification.create).not.toHaveBeenCalled();
+  });
+
+  it('does not follow on a guess when the block lists cannot be read', async () => {
+    prisma.dvSafetyProfile.findFirst.mockRejectedValue(new Error('connection reset'));
+
+    await request(app).post('/api/users/target-1/follow').expect(500);
+
+    expect(prisma.follow.create).not.toHaveBeenCalled();
+    expect(prisma.notification.create).not.toHaveBeenCalled();
+  });
+
+  it('still follows a member nobody has blocked', async () => {
+    prisma.user.findUnique.mockResolvedValueOnce({ id: 'target-1' }).mockResolvedValueOnce({ displayName: 'Jess', firstName: 'Jessica' });
+
+    await request(app).post('/api/users/target-1/follow').expect(200);
+
+    expect(prisma.follow.create).toHaveBeenCalled();
   });
 });

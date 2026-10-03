@@ -20,7 +20,13 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 jest.mock('../../utils/prisma', () => ({
   prisma: {
     user: { findUnique: jest.fn(), update: jest.fn(async () => ({})) },
-    safetyIncident: { create: jest.fn(async () => ({})), findMany: jest.fn(async () => []), count: jest.fn(async () => 0) },
+    safetyIncident: {
+      create: jest.fn(async () => ({})),
+      findMany: jest.fn(async () => []),
+      findFirst: jest.fn(async () => null),
+      updateMany: jest.fn(async () => ({ count: 0 })),
+      count: jest.fn(async () => 0),
+    },
     mentorSession: { count: jest.fn(async () => 0) },
     adminFlag: { create: jest.fn(async () => ({ id: 'flag-1' })) },
   },
@@ -41,7 +47,14 @@ jest.mock('../../services/notification.service', () => ({
 
 import { prisma as prismaTyped } from '../../utils/prisma';
 import { notifyAdmins } from '../admin-notify.service';
-import { calculateSafetyScore, getSafetyStatus, handleUserBlock, recordSafetyIncident } from '../safety-score.service';
+import {
+  calculateSafetyScore,
+  getSafetyStatus,
+  handleUserBlock,
+  handleUserReport,
+  handleUserUnblock,
+  recordSafetyIncident,
+} from '../safety-score.service';
 
 const prisma: any = prismaTyped;
 const adminNotice = notifyAdmins as unknown as jest.Mock;
@@ -77,12 +90,24 @@ function verifiedReports(count: number) {
   }));
 }
 
+/** An unverified, undecided report from this reporter, as it sits in the table the day it is filed. */
+function undecidedReport(reporterId: string, index = 0) {
+  return { id: `rep-${reporterId}-${index}`, type: 'REPORT', verified: false, resolvedAt: null, reporterId, reason: 'harassment', createdAt: new Date() };
+}
+
+/** A block from this blocker, which the platform records as verified the moment it is made. */
+function block(blockerId: string, overrides: Record<string, unknown> = {}) {
+  return { id: `blk-${blockerId}`, type: 'BLOCK', verified: true, resolvedAt: null, reporterId: blockerId, reason: 'Blocked by another user', createdAt: new Date(), ...overrides };
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
   notify.mockClear();
   prisma.user.update.mockResolvedValue({});
   prisma.safetyIncident.create.mockResolvedValue({});
   prisma.safetyIncident.count.mockResolvedValue(0);
+  prisma.safetyIncident.findFirst.mockResolvedValue(null);
+  prisma.safetyIncident.updateMany.mockResolvedValue({ count: 0 });
   prisma.mentorSession.count.mockResolvedValue(0);
   prisma.adminFlag.create.mockResolvedValue({ id: 'flag-1' });
 });
@@ -219,6 +244,179 @@ describe('calculateSafetyScore', () => {
 
     expect(breakdown.score).toBe(0);
     expect(breakdown.riskLevel).toBe('CRITICAL');
+  });
+});
+
+/**
+ * Reports and blocks nobody has checked are one account's word each, and the
+ * score is what puts an account in front of staff and emails her that her
+ * standing has changed. These hold that a few accounts cannot use them to make
+ * somebody look like the risk (the DPIA's "a survivor is wrongly scored as the
+ * aggressor"), while a report a moderator has upheld still counts in full.
+ */
+describe('calculateSafetyScore: what unchecked signals can and cannot do', () => {
+  const scoreWith = async (incidents: unknown[]) => {
+    prisma.user.findUnique.mockResolvedValue(member());
+    prisma.safetyIncident.findMany.mockResolvedValue(incidents);
+    return calculateSafetyScore('member-1');
+  };
+
+  it('counts twenty undecided reports from one account as one', async () => {
+    const clean = await scoreWith([]);
+    const one = await scoreWith([undecidedReport('troll')]);
+    const twenty = await scoreWith(Array.from({ length: 20 }, (_v, index) => undecidedReport('troll', index)));
+
+    expect(one.score).toBeLessThan(clean.score);
+    expect(twenty.score).toBe(one.score);
+    // Said in the breakdown, so a moderator reading it sees why it did not move.
+    expect(twenty.factors.filter((factor) => factor.details.includes('already counted'))).toHaveLength(19);
+  });
+
+  it('stops undecided reports at three accounts worth, however many accounts there are', async () => {
+    const clean = await scoreWith([]);
+    const three = await scoreWith(['a', 'b', 'c'].map((id) => undecidedReport(id)));
+    const thirty = await scoreWith(Array.from({ length: 30 }, (_v, index) => undecidedReport(`acct-${index}`)));
+
+    expect(clean.score - three.score).toBe(30);
+    expect(thirty.score).toBe(three.score);
+  });
+
+  it('counts a report a moderator has upheld in full, whatever the unchecked ones add up to', async () => {
+    const clean = await scoreWith([]);
+    const upheld = (index: number) => ({ id: `up-${index}`, type: 'REPORT', verified: true, resolvedAt: new Date(), reporterId: `r${index}`, reason: 'threats', createdAt: new Date() });
+
+    const crowd = Array.from({ length: 10 }, (_v, index) => undecidedReport(`acct-${index}`));
+    const withOneUpheld = await scoreWith([...crowd, upheld(1)]);
+    const withTwoUpheld = await scoreWith([upheld(1), upheld(2)]);
+
+    // -30 from the unchecked ten, capped, and -25 from the one a person checked.
+    expect(clean.score - withOneUpheld.score).toBe(55);
+    // Two upheld reports are -50: nothing caps what a person decided.
+    expect(clean.score - withTwoUpheld.score).toBe(50);
+  });
+
+  it('counts a block once per blocker, and stops at three blockers', async () => {
+    const clean = await scoreWith([]);
+    const one = await scoreWith([block('a')]);
+    const sameAgain = await scoreWith([block('a'), block('a', { id: 'blk-a-2' }), block('a', { id: 'blk-a-3' })]);
+    const three = await scoreWith([block('a'), block('b'), block('c')]);
+    const forty = await scoreWith(Array.from({ length: 40 }, (_v, index) => block(`acct-${index}`)));
+
+    expect(clean.score - one.score).toBe(5);
+    expect(sameAgain.score).toBe(one.score);
+    expect(clean.score - three.score).toBe(15);
+    expect(forty.score).toBe(three.score);
+  });
+
+  it('stops counting a block that was lifted', async () => {
+    const clean = await scoreWith([]);
+    const lifted = await scoreWith([block('a', { resolvedAt: new Date() })]);
+
+    expect(lifted.score).toBe(clean.score);
+    expect(lifted.factors.find((factor) => factor.category === 'incident')).toMatchObject({
+      impact: 0,
+      details: expect.stringContaining('lifted'),
+    });
+  });
+
+  it('cannot take an account into the critical band with unchecked reports and blocks alone', async () => {
+    const reports = Array.from({ length: 50 }, (_v, index) => undecidedReport(`reporter-${index}`));
+    const blocks = Array.from({ length: 50 }, (_v, index) => block(`blocker-${index}`));
+
+    const clean = await scoreWith([]);
+    const worst = await scoreWith([...reports, ...blocks]);
+
+    // The two ceilings (-30 and -15) leave the default well clear of the
+    // critical line: a restriction on messaging at most, and no staff flag and
+    // no standing email for the account.
+    expect(clean.score - worst.score).toBe(45);
+    expect(worst.score).toBeGreaterThanOrEqual(25);
+    expect(worst.riskLevel).not.toBe('CRITICAL');
+  });
+});
+
+describe('recordSafetyIncident: one open voice per person against another', () => {
+  it('does not record a second open report from the same reporter, and does not recalculate', async () => {
+    prisma.user.findUnique.mockResolvedValue(member());
+    prisma.safetyIncident.findMany.mockResolvedValue([]);
+    prisma.safetyIncident.findFirst.mockResolvedValue({ id: 'earlier' });
+
+    await recordSafetyIncident({ userId: 'member-1', type: 'REPORT', severity: 'MEDIUM', reason: 'harassment', reporterId: 'troll', verified: false });
+
+    expect(prisma.safetyIncident.findFirst).toHaveBeenCalledWith({
+      where: { userId: 'member-1', type: 'REPORT', reporterId: 'troll', resolvedAt: null },
+      select: { id: true },
+    });
+    expect(prisma.safetyIncident.create).not.toHaveBeenCalled();
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('records the first report from a reporter, and a fresh one once the earlier has been decided', async () => {
+    prisma.user.findUnique.mockResolvedValue(member());
+    prisma.safetyIncident.findMany.mockResolvedValue([]);
+    // Decided reports have a resolvedAt, so the open-report search finds nothing.
+    prisma.safetyIncident.findFirst.mockResolvedValue(null);
+
+    await recordSafetyIncident({ userId: 'member-1', type: 'REPORT', severity: 'MEDIUM', reason: 'harassment', reporterId: 'her', verified: false });
+
+    expect(prisma.safetyIncident.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not dedupe the incidents a moderator or the system records, which have no reporter to weigh', async () => {
+    prisma.user.findUnique.mockResolvedValue(member());
+    prisma.safetyIncident.findMany.mockResolvedValue([]);
+
+    await recordSafetyIncident({ userId: 'member-1', type: 'CONTENT_REMOVAL', severity: 'MEDIUM', reason: 'removed', reporterId: 'mod-1', verified: true });
+    await recordSafetyIncident({ userId: 'member-1', type: 'SUSPENSION', severity: 'HIGH', reason: 'suspended', verified: true });
+
+    expect(prisma.safetyIncident.findFirst).not.toHaveBeenCalled();
+    expect(prisma.safetyIncident.create).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('handleUserReport: who a report is about', () => {
+  it('records a report for conduct', async () => {
+    prisma.user.findUnique.mockResolvedValue(member());
+    prisma.safetyIncident.findMany.mockResolvedValue([]);
+
+    await handleUserReport('member-1', 'her', 'harassment', 'post-1', 'post');
+
+    expect(prisma.safetyIncident.create.mock.calls[0][0].data).toMatchObject({ type: 'REPORT', reporterId: 'her', reason: 'harassment' });
+  });
+
+  it('records nothing against a member who was reported because she may be at risk', async () => {
+    // The report reaches the staff queue and its alert by its own route; a score
+    // that fell because a woman wrote that she wanted to die would mark her as a
+    // risk to others.
+    await handleUserReport('member-1', 'her', 'self_harm', 'post-1', 'post');
+    await handleUserReport('member-1', 'her', 'SELF_HARM', 'post-1', 'post');
+
+    expect(prisma.safetyIncident.create).not.toHaveBeenCalled();
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('handleUserUnblock', () => {
+  it('lifts the open block of that blocker against the member and works the score out again', async () => {
+    prisma.user.findUnique.mockResolvedValue(member());
+    prisma.safetyIncident.findMany.mockResolvedValue([]);
+    prisma.safetyIncident.updateMany.mockResolvedValue({ count: 1 });
+
+    await handleUserUnblock('member-1', 'blocker-1');
+
+    expect(prisma.safetyIncident.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'member-1', type: 'BLOCK', reporterId: 'blocker-1', resolvedAt: null },
+      data: { resolvedAt: expect.any(Date) },
+    });
+    expect(prisma.user.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('does nothing more when there was no open block to lift', async () => {
+    prisma.safetyIncident.updateMany.mockResolvedValue({ count: 0 });
+
+    await handleUserUnblock('member-1', 'blocker-1');
+
+    expect(prisma.user.update).not.toHaveBeenCalled();
   });
 });
 
@@ -370,13 +568,17 @@ describe('getSafetyStatus', () => {
     expect(status.assessedAt).toBeNull();
   });
 
-  it('lists only the badges that are still active', async () => {
+  it('lists only the badges a reviewer has approved', async () => {
+    // Rows as the table really has them: a status, and no isActive column. The
+    // fixture used to invent that column, which is how a scorer that read it
+    // went unnoticed.
     prisma.user.findUnique.mockResolvedValue({
       safetyScore: 90,
       safetyScoreUpdatedAt: new Date(),
       verificationBadges: [
-        { type: 'IDENTITY', isActive: true },
-        { type: 'EMPLOYER', isActive: false },
+        { id: 'b1', type: 'IDENTITY', status: 'APPROVED' },
+        { id: 'b2', type: 'EMPLOYER', status: 'PENDING' },
+        { id: 'b3', type: 'EDUCATOR', status: 'REJECTED' },
       ],
     });
 
@@ -384,5 +586,93 @@ describe('getSafetyStatus', () => {
 
     expect(status.level).toBe('TRUSTED');
     expect(status.badges).toEqual(['IDENTITY']);
+  });
+
+  it('reads a member nobody has assessed yet at the baseline, not at the column default of 50', async () => {
+    // The column defaults to 50 and the scorer starts every member at 75. A
+    // member with no assessment is a member with nothing against her.
+    prisma.user.findUnique.mockResolvedValue({ safetyScore: 50, safetyScoreUpdatedAt: null, verificationBadges: [] });
+
+    const status = await getSafetyStatus('member-1');
+
+    expect(status.score).toBe(75);
+    expect(status.level).toBe('GOOD');
+    expect(status.assessedAt).toBeNull();
+  });
+
+  it('reads a member who has been assessed at what was measured, however low', async () => {
+    prisma.user.findUnique.mockResolvedValue({ safetyScore: 0, safetyScoreUpdatedAt: new Date(), verificationBadges: [] });
+
+    const status = await getSafetyStatus('member-1');
+
+    expect(status.score).toBe(0);
+    expect(status.level).toBe('RESTRICTED');
+  });
+});
+
+describe('what a verification badge is worth to the score', () => {
+  // A fresh account, so the age bonus is small and the same in every case below.
+  const withBadges = (badges: Array<{ type: string; status: string }>) =>
+    member({ createdAt: new Date(Date.now() - 1 * DAY), verificationBadges: badges.map((b, i) => ({ id: `b${i}`, ...b })) });
+
+  async function scoreWith(badges: Array<{ type: string; status: string }>) {
+    prisma.user.findUnique.mockResolvedValue(withBadges(badges));
+    prisma.safetyIncident.findMany.mockResolvedValue([]);
+    return calculateSafetyScore('member-1');
+  }
+
+  it('adds 20 for an approved identity check and 15 for an approved employer check', async () => {
+    const none = await scoreWith([]);
+    const identity = await scoreWith([{ type: 'IDENTITY', status: 'APPROVED' }]);
+    const employer = await scoreWith([{ type: 'EMPLOYER', status: 'APPROVED' }]);
+
+    expect(identity.score - none.score).toBe(20);
+    expect(employer.score - none.score).toBe(15);
+    expect(identity.factors.some((f) => f.category === 'verification' && f.details === 'Identity verified')).toBe(true);
+    expect(employer.factors.some((f) => f.category === 'verification' && f.details === 'Employer verified')).toBe(true);
+  });
+
+  it('adds nothing for a check still waiting, or one that was refused', async () => {
+    const none = await scoreWith([]);
+    const pending = await scoreWith([
+      { type: 'IDENTITY', status: 'PENDING' },
+      { type: 'EMPLOYER', status: 'PENDING' },
+    ]);
+    const rejected = await scoreWith([
+      { type: 'IDENTITY', status: 'REJECTED' },
+      { type: 'EMPLOYER', status: 'REJECTED' },
+    ]);
+
+    expect(pending.score).toBe(none.score);
+    expect(rejected.score).toBe(none.score);
+    expect(pending.factors.some((f) => f.category === 'verification')).toBe(false);
+    expect(rejected.factors.some((f) => f.category === 'verification')).toBe(false);
+  });
+
+  it('adds nothing for an approved badge of a kind the score does not weigh', async () => {
+    const none = await scoreWith([]);
+    const mentor = await scoreWith([{ type: 'MENTOR', status: 'APPROVED' }]);
+
+    expect(mentor.score).toBe(none.score);
+  });
+});
+
+describe('recordSafetyIncident for a member nobody had assessed', () => {
+  it('measures her first report as a fall from the baseline, so the notice that goes with a fall is sent', async () => {
+    // Column default 50, never scored. One upheld report takes the recalculated
+    // score to 75 - 25 + the small age bonus: a real fall from 75, which is
+    // 15 or more, and which measured from 50 would have looked like a rise.
+    prisma.user.findUnique.mockImplementation(async ({ include }: any) =>
+      include
+        ? member({ createdAt: new Date(Date.now() - 1 * DAY) })
+        : { safetyScore: 50, safetyScoreUpdatedAt: null }
+    );
+    prisma.safetyIncident.findMany.mockResolvedValue([
+      { id: 'inc-0', type: 'REPORT', verified: true, resolvedAt: null, reporterId: 'her', reason: 'harassment', createdAt: new Date() },
+    ]);
+
+    await recordSafetyIncident({ userId: 'member-1', type: 'REPORT', severity: 'MEDIUM', reason: 'harassment', reporterId: 'her', verified: true });
+
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: 'Account Standing Update' }));
   });
 });

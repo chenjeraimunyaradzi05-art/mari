@@ -20,8 +20,20 @@ import { cn } from '@/lib/utils';
 type BadgeType = 'IDENTITY' | 'EMPLOYER' | 'EDUCATOR' | 'MENTOR' | 'CREATOR';
 type Badge = { id: string; type: BadgeType; status: 'PENDING' | 'APPROVED' | 'REJECTED'; metadata: Record<string, unknown> | null; reason: string | null; submittedAt: string; reviewedAt: string | null };
 
-const BADGES: Array<{ type: BadgeType; title: string; blurb: string; fields: Array<{ key: string; label: string; placeholder: string }> }> = [
-  { type: 'IDENTITY', title: 'Identity', blurb: 'Proves you are who you say you are. Shows a verified tick on your profile.', fields: [{ key: 'note', label: 'Anything the reviewer should know', placeholder: 'Optional' }] },
+type BadgeDef = {
+  type: BadgeType;
+  title: string;
+  blurb: string;
+  fields: Array<{ key: string; label: string; placeholder: string }>;
+  // A badge a person reads and confirms, with no check behind it that ATHENA
+  // can run. It is called Reviewed, not Verified, so it does not claim more.
+  reviewedOnly?: boolean;
+};
+
+type CreatorEligibility = { eligible: boolean; followers: number; minFollowers: number; accountAgeDays: number; minAccountAgeDays: number };
+
+const BADGES: BadgeDef[] = [
+  { type: 'IDENTITY', title: 'Identity', blurb: 'Proves you are who you say you are. Shows a verified tick on your profile. The photo ID and selfie go to Stripe, not to ATHENA, and Stripe is asked to erase them once a decision is made.', fields: [{ key: 'note', label: 'Anything the reviewer should know', placeholder: 'Optional' }] },
   {
     type: 'EMPLOYER',
     title: 'Employer',
@@ -44,7 +56,8 @@ const BADGES: Array<{ type: BadgeType; title: string; blurb: string; fields: Arr
   {
     type: 'MENTOR',
     title: 'Mentor',
-    blurb: 'For mentors who want their experience confirmed.',
+    blurb: 'For mentors who want a person at ATHENA to read what they have done and confirm what they can. This is a review, not a background or police check.',
+    reviewedOnly: true,
     fields: [
       { key: 'role', label: 'Current role', placeholder: 'e.g. Head of Product, 12 years' },
       { key: 'evidenceUrl', label: 'Where we can confirm it', placeholder: 'LinkedIn or a company page' },
@@ -53,13 +66,16 @@ const BADGES: Array<{ type: BadgeType; title: string; blurb: string; fields: Arr
   {
     type: 'CREATOR',
     title: 'Creator',
-    blurb: 'For creators with an audience elsewhere.',
+    blurb: 'For creators with 10,000 followers on ATHENA and an account at least 90 days old. ATHENA counts both, and a person then looks at your work.',
     fields: [
-      { key: 'evidenceUrl', label: 'Your main channel', placeholder: 'YouTube, Instagram, Substack…' },
-      { key: 'note', label: 'Audience size, roughly', placeholder: 'e.g. 12k on Instagram' },
+      { key: 'evidenceUrl', label: 'A link to your work', placeholder: 'Your channel, newsletter or portfolio' },
+      { key: 'note', label: 'Anything the reviewer should know', placeholder: 'Optional' },
     ],
   },
 ];
+
+/** What an approved badge is called: Verified where a check stands behind it, Reviewed where a person only read it. */
+const approvedWord = (def: Pick<BadgeDef, 'reviewedOnly'>) => (def.reviewedOnly ? 'Reviewed' : 'Verified');
 
 const errorMessage = (e: unknown) => (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
 const errorStatus = (e: unknown) => (e as { response?: { status?: number } })?.response?.status;
@@ -77,6 +93,16 @@ export default function VerificationSettingsPage() {
     queryFn: () => api.get('/verification/badges'),
     select: (r) => (Array.isArray(r.data?.data) ? (r.data.data as Badge[]) : []),
     refetchInterval: justReturned ? 10000 : false,
+  });
+
+  // How far she is from the creator badge, counted by the server: the badge
+  // is only offered once she is there, rather than taking an application that
+  // can only be refused.
+  const eligibility = useQuery({
+    queryKey: ['verification-eligibility'],
+    queryFn: () => api.get('/verification/eligibility'),
+    select: (r) => (r.data?.data?.creator ?? null) as CreatorEligibility | null,
+    retry: false,
   });
 
   useEffect(() => {
@@ -146,13 +172,20 @@ export default function VerificationSettingsPage() {
                   <div>
                     <h2 className="flex items-center gap-2 font-semibold text-slate-900 dark:text-white">
                       {def.title}
-                      {latest?.status === 'APPROVED' && <ShieldCheck className="h-4 w-4 text-emerald-600" aria-label="Verified" />}
+                      {latest?.status === 'APPROVED' && <ShieldCheck className="h-4 w-4 text-emerald-600" aria-label={approvedWord(def)} />}
                     </h2>
                     <p className="text-sm text-slate-500">{def.blurb}</p>
+                    {def.type === 'CREATOR' && eligibility.data && (
+                      <p className="mt-1 text-xs text-slate-600 dark:text-slate-300" data-testid="creator-progress">
+                        {eligibility.data.eligible
+                          ? 'You meet both, so you can apply.'
+                          : `You have ${eligibility.data.followers.toLocaleString('en-AU')} of ${eligibility.data.minFollowers.toLocaleString('en-AU')} followers, and your account is ${eligibility.data.accountAgeDays} of ${eligibility.data.minAccountAgeDays} days old.`}
+                      </p>
+                    )}
                     {latest && (
                       <p className={cn('mt-1 inline-flex items-center gap-1 text-xs', latest.status === 'APPROVED' ? 'text-emerald-700' : latest.status === 'REJECTED' ? 'text-red-600' : 'text-amber-700')}>
                         {latest.status === 'APPROVED' ? <ShieldCheck className="h-3.5 w-3.5" /> : latest.status === 'REJECTED' ? <XCircle className="h-3.5 w-3.5" /> : <Clock className="h-3.5 w-3.5" />}
-                        {latest.status === 'APPROVED' ? 'Verified' : latest.status === 'REJECTED' ? 'Not approved' : 'Under review'}
+                        {latest.status === 'APPROVED' ? approvedWord(def) : latest.status === 'REJECTED' ? 'Not approved' : 'Under review'}
                         {latest.reason ? ` · ${latest.reason}` : ''}
                       </p>
                     )}
@@ -165,7 +198,12 @@ export default function VerificationSettingsPage() {
                         </button>
                       )}
                       {(def.type !== 'IDENTITY' || identityUnavailable) && (
-                        <button type="button" onClick={() => setOpen(def.type)} className={cn('text-sm', def.type === 'IDENTITY' ? 'btn-primary' : 'btn-outline')} disabled={latest?.status === 'PENDING' && def.type !== 'IDENTITY'}>
+                        <button
+                          type="button"
+                          onClick={() => setOpen(def.type)}
+                          className={cn('text-sm', def.type === 'IDENTITY' ? 'btn-primary' : 'btn-outline')}
+                          disabled={(latest?.status === 'PENDING' && def.type !== 'IDENTITY') || (def.type === 'CREATOR' && eligibility.data?.eligible === false)}
+                        >
                           {latest?.status === 'PENDING' ? 'Application sent' : latest?.status === 'REJECTED' ? 'Apply again' : 'Apply'}
                         </button>
                       )}

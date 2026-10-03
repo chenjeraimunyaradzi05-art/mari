@@ -159,6 +159,43 @@ describe('generateFeed pagination and blocking', () => {
     expect(result.posts).toHaveLength(20);
   });
 
+  // The signed-in query used to ask "public, or by anyone the viewer follows"
+  // under a comment saying private posts from followed members were meant to be
+  // included, so every follower was shown a post whose author had unticked
+  // "Post publicly". Every route that opens one post treats that as hers alone.
+  // The rows are run over a small world in tests/post-visibility.test.ts.
+  it('asks for public posts or her own, never everything by the people she follows', async () => {
+    userFindUnique.mockResolvedValue({ persona: 'GENERAL', currentJobTitle: null, following: [{ followingId: 'friend' }] });
+    count.mockResolvedValue(10);
+    findMany.mockResolvedValue(postsFrom(10));
+
+    for (const algorithm of ['engagement', 'chronological'] as const) {
+      findMany.mockClear();
+      await generateFeed({ userId: 'viewer', page: 1, limit: 20, algorithm });
+
+      const where = JSON.stringify(firstQuery(findMany).where);
+      expect(where).toContain(JSON.stringify({ OR: [{ isPublic: true }, { authorId: 'viewer' }] }));
+      expect(where).toContain('"isHidden":false');
+      // The followed-author branch belongs to the audience rule (a connections-only author
+      // reaches her followers) and is ANDed with the clause above, not offered beside it.
+      const clauses = firstQuery(findMany).where as { AND: Array<{ AND?: unknown[] }> };
+      expect(clauses.AND[1].AND).toEqual(
+        expect.arrayContaining([{ OR: [{ isPublic: true }, { authorId: 'viewer' }] }])
+      );
+    }
+  });
+
+  it('asks the same of a signed-out visitor, without the clause for her own posts', async () => {
+    count.mockResolvedValue(10);
+    findMany.mockResolvedValue(postsFrom(10));
+
+    await generateFeed({ page: 1, limit: 20 });
+
+    const where = JSON.stringify(firstQuery(findMany).where);
+    expect(where).toContain(JSON.stringify({ OR: [{ isPublic: true }] }));
+    expect(where).not.toContain('"authorId"');
+  });
+
   it('asks for no block clause when the viewer has blocked nobody', async () => {
     count.mockResolvedValue(30);
     findMany.mockResolvedValue(postsFrom(30));

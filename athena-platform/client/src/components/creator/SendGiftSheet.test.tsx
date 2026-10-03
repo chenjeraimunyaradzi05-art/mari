@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 jest.mock('@/lib/api', () => ({
   api: {},
-  creatorApi: { getGifts: jest.fn(), getBalance: jest.fn(), sendGift: jest.fn() },
+  creatorApi: { getGifts: jest.fn(), getBalance: jest.fn(), sendGift: jest.fn(), getPublicProfile: jest.fn() },
 }));
 
 // The card step is exercised on its own; here only that it opens matters.
@@ -20,8 +20,9 @@ jest.mock('react-hot-toast', () => ({
 
 import { SendGiftSheet } from './SendGiftSheet';
 import { creatorApi } from '@/lib/api';
+import { CREATOR_SHARE_RANGE_PERCENT } from '@/lib/pricing';
 
-const mockedApi = creatorApi as unknown as { getGifts: jest.Mock; getBalance: jest.Mock; sendGift: jest.Mock };
+const mockedApi = creatorApi as unknown as { getGifts: jest.Mock; getBalance: jest.Mock; sendGift: jest.Mock; getPublicProfile: jest.Mock };
 
 const gifts = [
   { id: 'spark', name: 'Spark', value: 1, icon: '✨', description: 'Show some love!' },
@@ -46,6 +47,28 @@ describe('SendGiftSheet', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockedApi.sendGift.mockResolvedValue({ data: { success: true, data: { transaction: {}, creatorShare: 4 } } });
+    mockedApi.getPublicProfile.mockResolvedValue({
+      data: { success: true, data: { userId: 'creator-1', tier: { name: 'Rising', revShare: 75 }, isMonetized: true } },
+    });
+  });
+
+  // The sheet used to say creators keep "most" of a gift. The share is a
+  // published figure, and the sender is told the one this creator is paid.
+  it('tells the sender what this creator keeps of the gift, at her tier', async () => {
+    renderSheet(50);
+
+    expect(await screen.findByText(/Ada keeps 75% of what a gift is worth; the rest is ATHENA’s fee/)).toBeInTheDocument();
+    expect(screen.queryByText(/most of what a gift is worth/)).not.toBeInTheDocument();
+  });
+
+  it('quotes the range the tiers pay, not a share it was not told, when her profile cannot be read', async () => {
+    mockedApi.getPublicProfile.mockRejectedValue({ response: { status: 404 } });
+    renderSheet(50);
+
+    expect(await screen.findByText('You have 50 points')).toBeInTheDocument();
+    expect(
+      screen.getByText(new RegExp(`Creators keep ${CREATOR_SHARE_RANGE_PERCENT.min}% to ${CREATOR_SHARE_RANGE_PERCENT.max}% of what a gift is worth`))
+    ).toBeInTheDocument();
   });
 
   it('shows the top-up path when the balance is short, and never posts', async () => {

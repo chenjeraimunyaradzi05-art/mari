@@ -149,7 +149,7 @@ router.post('/content', async (req: Request, res: Response, next: NextFunction) 
   } catch (error) {
     if (error instanceof Error && error.message.includes('no users exist')) {
       res.status(409).json({
-        error: 'No users to attribute content to. Seed users first (npm run db:seed).',
+        error: 'No users to attribute content to. Seed users first (npm run db:seed:demo, on a development database).',
       });
       return;
     }
@@ -169,6 +169,7 @@ router.post('/content', async (req: Request, res: Response, next: NextFunction) 
  * not recoverable afterwards. Passwords are never accepted over this route -
  * set ADMIN_PASSWORD in the environment to choose your own.
  */
+// validated: rotateExisting is read as === true and email only when it is text.
 router.post('/admin', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const rotateExisting = req.body?.rotateExisting === true;
@@ -231,6 +232,7 @@ router.post('/admin', async (req: Request, res: Response, next: NextFunction) =>
  * POST /api/admin/seed/all
  * Convenience: admin account followed by content.
  */
+// validated: rotateExisting is read as === true and nothing else of the body is read.
 router.post('/all', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const admin = await seedAdmin(prisma, { rotateExisting: req.body?.rotateExisting === true });

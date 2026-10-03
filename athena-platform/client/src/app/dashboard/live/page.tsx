@@ -362,6 +362,14 @@ export default function LiveConsolePage() {
                     <div className="min-w-0">
                       <p className="truncate font-medium text-slate-900 dark:text-white">{s.title}</p>
                       <p className="text-xs text-slate-500">{s.endedAt ? new Date(s.endedAt).toLocaleString('en-AU') : ''}</p>
+                      {/* Staff ended this one, which is not the same as it finishing:
+                          it cannot be restarted, and she should not be left to find
+                          that out by trying. */}
+                      {s.suspended && (
+                        <p className="text-xs font-medium text-rose-700 dark:text-rose-300">
+                          Ended by the ATHENA team. It cannot be restarted. If you think this was a mistake, please contact support.
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-3 text-xs text-slate-500">
                       <span className="inline-flex items-center gap-1">

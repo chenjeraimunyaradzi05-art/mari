@@ -24,6 +24,7 @@ import cookieParser from 'cookie-parser';
 import { securityHeaders } from './middleware/securityHeaders';
 import { trustedProxyIdentity } from './middleware/trustedProxy';
 import { SharedRateLimitStore } from './utils/rate-limit-store';
+import { redisReadyForTraffic } from './utils/redis';
 import { secretMatches } from './utils/secret-compare';
 
 // Import routes
@@ -66,6 +67,7 @@ import referralRoutes from './routes/referral.routes';
 import employerRoutes from './routes/employer.routes';
 import educationRoutes from './routes/education.routes';
 import creatorRoutes from './routes/creator.routes';
+import feesRoutes from './routes/fees.routes';
 import analyticsRoutes from './routes/analytics.routes';
 import searchRoutes from './routes/search.routes';
 import engagementRoutes from './routes/engagement.routes';
@@ -107,7 +109,9 @@ import financeRoutes from './routes/finance.routes';
 import impactRoutes from './routes/impact.routes';
 import communitySupportRoutes from './routes/community-support.routes';
 import aiAlgorithmsRoutes from './routes/ai-algorithms.routes';
-import healthRoutes from './routes/health.routes';
+import healthRoutes, { buildLaunchReadiness } from './routes/health.routes';
+import { reportLaunchReadinessAtBoot } from './utils/launch-readiness';
+import { mountJsonBodyParsers } from './config/body-limits';
 import featureFlagsRoutes from './routes/feature-flags.routes';
 import connectRoutes from './routes/connect.routes';
 import invoiceRoutes from './routes/invoice.routes';
@@ -120,6 +124,7 @@ import wellnessRoutes from './routes/wellness.routes';
 import automotiveRoutes from './routes/automotive.routes';
 import { startAutomotiveSweeper } from './services/automotive/automotive-reminders.service';
 import { startEscrowExpirySweeper } from './services/escrow-expiry.service';
+import { startCreatorPayoutSweeper } from './services/creator-payout-sweeper.service';
 import { startCarCatalogue } from './services/automotive/automotive-catalogue';
 import { startWellnessSweeper } from './services/wellness/wellness-reminders.service';
 import { startWellnessCatalogue } from './services/wellness/wellness-catalogue';
@@ -132,13 +137,17 @@ import { responseTimeMiddleware } from './middleware/responseTime';
 import { localeMiddleware } from './middleware/locale';
 // import { createOpenSearchMiddleware } from './middleware/opensearch-sync'; // Disabled - needs OpenSearch
 import { createRateLimiter } from './middleware/rateLimiter';
+import { createApiBudget, createCredentialLimiters } from './middleware/apiBudget';
 import { logger } from './utils/logger';
 import { bestEffort } from './utils/best-effort';
 import { register } from './utils/metrics';
 import { getAllowedOrigins, isCorsOriginAllowed } from './utils/origins';
 import { probeMediaStorage } from './utils/media-storage';
+import { probeMalwareScanner } from './services/malware-scan.service';
+import { isPublicUploadPath } from './utils/public-uploads';
 import { parseClientCrashReport, recordClientCrash } from './utils/client-crash-report';
 import { getMaintenanceState } from './services/feature-flags.service';
+import { maintenanceGate } from './middleware/maintenance-gate';
 
 // Import services
 import { initializeSocketHandlers } from './services/socket.service';
@@ -323,39 +332,19 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 // Rate limiting
 // The switch exists for local tooling; production never runs without limits.
 const rateLimitEnabled = process.env.NODE_ENV === 'production' || process.env.RATE_LIMIT_ENABLED !== 'false';
-const rateLimitWindowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS || String(15 * 60 * 1000), 10);
-// Production keeps the strict budget. Outside production it is relaxed, the way
-// authLimiter below already does: one homepage load fans out to six API calls,
-// so 100 per 15 minutes trips during any E2E run or manual QA pass and the app
-// starts serving 429s to the developer testing it. RATE_LIMIT_MAX still wins.
-const rateLimitMax = parseInt(
-  process.env.RATE_LIMIT_MAX || (process.env.NODE_ENV === 'production' ? '100' : '2000'),
-  10
-);
 
-// Counters live in Redis when it is configured, so every instance of the
-// API draws on the same budget per caller; in the process otherwise.
-const limiter = rateLimit({
-  windowMs: Number.isFinite(rateLimitWindowMs) ? rateLimitWindowMs : 15 * 60 * 1000,
-  max: Number.isFinite(rateLimitMax) ? rateLimitMax : 100,
-  message: { success: false, message: 'Too many requests, please try again later.' },
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: (req: Request) => req.path === '/metrics' || req.path.startsWith('/webhooks'),
-  validate: { xForwardedForHeader: false },
-  store: new SharedRateLimitStore('rl:api:'),
-});
+// The ceiling on everything under /api, counted per caller rather than per
+// address: a member with a valid token has a budget of her own, an address
+// without one has the (much smaller) anonymous budget. The numbers, their
+// environment variables (RATE_LIMIT_MAX for the anonymous one) and why they are
+// what they are are in middleware/apiBudget.ts. Counters live in Redis when it
+// is configured, so every instance draws on the same budget; in the process
+// otherwise.
+const apiBudget = createApiBudget();
 
-// Strict rate limiter for authentication endpoints (brute-force protection)
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'production' ? 10 : 100, // relaxed in dev
-  message: { success: false, message: 'Too many login attempts, please try again later.' },
-  standardHeaders: true,
-  legacyHeaders: false,
-  validate: { xForwardedForHeader: false },
-  store: new SharedRateLimitStore('rl:auth:'),
-});
+// Sign-in and sign-up each get their own counter, so a burst of one does not
+// spend the other's budget (brute-force protection).
+const { login: loginLimiter, register: registerLimiter } = createCredentialLimiters();
 
 // Lenient limiter just for /refresh — high enough not to interfere with
 // active sessions, low enough to cap leaked-token replay loops.
@@ -381,10 +370,10 @@ const passwordResetLimiter = rateLimit({
 });
 
 if (rateLimitEnabled) {
-  app.use('/api/', limiter);
+  app.use('/api/', apiBudget);
   // Apply stricter limits to auth endpoints
-  app.use('/api/auth/login', authLimiter);
-  app.use('/api/auth/register', authLimiter);
+  app.use('/api/auth/login', loginLimiter);
+  app.use('/api/auth/register', registerLimiter);
   app.use('/api/auth/refresh', refreshLimiter);
   app.use('/api/auth/forgot-password', passwordResetLimiter);
   app.use('/api/auth/resend-verification', passwordResetLimiter);
@@ -429,19 +418,20 @@ app.post('/api/subscriptions/webhook', (req: Request, res: Response) => {
   });
 });
 
-// Body parsing
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+// Body parsing. 256kb for every route, with a larger limit only where a route
+// really takes a spreadsheet or an article: see config/body-limits.ts. This was
+// one 10mb limit for everything, sign-in included.
+mountJsonBodyParsers(app);
 
 // Serve static files from uploads directory
 const uploadsPath = path.join(process.cwd(), 'uploads');
 const publicUploadFolders = new Set(['avatars', 'covers', 'posts', 'videos']);
 logger.info('Mounting static uploads', { path: uploadsPath });
 app.use('/uploads', (req, res, next) => {
-  const normalizedPath = req.path.replace(/\\/g, '/').replace(/^\/+/, '');
-  const folder = normalizedPath.split('/')[0];
-
-  if (folder && !publicUploadFolders.has(folder)) {
+  // The folder is read the way the file server below will read the path, and a
+  // `..` anywhere is refused (isPublicUploadPath): the first segment of the raw
+  // text is not what gets served once `..` is resolved.
+  if (!isPublicUploadPath(req.path, publicUploadFolders)) {
     return res.status(404).json({
       success: false,
       message: 'Not found',
@@ -471,18 +461,18 @@ app.get('/', (_req: Request, res: Response) => {
   res.status(200).json({
     name: 'ATHENA API',
     status: 'running',
-    version: process.env.npm_package_version || '1.0.0',
     health: '/health',
     docs: '/api',
   });
 });
 
-// Health check
+// Health check. Answers anyone, so it says that the process is up and nothing
+// about which build: the version is on /health/version for the status page and
+// the rest of that answer is behind the diagnostics token.
 app.get('/health', (_req: Request, res: Response) => {
   res.status(200).json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
-    version: process.env.npm_package_version || '1.0.0',
   });
 });
 
@@ -494,7 +484,12 @@ app.get('/livez', (_req: Request, res: Response) => {
   });
 });
 
-// Readiness probe (dependencies are reachable)
+// Readiness probe (dependencies are reachable). Postgres always; and, in
+// production, Redis, which the API will not boot without: with it gone the
+// sweeps are paused and every counter is kept per process. The answer does not
+// say which of the two it was (this route answers anyone, and the log has the
+// reason). The host's own check stays on /livez, so a Redis blip is reported
+// by the uptime workflow and does not restart a healthy API.
 app.get('/readyz', async (_req: Request, res: Response) => {
   // Return 503 during graceful shutdown drain period
   if (isShuttingDown) {
@@ -506,6 +501,13 @@ app.get('/readyz', async (_req: Request, res: Response) => {
   try {
     // Minimal DB check
     await prisma.$queryRaw`SELECT 1`;
+    if (!(await redisReadyForTraffic())) {
+      logger.error('Readiness check failed: Redis does not answer');
+      return res.status(503).json({
+        status: 'not_ready',
+        timestamp: new Date().toISOString(),
+      });
+    }
     res.status(200).json({
       status: 'ready',
       timestamp: new Date().toISOString(),
@@ -587,52 +589,13 @@ app.post(
   }
 );
 
-// Paths that stay open while the platform is closed. Operators have to be able
-// to sign in and turn maintenance back off, and the client has to be able to
-// find out why it is being refused; everything else waits.
-const MAINTENANCE_OPEN_PATHS = [
-  '/admin',
-  '/auth/login',
-  '/auth/refresh',
-  '/auth/logout',
-  '/auth/me',
-  '/feature-flags/active',
-  '/maintenance',
-];
-
-// Mounted on /api only, and after the webhook router: Stripe retries a rejected
-// webhook for days, so dropping payment events during a ten-minute deploy would
-// cost more than it saves.
-app.use('/api', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const state = await getMaintenanceState();
-    if (!state.enabled) return next();
-
-    if (MAINTENANCE_OPEN_PATHS.some((open) => req.path === open || req.path.startsWith(open + '/'))) {
-      return next();
-    }
-
-    // Retry-After is in seconds and has to be an integer; without an announced
-    // end time, ask clients back in a minute rather than in a tight loop.
-    const retryAfterSeconds = state.endsAt
-      ? Math.max(30, Math.ceil((new Date(state.endsAt).getTime() - Date.now()) / 1000))
-      : 60;
-
-    res.setHeader('Retry-After', String(retryAfterSeconds));
-    return res.status(503).json({
-      success: false,
-      message: state.message,
-      maintenance: {
-        enabled: true,
-        message: state.message,
-        startedAt: state.startedAt,
-        endsAt: state.endsAt,
-      },
-    });
-  } catch (error) {
-    next(error);
-  }
-});
+// While the platform is closed every /api path but a short list answers 503.
+// The list (operators, then the safety tooling and the public crisis lines, so a
+// member in danger is never locked out by a deploy) and the reasons for it are
+// in middleware/maintenance-gate.ts. Mounted on /api only, and after the webhook
+// router: Stripe retries a rejected webhook for days, so dropping payment events
+// during a ten-minute deploy would cost more than it saves.
+app.use('/api', maintenanceGate());
 
 // API routes
 app.use('/api/auth', authRoutes);
@@ -692,6 +655,8 @@ app.use('/api/referrals', referralRoutes);
 app.use('/api/employer', employerRoutes);
 app.use('/api/education', educationRoutes);
 app.use('/api/creator', creatorRoutes);
+// What ATHENA keeps, public: the fees page reads it.
+app.use('/api/fees', feesRoutes);
 app.use('/api/formation', formationRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/search', searchRoutes);
@@ -851,6 +816,11 @@ export async function startServer() {
   // credentials surfaced only as one warning per failed upload.
   void probeMediaStorage();
 
+  // The same for the malware scanner: not awaited, never throws, and says at
+  // boot in the log what a missing or unreachable one costs (résumés and
+  // documents are refused in production) so it is not found out from a member.
+  void probeMalwareScanner({ announce: true });
+
   await initializeSearchIfConfigured();
 
   // Ensure DB connection with retry/backoff
@@ -929,6 +899,9 @@ export async function startServer() {
     // Escrow holds outliving the card authorisation behind them: warn while
     // there is still time to act.
     startEscrowExpirySweeper();
+    // Monthly creator payouts, only when CREATOR_AUTO_PAYOUTS=monthly is set. Off
+    // by default: until it is on a creator is paid when she asks.
+    startCreatorPayoutSweeper();
     startCarCatalogue();
     // Scheduled posts: publish what has come due, once a minute.
     startScheduledPostPublisher();
@@ -941,6 +914,12 @@ export async function startServer() {
     // the workers are up here, and after listen, so a slow database cannot
     // hold the port closed.
     void bestEffort('video.resume-stranded', () => resumeStrandedVideos(processStartedAt));
+
+    // What a production launch is still missing, said once per boot in the log
+    // and in Sentry. The API starts without Stripe, email or the Connect secret
+    // by design; this is what makes that state loud instead of silent. Not
+    // awaited, and never throws: see utils/launch-readiness.ts.
+    void reportLaunchReadinessAtBoot(() => buildLaunchReadiness());
   });
 
   // ===========================================

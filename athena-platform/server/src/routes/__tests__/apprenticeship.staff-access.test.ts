@@ -6,6 +6,8 @@ jest.mock('../../utils/prisma', () => ({
     apprenticeship: { findUnique: jest.fn() },
     apprenticeshipApplication: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn(), create: jest.fn() },
     organizationMember: { findFirst: jest.fn(), findMany: jest.fn() },
+    // The host check: verified, with an approved attestation that has not run out.
+    organization: { findMany: jest.fn(async () => []) },
   },
 }));
 
@@ -49,6 +51,19 @@ const LISTING = {
   positions: 2,
   positionsFilled: 0,
 };
+
+/** How the organisation named on the listing stands. `checked` has both halves; the others are missing one. */
+function hostIs(standing: 'checked' | 'unverified' | 'unattested' | 'unknown') {
+  prisma.organization.findMany.mockImplementation(async ({ where }: any) =>
+    standing === 'unknown'
+      ? []
+      : (where.id.in as string[]).map((id) => ({
+          id,
+          isVerified: standing !== 'unverified',
+          hostSafetyAttestations: standing === 'unattested' ? [] : [{ id: 'att-1' }],
+        }))
+  );
+}
 
 const HIRING_FILTER = {
   acceptedAt: { not: null },
@@ -115,6 +130,54 @@ describe('Applying for an apprenticeship', () => {
     prisma.apprenticeshipApplication.findUnique.mockResolvedValue(null);
     prisma.apprenticeshipApplication.create.mockImplementation(async ({ data }: any) => ({ id: 'a-new', ...data }));
     (notify as any).mockResolvedValue(undefined);
+    hostIs('checked');
+  });
+
+  // A listing that was open before the host check existed, or one whose host's
+  // attestation has since run out, stays visible but takes no applications: an
+  // applicant is not placed with a workplace ATHENA has not looked at.
+  describe('when the host has not been safety-checked', () => {
+    it.each([
+      ['is not verified', 'unverified'],
+      ['has no approved safety attestation', 'unattested'],
+      ['is not an organisation ATHENA knows', 'unknown'],
+    ] as const)('refuses, writes nothing, and says why, when the host %s', async (_what, standing) => {
+      hostIs(standing);
+      prisma.organizationMember.findMany.mockResolvedValue([{ userId: 'staff-1', organizationId: 'rto-1' }]);
+
+      const res = await request(app).post('/api/apprenticeships/ap1/apply').set({ 'x-test-user': APPLICANT }).send({ coverLetter: 'Hello' }).expect(409);
+
+      expect(res.body.message ?? res.body.error).toMatch(/has not safety-checked this host yet/);
+      expect(prisma.apprenticeshipApplication.create).not.toHaveBeenCalled();
+      expect(prisma.apprenticeshipApplication.findUnique).not.toHaveBeenCalled();
+      expect(notify).not.toHaveBeenCalled();
+    });
+
+    it('asks only about the host named on the listing when one is named, and about the training provider when none is', async () => {
+      prisma.organizationMember.findMany.mockResolvedValue([{ userId: 'staff-1', organizationId: 'host-1' }]);
+
+      prisma.apprenticeship.findUnique.mockResolvedValue({ ...LISTING, hostEmployerId: 'host-1' });
+      await request(app).post('/api/apprenticeships/ap1/apply').set({ 'x-test-user': APPLICANT }).send({ coverLetter: 'Hello' }).expect(201);
+      expect(prisma.organization.findMany.mock.calls[0][0].where).toEqual({ id: { in: ['host-1'] } });
+
+      prisma.organization.findMany.mockClear();
+      prisma.apprenticeshipApplication.findUnique.mockResolvedValue(null);
+      prisma.apprenticeship.findUnique.mockResolvedValue({ ...LISTING, hostEmployerId: null });
+      await request(app).post('/api/apprenticeships/ap1/apply').set({ 'x-test-user': APPLICANT }).send({ coverLetter: 'Hello' }).expect(201);
+      expect(prisma.organization.findMany.mock.calls[0][0].where).toEqual({ id: { in: ['rto-1'] } });
+    });
+
+    it('only counts an attestation that is approved and has not run out', async () => {
+      prisma.organizationMember.findMany.mockResolvedValue([{ userId: 'staff-1', organizationId: 'rto-1' }]);
+      const before = Date.now();
+
+      await request(app).post('/api/apprenticeships/ap1/apply').set({ 'x-test-user': APPLICANT }).send({ coverLetter: 'Hello' }).expect(201);
+
+      const select = prisma.organization.findMany.mock.calls[0][0].select.hostSafetyAttestations;
+      expect(select.where.status).toBe('APPROVED');
+      expect(select.where.expiresAt.gt).toBeInstanceOf(Date);
+      expect(select.where.expiresAt.gt.getTime()).toBeGreaterThanOrEqual(before - 1000);
+    });
   });
 
   it('refuses, before writing anything, when nobody at the provider could read it', async () => {
@@ -267,6 +330,32 @@ describe('A listing says whether it can take applications', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     prisma.apprenticeship.findUnique.mockResolvedValue({ ...LISTING, rto: { id: 'rto-1', name: 'TAFE Queensland', logo: null }, hostEmployer: null });
+    hostIs('checked');
+  });
+
+  // The seeded catalogue names training providers nobody here has checked. They
+  // are shown, labelled, not hidden: an honest "not yet checked" serves a
+  // visitor better than an empty page.
+  it('says honestly that its host has not been checked, and still shows the listing', async () => {
+    hostIs('unknown');
+    prisma.organizationMember.findMany.mockResolvedValue([]);
+
+    const res = await request(app).get('/api/apprenticeships/ap1').expect(200);
+
+    expect(res.body.data).toMatchObject({ id: 'ap1', hostVerified: false, hostSafetyChecked: false, hostMayPlace: false });
+  });
+
+  it.each([
+    ['verified but without an attestation', 'unattested', { hostVerified: true, hostSafetyChecked: false, hostMayPlace: false }],
+    ['with an attestation but not verified', 'unverified', { hostVerified: false, hostSafetyChecked: true, hostMayPlace: false }],
+    ['verified and attested', 'checked', { hostVerified: true, hostSafetyChecked: true, hostMayPlace: true }],
+  ] as const)('reports each half separately for a host that is %s', async (_what, standing, expected) => {
+    hostIs(standing);
+    prisma.organizationMember.findMany.mockResolvedValue([{ userId: 'staff-1', organizationId: 'rto-1' }]);
+
+    const res = await request(app).get('/api/apprenticeships/ap1').expect(200);
+
+    expect(res.body.data).toMatchObject(expected);
   });
 
   it('is false when nobody at the provider has an account', async () => {

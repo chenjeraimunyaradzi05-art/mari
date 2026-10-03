@@ -12,19 +12,20 @@ import { Router } from 'express';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { publicName } from '../utils/member-display';
 
 const router = Router();
 
 const MAX_CLOSE_FRIENDS = 200;
 
-const PERSON_SELECT = { id: true, firstName: true, lastName: true, displayName: true, avatar: true, headline: true };
+const PERSON_SELECT = { id: true, firstName: true, displayName: true, avatar: true, headline: true };
 
-type Person = { id: string; firstName: string | null; lastName: string | null; displayName: string | null; avatar: string | null; headline: string | null };
+type Person = { id: string; firstName: string | null; displayName: string | null; avatar: string | null; headline: string | null };
 
 function personView(user: Person) {
   return {
     id: user.id,
-    name: user.displayName?.trim() || [user.firstName, user.lastName].filter(Boolean).join(' ').trim() || 'Member',
+    name: publicName(user),
     avatar: user.avatar,
     headline: user.headline,
   };

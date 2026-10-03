@@ -5,52 +5,39 @@
  * holds the kind and the day of an entry in the clear, for indexing, and
  * nothing else. A record written under a key this host no longer has is
  * returned as unreadable rather than as an error.
+ *
+ * The key, its production checks and the retired keys a rotation leaves behind
+ * are in utils/encryption-key.ts; docs/runbooks/ENCRYPTION.md says what this
+ * protects and what it does not. It is encryption at rest: ATHENA's servers
+ * decrypt a record to show it to the member who wrote it.
  */
 
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto';
-
-const ALGORITHM = 'aes-256-gcm';
-const IV_LENGTH = 12;
-const AUTH_TAG_LENGTH = 16;
-
-let cached: { source: string; key: Buffer } | null = null;
-
-function getKey(): Buffer {
-  const hex = process.env.HEALTH_ENCRYPTION_KEY || process.env.DV_ENCRYPTION_KEY || '';
-  const valid = /^[0-9a-fA-F]{64}$/.test(hex);
-  const source = valid ? hex : 'dev';
-  if (cached && cached.source === source) return cached.key;
-  if (!valid) {
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error('HEALTH_ENCRYPTION_KEY (or DV_ENCRYPTION_KEY) must be a 64-character hex key in production');
-    }
-    cached = { source, key: scryptSync('dev-only-insecure-key', 'athena-health-salt', 32) };
-    return cached.key;
-  }
-  cached = { source, key: Buffer.from(hex, 'hex') };
-  return cached.key;
-}
+import { openText, sealText } from '../../utils/encryption-key';
+import { recordFailure } from '../../utils/ops-metrics';
 
 export function encryptJson(value: unknown): string {
-  const key = getKey();
-  const iv = randomBytes(IV_LENGTH);
-  const cipher = createCipheriv(ALGORITHM, key, iv, { authTagLength: AUTH_TAG_LENGTH });
-  const encrypted = Buffer.concat([cipher.update(JSON.stringify(value), 'utf8'), cipher.final()]);
-  return Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString('base64');
+  return sealText('health', JSON.stringify(value));
 }
 
+/**
+ * The record a sealed value holds, or null when it cannot be read. Null is the
+ * answer, not an error: the member is shown "unreadable" and the page goes on.
+ * But a record nobody can open is also the first sign that the key on this host
+ * is not the key the records were sealed under (a rotation that skipped the
+ * `_PREVIOUS` step, a restore onto a host with a different key), so each one is
+ * counted where the operations screen reads (utils/ops-metrics), with no id
+ * and no content. A quiet null used to be the only trace.
+ */
 export function decryptJson<T = Record<string, unknown>>(payload: string): T | null {
+  const text = openText('health', payload);
+  if (text === null) {
+    if (payload) recordFailure('health.record_unreadable', new Error('a health record could not be opened under the keys this host holds'));
+    return null;
+  }
   try {
-    const key = getKey();
-    const data = Buffer.from(payload, 'base64');
-    const iv = data.subarray(0, IV_LENGTH);
-    const tag = data.subarray(IV_LENGTH, IV_LENGTH + AUTH_TAG_LENGTH);
-    const body = data.subarray(IV_LENGTH + AUTH_TAG_LENGTH);
-    const decipher = createDecipheriv(ALGORITHM, key, iv, { authTagLength: AUTH_TAG_LENGTH });
-    decipher.setAuthTag(tag);
-    const text = decipher.update(body) + decipher.final('utf8');
     return JSON.parse(text) as T;
   } catch {
+    recordFailure('health.record_unreadable', new Error('a health record opened but did not hold JSON'));
     return null;
   }
 }

@@ -13,7 +13,7 @@
  */
 
 import request from 'supertest';
-import { describe, it, expect, jest, beforeEach } from '@jest/globals';
+import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
 
 jest.mock('../../utils/prisma', () => ({
   prisma: {
@@ -103,6 +103,15 @@ jest.mock('../../utils/logger', () => ({
 import { app } from '../../index';
 import { prisma as prismaTyped } from '../../utils/prisma';
 import { clearPlanPriceCache } from '../../services/payments-orchestration.service';
+import {
+  CREATOR_REVENUE_SHARE_PERCENT,
+  ESCROW_DEFAULT_FEE_PERCENT,
+  GIFT_POINT_VALUE_AUD,
+  MENTOR_PLATFORM_FEE_RATE,
+  MINIMUM_PAYOUT_AUD,
+  REFUND_DAYS,
+  TRIAL_DAYS,
+} from '../../config/price-book';
 
 const prisma: any = prismaTyped;
 
@@ -187,6 +196,91 @@ describe('GET /api/subscriptions/plans', () => {
   });
 });
 
+/**
+ * The numbers a price page prints beside the price - the trial, the refund
+ * window, what ATHENA keeps, the GST sentence - come from the one price book,
+ * so a page that reads this cannot say one thing while checkout and the Terms
+ * say another.
+ */
+describe('GET /api/subscriptions/plans: the rest of the price book', () => {
+  const saved = {
+    abn: process.env.ATHENA_ABN,
+    from: process.env.ATHENA_GST_REGISTERED_FROM,
+  };
+
+  afterEach(() => {
+    if (saved.abn === undefined) delete process.env.ATHENA_ABN;
+    else process.env.ATHENA_ABN = saved.abn;
+    if (saved.from === undefined) delete process.env.ATHENA_GST_REGISTERED_FROM;
+    else process.env.ATHENA_GST_REGISTERED_FROM = saved.from;
+  });
+
+  it('serves the trial, the refund window and the fees from the book', async () => {
+    const res = await request(app).get('/api/subscriptions/plans').expect(200);
+
+    expect(res.body.data.trialDays).toBe(TRIAL_DAYS);
+    expect(res.body.data.refundDays).toBe(REFUND_DAYS);
+    expect(res.body.data.fees).toEqual({
+      mentoringPlatformPercent: Math.round(MENTOR_PLATFORM_FEE_RATE * 100),
+      marketplacePlatformPercent: ESCROW_DEFAULT_FEE_PERCENT,
+      creatorSharePercent: { ...CREATOR_REVENUE_SHARE_PERCENT },
+      giftPointValueAud: GIFT_POINT_VALUE_AUD,
+      minimumPayoutAud: MINIMUM_PAYOUT_AUD,
+    });
+  });
+
+  it('says plainly that no GST is added while ATHENA is not registered', async () => {
+    delete process.env.ATHENA_ABN;
+    delete process.env.ATHENA_GST_REGISTERED_FROM;
+
+    const res = await request(app).get('/api/subscriptions/plans').expect(200);
+
+    expect(res.body.data.gst.registered).toBe(false);
+    expect(res.body.data.gst.statement).toMatch(/not registered for GST/);
+    expect(res.body.data.gst.statement).toMatch(/AUD/);
+  });
+
+  it('says prices include GST once there is an ABN and a registration that has begun', async () => {
+    // Passes the ABN checksum, which is the only reason it is used.
+    process.env.ATHENA_ABN = '51824753556';
+    process.env.ATHENA_GST_REGISTERED_FROM = '2020-01-01';
+
+    const res = await request(app).get('/api/subscriptions/plans').expect(200);
+
+    expect(res.body.data.gst.registered).toBe(true);
+    expect(res.body.data.gst.statement).toMatch(/include GST/);
+  });
+
+  it('does not claim a registration that has not begun, or an ABN with no registration', async () => {
+    process.env.ATHENA_ABN = '51824753556';
+    process.env.ATHENA_GST_REGISTERED_FROM = '2999-01-01';
+    const notYet = await request(app).get('/api/subscriptions/plans').expect(200);
+    expect(notYet.body.data.gst.registered).toBe(false);
+
+    delete process.env.ATHENA_GST_REGISTERED_FROM;
+    const abnOnly = await request(app).get('/api/subscriptions/plans').expect(200);
+    expect(abnOnly.body.data.gst.registered).toBe(false);
+  });
+
+  it('sends no GST sentence beside a price in another currency, because it opens "Prices are in Australian dollars"', async () => {
+    // A deployment that has set up a US-dollar price for a member who chose US
+    // dollars shows that price. The sentence would sit beside it and be false.
+    const career = stripePrices.price_1CareerLive;
+    const was = career.currency;
+    career.currency = 'usd';
+    try {
+      const res = await request(app).get('/api/subscriptions/plans').expect(200);
+
+      expect(planFor(res.body, 'PREMIUM_CAREER').currency).toBe('USD');
+      expect(res.body.data.gst).toBeNull();
+      // The rest of the book is still served.
+      expect(res.body.data.trialDays).toBe(TRIAL_DAYS);
+    } finally {
+      career.currency = was;
+    }
+  });
+});
+
 describe('GET /api/payments/pricing, which the mobile upgrade screen reads', () => {
   it('reports the Stripe prices, not a table of its own', async () => {
     const { body: pricing } = await request(app).get('/api/payments/pricing?region=AU').expect(200);
@@ -244,6 +338,58 @@ describe('POST /api/subscriptions/cancel', () => {
     });
   });
 
+  // A cancel is a promise about a date. The page said only that it had been
+  // cancelled, which reads as ending now.
+  it('says the day the membership ends, as Stripe has it', async () => {
+    prisma.subscription.findUnique.mockResolvedValue({ userId: 'member-1', stripeSubscriptionId: 'sub_mei' });
+    stripeClient.subscriptions.update.mockResolvedValueOnce({
+      status: 'active',
+      cancel_at_period_end: true,
+      current_period_end: Math.floor(Date.UTC(2026, 10, 12, 3, 0, 0) / 1000),
+    });
+
+    const res = await request(app).post('/api/subscriptions/cancel').expect(200);
+
+    expect(res.body.data).toEqual({
+      cancelAtPeriodEnd: true,
+      currentPeriodEnd: '2026-11-12T03:00:00.000Z',
+      trialing: false,
+    });
+  });
+
+  it('says so when it is a trial she is cancelling, which is the day the first charge would have been taken', async () => {
+    prisma.subscription.findUnique.mockResolvedValue({ userId: 'member-1', stripeSubscriptionId: 'sub_mei' });
+    stripeClient.subscriptions.update.mockResolvedValueOnce({
+      status: 'trialing',
+      cancel_at_period_end: true,
+      current_period_end: Math.floor(Date.UTC(2026, 9, 15, 0, 0, 0) / 1000),
+    });
+
+    const res = await request(app).post('/api/subscriptions/cancel').expect(200);
+
+    expect(res.body.data).toMatchObject({ trialing: true, currentPeriodEnd: '2026-10-15T00:00:00.000Z' });
+    // Still at the end of the period, never now.
+    expect(stripeClient.subscriptions.update).toHaveBeenCalledWith('sub_mei', { cancel_at_period_end: true });
+    expect((stripeClient.subscriptions as any).cancel).toBeUndefined();
+  });
+
+  it('still cancels, with no date, when Stripe does not give one', async () => {
+    prisma.subscription.findUnique.mockResolvedValue({ userId: 'member-1', stripeSubscriptionId: 'sub_mei' });
+
+    const res = await request(app).post('/api/subscriptions/cancel').expect(200);
+
+    expect(res.body.data).toEqual({ cancelAtPeriodEnd: true, currentPeriodEnd: null, trialing: false });
+  });
+
+  it('cannot cancel somebody else’s subscription: it reads her own row, never one named in the request', async () => {
+    prisma.subscription.findUnique.mockResolvedValue({ userId: 'member-1', stripeSubscriptionId: 'sub_mei' });
+
+    await request(app).post('/api/subscriptions/cancel').send({ userId: 'someone-else', subscriptionId: 'sub_other' }).expect(200);
+
+    expect(prisma.subscription.findUnique).toHaveBeenCalledWith({ where: { userId: 'member-1' } });
+    expect(stripeClient.subscriptions.update).toHaveBeenCalledWith('sub_mei', { cancel_at_period_end: true });
+  });
+
   it('refuses when there is nothing to cancel, and changes nothing', async () => {
     prisma.subscription.findUnique.mockResolvedValue({ userId: 'member-1', stripeSubscriptionId: null });
 
@@ -258,5 +404,53 @@ describe('POST /api/subscriptions/cancel', () => {
 
     await request(app).post('/api/subscriptions/cancel').expect(500);
     expect(prisma.subscription.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /api/subscriptions/plans: what Free and a paid membership get', () => {
+  const CHAT_ENV = ['AI_CHAT_FREE_MAX_REQUESTS', 'AI_CHAT_FREE_WINDOW_SECONDS', 'AI_CHAT_PREMIUM_MAX_REQUESTS', 'AI_CHAT_PREMIUM_WINDOW_SECONDS'];
+  const savedChat = Object.fromEntries(CHAT_ENV.map((name) => [name, process.env[name]]));
+
+  afterEach(() => {
+    for (const name of CHAT_ENV) {
+      if (savedChat[name] === undefined) delete process.env[name];
+      else process.env[name] = savedChat[name];
+    }
+  });
+
+  it('serves the table the paid routes are gated by, so the pricing page prints what the server enforces', async () => {
+    for (const name of CHAT_ENV) delete process.env[name];
+
+    const res = await request(app).get('/api/subscriptions/plans').expect(200);
+
+    expect(res.body.data.entitlements).toEqual({
+      free: { aiTools: false, aiChat: { messages: 20, windowSeconds: 86_400 } },
+      paid: { aiTools: true, aiChat: { messages: 200, windowSeconds: 86_400 } },
+    });
+  });
+
+  it('follows the chat limits an operator has set, with no change to the page', async () => {
+    process.env.AI_CHAT_FREE_MAX_REQUESTS = '12';
+    process.env.AI_CHAT_PREMIUM_MAX_REQUESTS = '300';
+
+    const res = await request(app).get('/api/subscriptions/plans').expect(200);
+
+    expect(res.body.data.entitlements.free.aiChat.messages).toBe(12);
+    expect(res.body.data.entitlements.paid.aiChat.messages).toBe(300);
+  });
+
+  it('lists nothing a plan does not really change: no application cap, mentor limit or course discount', async () => {
+    const res = await request(app).get('/api/subscriptions/plans').expect(200);
+
+    for (const plan of ['free', 'paid']) {
+      expect(Object.keys(res.body.data.entitlements[plan]).sort()).toEqual(['aiChat', 'aiTools']);
+    }
+  });
+
+  it('says payments are not paused when nothing has paused them', async () => {
+    const res = await request(app).get('/api/subscriptions/plans').expect(200);
+
+    expect(res.body.data.paused).toBe(false);
+    expect(res.body.data.pauseMessage).toBeNull();
   });
 });

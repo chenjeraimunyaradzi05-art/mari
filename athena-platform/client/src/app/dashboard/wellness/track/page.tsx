@@ -12,8 +12,8 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
 import { Activity, CalendarHeart, ChevronLeft, ChevronRight, Droplets, HeartPulse, Moon, Trash2, Utensils, Thermometer } from 'lucide-react';
-import { localDay, wellnessApi, wellnessError, type Entry } from '@/lib/wellness-api';
-import { ErrorBox, HealthDisclaimer, Loading, PageTitle, Scale, WellnessNav, fmtDay, useLoad } from '@/components/wellness/WellnessUi';
+import { localDay, wellnessApi, wellnessError, type CrisisAnswer, type Entry } from '@/lib/wellness-api';
+import { CrisisNotice, ErrorBox, HealthDisclaimer, Loading, PageTitle, Scale, WellnessNav, crisisOf, fmtDay, useLoad } from '@/components/wellness/WellnessUi';
 import { Field, JumpLinks, NumberInput, Panel, SelectInput, Stat, inputClass, num } from '@/components/strategy/StrategyUi';
 import { cn } from '@/lib/utils';
 
@@ -52,9 +52,12 @@ export default function TrackPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range.data, day]);
 
+  // The line about the day is hers alone; if it sounds like crisis the answer carries the lines and says nobody has been told.
+  const [crisis, setCrisis] = useState<CrisisAnswer | null>(null);
   const save = async (kind: string, payload: Record<string, unknown>, extra: Record<string, unknown> = {}) => {
     try {
-      await wellnessApi.addEntry({ kind, day, payload, ...extra });
+      const res = await wellnessApi.addEntry({ kind, day, payload, ...extra });
+      setCrisis(crisisOf(res));
       toast.success('Saved');
       range.reload();
       if (kind === 'PERIOD') cycle.reload();
@@ -72,6 +75,7 @@ export default function TrackPage() {
     <div className="mx-auto max-w-5xl space-y-6 p-6">
       <PageTitle icon={HeartPulse} kicker="Wellness" title="Track" blurb="A day at a time. Log it when it happens, or fill a day in later. Everything is encrypted before it is stored." action={<Link href="/dashboard/wellness/import" className="btn-secondary text-sm">Bring in Apple Health or Google Fit</Link>} />
       <WellnessNav current="/dashboard/wellness/track" />
+      <CrisisNotice crisis={crisis} onClose={() => setCrisis(null)} />
       <JumpLinks items={[{ id: 'checkin', label: 'Check-in' }, { id: 'sleep', label: 'Sleep' }, { id: 'movement', label: 'Movement' }, { id: 'water', label: 'Water and food' }, { id: 'cycle', label: 'Cycle' }, { id: 'symptoms', label: 'Symptoms' }]} />
 
       <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
@@ -96,7 +100,7 @@ export default function TrackPage() {
             <Scale label="Anxiety" words="anxiety" value={checkin.anxiety} onChange={(v) => setCheckin((x) => ({ ...x, anxiety: v }))} />
             <Scale label="Energy" words="energy" value={checkin.energy} onChange={(v) => setCheckin((x) => ({ ...x, energy: v }))} />
           </div>
-          <div className="mt-4"><Field label="A line about the day" hint="Optional. Only you read it."><input value={checkin.note} onChange={(e) => setCheckin((x) => ({ ...x, note: e.target.value }))} maxLength={500} className={inputClass} placeholder="What was going on" /></Field></div>
+          <div className="mt-4"><Field label="A line about the day" hint="Optional. Encrypted before it is stored, and shown only to you unless you share it."><input value={checkin.note} onChange={(e) => setCheckin((x) => ({ ...x, note: e.target.value }))} maxLength={500} className={inputClass} placeholder="What was going on" /></Field></div>
           <div className="mt-4 flex gap-2">
             <button type="button" disabled={!checkin.mood || !checkin.stress || !checkin.anxiety || !checkin.energy} onClick={() => save('CHECKIN', { mood: checkin.mood, stress: checkin.stress, anxiety: checkin.anxiety, energy: checkin.energy, note: checkin.note || undefined })} className="btn-primary text-sm disabled:opacity-50">Save check-in</button>
             {first('CHECKIN') && <button type="button" onClick={() => remove(first('CHECKIN')!.id)} className="btn-ghost inline-flex items-center gap-1 text-sm text-slate-500"><Trash2 className="h-4 w-4" /> Remove</button>}

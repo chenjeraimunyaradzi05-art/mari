@@ -6,6 +6,7 @@
 import { createHash } from 'node:crypto';
 import OpenAI from 'openai';
 import { RekognitionClient, DetectModerationLabelsCommand } from "@aws-sdk/client-rekognition";
+import sharp from 'sharp';
 import { ApiError } from '../middleware/errorHandler';
 import { recordFailure } from '../utils/ops-metrics';
 import { logger } from '../utils/logger';
@@ -314,6 +315,12 @@ export type ModeratedSurface =
   // groups publish. These were screened under 'profile', so a flag on a
   // company page read in the log as though a member's own bio had tripped it.
   | 'organization'
+  // The title and description of a housing listing, which every eligible member
+  // reads, and the comment on a review of a practitioner, which the directory
+  // shows beside the rating. Neither went through the gate; a listing is the
+  // one surface where the words reach a woman looking for somewhere safe.
+  | 'housing_listing'
+  | 'health_review'
   | 'message'
   | 'group_message'
   | 'channel_message'
@@ -779,11 +786,121 @@ export async function evaluateSafetyScore(content: string): Promise<SafetyScoreR
 }
 
 /**
+ * What happens to an image when the provider IS configured and cannot answer.
+ *
+ * - 'allow' (the default): it goes up, and the outage is counted and logged.
+ *   This is what the text gate does for the surfaces everyone sees.
+ * - 'refuse': the upload is answered with a 503 the member can retry, the same
+ *   answer an image gets when no provider is configured at all.
+ *
+ * It is the operator's decision, from MODERATION_IMAGE_OUTAGE, because it
+ * trades a member being unable to upload for a few minutes against a picture
+ * going up unseen, and neither is obviously right for every deployment. A
+ * value that is not 'refuse' leaves the default.
+ */
+export type ImageOutagePolicy = 'allow' | 'refuse';
+
+export function imageOutagePolicy(): ImageOutagePolicy {
+  return process.env.MODERATION_IMAGE_OUTAGE?.trim().toLowerCase() === 'refuse' ? 'refuse' : 'allow';
+}
+
+/**
+ * Rekognition takes an image as bytes only up to 5 MiB, and only as JPEG or
+ * PNG. Both limits used to be the provider's problem: the upload routes pass
+ * the picture as it arrived (an avatar may be 5 MB, a cover 10 MB, a post
+ * picture 20 MB, and a WebP or GIF is allowed everywhere), the provider
+ * refused anything over the limit or in another format, and the catch below
+ * read a refusal as an outage and let the picture through. So a picture only
+ * had to be a few megabytes bigger, or saved as WebP, to go up unseen.
+ */
+const REKOGNITION_MAX_BYTES = 5 * 1024 * 1024;
+/** Held below the limit so a file near it is not a coin toss. */
+const SCREENING_TARGET_BYTES = 4 * 1024 * 1024;
+/** What a picture is looked at as: large enough to see what is in it, small enough to be quick. */
+const SCREENING_MAX_SIDE = 1600;
+
+const isJpeg = (bytes: Buffer) => bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+const isPng = (bytes: Buffer) =>
+  bytes.length > 7 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+
+export type ScreeningCopy = { ok: true; bytes: Buffer } | { ok: false; reason: 'unreadable' | 'too_large' };
+
+/**
+ * The bytes the provider is shown: the picture itself when it is already a
+ * JPEG or PNG within the limit, and otherwise a JPEG copy, turned upright and
+ * scaled down, made only for the look. The copy is never stored. Whatever the
+ * caller holds, no caller can send the provider something it will refuse.
+ */
+export async function imageForScreening(image: Buffer): Promise<ScreeningCopy> {
+  if (image.length <= SCREENING_TARGET_BYTES && (isJpeg(image) || isPng(image))) {
+    return { ok: true, bytes: image };
+  }
+
+  // A picture the provider would refuse is made smaller until it will not.
+  // A GIF is looked at by its first frame, which is what sharp reads.
+  let decoded: ReturnType<typeof sharp>;
+  try {
+    decoded = sharp(image).rotate();
+    await decoded.metadata();
+  } catch {
+    return { ok: false, reason: 'unreadable' };
+  }
+
+  for (const [side, quality] of [
+    [SCREENING_MAX_SIDE, 80],
+    [1000, 60],
+  ] as const) {
+    try {
+      const bytes = await decoded
+        .clone()
+        .resize(side, side, { fit: 'inside', withoutEnlargement: true })
+        // A PNG or WebP with transparency would otherwise come out black.
+        .flatten({ background: '#ffffff' })
+        .jpeg({ quality })
+        .toBuffer();
+      if (bytes.length <= REKOGNITION_MAX_BYTES) return { ok: true, bytes };
+    } catch {
+      return { ok: false, reason: 'unreadable' };
+    }
+  }
+  return { ok: false, reason: 'too_large' };
+}
+
+/**
+ * What an image that could not be screened becomes, by MODERATION_IMAGE_OUTAGE:
+ * a 503 the member can retry, or a pass that is counted.
+ */
+function imageCouldNotBeScreened(error: unknown, detail: string): ModerationResult {
+  logger.error('Image moderation could not screen an image', {
+    detail,
+    error: error instanceof Error ? error.message : String(error),
+  });
+  recordFailure('moderation.image_provider_unavailable', error);
+  if (imageOutagePolicy() === 'refuse') {
+    throw new ApiError(503, IMAGE_CHECK_UNAVAILABLE);
+  }
+  return {
+    flagged: false,
+    categories: [],
+    scores: {},
+    action: 'allow',
+    reason: 'Image moderation unavailable',
+    unavailable: true,
+  };
+}
+
+/**
  * Moderate image content using AWS Rekognition
  *
  * Throws a 503 when no provider is configured and the deployment requires
  * screening (see moderationRequirement): every image a member uploads is
  * public, an avatar as much as a post, so images follow the 'public' line.
+ *
+ * The provider is shown a JPEG or PNG of at most 5 MiB whatever was passed in
+ * (see imageForScreening), so a large or WebP picture is screened rather than
+ * waved through. An image that cannot be decoded at all is a 400, as it is
+ * where the route would store it. A provider that is configured and does not
+ * answer follows MODERATION_IMAGE_OUTAGE (see imageOutagePolicy).
  */
 export async function moderateImage(imageBuffer: Buffer): Promise<ModerationResult> {
   // No provider, no screening — said once at error level and counted every
@@ -799,9 +916,18 @@ export async function moderateImage(imageBuffer: Buffer): Promise<ModerationResu
     return { flagged: false, categories: [], scores: {}, action: 'allow' };
   }
 
+  const copy = await imageForScreening(imageBuffer);
+  if (!copy.ok) {
+    if (copy.reason === 'unreadable') {
+      logger.warn('Image refused: it could not be read');
+      throw new ApiError(400, 'That image could not be read. Try saving it again, or choose another.');
+    }
+    return imageCouldNotBeScreened(new Error('image too large to screen'), 'too_large');
+  }
+
   try {
     const command = new DetectModerationLabelsCommand({
-      Image: { Bytes: imageBuffer },
+      Image: { Bytes: copy.bytes },
       MinConfidence: 60,
     });
 
@@ -852,19 +978,11 @@ export async function moderateImage(imageBuffer: Buffer): Promise<ModerationResu
       reason,
     };
   } catch (error) {
-    // The image goes up, as a post does when the text provider is down, but the
-    // outage is now counted. It was a log line and nothing else, so a
+    // By default the image goes up, as a post does when the text provider is
+    // down, but the outage is counted. It was a log line and nothing else, so a
     // Rekognition outage that let every image through unscreened looked, on
-    // every dashboard, exactly like a quiet day.
-    logger.error('AWS Rekognition moderation failed', { error });
-    recordFailure('moderation.image_provider_unavailable', error);
-    return {
-      flagged: false,
-      categories: [],
-      scores: {},
-      action: 'allow',
-      reason: 'Image moderation unavailable',
-      unavailable: true,
-    };
+    // every dashboard, exactly like a quiet day. MODERATION_IMAGE_OUTAGE=refuse
+    // makes it a 503 instead (imageOutagePolicy).
+    return imageCouldNotBeScreened(error, 'provider_error');
   }
 }

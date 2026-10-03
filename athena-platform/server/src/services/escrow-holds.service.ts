@@ -15,6 +15,7 @@
 
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
+import { holdDeadlineOf } from './escrow-deadline';
 
 /**
  * The session types a flow of its own creates and releases. A hold carrying one
@@ -24,6 +25,10 @@ import { ApiError } from '../middleware/errorHandler';
 export const FLOW_OWNED_SESSION_TYPES: readonly string[] = [
   'mentor_session',
   'service_order',
+  // An hour booked on a listing, and a proposal the buyer accepted on a brief.
+  // Each is released by its own screen, so the generic route must not move them.
+  'service_booking',
+  'custom_request',
   'vehicle_purchase',
   'car_service',
   'vehicle_inspection',
@@ -35,9 +40,6 @@ export const GENERIC_SESSION_TYPES: readonly string[] = ['course_purchase', 'cre
 /** Where a buyer releases or cancels a hold that no flow owns. */
 export const GENERIC_HOLDS_SCREEN = '/dashboard/finance/holds';
 
-/** How long a card authorisation is assumed to last; the expiry sweep uses the same figure. */
-const AUTHORISATION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
-
 /** How far back settled holds are still listed, so she can see what became of one. */
 const SETTLED_LOOKBACK_MS = 90 * 24 * 60 * 60 * 1000;
 
@@ -46,6 +48,8 @@ const HELD_STATUSES = ['PENDING', 'AUTHORIZED'];
 const KIND_LABELS: Record<string, string> = {
   mentor_session: 'Mentor session',
   service_order: 'Marketplace order',
+  service_booking: 'Marketplace booking',
+  custom_request: 'Marketplace request',
   vehicle_purchase: 'Car purchase',
   car_service: 'Workshop job',
   vehicle_inspection: 'Vehicle inspection',
@@ -58,6 +62,8 @@ type HoldRecord = {
   paymentIntentId: string | null;
   sessionType: string | null;
   serviceOrder: { id: string } | null;
+  serviceBooking: { id: string } | null;
+  serviceProposal: { id: string } | null;
   vehiclePurchase: { id: string } | null;
   vehicleInspection: { id: string; listingId: string } | null;
   mechanicBooking: { id: string } | null;
@@ -68,6 +74,8 @@ const HOLD_RECORD_SELECT = {
   paymentIntentId: true,
   sessionType: true,
   serviceOrder: { select: { id: true } },
+  serviceBooking: { select: { id: true } },
+  serviceProposal: { select: { id: true } },
   vehiclePurchase: { select: { id: true } },
   vehicleInspection: { select: { id: true, listingId: true } },
   mechanicBooking: { select: { id: true } },
@@ -91,6 +99,14 @@ export type HoldOwner =
 async function ownerOf(hold: HoldRecord, sessionsByIntent?: Map<string, string>): Promise<HoldOwner> {
   if (hold.serviceOrder) {
     return { kind: 'flow', flow: 'service_order', href: `/skills-marketplace/orders/${hold.serviceOrder.id}`, label: 'Open the order' };
+  }
+  if (hold.serviceBooking) {
+    return { kind: 'flow', flow: 'service_booking', href: '/skills-marketplace/bookings', label: 'Open your bookings' };
+  }
+  if (hold.serviceProposal) {
+    // The web app has no page for a brief yet, so this points at the marketplace
+    // rather than at an address that would not open.
+    return { kind: 'flow', flow: 'custom_request', href: '/skills-marketplace', label: 'Open the marketplace' };
   }
   if (hold.vehiclePurchase) {
     return { kind: 'flow', flow: 'vehicle_purchase', href: `/dashboard/cars/purchases/${hold.vehiclePurchase.id}`, label: 'Open the purchase' };
@@ -124,7 +140,15 @@ async function ownerOf(hold: HoldRecord, sessionsByIntent?: Map<string, string>)
 /** Mentor sessions behind a set of holds, looked up in one query. */
 async function sessionsFor(holds: HoldRecord[]): Promise<Map<string, string>> {
   const intentIds = holds
-    .filter(h => !h.serviceOrder && !h.vehiclePurchase && !h.vehicleInspection && !h.mechanicBooking)
+    .filter(
+      h =>
+        !h.serviceOrder &&
+        !h.serviceBooking &&
+        !h.serviceProposal &&
+        !h.vehiclePurchase &&
+        !h.vehicleInspection &&
+        !h.mechanicBooking
+    )
     .map(h => h.paymentIntentId)
     .filter((id): id is string => Boolean(id));
   if (intentIds.length === 0) return new Map();
@@ -191,6 +215,8 @@ export async function listBuyerHolds(userId: string, now = new Date()): Promise<
       status: true,
       description: true,
       createdAt: true,
+      // Where Stripe's own deadline for the hold is kept; see escrow-deadline.
+      metadata: true,
       seller: { select: { displayName: true, firstName: true, lastName: true } },
     },
   });
@@ -210,10 +236,7 @@ export async function listBuyerHolds(userId: string, now = new Date()): Promise<
         currency: row.currency.toUpperCase(),
         status: row.status,
         createdAt: row.createdAt.toISOString(),
-        lapsesAt:
-          held && row.status === 'AUTHORIZED'
-            ? new Date(row.createdAt.getTime() + AUTHORISATION_LIFETIME_MS).toISOString()
-            : null,
+        lapsesAt: held && row.status === 'AUTHORIZED' ? holdDeadlineOf(row).toISOString() : null,
         payee: displayName(row.seller),
         owner,
         canRelease: held && row.status === 'AUTHORIZED' && owner.kind === 'generic' && Boolean(row.paymentIntentId),
@@ -271,6 +294,76 @@ export async function assertMemberMayMoveHold(
   }
 }
 
+export interface EscrowFlowSummary {
+  /** The flow's name: service_order, mentor_session, vehicle_purchase, and so on. */
+  flow: string;
+  /** What the staff reading a card dispute would call it. */
+  label: string;
+  id: string;
+  /** Where that flow has got to, in its own words. */
+  status: string;
+}
+
+/**
+ * What each of a set of escrow rows is paying for, for the people who read a card
+ * dispute and need to know which order, booking, purchase or session the bank is
+ * asking about. A row no flow claims (a generic hold) is left out of the answer.
+ * One query for the escrow rows and one more for the sessions, whatever the count.
+ */
+export async function summariseEscrowFlows(escrowIds: string[]): Promise<Map<string, EscrowFlowSummary>> {
+  const found = new Map<string, EscrowFlowSummary>();
+  if (escrowIds.length === 0) return found;
+
+  const rows = await prisma.escrowPayment.findMany({
+    where: { id: { in: escrowIds } },
+    select: {
+      id: true,
+      paymentIntentId: true,
+      serviceOrder: { select: { id: true, status: true } },
+      serviceBooking: { select: { id: true, status: true } },
+      serviceProposal: { select: { id: true, status: true } },
+      vehiclePurchase: { select: { id: true, status: true } },
+      vehicleInspection: { select: { id: true, status: true } },
+      mechanicBooking: { select: { id: true, status: true } },
+    },
+  });
+
+  const claimed = (
+    row: (typeof rows)[number]
+  ): { flow: string; id: string; status: string } | null => {
+    if (row.serviceOrder) return { flow: 'service_order', ...row.serviceOrder };
+    if (row.serviceBooking) return { flow: 'service_booking', ...row.serviceBooking };
+    if (row.serviceProposal) return { flow: 'custom_request', ...row.serviceProposal };
+    if (row.vehiclePurchase) return { flow: 'vehicle_purchase', ...row.vehiclePurchase };
+    if (row.vehicleInspection) return { flow: 'vehicle_inspection', ...row.vehicleInspection };
+    if (row.mechanicBooking) return { flow: 'car_service', ...row.mechanicBooking };
+    return null;
+  };
+
+  const unclaimedIntents: string[] = [];
+  for (const row of rows) {
+    const flow = claimed(row);
+    if (flow) found.set(row.id, { ...flow, label: KIND_LABELS[flow.flow] ?? 'Payment' });
+    else if (row.paymentIntentId) unclaimedIntents.push(row.paymentIntentId);
+  }
+
+  if (unclaimedIntents.length > 0) {
+    const sessions = await prisma.mentorSession.findMany({
+      where: { stripePaymentIntentId: { in: unclaimedIntents } },
+      select: { id: true, status: true, stripePaymentIntentId: true },
+    });
+    const bySession = new Map(sessions.map((s) => [s.stripePaymentIntentId, s]));
+    for (const row of rows) {
+      const session = row.paymentIntentId ? bySession.get(row.paymentIntentId) : undefined;
+      if (session && !found.has(row.id)) {
+        found.set(row.id, { flow: 'mentor_session', label: KIND_LABELS.mentor_session, id: session.id, status: session.status });
+      }
+    }
+  }
+
+  return found;
+}
+
 export interface AdminHeldEscrow {
   id: string;
   paymentIntentId: string | null;
@@ -309,6 +402,7 @@ export async function listHeldEscrowForAdmin(
       status: true,
       description: true,
       createdAt: true,
+      metadata: true,
     },
   });
 
@@ -328,7 +422,7 @@ export async function listHeldEscrowForAdmin(
         currency: row.currency.toUpperCase(),
         status: row.status,
         createdAt: row.createdAt.toISOString(),
-        lapsesAt: new Date(row.createdAt.getTime() + AUTHORISATION_LIFETIME_MS).toISOString(),
+        lapsesAt: holdDeadlineOf(row).toISOString(),
         owner: await ownerOf(row, sessions),
       }))
     ),

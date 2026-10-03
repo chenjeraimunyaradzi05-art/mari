@@ -14,6 +14,8 @@ jest.mock('../../utils/prisma', () => ({
     },
     storyHighlightItem: { create: jest.fn(), delete: jest.fn() },
     userSafetySettings: { findMany: jest.fn(async () => []), findUnique: jest.fn(async () => null) },
+    // The DV safety page's own block list, the second place a block can be written: nobody is blocked there unless a test says so.
+    dvSafetyProfile: { findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
   },
 }));
 

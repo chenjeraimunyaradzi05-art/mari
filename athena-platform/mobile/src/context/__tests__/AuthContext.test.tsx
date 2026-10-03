@@ -28,6 +28,7 @@ const mockGet = jest.fn<(url: string) => Promise<unknown>>();
 const mockPost = jest.fn<(url: string, body?: unknown) => Promise<unknown>>();
 const mockSetAuthTokens = jest.fn();
 const mockExpiryListeners: Array<() => void> = [];
+const mockRefreshedListeners: Array<(tokens: { accessToken: string; refreshToken: string | null }) => void | Promise<void>> = [];
 jest.mock('../../services/api', () => ({
   api: {
     get: (url: string) => mockGet(url),
@@ -39,6 +40,13 @@ jest.mock('../../services/api', () => ({
     return () => {
       const index = mockExpiryListeners.indexOf(listener);
       if (index >= 0) mockExpiryListeners.splice(index, 1);
+    };
+  },
+  onTokensRefreshed: (listener: (tokens: { accessToken: string; refreshToken: string | null }) => void | Promise<void>) => {
+    mockRefreshedListeners.push(listener);
+    return () => {
+      const index = mockRefreshedListeners.indexOf(listener);
+      if (index >= 0) mockRefreshedListeners.splice(index, 1);
     };
   },
   unwrapApiData: (payload: any) => payload?.data ?? payload,
@@ -96,6 +104,7 @@ describe('AuthContext', () => {
     mockStore.clear();
     mockCalls.length = 0;
     mockExpiryListeners.length = 0;
+    mockRefreshedListeners.length = 0;
     jest.spyOn(console, 'log').mockImplementation(() => undefined);
   });
 
@@ -134,6 +143,38 @@ describe('AuthContext', () => {
     auth.unmount();
   });
 
+  it('saves the new pair whenever the API layer rotates the tokens, so a cold start never restores a retired one', async () => {
+    mockStore.set('athena_access_token', 'access-1');
+    mockStore.set('athena_refresh_token', 'refresh-1');
+    mockGet.mockResolvedValueOnce({ data: { success: true, data: USER } });
+    const auth = await mountProvider();
+    expect(mockRefreshedListeners).toHaveLength(1);
+
+    await act(async () => {
+      await mockRefreshedListeners[0]({ accessToken: 'access-2', refreshToken: 'refresh-2' });
+    });
+
+    expect(mockStore.get('athena_access_token')).toBe('access-2');
+    expect(mockStore.get('athena_refresh_token')).toBe('refresh-2');
+    auth.unmount();
+    expect(mockRefreshedListeners).toHaveLength(0);
+  });
+
+  it('keeps the stored refresh token when a refresh answers with an access token only', async () => {
+    mockStore.set('athena_access_token', 'access-1');
+    mockStore.set('athena_refresh_token', 'refresh-1');
+    mockGet.mockResolvedValueOnce({ data: { success: true, data: USER } });
+    const auth = await mountProvider();
+
+    await act(async () => {
+      await mockRefreshedListeners[0]({ accessToken: 'access-2', refreshToken: null });
+    });
+
+    expect(mockStore.get('athena_access_token')).toBe('access-2');
+    expect(mockStore.get('athena_refresh_token')).toBe('refresh-1');
+    auth.unmount();
+  });
+
   it('throws away stored tokens the server no longer accepts, and stays signed out', async () => {
     mockStore.set('athena_access_token', 'stale');
     mockGet.mockRejectedValueOnce({ response: { status: 401 } });
@@ -144,6 +185,39 @@ describe('AuthContext', () => {
     expect(auth.current().isLoading).toBe(false);
     expect(mockStore.has('athena_access_token')).toBe(false);
     expect(mockCalls).not.toContain('push:sync');
+    auth.unmount();
+  });
+
+  it.each([
+    ['the phone is offline: no answer at all', { isAxiosError: true, message: 'Network Error' }],
+    ['the request timed out', { isAxiosError: true, code: 'ECONNABORTED', message: 'timeout of 10000ms exceeded' }],
+    ['the service is down for a deploy', { isAxiosError: true, response: { status: 503 } }],
+    ['the service is rate limiting', { isAxiosError: true, response: { status: 429 } }],
+  ])('keeps the stored tokens when the app opens and %s, so the next launch can restore the session', async (_label, failure) => {
+    mockStore.set('athena_access_token', 'access-1');
+    mockStore.set('athena_refresh_token', 'refresh-1');
+    mockGet.mockRejectedValueOnce(failure);
+
+    const auth = await mountProvider();
+
+    // The sign-in screen shows this time, but nothing the phone holds was thrown away.
+    expect(auth.current().isAuthenticated).toBe(false);
+    expect(auth.current().isLoading).toBe(false);
+    expect(mockStore.get('athena_access_token')).toBe('access-1');
+    expect(mockStore.get('athena_refresh_token')).toBe('refresh-1');
+    auth.unmount();
+  });
+
+  it.each([400, 401, 403, 409])('throws away both stored tokens when the server answers %s', async (status) => {
+    mockStore.set('athena_access_token', 'access-1');
+    mockStore.set('athena_refresh_token', 'refresh-1');
+    mockGet.mockRejectedValueOnce({ isAxiosError: true, response: { status } });
+
+    const auth = await mountProvider();
+
+    expect(auth.current().isAuthenticated).toBe(false);
+    expect(mockStore.has('athena_access_token')).toBe(false);
+    expect(mockStore.has('athena_refresh_token')).toBe(false);
     auth.unmount();
   });
 

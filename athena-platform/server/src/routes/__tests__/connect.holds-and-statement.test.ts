@@ -13,7 +13,7 @@
 
 import request from 'supertest';
 import express from 'express';
-import { describe, it, expect, jest, beforeEach } from '@jest/globals';
+import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
 
 jest.mock('../../utils/prisma', () => ({
   prisma: {
@@ -99,6 +99,9 @@ describe('POST /api/connect/escrow', () => {
     // The webhook reads `type` and `registrationId` as what was paid for, so a
     // body that could set them could mark somebody's registration as paid.
     expect(input.metadata).toEqual({ reference: 'Term 3' });
+    // No row of its own to key from, so the request inside a minute: the same
+    // hold asked for twice by the same buyer is one intent, not two holds.
+    expect(input.idempotencyKey).toMatch(/^connect-escrow-buyer-1-seller-1-course_purchase-aud-5000-\d+$/);
   });
 
   it('refuses to make a hold that claims to be a mentor session, an order or a car payment, or names nothing', async () => {
@@ -295,10 +298,62 @@ describe('The earnings statement', () => {
       gte: new Date('2025-06-30T14:00:00.000Z'),
       lt: new Date('2026-06-30T14:00:00.000Z'),
     });
+    // Not registered for GST in this environment, so no GST is inside the fee
+    // and the statement says so, rather than leaving the figure out.
     expect(res.body.data.totals).toEqual([
-      { currency: 'AUD', count: 1, gross: 20000, fee: 3000, net: 17000, refundedCount: 1, refundedNet: 8500 },
+      { currency: 'AUD', count: 1, gross: 20000, fee: 3000, feeGst: 0, net: 17000, refundedCount: 1, refundedNet: 8500 },
     ]);
+    expect(res.body.data.gstRegistered).toBe(false);
     expect(res.headers['cache-control']).toBe('private, no-store');
+  });
+
+  describe('once ATHENA is registered for GST', () => {
+    const saved = { abn: process.env.ATHENA_ABN, from: process.env.ATHENA_GST_REGISTERED_FROM };
+    const setRegistration = (from: string | undefined) => {
+      process.env.ATHENA_ABN = '51824753556';
+      if (from === undefined) delete process.env.ATHENA_GST_REGISTERED_FROM;
+      else process.env.ATHENA_GST_REGISTERED_FROM = from;
+    };
+
+    afterEach(() => {
+      if (saved.abn === undefined) delete process.env.ATHENA_ABN;
+      else process.env.ATHENA_ABN = saved.abn;
+      if (saved.from === undefined) delete process.env.ATHENA_GST_REGISTERED_FROM;
+      else process.env.ATHENA_GST_REGISTERED_FROM = saved.from;
+    });
+
+    it('shows the GST inside the fee as one eleventh of it, on each line and in the totals, and gives the CSV a column for it', async () => {
+      setRegistration('2020-01-01');
+
+      const json = await request(app()).get('/api/connect/earnings/statement?fy=2026');
+      expect(json.status).toBe(200);
+      expect(json.body.data.gstRegistered).toBe(true);
+      // A$30.00 fee: one eleventh is A$2.73, in cents, rounded to the cent.
+      expect(json.body.data.lines[0]).toMatchObject({ fee: 3000, feeGst: 273, net: 17000 });
+      // The refunded line carries its own figure but is not in the totals.
+      expect(json.body.data.lines[1]).toMatchObject({ status: 'REFUNDED', feeGst: 136 });
+      expect(json.body.data.totals).toEqual([
+        { currency: 'AUD', count: 1, gross: 20000, fee: 3000, feeGst: 273, net: 17000, refundedCount: 1, refundedNet: 8500 },
+      ]);
+
+      const csv = await request(app()).get('/api/connect/earnings/statement?fy=2026&format=csv');
+      expect(csv.text).toContain('ATHENA fee,GST in ATHENA fee,Paid to you');
+      expect(csv.text).toContain('200.00,30.00,2.73,170.00,Released');
+      expect(csv.text).toMatch(/one eleventh of the fee/);
+    });
+
+    it('puts no GST in the fee of a payment released before the registration took effect', async () => {
+      // Registered from the day after these payments were released.
+      setRegistration('2026-07-01');
+
+      const json = await request(app()).get('/api/connect/earnings/statement?fy=2026');
+      expect(json.status).toBe(200);
+      expect(json.body.data.lines[0]).toMatchObject({ fee: 3000, feeGst: 0 });
+      expect(json.body.data.totals[0]).toMatchObject({ feeGst: 0 });
+
+      const csv = await request(app()).get('/api/connect/earnings/statement?fy=2026&format=csv');
+      expect(csv.text).toContain('200.00,30.00,0.00,170.00,Released');
+    });
   });
 
   it('downloads as a CSV a spreadsheet cannot be made to run', async () => {
@@ -313,6 +368,52 @@ describe('The earnings statement', () => {
     expect(res.text).toContain('2026-06-30,escrow-a,Marketplace order');
     expect(res.text).toContain('200.00,30.00,170.00,Released');
     expect(res.text).toMatch(/not a tax invoice and not tax advice/);
+  });
+
+  it('says when a released sale was refunded in part, instead of reading as a sale that stood or one that was lost', async () => {
+    prisma.escrowPayment.findMany.mockResolvedValue([
+      {
+        id: 'escrow-p',
+        amount: 24000,
+        platformFee: 3600,
+        currency: 'aud',
+        status: 'CAPTURED',
+        description: 'Pitch review (120 minute booking)',
+        sessionType: 'service_booking',
+        capturedAt: lateJune,
+        // A$10 of the A$240, as Stripe reports it.
+        refundedAmount: 1000,
+      },
+    ]);
+
+    const json = await request(app()).get('/api/connect/earnings/statement?fy=2026');
+    expect(json.body.data.lines[0]).toMatchObject({ kind: 'Marketplace booking', status: 'RELEASED', gross: 24000, refunded: 1000 });
+    // Still a released sale: it is in the totals, and the line is what says part came back.
+    expect(json.body.data.totals[0]).toMatchObject({ count: 1, gross: 24000, refundedCount: 0 });
+
+    const csv = await request(app()).get('/api/connect/earnings/statement?fy=2026&format=csv');
+    expect(csv.text).toContain('Released; 10.00 of it refunded to the buyer');
+    expect(csv.text).toContain('1 payment(s) released and not refunded in full');
+  });
+
+  it('labels a proposal a buyer accepted on a brief as a marketplace request', async () => {
+    prisma.escrowPayment.findMany.mockResolvedValue([
+      {
+        id: 'escrow-q',
+        amount: 90000,
+        platformFee: 13500,
+        currency: 'aud',
+        status: 'CAPTURED',
+        description: null,
+        sessionType: 'custom_request',
+        capturedAt: lateJune,
+        refundedAmount: 0,
+      },
+    ]);
+
+    const res = await request(app()).get('/api/connect/earnings/statement?fy=2026');
+
+    expect(res.body.data.lines[0]).toMatchObject({ kind: 'Marketplace request', description: 'Marketplace request', refunded: 0 });
   });
 
   it('refuses a year that has not started', async () => {

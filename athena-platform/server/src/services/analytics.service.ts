@@ -5,6 +5,7 @@
 
 import { prisma } from '../utils/prisma';
 import { cacheGetOrSet, CacheKeys } from '../utils/cache';
+import { GIFT_POINT_VALUE_AUD } from '../config/price-book';
 
 // ==========================================
 // TYPES
@@ -186,12 +187,12 @@ export async function getPlatformStats(): Promise<PlatformStats> {
         },
         creators: {
           total: totalCreators,
-          totalEarnings: (creatorEarnings._sum.totalEarnings || 0) * 0.01,
+          totalEarnings: (creatorEarnings._sum.totalEarnings || 0) * GIFT_POINT_VALUE_AUD,
           giftsToday,
           topCreators: topCreators.map((c) => ({
             id: c.user.id,
             displayName: c.user.displayName || '',
-            earnings: c.totalEarnings * 0.01,
+            earnings: c.totalEarnings * GIFT_POINT_VALUE_AUD,
           })),
         },
         engagement: {
@@ -324,10 +325,18 @@ export async function getTopContent(
 
   const startDate = new Date(Date.now() - periods[period]);
 
+  // Only what the community can see: a post its author kept to herself, and a
+  // group's conversation (which stays on the group's page), are not content
+  // that "performed", and the excerpt, the author's name and the counts of one
+  // would otherwise reach the staff dashboard, and any export or screenshot
+  // of it, from a post nobody but her was ever meant to read. Staff reach a
+  // reported post through the moderation queue, which says why they are looking.
+  const communityPosts = { isPublic: true, groupId: null };
+
   const [topPosts, topVideos, topCreators] = await Promise.all([
     // Top posts by engagement
     prisma.post.findMany({
-      where: { createdAt: { gte: startDate }, isHidden: false },
+      where: { createdAt: { gte: startDate }, isHidden: false, ...communityPosts },
       include: {
         author: { select: { id: true, displayName: true, avatar: true } },
       },
@@ -336,7 +345,7 @@ export async function getTopContent(
     }),
     // Top videos specifically
     prisma.post.findMany({
-      where: { type: 'VIDEO', createdAt: { gte: startDate }, isHidden: false },
+      where: { type: 'VIDEO', createdAt: { gte: startDate }, isHidden: false, ...communityPosts },
       include: {
         author: { select: { id: true, displayName: true, avatar: true } },
       },
@@ -347,11 +356,11 @@ export async function getTopContent(
     prisma.user.findMany({
       where: {
         role: 'CREATOR',
-        posts: { some: { createdAt: { gte: startDate } } },
+        posts: { some: { createdAt: { gte: startDate }, ...communityPosts } },
       },
       include: {
         posts: {
-          where: { createdAt: { gte: startDate } },
+          where: { createdAt: { gte: startDate }, ...communityPosts },
           select: { viewCount: true, likeCount: true, commentCount: true },
         },
         _count: { select: { followers: true } },

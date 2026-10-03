@@ -16,9 +16,30 @@ import { bestEffort } from '../utils/best-effort';
 export type MessageAudience = 'all' | 'connections' | 'none';
 
 /**
+ * Who can message a member who has never chosen.
+ *
+ * This is the one place the answer is written down, because three things have
+ * to agree on it: what the server enforces for a member with no settings row
+ * (below), what the Safety Centre and the messages page show her for the same
+ * member (routes/safety.routes.ts), and what a settings row made for some other
+ * reason starts with (the same file, and utils/safety-store.ts when a first
+ * block makes one). They disagreed — the server let anyone open a thread while
+ * the page told her only people she follows could — so a member was told one
+ * thing and protected by another.
+ *
+ * 'all' keeps what the platform has always done: anyone may write, and a thread
+ * from someone she does not follow arrives as a message request she can accept
+ * or ignore, capped at a few messages until she does. Choosing 'connections'
+ * here instead would end message requests for every member who has not saved a
+ * setting; that is a product decision for the owner, and it is made by changing
+ * this one line.
+ */
+export const DEFAULT_MESSAGE_AUDIENCE: MessageAudience = 'all';
+
+/**
  * This read fails OPEN: a settings row that cannot be read falls through the
- * last line to 'all', the same answer a member who never changed the setting
- * gets. That is the weaker of the two directions and is deliberate — the
+ * last line to the default, the same answer a member who never changed the
+ * setting gets. That is the weaker of the two directions and is deliberate — the
  * alternative would let one database blip close every inbox on the platform —
  * and it is not the only thing standing between a member and an unwanted
  * message, because blocking is enforced separately and applies to a thread
@@ -36,7 +57,7 @@ export async function messageAudienceOf(userId: string): Promise<MessageAudience
     })
   );
   const value = row?.allowMessagesFrom;
-  return value === 'connections' || value === 'none' ? value : 'all';
+  return value === 'all' || value === 'connections' || value === 'none' ? value : DEFAULT_MESSAGE_AUDIENCE;
 }
 
 /**

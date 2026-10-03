@@ -119,6 +119,34 @@ jobs:
       - name: Check type-safety and validation debt has not grown
         run: node scripts/check-debt-ratchet.js
 
+      # A request body handed to Prisma as it arrived is a nested write on
+      # whatever relation the sender names: `PATCH /api/users/me/profile` did
+      # exactly that, and `{"user":{"update":{"role":"SUPER_ADMIN"}}}` made any
+      # member an administrator. This fails on `update: req.body`,
+      # `create: req.body`, `data: req.body`, `...req.body` and the like in
+      # routes/ and services/. Syntax-tree based, so it needs no database.
+      - name: Check no request body reaches a database call unparsed
+        run: npm run check:raw-body
+
+      # Every route a server router registers must either refuse an anonymous
+      # call or be named, with its reason, in src/config/public-routes.ts. This
+      # static half joins app.use('/api/x', yRoutes) in index.ts to the
+      # router.<verb> calls and the middleware in front of them;
+      # src/__tests__/route-auth-coverage.test.ts is the runtime half, and
+      # sends every route an anonymous request.
+      - name: Check every route is guarded or deliberately public
+        run: npm run check:route-auth
+
+      # A route that reads a request body or a list size and checks neither. Counts
+      # per file are in scripts/route-validation-baseline.json and may only fall: a
+      # new route reading req.body needs a zod schema (zodBody, or parseWith in the
+      # handler), a validationResult read after its express-validator chain (a
+      # chain nobody reads checks nothing), or a `// validated: <where>` note on
+      # the route saying where the checking is. A list size goes through
+      # clampLimit or parsePagination. Syntax-tree based, so no database.
+      - name: Check every route that reads input validates it
+        run: npm run check:route-validation
+
       # scripts/check-env.js existed, worked, and was called by nothing — so the
       # production drift it was written to catch (STRIPE_PRICE_STARTER for
       # STRIPE_PRICE_CAREER, OPENSEARCH_URL for OPENSEARCH_NODE, SES settings

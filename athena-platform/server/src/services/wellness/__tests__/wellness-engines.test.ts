@@ -8,7 +8,7 @@ import { challengeLeaderboard, goalProgress, goalReviewText, milestoneReached, s
 import { detectCrisisLanguage, normaliseWarning, presentAuthor } from '../forum.service';
 import { availableSlots, canCancel, normaliseAvailability, recomputeRating } from '../practitioners.service';
 import { checkInRemindersDue, circleCheckInsDue, currentWeek, dosesDue, goalReviewsDue, habitRemindersDue, refillsDue, visitFollowUps } from '../wellness-reminders.service';
-import { CRISIS_LINES, FORUM_SEEDS, HABIT_TEMPLATES, LIBRARY, SERVICE_SEEDS } from '../wellness-library';
+import { CRISIS_LINES, DISTRESS_LINE_KEYS, FORUM_SEEDS, HABIT_TEMPLATES, LIBRARY, SERVICE_SEEDS, distressLines } from '../wellness-library';
 import { buildBookingIcs, buildCircleIcs, firstMeetingDay, foldLine, icsEscape } from '../wellness-calendar';
 
 describe('days and zones', () => {
@@ -140,6 +140,38 @@ describe('insights', () => {
   });
 });
 
+describe('the K10 and the lines it puts in front of her', () => {
+  it('uses the ABS words for the ABS bands: low, moderate, high, very high', () => {
+    // 10 to 15, 16 to 21, 22 to 29, 30 to 50. The labels used to be a step
+    // gentler than the survey this score is quoted from.
+    const scored = (answers: number[]) => assessK10(answers);
+    expect(scored(Array(10).fill(1))).toMatchObject({ score: 10, band: 'low', label: 'Low distress' });
+    expect(scored([2, 2, 2, 2, 2, 2, 2, 2, 2, 2]).label).toBe('Moderate distress');
+    expect(scored([2, 2, 2, 2, 2, 2, 2, 2, 2, 3]).score).toBe(21);
+    expect(scored([2, 2, 2, 2, 2, 2, 2, 2, 2, 3]).band).toBe('mild');
+    expect(scored([3, 3, 3, 3, 3, 2, 2, 2, 2, 2])).toMatchObject({ score: 25, band: 'moderate', label: 'High distress' });
+    expect(scored([3, 3, 3, 3, 3, 3, 3, 3, 3, 3])).toMatchObject({ score: 30, band: 'severe', label: 'Very high distress' });
+    expect(scored(Array(10).fill(5)).score).toBe(50);
+  });
+
+  it('names 000, Lifeline and 1800RESPECT first for a high or very high score, so the short strip shows them', () => {
+    for (const answers of [[3, 3, 3, 3, 3, 2, 2, 2, 2, 2], Array(10).fill(4)]) {
+      const keys = assessK10(answers).crisisLines.map((l) => l.key);
+      expect(keys.slice(0, 3)).toEqual(['emergency', 'lifeline', '1800respect']);
+      expect(keys).toHaveLength(6);
+    }
+    // A score that is not distress does not put the whole list in front of her.
+    expect(assessK10(Array(10).fill(1)).crisisLines.map((l) => l.key)).not.toContain('1800respect');
+  });
+
+  it('takes every line it shows from the one list, and fails the build if a key stops matching', () => {
+    expect(distressLines().map((l) => l.key)).toEqual([...DISTRESS_LINE_KEYS]);
+    expect(distressLines().find((l) => l.key === '1800respect')?.phone).toBe('1800 737 732');
+    expect(distressLines().find((l) => l.key === 'lifeline')?.phone).toBe('13 11 14');
+    expect(distressLines()[0].phone).toBe('000');
+  });
+});
+
 describe('the mental load', () => {
   const today = '2026-09-11';
   it('sums the invisible work, sees who carries it, and warns when it looks like burnout', () => {
@@ -228,12 +260,47 @@ describe('the forums', () => {
     expect(detectCrisisLanguage('thinking about self-harm again').matches).toContain('self-harm');
   });
 
+  it('also reaches for the lines on the phrasings the first list missed', () => {
+    for (const said of [
+      "I don't want to be alive any more",
+      'I no longer want to be alive',
+      'some nights I think about ending my own life',
+      'I wish I was dead',
+      'I wish that I were never born',
+      'life is not worth living',
+      "there's nothing left to live for",
+      'I keep harming myself when it gets loud',
+      'thoughts about dying are back',
+      'I have been thinking of ending it',
+    ]) {
+      expect({ said, flagged: detectCrisisLanguage(said).flagged }).toEqual({ said, flagged: true });
+    }
+  });
+
+  it('does not reach for the lines on ordinary talk that borders those words', () => {
+    for (const said of [
+      "I'm alive and well and the garden is thriving",
+      'dead tired after the school run',
+      'This city is not worth living in at these rents',
+      'I want to end the lease early and move',
+      'my grandmother died last year and I miss her',
+      'a podcast about harm minimisation for the whole family',
+      'Lifeline was a lifesaver when I rang them for a friend',
+    ]) {
+      expect({ said, flagged: detectCrisisLanguage(said).flagged }).toEqual({ said, flagged: false });
+    }
+  });
+
   it('hides an anonymous author from everyone but herself', () => {
     const author = { id: 'u1', firstName: 'Mei', lastName: 'Lin', displayName: null, avatar: null };
     expect(presentAuthor(author, true, 'u2').name).toBe('A member');
     expect(presentAuthor(author, true, 'u1').name).toBe('You, anonymously');
     expect(presentAuthor(author, true, 'u2').id).toBeNull();
-    expect(presentAuthor(author, false, 'u2').name).toBe('Mei Lin');
+    // A forum is read by strangers: her chosen public name, else her first name alone, never the legal surname.
+    expect(presentAuthor(author, false, 'u2').name).toBe('Mei');
+    expect(presentAuthor({ ...author, displayName: 'Willow Rain' }, false, 'u2').name).toBe('Willow Rain');
+    expect(JSON.stringify(presentAuthor(author, false, 'u2'))).not.toContain('Lin');
+    expect(presentAuthor({ ...author, firstName: null, lastName: 'Lin' }, false, 'u2').name).toBe('A member');
     expect(presentAuthor(author, false, 'u2').isPractitioner).toBe(false);
     const gp = { ...author, practitionerProfile: { isVerified: true, kind: 'GP' } };
     expect(presentAuthor(gp, false, 'u2')).toMatchObject({ isPractitioner: true, practitionerKind: 'GP' });

@@ -7,7 +7,9 @@
  *   2. poster     a frame one second in, scaled to 720px wide, unless the
  *                 uploader already supplied a thumbnail
  *   3. rendition  H.264/AAC MP4 with the moov atom up front, capped at 1080
- *                 rows, unless the upload already is one
+ *                 rows, unless the upload already is one, in which case it is
+ *                 copied across without its metadata (a phone writes where it
+ *                 was filmed into the file, and every step here drops it)
  *   4. sound      the audio track extracted to m4a and registered as the
  *                 reel's original sound, unless the reel uses a chosen sound
  *   5. publish    status, duration, aspect ratio, URLs, progress 100
@@ -37,6 +39,7 @@ import { fetchPublic } from '../utils/outbound-url';
 import { tryQueueVideoProcessing } from '../utils/video-queue';
 import { emitToUserRoom } from './socket.service';
 import { checkContentAchievements } from './engagement.service';
+import { publicName } from '../utils/member-display';
 
 // The most a source video may be: the upload ceiling for videos. Anything
 // larger is refused rather than read into memory or onto the disk.
@@ -95,6 +98,147 @@ function runFfmpeg(args: string[], timeoutMs = 10 * 60 * 1000): Promise<{ code: 
       resolve({ code: code ?? -1, stderr });
     });
   });
+}
+
+// ===========================================
+// Metadata
+// ===========================================
+
+/**
+ * Why a file could not be cleaned of its metadata: ffmpeg exited without
+ * writing it (unreadable: it is not the video or recording it says it is, or is
+ * damaged), or there was no ffmpeg to ask (unavailable: nothing is wrong with the
+ * file).
+ */
+export class MediaMetadataError extends Error {
+  constructor(
+    message: string,
+    readonly reason: 'unreadable' | 'unavailable'
+  ) {
+    super(message);
+    this.name = 'MediaMetadataError';
+  }
+}
+
+/**
+ * How each type a member can upload as video or sound is written back out.
+ * The muxer is named rather than guessed from a file name, because the temporary
+ * files have none, and `faststart` only exists for the MP4 family.
+ */
+const METADATA_STRIP_FORMATS: Record<string, { muxer: string; kind: 'video' | 'audio'; mp4Family: boolean }> = {
+  'video/mp4': { muxer: 'mp4', kind: 'video', mp4Family: true },
+  'video/quicktime': { muxer: 'mov', kind: 'video', mp4Family: true },
+  'video/webm': { muxer: 'webm', kind: 'video', mp4Family: false },
+  'audio/mp4': { muxer: 'mp4', kind: 'audio', mp4Family: true },
+  'audio/x-m4a': { muxer: 'ipod', kind: 'audio', mp4Family: true },
+  'audio/mpeg': { muxer: 'mp3', kind: 'audio', mp4Family: false },
+  'audio/aac': { muxer: 'adts', kind: 'audio', mp4Family: false },
+  'audio/wav': { muxer: 'wav', kind: 'audio', mp4Family: false },
+  'audio/ogg': { muxer: 'ogg', kind: 'audio', mp4Family: false },
+  'audio/webm': { muxer: 'webm', kind: 'audio', mp4Family: false },
+};
+
+/** Whether uploads of this type carry metadata that is dropped here. */
+export function hasStrippableMetadata(contentType: string): boolean {
+  return Object.prototype.hasOwnProperty.call(METADATA_STRIP_FORMATS, contentType);
+}
+
+/**
+ * The ffmpeg arguments that copy a file's pictures and sound across untouched
+ * and leave everything else behind: no global or stream tags (where a phone
+ * writes the place it was filmed, the device and the title), no chapters, no
+ * data tracks (some cameras record a GPS track alongside the picture) and no
+ * cover art. Nothing is re-encoded, so it costs a disk copy, not a transcode,
+ * and the picture is exactly what was sent. A phone's rotation is not a tag, it
+ * is a property of the video stream, and a stream copy keeps it.
+ */
+export function stripMetadataArgs(inputPath: string, outputPath: string, contentType: string): string[] {
+  const format = METADATA_STRIP_FORMATS[contentType];
+  if (!format) throw new Error(`No metadata strip is defined for ${contentType}`);
+
+  return [
+    '-hide_banner',
+    '-y',
+    '-i',
+    inputPath,
+    ...(format.kind === 'video' ? ['-map', '0:v:0', '-map', '0:a?'] : ['-map', '0:a']),
+    '-map_metadata',
+    '-1',
+    '-map_chapters',
+    '-1',
+    '-c',
+    'copy',
+    ...(format.mp4Family ? ['-movflags', '+faststart'] : []),
+    // The muxer writes an ID3 header of its own whenever it is asked to.
+    ...(format.muxer === 'mp3' ? ['-write_id3v2', '0'] : []),
+    '-f',
+    format.muxer,
+    outputPath,
+  ];
+}
+
+/**
+ * Writes a copy of a video or recording without its metadata. Throws a
+ * MediaMetadataError, and leaves no output file behind, when it cannot.
+ */
+export async function stripMediaMetadata(inputPath: string, outputPath: string, contentType: string): Promise<void> {
+  if (!isFfmpegAvailable()) {
+    throw new MediaMetadataError('ffmpeg is not available on this host', 'unavailable');
+  }
+
+  let result: { code: number; stderr: string };
+  try {
+    result = await runFfmpeg(stripMetadataArgs(inputPath, outputPath, contentType), 5 * 60 * 1000);
+  } catch (error) {
+    fs.rmSync(outputPath, { force: true });
+    throw new MediaMetadataError(error instanceof Error ? error.message : String(error), 'unavailable');
+  }
+
+  const written = result.code === 0 && fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0;
+  if (!written) {
+    fs.rmSync(outputPath, { force: true });
+    throw new MediaMetadataError(
+      `ffmpeg could not copy the file (${result.stderr.trim().split('\n').pop() ?? 'no detail'})`,
+      'unreadable'
+    );
+  }
+}
+
+/**
+ * One picture from a video, as a JPEG, or null when the file has nothing at that
+ * time (it is shorter, or ffmpeg cannot read it). For the screening of what a
+ * video shows (video-screening.service): the frame is looked at and thrown away.
+ * Seeking before the input makes it a jump, not a decode from the start, so it
+ * costs about as much for the last minute of a long video as for the first.
+ */
+export async function extractFrameJpeg(inputPath: string, atSeconds: number, timeoutMs = 30_000): Promise<Buffer | null> {
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'athena-frame-'));
+  const outputPath = path.join(workDir, 'frame.jpg');
+  try {
+    const result = await runFfmpeg(
+      ['-hide_banner', '-y', '-ss', String(atSeconds), '-i', inputPath, '-frames:v', '1', '-vf', 'scale=640:-2', '-q:v', '4', outputPath],
+      timeoutMs
+    );
+    if (result.code !== 0 || !fs.existsSync(outputPath)) return null;
+    const frame = fs.readFileSync(outputPath);
+    return frame.length > 0 ? frame : null;
+  } finally {
+    fs.rmSync(workDir, { recursive: true, force: true });
+  }
+}
+
+/** The same, for a sound held in memory: through a scratch folder that is always removed. */
+export async function stripMediaMetadataBuffer(body: Buffer, contentType: string): Promise<Buffer> {
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'athena-strip-'));
+  try {
+    const inputPath = path.join(workDir, 'in');
+    const outputPath = path.join(workDir, 'out');
+    fs.writeFileSync(inputPath, body);
+    await stripMediaMetadata(inputPath, outputPath, contentType);
+    return fs.readFileSync(outputPath);
+  } finally {
+    fs.rmSync(workDir, { recursive: true, force: true });
+  }
 }
 
 /** ffmpeg prints what it knows about an input on stderr; that is the probe. */
@@ -292,7 +436,7 @@ export async function processVideo(videoId: string): Promise<void> {
       duration: true,
       audioTrackId: true,
       duetOfVideoId: true,
-      author: { select: { displayName: true, firstName: true, lastName: true } },
+      author: { select: { displayName: true, firstName: true } },
     },
   });
   if (!video) return;
@@ -348,6 +492,10 @@ export async function processVideo(videoId: string): Promise<void> {
           '-pix_fmt',
           'yuv420p',
           ...(replyInfo.hasAudio || originalInfo.hasAudio ? ['-c:a', 'aac', '-b:a', '128k'] : []),
+          '-map_metadata',
+          '-1',
+          '-map_chapters',
+          '-1',
           '-shortest',
           '-movflags',
           '+faststart',
@@ -412,6 +560,10 @@ export async function processVideo(videoId: string): Promise<void> {
         '-pix_fmt',
         'yuv420p',
         ...(info.hasAudio ? ['-c:a', 'aac', '-b:a', '128k'] : ['-an']),
+        '-map_metadata',
+        '-1',
+        '-map_chapters',
+        '-1',
         '-movflags',
         '+faststart',
         renditionPath,
@@ -423,6 +575,20 @@ export async function processVideo(videoId: string): Promise<void> {
         failure = `Transcode failed; the upload was published as received (${rendition.stderr.trim().split('\n').pop() ?? 'no detail'})`;
         logger.warn('Transcode failed', { videoId, tail: rendition.stderr.slice(-300) });
       }
+    } else {
+      // Already the rendition we would make, so nothing is re-encoded, but it
+      // is still copied across without its metadata: a file from a phone, or
+      // from a link the creator pasted, says where it was filmed, and this is
+      // the copy that is played to everyone.
+      const cleanPath = path.join(workDir, 'clean.mp4');
+      try {
+        await stripMediaMetadata(inputPath, cleanPath, 'video/mp4');
+        outputs.sourceUrl = inputUrl;
+        outputs.videoUrl = await storeFile(`videos/${video.authorId}/${videoId}-web.mp4`, cleanPath, 'video/mp4');
+      } catch (error) {
+        failure = `The upload could not be copied without its metadata; it was published as received (${error instanceof Error ? error.message : String(error)})`;
+        logger.warn('Metadata strip failed', { videoId, error: error instanceof Error ? error.message : String(error) });
+      }
     }
     await setProgress(videoId, video.authorId, 85, 'rendition');
 
@@ -430,15 +596,13 @@ export async function processVideo(videoId: string): Promise<void> {
     if (info.hasAudio && !video.audioTrackId && !composedDuet) {
       const audioPath = path.join(workDir, 'sound.m4a');
       const audio = await runFfmpeg(
-        ['-hide_banner', '-y', '-i', inputPath, '-vn', '-c:a', 'aac', '-b:a', '128k', audioPath],
+        ['-hide_banner', '-y', '-i', inputPath, '-vn', '-map_metadata', '-1', '-c:a', 'aac', '-b:a', '128k', audioPath],
         5 * 60 * 1000
       );
       if (audio.code === 0 && fs.existsSync(audioPath)) {
         const audioUrl = await storeFile(`sounds/${video.authorId}/${videoId}.m4a`, audioPath, 'audio/mp4');
-        const authorName =
-          video.author.displayName?.trim() ||
-          [video.author.firstName, video.author.lastName].filter(Boolean).join(' ').trim() ||
-          'ATHENA member';
+        // Listed under her public name, else her first name alone, never her legal surname.
+        const authorName = publicName(video.author, 'ATHENA member');
         const existing = await prisma.audioTrack.findUnique({ where: { sourceVideoId: videoId }, select: { id: true } });
         const track = existing
           ? await prisma.audioTrack.update({

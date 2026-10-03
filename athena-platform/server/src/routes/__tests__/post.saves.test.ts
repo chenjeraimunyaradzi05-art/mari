@@ -5,7 +5,10 @@ jest.mock('../../utils/prisma', () => ({
   prisma: {
     // The block checks read the DV safety profile's list as well as the
     // platform one, in both directions; nobody is blocked here.
-    dvSafetyProfile: { findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => null) },
+    dvSafetyProfile: { findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
+    // Whether a member is in Safe Mode is asked of the user table with findFirst
+    // (audience.service isDiscreet); nobody is in it here.
+    user: { findFirst: jest.fn(async () => null) },
     post: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn() },
     postSave: { findMany: jest.fn(), upsert: jest.fn(), deleteMany: jest.fn() },
     like: { findMany: jest.fn(async () => []), groupBy: jest.fn(async () => []) },

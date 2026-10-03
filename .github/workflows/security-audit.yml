@@ -29,6 +29,23 @@ jobs:
           node-version: '20'
 
       # `npm audit` reads the lockfile directly, so there is nothing to install.
+      #
+      # Two things in athena-platform/server/package.json exist because of this
+      # job, and are easy to undo by accident:
+      #   - "overrides": { "deepmerge-ts": "^8.0.2" }. Prisma 6.19's config
+      #     package depends on deepmerge-ts 7, which has a stack-exhaustion
+      #     advisory (GHSA-ggr8-5vv4-36mx) whose only upstream fix is a Prisma
+      #     major upgrade (npm's own suggestion, prisma@6.12.0, is a downgrade).
+      #     Version 8 exports the same `deepmerge` that Prisma imports, and
+      #     `prisma validate` and `prisma generate` run with it. Reachability is
+      #     low (it only merges Prisma's own config at deploy time), so this is
+      #     tidiness rather than urgency. Drop the override when Prisma ships a
+      #     release that depends on deepmerge-ts 8 itself, and plan the Prisma 7
+      #     upgrade as its own change.
+      #   - no `uuid` dependency. The four places that made a version 4 id use
+      #     crypto.randomUUID, so there is no uuid package to carry advisories.
+      #     (The moderate uuid finding that remains comes from autocannon, a dev
+      #     tool for load tests, and is below this job's `high` threshold.)
       - name: Audit dependencies
         working-directory: athena-platform/${{ matrix.package }}
         run: npm audit --audit-level=high

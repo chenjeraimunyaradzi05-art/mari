@@ -25,7 +25,9 @@ import { ArrowLeft, Award, CalendarDays, Clock, Loader2, Users } from 'lucide-re
 import { useAuthStore, useBookMentor, useMentor } from '@/lib/hooks';
 import { mentorApi } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
+import { SESSION_CONFIRMATION_HOURS } from '@/lib/pricing';
 import { Avatar } from '@/components/ui/avatar';
+import { VerifiedMark } from '@/components/ui/VerifiedMark';
 import { PaymentIntentForm } from '@/components/payments/PaymentIntentForm';
 
 const DURATIONS = [30, 60, 90] as const;
@@ -36,9 +38,10 @@ function toStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
-function todayIso(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+function todayIso(daysAhead = 0): string {
+  const day = new Date();
+  day.setDate(day.getDate() + daysAhead);
+  return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
 }
 
 /** The viewer's own timezone, so the offered times are the times she keeps. */
@@ -95,6 +98,14 @@ export default function MentorProfilePage() {
 
   const slots: Slot[] = useMemo(() => availability?.data?.slots ?? [], [availability]);
   const slotTimezone: string | undefined = availability?.data?.timezone;
+  // A paid session is held on her card from the moment it is requested, and a
+  // card hold lasts about a week, so the server only books a paid session a few
+  // days ahead and says how many. A mentor who charges nothing has no limit. The
+  // page follows the server's number rather than keeping a copy of it.
+  const paidDaysAhead: number | null =
+    !isFree && typeof availability?.data?.paidSessionsDaysAhead === 'number' ? availability.data.paidSessionsDaysAhead : null;
+  const latestDate = paidDaysAhead !== null ? todayIso(paidDaysAhead) : undefined;
+  const beyondLimit = latestDate !== undefined && date > latestDate;
 
   // A day change invalidates whatever was picked on the previous one.
   useEffect(() => {
@@ -154,7 +165,10 @@ export default function MentorProfilePage() {
           <div className="flex items-start gap-4">
             <Avatar src={mentor.user?.avatar || undefined} alt={name} fallback={name.slice(0, 2).toUpperCase()} className="h-20 w-20" />
             <div className="min-w-0 flex-1">
-              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{name}</h1>
+              <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900 dark:text-white">
+                {name}
+                {mentor.user?.isVerified === true && <VerifiedMark />}
+              </h1>
               <p className="text-slate-500 dark:text-slate-400">{mentor.user?.headline || 'Career mentor'}</p>
               <div className="mt-2 flex flex-wrap items-center gap-4 text-sm">
                 {/* No star rating: nothing on the platform writes one, so every
@@ -198,19 +212,24 @@ export default function MentorProfilePage() {
         <aside className="card space-y-4 self-start">
           <div className="flex items-baseline justify-between">
             <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Book a session</h2>
+            {/* The rate is typed and charged in Australian dollars, whatever currency
+                the viewer prefers, so it is shown as AUD and not relabelled. */}
             <span className="text-sm font-semibold text-slate-900 dark:text-white">
-              {hourlyRate ? `${formatCurrency(hourlyRate)}/hour` : 'Rate on request'}
+              {hourlyRate ? `${formatCurrency(hourlyRate, 'AUD')}/hour` : 'Rate on request'}
             </span>
           </div>
 
           {payment ? (
             <div className="space-y-3">
               <p className="text-sm text-slate-700 dark:text-slate-200">
-                Session requested. Authorise the payment now so the mentor can confirm; it is only charged once the session is completed.
+                Session requested. Authorise the payment now so the mentor can confirm; it is only charged once the session
+                has happened: when you confirm it, or {SESSION_CONFIRMATION_HOURS} hours after your mentor marks it complete
+                unless you say it did not take place. The mentor sees your request once the payment is authorised, and a
+                request that is not paid for within a few hours is cancelled.
               </p>
               <PaymentIntentForm
                 clientSecret={payment.clientSecret}
-                amountLabel={formatCurrency(payment.amount)}
+                amountLabel={formatCurrency(payment.amount, 'AUD')}
                 onAuthorised={() => router.push('/dashboard/mentors/sessions?paid=1')}
                 onSkip={() => router.push('/dashboard/mentors/sessions')}
               />
@@ -242,7 +261,7 @@ export default function MentorProfilePage() {
                 <span className="mb-1 flex items-center gap-1 font-medium text-slate-700 dark:text-slate-200">
                   <CalendarDays className="h-4 w-4" /> Date
                 </span>
-                <input type="date" value={date} min={todayIso()} onChange={(e) => setDate(e.target.value)} required className="input w-full" />
+                <input type="date" value={date} min={todayIso()} max={latestDate} onChange={(e) => setDate(e.target.value)} required className="input w-full" />
               </label>
               <fieldset className="text-sm">
                 <legend className="mb-1 flex items-center gap-1 font-medium text-slate-700 dark:text-slate-200">
@@ -257,6 +276,11 @@ export default function MentorProfilePage() {
                   <p className="py-3 text-slate-500 dark:text-slate-400">
                     We could not load her availability just now, so no hours are shown. Try another day, or
                     refresh.
+                  </p>
+                ) : slots.length === 0 && beyondLimit ? (
+                  <p className="py-3 text-slate-500 dark:text-slate-400">
+                    Paid sessions can be booked up to {paidDaysAhead} days ahead, because the hold on your card lasts about
+                    a week and your mentor is paid once the hour has been given. Pick a nearer date.
                   </p>
                 ) : slots.length === 0 ? (
                   <p className="py-3 text-slate-500 dark:text-slate-400">
@@ -325,8 +349,8 @@ export default function MentorProfilePage() {
 
               {estimate !== null && (
                 <p className="text-sm text-slate-600 dark:text-slate-300">
-                  Estimated cost <span className="font-semibold text-slate-900 dark:text-white">{formatCurrency(estimate)}</span>. You
-                  are charged only after the session is completed.
+                  Estimated cost <span className="font-semibold text-slate-900 dark:text-white">{formatCurrency(estimate, 'AUD')}</span>.
+                  Your card is held now and charged only once the session has happened.
                 </p>
               )}
               {inPast && <p className="text-xs text-red-600">That time has just passed. Pick another.</p>}

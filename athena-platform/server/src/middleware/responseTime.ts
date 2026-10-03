@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { httpRequestsTotal, httpRequestDurationSeconds } from '../utils/metrics';
 import { logger } from '../utils/logger';
+import { loggablePath } from '../utils/request-path';
 
 /**
  * Middleware that records request duration and increments counters for Prometheus.
@@ -32,11 +33,12 @@ export function responseTimeMiddleware(req: Request, res: Response, next: NextFu
     httpRequestsTotal.inc(labels);
     httpRequestDurationSeconds.observe(labels, durationS);
 
-    // Log response time with correlation ID
+    // Log response time with correlation ID. The route's pattern, not the
+    // path as it came: some routes carry a credential in the path.
     logger.info('request completed', {
       requestId: (req as any).requestId,
       method: req.method,
-      path: req.path,
+      path: loggablePath(req),
       status: res.statusCode,
       durationMs: Math.round(durationMs * 100) / 100,
     });

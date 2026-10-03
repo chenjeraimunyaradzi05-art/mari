@@ -1,11 +1,13 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
 import rateLimit from 'express-rate-limit';
+import jwt from 'jsonwebtoken';
 import { AuditAction, Persona, Prisma, Region, UserRole, WomanVerificationStatus } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { logAudit } from '../utils/audit';
 import { bestEffort } from '../utils/best-effort';
-import { recordFailure } from '../utils/ops-metrics';
+import { recordFailure, recordSuccess } from '../utils/ops-metrics';
+import { authEmailTotal, type AuthEmailKind } from '../utils/metrics';
 import { SharedRateLimitStore } from '../utils/rate-limit-store';
 import { hashPassword, comparePassword, DUMMY_PASSWORD_HASH } from '../utils/password';
 import {
@@ -15,12 +17,25 @@ import {
   verifyToken,
 } from '../utils/jwt';
 import { ApiError } from '../middleware/errorHandler';
-import { authenticate, AuthRequest, SUSPENDED_ACCOUNT_MESSAGE } from '../middleware/auth';
-import { sendVerificationEmail, sendPasswordResetEmail, sendWelcomeEmail } from '../utils/email';
+import {
+  ACCOUNT_LOCKED_MESSAGE,
+  authenticate,
+  AuthRequest,
+  EMAIL_NOT_VERIFIED_MESSAGE,
+  SUSPENDED_ACCOUNT_MESSAGE,
+} from '../middleware/auth';
+import {
+  INTERACTIVE_DELIVERY,
+  sendAccountExistsEmail,
+  sendVerificationEmail,
+  sendPasswordResetEmail,
+  sendWelcomeEmail,
+} from '../utils/email';
 import { logger } from '../utils/logger';
 import crypto from 'crypto';
-import { sessionService } from '../services/session.service';
+import { RefreshConflictError, sessionService } from '../services/session.service';
 import { noteSignIn } from '../services/login-alert.service';
+import { lockAccount, lockAccountByLink, mailUnlockLink, unlockAccount } from '../services/account-lock.service';
 import { notifyAdmins } from '../services/admin-notify.service';
 import { hashOpaqueToken } from '../utils/opaqueToken';
 import { getTrustedOriginFromHeaders, isCorsOriginAllowed } from '../utils/origins';
@@ -163,14 +178,76 @@ type SignInProvider = 'Google' | 'Facebook';
  * that matched a suspended account, or one protected by a second factor, was
  * refused — and had already attached a new way into the account before it
  * was. They now run first, and nothing is written for a refused request.
+ *
+ * The second factor is asked for separately, by requireSocialSecondFactor,
+ * straight after this and before any write.
  */
-function refuseSocialSignIn(account: { isSuspended: boolean; twoFactorEnabled: boolean }): void {
+function refuseSocialSignIn(account: {
+  isSuspended: boolean;
+  lockedAt?: Date | null;
+}): void {
   if (account.isSuspended) {
     throw new ApiError(403, SUSPENDED_ACCOUNT_MESSAGE);
   }
-  if (account.twoFactorEnabled) {
-    throw new ApiError(401, 'Two-factor code required. Please sign in with email and password.');
+  // Her own lock holds against the provider doors as it does against the
+  // password: signing in with Google must not undo what she did when she
+  // thought someone else had the account.
+  if (account.lockedAt) {
+    throw new ApiError(403, ACCOUNT_LOCKED_MESSAGE);
   }
+}
+
+/**
+ * The second factor on the Google and Facebook doors.
+ *
+ * A member with two-factor on was turned away from both with "sign in with
+ * email and password". That was no way in at all for a member who signed up
+ * with Google or Facebook and has no password, and the only route back to her
+ * account was the reset-password email. The doors now take the code in the
+ * body (`twoFactorCode`, an authenticator code or an unused recovery code,
+ * the same as /login), checked before anything is written to the account. The
+ * provider's own proof is the first factor; this is the second, and a
+ * provider login on its own never opens a protected account.
+ *
+ * Wrong answers count against the same lockout as /login, per address and per
+ * place, so these doors are not a second place to guess six-digit codes. The
+ * code is not asked for on a sign-up: a new account has no second factor yet.
+ */
+async function requireSocialSecondFactor(
+  req: Request,
+  account: {
+    id: string;
+    email: string;
+    twoFactorEnabled: boolean;
+    twoFactorSecret: string | null;
+    twoFactorRecoveryCodes: string[];
+  }
+): Promise<boolean> {
+  if (!account.twoFactorEnabled) return false;
+
+  const lockStatus = await getLockoutStatus(account.email, req.ip);
+  if (lockStatus.locked) {
+    const minutes = Math.max(1, Math.ceil(lockStatus.retryAfterSeconds / 60));
+    throw new ApiError(429, `Too many failed login attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`);
+  }
+
+  const submittedCode = typeof req.body?.twoFactorCode === 'string' ? req.body.twoFactorCode.trim() : '';
+  if (!submittedCode) {
+    // Not counted: she has not been asked yet. The sign-in screens answer this
+    // sentence by showing the code box and sending the same credential again.
+    throw new ApiError(401, 'Two-factor code required');
+  }
+
+  if (!(await verifySecondFactor(account, submittedCode))) {
+    const failed = await recordFailedLogin(account.email, req.ip);
+    if (failed.locked) {
+      const minutes = Math.max(1, Math.ceil(failed.retryAfterSeconds / 60));
+      throw new ApiError(429, `Too many failed login attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`);
+    }
+    throw new ApiError(401, 'Invalid two-factor code');
+  }
+
+  return true;
 }
 
 /**
@@ -260,6 +337,10 @@ const PERSONA_VALUES = [
   'GOVERNMENT_NGO',
 ];
 
+// What a failed send is logged with. A member's id, never her address: the log is
+// kept for weeks and read by more people than the database is, and the id finds
+// the row. (The logger would redact an `email` key anyway; this keeps it out of
+// the code too.)
 type AuthEmailContext = Record<string, string | undefined>;
 
 type InviteCodeRecord = {
@@ -273,25 +354,112 @@ function generateSecureToken(): string {
   return crypto.randomBytes(32).toString('hex');
 }
 
+/**
+ * Counts what became of one of the emails a member cannot get in, or back in,
+ * without: in the process's own failure list (so /health/detailed degrades while
+ * they are failing) and in the Prometheus counter that AthenaAuthEmailFailing
+ * reads. Until this existed a refused or lost one was a line in the log and
+ * nothing else, so a sender the provider had stopped accepting locked every new
+ * member out and nobody could see it happening. Never throws, and never puts an
+ * address in the failure list, which /health/detailed shows.
+ */
+function noteAuthEmail(kind: AuthEmailKind, sent: boolean, error?: unknown): void {
+  try {
+    authEmailTotal.inc({ kind, outcome: sent ? 'sent' : 'failed' });
+  } catch {
+    // Counting is never worth failing a registration over.
+  }
+  const operation = `auth.email.${kind}`;
+  if (sent) {
+    recordSuccess(operation);
+  } else {
+    recordFailure(operation, error ?? new Error(`The ${kind.replace(/_/g, ' ')} email was not accepted by the email provider`));
+  }
+}
+
+/** Runs one send and notes its outcome. A send that throws counts as a failure and answers false. */
+async function sendAuthEmail(
+  kind: AuthEmailKind,
+  sendTask: () => Promise<boolean>,
+  context: AuthEmailContext
+): Promise<boolean> {
+  try {
+    const sent = await sendTask();
+    noteAuthEmail(kind, sent === true);
+    return sent === true;
+  } catch (error) {
+    logger.error('Auth email threw', { ...context, error });
+    noteAuthEmail(kind, false, error);
+    return false;
+  }
+}
+
+/** The machine-readable word on the 503 for a registration whose confirmation mail could not go. */
+const VERIFICATION_EMAIL_FAILED = 'VERIFICATION_EMAIL_FAILED';
+
 async function requireAuthEmailDelivery(
+  kind: AuthEmailKind,
   sendTask: () => Promise<boolean>,
   failureMessage: string,
   context: AuthEmailContext
 ): Promise<void> {
-  try {
-    const sent = await sendTask();
-    if (!sent) {
-      logger.error('Required auth email was not accepted by the email provider', context);
-      throw new ApiError(503, failureMessage);
-    }
-  } catch (error) {
-    if (error instanceof ApiError) {
-      throw error;
-    }
-
-    logger.error('Required auth email failed', { ...context, error });
+  const sent = await sendAuthEmail(kind, sendTask, context);
+  if (!sent) {
+    logger.error('Required auth email was not accepted by the email provider', context);
     throw new ApiError(503, failureMessage);
   }
+}
+
+/**
+ * Mints a one-time emailed link, mails it, and only then retires the older
+ * ones of the same kind.
+ *
+ * It used to retire the older links first. A mail the provider then refused
+ * left the member with no valid link at all: the one she already held was gone
+ * and the new one never arrived, while the page told her a new link was on its
+ * way. Now a refused mail withdraws only the link it was about, so whatever she
+ * held before still works, and a mail that went retires the links before it.
+ * "Before it" is by creation time, so two requests that overlap cannot each
+ * retire the other's link and leave nothing live.
+ *
+ * Returns whether the mail was accepted.
+ */
+async function mailFreshLink(params: {
+  account: { id: string; email: string };
+  type: 'EMAIL_VERIFICATION' | 'PASSWORD_RESET';
+  lifetimeMs: number;
+  kind: AuthEmailKind;
+  send: (token: string) => Promise<boolean>;
+}): Promise<boolean> {
+  const { account, type, lifetimeMs, kind, send } = params;
+  const token = generateSecureToken();
+
+  const link = await prisma.verificationToken.create({
+    data: {
+      userId: account.id,
+      token: hashOpaqueToken(token),
+      type,
+      expiresAt: new Date(Date.now() + lifetimeMs),
+    },
+    select: { id: true, createdAt: true },
+  });
+
+  const sent = await sendAuthEmail(kind, () => send(token), { userId: account.id });
+  if (sent) {
+    await prisma.verificationToken.deleteMany({
+      where: { userId: account.id, type, createdAt: { lt: link.createdAt } },
+    });
+  } else {
+    logger.error('An emailed link was not accepted by the email provider and has been withdrawn', {
+      userId: account.id,
+      kind,
+    });
+    // Only ever by id: a filter with nothing in it would match every link.
+    if (link?.id) {
+      await prisma.verificationToken.deleteMany({ where: { id: link.id } });
+    }
+  }
+  return sent;
 }
 
 function sendBestEffortAuthEmail(
@@ -455,6 +623,137 @@ async function verifyAuthenticatorCode(userId: string, storedSecret: string, cod
   return firstUse;
 }
 
+// ===========================================
+// CREDENTIAL CHECKS BEHIND A SESSION
+// ===========================================
+
+/**
+ * Changing the password, turning two-factor on or off and minting new recovery
+ * codes each ask for the current password or an authenticator code, behind an
+ * access token. They answered a wrong one as often as they were asked, under
+ * nothing but the general limit of a hundred requests in fifteen minutes and
+ * without ever counting a failure. A stolen access token, or a phone left
+ * unlocked, could guess the password that protects everything else, and a
+ * six-digit code is a million guesses.
+ *
+ * They now share one failure counter per member, in the same store as the
+ * sign-in lockout (Redis, or this process when Redis is away), so five wrong
+ * answers across all four routes lock all four for fifteen minutes. It is
+ * counted per member and not per address, because whoever holds the token is
+ * the one guessing and can change address freely. It is kept apart from the
+ * sign-in counter on purpose: whoever holds a session can fail these as often
+ * as they like, and that must not be a way to lock the owner out of signing in.
+ */
+const CREDENTIAL_CHECK_SUBJECT_PREFIX = 'credential-check:';
+
+function credentialCheckSubject(userId: string): string {
+  return `${CREDENTIAL_CHECK_SUBJECT_PREFIX}${userId}`;
+}
+
+function credentialLockoutError(retryAfterSeconds: number): ApiError {
+  const minutes = Math.max(1, Math.ceil(retryAfterSeconds / 60));
+  return new ApiError(429, `Too many incorrect attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`);
+}
+
+/** Before any password is compared or code is checked, so a locked member burns no bcrypt cycles. */
+async function refuseLockedCredentialChecks(userId: string): Promise<void> {
+  const status = await getLockoutStatus(credentialCheckSubject(userId));
+  if (status.locked) {
+    throw credentialLockoutError(status.retryAfterSeconds);
+  }
+}
+
+/**
+ * Counts a wrong password or code and returns the error to throw: the refusal
+ * the route gives, or the lockout's 429 once this was the failure that locked.
+ */
+async function failedCredentialCheck(userId: string, refusal: ApiError): Promise<ApiError> {
+  const status = await recordFailedLogin(credentialCheckSubject(userId));
+  return status.locked ? credentialLockoutError(status.retryAfterSeconds) : refusal;
+}
+
+async function clearCredentialChecks(userId: string): Promise<void> {
+  await clearFailedLogins(credentialCheckSubject(userId));
+}
+
+/**
+ * The account `authenticate` put on the request. The routes that call this are
+ * mounted behind that middleware, so a request with no principal never reaches
+ * them; the check is here so the type says so too, with no non-null assertion.
+ */
+function signedIn(req: AuthRequest) {
+  if (!req.user) throw new ApiError(401, 'Authentication required');
+  return req.user;
+}
+
+/**
+ * Asks a signed-in member to prove it is her at the keyboard, for an action a
+ * stolen session or an unlocked phone must not be enough for: her password when
+ * the account has one, and a live second factor (an authenticator code or an
+ * unused recovery code) when two-factor is on. An account that signs in only
+ * with Google or Facebook has no password to ask for, so it is asked for the
+ * second factor alone, if it has one; that is the same line the two-factor
+ * routes above draw.
+ *
+ * It shares the credential-check failure counter, so guessing here counts
+ * against the same five attempts as guessing at the change-password form.
+ * Account deletion is the first caller (DELETE /users/me and POST
+ * /gdpr/dsar/delete): it cannot be undone, and it is also how someone who had
+ * got into an account would destroy the evidence of it.
+ */
+export async function requireStepUp(
+  userId: string,
+  answers: { currentPassword?: unknown; code?: unknown }
+): Promise<void> {
+  await refuseLockedCredentialChecks(userId);
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      passwordHash: true,
+      twoFactorEnabled: true,
+      twoFactorSecret: true,
+      twoFactorRecoveryCodes: true,
+    },
+  });
+  if (!user) {
+    throw new ApiError(404, 'User not found');
+  }
+
+  if (user.passwordHash) {
+    const currentPassword = typeof answers.currentPassword === 'string' ? answers.currentPassword : '';
+    if (!currentPassword) {
+      throw new ApiError(400, 'Current password is required');
+    }
+    // A 403 and not a 401 on purpose. Both web and phone clients answer a 401
+    // by refreshing the session and sending the same request again, so a wrong
+    // password was tried twice per press: it spent two of the five attempts the
+    // credential-check lockout allows, and two of the five requests an hour the
+    // erasure limit allows, so a few mistyped passwords locked her out of
+    // deleting her own account for an hour. A refusal of a password she was
+    // just asked for is not an expired session, and must not read as one.
+    if (currentPassword.length > PASSWORD_MAX_LENGTH) {
+      throw await failedCredentialCheck(user.id, new ApiError(403, 'Current password is incorrect'));
+    }
+    if (!(await comparePassword(currentPassword, user.passwordHash))) {
+      throw await failedCredentialCheck(user.id, new ApiError(403, 'Current password is incorrect'));
+    }
+  }
+
+  if (user.twoFactorEnabled) {
+    // Not asked yet is not the same as wrong, and is not counted.
+    if (typeof answers.code !== 'string' || !answers.code.trim()) {
+      throw new ApiError(400, 'Two-factor code is required');
+    }
+    if (!(await verifySecondFactor(user, answers.code))) {
+      throw await failedCredentialCheck(user.id, new ApiError(400, 'Invalid two-factor code'));
+    }
+  }
+
+  await clearCredentialChecks(user.id);
+}
+
 async function fetchWithTimeout(url: string, timeoutMs = 5000): Promise<globalThis.Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -524,6 +823,198 @@ async function consumeInviteCode(
   }
 }
 
+/**
+ * What registration says, whether or not the address already has an account.
+ *
+ * It used to answer 409 "Email already registered" for a taken address, which
+ * is a way to ask the platform whether somebody has an account: type a name's
+ * address into the form and read the answer. For a woman whose former partner
+ * knows her email address, that answer is exactly the information the rest of
+ * this router already withholds (forgot-password and resend-verification
+ * reply the same way for every address, and so does an employer's team
+ * invite). Now a taken address and a free one get the same status and the same
+ * body, and the news goes to the inbox, where only its owner can read it.
+ *
+ * What is equal: the status, the body and the password hashing. What is not
+ * claimed to be equal: how long the rest of the work takes, because a new
+ * account is written and its mail is awaited so that a failed send is
+ * reported to the person who needs the mail. The route sits behind the
+ * sign-up limit (ten an hour from one address in production), which is what
+ * bounds anyone timing it.
+ */
+const REGISTRATION_RECEIVED_MESSAGE = 'Registration received. If this address can be used, an email is on its way.';
+
+function answerRegistrationReceived(res: Response): void {
+  res.status(201).json({
+    success: true,
+    message: REGISTRATION_RECEIVED_MESSAGE,
+    data: { verificationRequired: true },
+  });
+}
+
+/**
+ * How long an account whose address nobody has proved can hold that address
+ * before a new registration for it starts the account over. An hour is long
+ * enough for the person who signed up to find the email and click it, and short
+ * enough that a typo, or somebody else's registration of an address that is not
+ * theirs, cannot sit on it for good.
+ */
+const UNCONFIRMED_ACCOUNT_GRACE_MS = 60 * 60 * 1000;
+
+type TakenAddressAccount = {
+  id: string;
+  email: string;
+  firstName: string;
+  emailVerified: boolean;
+  createdAt?: Date;
+  lastLoginAt?: Date | null;
+  googleId?: string | null;
+  facebookId?: string | null;
+  isSuspended?: boolean;
+  bannedAt?: Date | null;
+};
+
+type RegistrationDetails = {
+  password: string;
+  inviteCode: unknown;
+  firstName: string;
+  lastName: string;
+  persona: Persona;
+  dateOfBirth: Date;
+};
+
+/**
+ * Whether a second registration may touch the account behind this address at
+ * all: only one that was never confirmed, never signed in and has no social
+ * sign-in on it, and that is not under a suspension or a ban. A confirmed
+ * account is its owner's and nothing about it changes.
+ */
+function mayContest(account: TakenAddressAccount): boolean {
+  if (account.emailVerified) return false;
+  return !(account.googleId || account.facebookId || account.lastLoginAt || account.isSuspended || account.bannedAt);
+}
+
+/**
+ * Whether, on top of that, the names and date of birth in the registration
+ * replace the ones the account was made with: only once it has been waiting
+ * for more than the grace period. A missing creation time says nothing, so it
+ * is not enough.
+ */
+function mayStartOver(account: TakenAddressAccount): boolean {
+  if (!mayContest(account)) return false;
+  if (!(account.createdAt instanceof Date)) return false;
+  return Date.now() - account.createdAt.getTime() >= UNCONFIRMED_ACCOUNT_GRACE_MS;
+}
+
+/**
+ * A registration for an address that already has an account.
+ *
+ * For a confirmed account nothing changes: the password in the form is hashed
+ * and thrown away, and the owner is told by email, after the reply has gone.
+ *
+ * An account whose address was never confirmed is sent a fresh confirmation
+ * link instead, the same thing the resend route does, because that is what
+ * whoever is typing it needs, and an address that nobody has proved is not
+ * yet anyone's to be told about. Its password is withdrawn as well. Two people
+ * have now typed a password for one address, and the link we send cannot tell
+ * which of them will click it: whoever registered an address first used to
+ * hold its password, so the real owner, finding the account already there and
+ * clicking the link we then sent, confirmed an account that opened with
+ * somebody else's password. And the other way round was no better: had the
+ * second registration's password been kept, somebody registering her address
+ * an hour after her would have held it instead. So neither is kept. Whoever
+ * clicks the link has proved the inbox, and chooses the password then
+ * (handleVerifyEmailToken hands the page a one-time link for it).
+ *
+ * If the account is more than an hour old its names and date of birth are
+ * started over with this registration's as well, so that a typo, or somebody's
+ * registration of an address that was not theirs, does not sit on the address
+ * for good. Within the hour they are left alone: the account is probably the
+ * same person's, still being confirmed. The creation time moves to now with a
+ * restart, so the new registrant also gets a full grace period.
+ */
+async function answerRegistrationForTakenAddress(
+  res: Response,
+  existing: TakenAddressAccount,
+  details: RegistrationDetails
+): Promise<void> {
+  // The refusal a new address would meet for a bad invite code, so a wrong
+  // code is a 400 for every address and says nothing about this one.
+  await findUsableInviteCode(details.inviteCode);
+  // The same hashing a new account costs; the result is not kept (see above).
+  await hashPassword(details.password);
+
+  let account = existing;
+  if (mayContest(existing)) {
+    const startOver = mayStartOver(existing);
+    // Conditions repeated in the write itself, so an account confirmed or
+    // signed in to between the read above and this write is left alone.
+    const contested = await prisma.user.updateMany({
+      where: {
+        id: existing.id,
+        emailVerified: false,
+        googleId: null,
+        facebookId: null,
+        lastLoginAt: null,
+        isSuspended: false,
+        bannedAt: null,
+        ...(startOver ? { createdAt: { lte: new Date(Date.now() - UNCONFIRMED_ACCOUNT_GRACE_MS) } } : {}),
+      },
+      data: {
+        passwordHash: null,
+        ...(startOver
+          ? {
+              firstName: details.firstName,
+              lastName: details.lastName,
+              displayName: `${details.firstName} ${details.lastName}`,
+              persona: details.persona,
+              dateOfBirth: details.dateOfBirth,
+              womanSelfAttested: true,
+              createdAt: new Date(),
+            }
+          : {}),
+      },
+    });
+    if (contested.count > 0) {
+      if (startOver) {
+        // Nothing should be signed in to an unconfirmed account; this makes sure.
+        await prisma.session.deleteMany({ where: { userId: existing.id } });
+        logger.info('An unconfirmed account was started over by a new registration for its address', {
+          userId: existing.id,
+        });
+        account = { ...existing, firstName: details.firstName };
+      } else {
+        logger.info('A second registration for an unconfirmed address withdrew its password', {
+          userId: existing.id,
+        });
+      }
+    }
+  }
+
+  if (account.emailVerified) {
+    sendAfterResponse(
+      res,
+      async () => {
+        const sent = await sendAuthEmail(
+          'account_exists',
+          () => sendAccountExistsEmail(account.email, account.firstName),
+          { userId: account.id }
+        );
+        if (!sent) {
+          logger.error('Account-exists email was not accepted by the email provider', {
+            userId: account.id,
+          });
+        }
+      },
+      { userId: account.id }
+    );
+  } else {
+    sendFreshVerificationAfterResponse(res, account);
+  }
+
+  answerRegistrationReceived(res);
+}
+
 function getRefreshTokenCookieBaseOptions() {
   const isProduction = process.env.NODE_ENV === 'production';
   const raw = String(process.env.COOKIE_SAMESITE || '').toLowerCase();
@@ -560,15 +1051,51 @@ function getRefreshTokenClearCookieOptions() {
   return getRefreshTokenCookieBaseOptions();
 }
 
+/**
+ * The phone apps say so with this header on every call (mobile/src/services/api.ts).
+ *
+ * A browser keeps its refresh token in an HttpOnly cookie that script cannot
+ * read, and the server refuses a refresh that does not come from a trusted
+ * origin, because a cookie travels on whatever the browser sends and that is
+ * what a cross-site request forgery rides on. A phone app has neither a cookie
+ * jar nor an origin: it was handed a refresh token the first time and had no way
+ * to read it (the response never carried one), so every expired access token
+ * ended in a sign-out. A client that says it is native is handed the token in
+ * the response body instead, and presents it in the body of /refresh. Nothing
+ * ambient is involved on that path, so there is nothing to forge: the token is
+ * the credential, it is single-use, and presenting a retired one still revokes
+ * every session. The cookie is never read or set for these requests, so the
+ * header cannot be used to lift a browser's cookie into a page.
+ */
+const NATIVE_CLIENT_HEADER = 'x-athena-client';
+
+function isNativeClient(req: Request): boolean {
+  return String(req.headers[NATIVE_CLIENT_HEADER] ?? '').trim().toLowerCase() === 'mobile';
+}
+
+/**
+ * Gives the new refresh token to whoever just signed in or refreshed: as the
+ * HttpOnly cookie for a browser, as the return value (to go in the response
+ * body) for a native app.
+ */
+function deliverRefreshToken(req: Request, res: Response, refreshToken: string): string | undefined {
+  if (isNativeClient(req)) return refreshToken;
+  res.cookie('refreshToken', refreshToken, getRefreshTokenCookieOptions(refreshToken));
+  return undefined;
+}
+
 function buildAuthResponseData(
   accessToken: string,
-  user?: Record<string, unknown>
+  user?: Record<string, unknown>,
+  /** Only ever passed for a native client; a browser's travels in the cookie. */
+  refreshToken?: string
 ) {
   const expiresIn = getTokenExpiresInSeconds(accessToken) ?? 0;
 
   return {
     ...(user ? { user } : {}),
     accessToken,
+    ...(refreshToken ? { refreshToken } : {}),
     expiresIn,
   };
 }
@@ -636,6 +1163,18 @@ async function handleVerifyEmailToken(
     throw new ApiError(400, 'Invalid or expired verification token');
   }
 
+  // An address that was registered twice before anyone confirmed it has had
+  // its password withdrawn (see answerRegistrationForTakenAddress): two people
+  // typed one, and this link could not tell which of them would click it. The
+  // person who did holds the inbox, which is the proof a forgotten password
+  // takes, so she gets the same one-time link a reset gets, handed to the page
+  // in front of her rather than mailed, and chooses the password now. Only
+  // `null`: a row that was not asked for the column is not read as one with
+  // none. An account that signs in with Google or Facebook has no password to
+  // choose.
+  const { user } = verificationToken;
+  const passwordToChoose = user.passwordHash === null && !user.googleId && !user.facebookId;
+
   await prisma.user.update({
     where: { id: verificationToken.userId },
     data: {
@@ -647,6 +1186,24 @@ async function handleVerifyEmailToken(
   await prisma.verificationToken.delete({
     where: { id: verificationToken.id },
   });
+
+  let setPasswordToken: string | null = null;
+  if (passwordToChoose) {
+    setPasswordToken = generateSecureToken();
+    const link = await prisma.verificationToken.create({
+      data: {
+        userId: verificationToken.userId,
+        token: hashOpaqueToken(setPasswordToken),
+        type: 'PASSWORD_RESET',
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1 hour, as a reset link
+      },
+      select: { id: true },
+    });
+    // One live link, as forgot-password keeps it.
+    await prisma.verificationToken.deleteMany({
+      where: { userId: verificationToken.userId, type: 'PASSWORD_RESET', id: { not: link.id } },
+    });
+  }
 
   const pendingReferral = await prisma.referral.findFirst({
     where: {
@@ -685,8 +1242,17 @@ async function handleVerifyEmailToken(
   sendBestEffortAuthEmail(
     'Welcome email after email verification',
     () => sendWelcomeEmail(verificationToken.user.email, verificationToken.user.firstName),
-    { userId: verificationToken.userId, email: verificationToken.user.email }
+    { userId: verificationToken.userId }
   );
+
+  if (setPasswordToken) {
+    res.json({
+      success: true,
+      message: 'Your email is confirmed. Choose the password you will sign in with to finish.',
+      data: { passwordSetupRequired: true, setPasswordToken },
+    });
+    return;
+  }
 
   res.json({
     success: true,
@@ -715,8 +1281,11 @@ router.post(
       .isLength({ min: 4, max: 32 })
       .matches(AUTH_CODE_PATTERN)
       .withMessage('Referral codes can only include letters, numbers, and dashes'),
+    // Exactly the boolean true. Left out, null or the string "true" is refused
+    // with this sentence: `.isBoolean()` ahead of the check used to answer a
+    // missing value with the validator's bare "Invalid value", because a
+    // message attaches only to the rule written directly before it.
     body('womanSelfAttested')
-      .isBoolean()
       .custom((value) => value === true)
       .withMessage('You must confirm you are a woman to join ATHENA'),
     // Collected here because it cannot be collected later: an account created
@@ -767,8 +1336,12 @@ router.post(
         throw new ApiError(400, 'First name and last name are required');
       }
 
-      if (!womanSelfAttested) {
-        throw new ApiError(400, 'Women-only access requires self-attestation');
+      // The validator above already refuses anything but a real true; this is
+      // the same rule where the account is made, so a body that reached here
+      // another way (an array, an object, a non-empty string) is not an
+      // attestation either.
+      if (womanSelfAttested !== true) {
+        throw new ApiError(400, 'You must confirm you are a woman to join ATHENA');
       }
 
       // `.toDate()` above has already turned the field into a Date, but a body
@@ -779,16 +1352,38 @@ router.post(
         throw new ApiError(400, DATE_OF_BIRTH_REFUSAL);
       }
 
-      // Check if user exists
-      const existingUser = await prisma.user.findUnique({ where: { email } });
+      // An address that already has an account is answered exactly as a new
+      // one is; see answerRegistrationForTakenAddress.
+      const existingUser = await prisma.user.findUnique({
+        where: { email },
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          emailVerified: true,
+          createdAt: true,
+          lastLoginAt: true,
+          googleId: true,
+          facebookId: true,
+          isSuspended: true,
+          bannedAt: true,
+        },
+      });
       if (existingUser) {
-        throw new ApiError(409, 'Email already registered');
+        await answerRegistrationForTakenAddress(res, existingUser, {
+          password,
+          inviteCode,
+          firstName,
+          lastName,
+          persona,
+          dateOfBirth,
+        });
+        return;
       }
 
       // After the check above, so an address that already has an account —
-      // banned or not — gets the same answer it always did, and the ban list
-      // is only consulted for an address that would otherwise become a new
-      // account.
+      // banned or not — is answered like any other, and the ban list is only
+      // consulted for an address that would otherwise become a new account.
       await refuseUnusableAddress(email);
 
       // Hash password
@@ -892,7 +1487,11 @@ router.post(
         if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
           const target = Array.isArray(err.meta?.target) ? err.meta.target : [];
           if (target.includes('email')) {
-            throw new ApiError(409, 'Email already registered');
+            // The other request made the account, so this one gets the answer
+            // any taken address gets. It sends nothing: the winner's
+            // confirmation email is already on its way to the same inbox.
+            answerRegistrationReceived(res);
+            return;
           }
           throw new ApiError(409, 'Could not create a unique account code. Please try again.');
         }
@@ -938,20 +1537,32 @@ router.post(
         });
       }
 
-      await requireAuthEmailDelivery(
-        () => sendVerificationEmail(email, firstName, verificationToken),
-        'Verification email could not be sent. Please try resending verification later.',
-        { userId: user.id, email }
-      );
+      try {
+        await requireAuthEmailDelivery(
+          'verification',
+          () => sendVerificationEmail(email, firstName, verificationToken, INTERACTIVE_DELIVERY),
+          'Verification email could not be sent. Please try resending verification later.',
+          { userId: user.id }
+        );
+      } catch (error) {
+        // The account and its link exist; only the mail did not go. The code
+        // lets the sign-up page offer the resend form in place of a bare
+        // error, because resending is exactly what she needs to do next.
+        if (error instanceof ApiError && error.statusCode === 503) {
+          res.status(503).json({
+            success: false,
+            message: error.message,
+            error: error.message,
+            code: VERIFICATION_EMAIL_FAILED,
+          });
+          return;
+        }
+        throw error;
+      }
 
-      res.status(201).json({
-        success: true,
-        message: 'Registration successful. Please check your email to verify your account.',
-        data: {
-          user,
-          verificationRequired: true,
-        },
-      });
+      // No account in the body, and no wording that only a new member could be
+      // told: a taken address gets this same reply.
+      answerRegistrationReceived(res);
     } catch (error) {
       next(error);
     }
@@ -1017,6 +1628,7 @@ router.post(
           isPublic: true,
           allowMessages: true,
           isSuspended: true,
+          lockedAt: true,
           createdAt: true,
           updatedAt: true,
           lastLoginAt: true,
@@ -1046,13 +1658,20 @@ router.post(
       }
 
       if (!user.emailVerified) {
-        throw new ApiError(403, 'Please verify your email before signing in.');
+        throw new ApiError(403, EMAIL_NOT_VERIFIED_MESSAGE);
       }
 
       // Only after the password checks out, so the account's standing is never
       // disclosed to someone who is merely guessing at the address.
       if (user.isSuspended) {
         throw new ApiError(403, SUSPENDED_ACCOUNT_MESSAGE);
+      }
+
+      // The member locked it herself (POST /auth/lock). The right password does
+      // not open it: whoever has the password is exactly who she locked it
+      // against. The emailed link does, and a new one can be asked for.
+      if (user.lockedAt) {
+        throw new ApiError(403, ACCOUNT_LOCKED_MESSAGE);
       }
 
       if (user.twoFactorEnabled) {
@@ -1086,8 +1705,7 @@ router.post(
 
       const accessToken = generateAccessToken(tokenPayload);
       const refreshToken = generateRefreshToken(tokenPayload);
-      const cookieOptions = getRefreshTokenCookieOptions(refreshToken);
-      res.cookie('refreshToken', refreshToken, cookieOptions);
+      const refreshTokenForBody = deliverRefreshToken(req, res, refreshToken);
 
       const session = await sessionService.createSession(
         user.id,
@@ -1104,18 +1722,21 @@ router.post(
         passwordHash: _passwordHash,
         twoFactorSecret: _twoFactorSecret,
         twoFactorRecoveryCodes: _twoFactorRecoveryCodes,
+        lockedAt: _lockedAt,
         ...userWithoutPassword
       } = user;
       void _passwordHash;
       void _twoFactorSecret;
       void _twoFactorRecoveryCodes;
+      void _lockedAt;
 
       res.json({
         success: true,
         message: 'Login successful',
         data: buildAuthResponseData(
           accessToken,
-          userWithoutPassword as Record<string, unknown>
+          userWithoutPassword as Record<string, unknown>,
+          refreshTokenForBody
         ),
       });
     } catch (error) {
@@ -1281,6 +1902,13 @@ router.post(
     }),
     body('mode').optional().isIn(['login', 'register']),
     body('womanSelfAttested').optional().isBoolean(),
+    // The member's second factor, sent again with the same credential once she
+    // has been asked for it. See requireSocialSecondFactor.
+    body('twoFactorCode')
+      .optional()
+      .isString()
+      .isLength({ min: 6, max: 32 })
+      .withMessage('Two-factor code must be a 6-digit code or a recovery code'),
     // Optional at the validator because a returning member sends none; the
     // branch that creates a new account insists on it below. Google does not
     // return a birthday in the identity token, so it has to come from the form.
@@ -1389,6 +2017,10 @@ router.post(
         emailVerifiedAt: true,
         googleId: true,
         passwordHash: true,
+        lockedAt: true,
+        // Only to check a second factor with; never part of what is returned.
+        twoFactorSecret: true,
+        twoFactorRecoveryCodes: true,
       } as const;
       const linkedGoogleUser = await prisma.user.findUnique({
         where: { googleId: googleProfile.sub },
@@ -1427,12 +2059,14 @@ router.post(
           }
         | null = null;
       let created = false;
+      let secondFactorChecked = false;
 
       const existingAccount = linkedGoogleUser ?? existingEmailUser;
 
       if (existingAccount) {
         // Every refusal before any write. See refuseSocialSignIn.
         refuseSocialSignIn(existingAccount);
+        secondFactorChecked = await requireSocialSecondFactor(req, existingAccount);
 
         const linking = !linkedGoogleUser;
         if (linking && existingAccount.googleId && existingAccount.googleId !== googleProfile.sub) {
@@ -1553,7 +2187,7 @@ router.post(
         sendBestEffortAuthEmail(
           'Welcome email after Google sign-up',
           () => sendWelcomeEmail(email, firstName),
-          { userId: user.id, email }
+          { userId: user.id }
         );
 
         created = true;
@@ -1567,8 +2201,11 @@ router.post(
         throw new ApiError(403, SUSPENDED_ACCOUNT_MESSAGE);
       }
 
-      if (!created && user.twoFactorEnabled) {
-        throw new ApiError(401, 'Two-factor code required. Please sign in with email and password.');
+      // The code was checked before anything was written. A returning account
+      // that has two-factor on and got here some other way is refused, not
+      // trusted: nothing but a checked code opens a protected account.
+      if (!created && user.twoFactorEnabled && !secondFactorChecked) {
+        throw new ApiError(401, 'Two-factor code required');
       }
 
       const tokenPayload = {
@@ -1580,8 +2217,7 @@ router.post(
 
       const accessToken = generateAccessToken(tokenPayload);
       const refreshToken = generateRefreshToken(tokenPayload);
-      const cookieOptions = getRefreshTokenCookieOptions(refreshToken);
-      res.cookie('refreshToken', refreshToken, cookieOptions);
+      const refreshTokenForBody = deliverRefreshToken(req, res, refreshToken);
 
       const googleSession = await sessionService.createSession(
         user.id,
@@ -1597,7 +2233,7 @@ router.post(
       res.status(created ? 201 : 200).json({
         success: true,
         message: created ? 'Google sign-up successful' : 'Google sign-in successful',
-        data: buildAuthResponseData(accessToken, user as Record<string, unknown>),
+        data: buildAuthResponseData(accessToken, user as Record<string, unknown>, refreshTokenForBody),
       });
     } catch (error) {
       next(error);
@@ -1615,6 +2251,12 @@ router.post(
     body('accessToken').isString().isLength({ min: 1, max: EXTERNAL_AUTH_TOKEN_MAX_LENGTH }),
     body('mode').optional().isIn(['login', 'register']),
     body('womanSelfAttested').optional().isBoolean(),
+    // See the Google route and requireSocialSecondFactor.
+    body('twoFactorCode')
+      .optional()
+      .isString()
+      .isLength({ min: 6, max: 32 })
+      .withMessage('Two-factor code must be a 6-digit code or a recovery code'),
     // Same reasoning as the Google route: optional at the validator because a
     // returning member sends none, insisted on below where an account is made.
     body('dateOfBirth').optional({ checkFalsy: true }).isISO8601().withMessage(DATE_OF_BIRTH_REFUSAL),
@@ -1738,6 +2380,10 @@ router.post(
         emailVerifiedAt: true,
         facebookId: true,
         passwordHash: true,
+        lockedAt: true,
+        // Only to check a second factor with; never part of what is returned.
+        twoFactorSecret: true,
+        twoFactorRecoveryCodes: true,
       } as const;
       const linkedFbUser = await prisma.user.findUnique({
         where: { facebookId: fbProfile.id },
@@ -1776,12 +2422,14 @@ router.post(
           }
         | null = null;
       let fbCreated = false;
+      let fbSecondFactorChecked = false;
 
       const existingFbAccount = linkedFbUser ?? existingFbEmailUser;
 
       if (existingFbAccount) {
         // Every refusal before any write. See refuseSocialSignIn.
         refuseSocialSignIn(existingFbAccount);
+        fbSecondFactorChecked = await requireSocialSecondFactor(req, existingFbAccount);
 
         const fbLinking = !linkedFbUser;
         if (fbLinking && existingFbAccount.facebookId && existingFbAccount.facebookId !== fbProfile.id) {
@@ -1885,7 +2533,7 @@ router.post(
         sendBestEffortAuthEmail(
           'Welcome email after Facebook sign-up',
           () => sendWelcomeEmail(fbEmail, fbFirstName),
-          { userId: fbUser.id, email: fbEmail }
+          { userId: fbUser.id }
         );
 
         fbCreated = true;
@@ -1899,8 +2547,8 @@ router.post(
         throw new ApiError(403, SUSPENDED_ACCOUNT_MESSAGE);
       }
 
-      if (!fbCreated && fbUser.twoFactorEnabled) {
-        throw new ApiError(401, 'Two-factor code required. Please sign in with email and password.');
+      if (!fbCreated && fbUser.twoFactorEnabled && !fbSecondFactorChecked) {
+        throw new ApiError(401, 'Two-factor code required');
       }
 
       const fbTokenPayload = {
@@ -1912,8 +2560,7 @@ router.post(
 
       const fbAccessTokenJwt = generateAccessToken(fbTokenPayload);
       const fbRefreshToken = generateRefreshToken(fbTokenPayload);
-      const fbCookieOptions = getRefreshTokenCookieOptions(fbRefreshToken);
-      res.cookie('refreshToken', fbRefreshToken, fbCookieOptions);
+      const fbRefreshTokenForBody = deliverRefreshToken(req, res, fbRefreshToken);
 
       const fbSession = await sessionService.createSession(
         fbUser.id,
@@ -1929,7 +2576,7 @@ router.post(
       res.status(fbCreated ? 201 : 200).json({
         success: true,
         message: fbCreated ? 'Facebook sign-up successful' : 'Facebook sign-in successful',
-        data: buildAuthResponseData(fbAccessTokenJwt, fbUser as Record<string, unknown>),
+        data: buildAuthResponseData(fbAccessTokenJwt, fbUser as Record<string, unknown>, fbRefreshTokenForBody),
       });
     } catch (error) {
       next(error);
@@ -1940,33 +2587,84 @@ router.post(
 // ===========================================
 // REFRESH TOKEN
 // ===========================================
+/** The machine-readable word on the 409 for a refresh that lost a race with another one. */
+const REFRESH_IN_PROGRESS = 'REFRESH_IN_PROGRESS';
+
+/**
+ * Said when the token in hand was rotated a moment ago by another request of
+ * the same device (a second tab, or a retry after a dropped connection). It is
+ * not a refusal of the member and nothing about her sessions has changed: the
+ * winning request has already issued the new pair, so asking again with it
+ * works. Answered 409, not 401, because a client that signs out on every 401
+ * would otherwise sign her out of a session that is perfectly fine.
+ */
+function refreshInProgressResponse(res: Response): void {
+  const message = 'Your session was just refreshed by another request. Please try again.';
+  res.status(409).json({ success: false, message, error: message, code: REFRESH_IN_PROGRESS });
+}
+
+// validated: the only field read is refreshToken, as text; it is verified as a signed refresh token
+//   and matched to a live session before it is used.
 router.post('/refresh', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    enforceTrustedRefreshCookieRequest(req);
+    const native = isNativeClient(req);
 
-    // Cookie-only refresh — body-supplied tokens are a CSRF channel.
-    // (Outside production we also accept the body so test tooling keeps working.)
-    const refreshToken =
-      req.cookies?.refreshToken ||
-      (process.env.NODE_ENV !== 'production' ? req.body?.refreshToken : undefined);
+    // A browser's refresh token is a cookie, an ambient credential that rides
+    // on whatever request the browser sends, so a browser refresh has to come
+    // from a trusted origin. A native app sends no cookie and no origin and
+    // has nothing ambient to forge (see NATIVE_CLIENT_HEADER), so the rule has
+    // nothing to protect there.
+    if (!native) {
+      enforceTrustedRefreshCookieRequest(req);
+    }
+
+    // A browser refreshes from its cookie only: a token in the body of a
+    // browser request is a CSRF channel. (Outside production the body is
+    // accepted too so test tooling keeps working.) A native client sends its
+    // token in the body, and never has a cookie to read.
+    const bodyToken = typeof req.body?.refreshToken === 'string' ? req.body.refreshToken : undefined;
+    const refreshToken = native
+      ? bodyToken
+      : req.cookies?.refreshToken || (process.env.NODE_ENV !== 'production' ? bodyToken : undefined);
 
     if (!refreshToken) {
       throw new ApiError(400, 'Refresh token required');
     }
 
     // Verify refresh token: the signature, the expiry, and that it is a
-    // refresh token rather than an access token wearing the same key.
-    const decoded = verifyToken(refreshToken, 'refresh');
+    // refresh token rather than an access token wearing the same key. An
+    // expired, forged or wrong-kind token is a signed-out visitor, and is
+    // answered as one: it used to escape as an unhandled JsonWebTokenError and
+    // come back as a 500 that went to Sentry, which every returning member
+    // with a week-old cookie caused.
+    let decoded: ReturnType<typeof verifyToken>;
+    try {
+      decoded = verifyToken(refreshToken, 'refresh');
+    } catch (error) {
+      if (!(error instanceof jwt.JsonWebTokenError)) throw error;
+      res.clearCookie('refreshToken', getRefreshTokenClearCookieOptions());
+      throw new ApiError(401, 'Invalid refresh token');
+    }
 
     // Find session
     const session = await sessionService.findActiveSessionByRefreshToken(refreshToken);
 
     if (!session || session.userId !== decoded.userId) {
       // If this token previously belonged to a *revoked* session, it's a
-      // replay of a rotated token — treat as compromise and burn every
-      // session for that user.
-      const compromisedUserId = await sessionService.detectRefreshTokenReuse(refreshToken);
-      if (compromisedUserId) {
+      // replay of a rotated token. Moments after the rotation, from the same
+      // device, that is a second tab or a retry and nothing is revoked; any
+      // other time it is treated as a compromise and every session for that
+      // user is burned.
+      const replay = await sessionService.detectRefreshTokenReuse(refreshToken, {
+        userAgent: req.headers['user-agent'],
+      });
+      if (replay.kind === 'concurrent') {
+        // The cookie is left alone: the request that won has already put the
+        // new one in the browser, and clearing it here would undo that.
+        refreshInProgressResponse(res);
+        return;
+      }
+      if (replay.kind === 'reuse') {
         res.clearCookie('refreshToken', getRefreshTokenClearCookieOptions());
       }
       throw new ApiError(401, 'Invalid refresh token');
@@ -1975,18 +2673,45 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
     // Get user
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
-      select: { id: true, email: true, role: true, persona: true, isSuspended: true },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        persona: true,
+        isSuspended: true,
+        bannedAt: true,
+        lockedAt: true,
+        emailVerified: true,
+      },
     });
 
     if (!user) {
       throw new ApiError(401, 'User not found');
     }
 
-    // A suspension must end the session rather than be renewed through it.
-    if (user.isSuspended) {
-      await sessionService.revokeAllUserSessions(user.id, { reason: 'suspended' });
+    // A suspension or a ban must end the session rather than be renewed
+    // through it. A ban is its own column, and either one closes the account.
+    if (user.isSuspended || user.bannedAt) {
+      await sessionService.revokeAllUserSessions(user.id, { reason: user.bannedAt ? 'banned' : 'suspended' });
       res.clearCookie('refreshToken', getRefreshTokenClearCookieOptions());
       throw new ApiError(403, SUSPENDED_ACCOUNT_MESSAGE);
+    }
+
+    // She locked the account herself: no session is renewed through the lock,
+    // and whatever is still open is ended.
+    if (user.lockedAt) {
+      await sessionService.revokeAllUserSessions(user.id, { reason: 'locked' });
+      res.clearCookie('refreshToken', getRefreshTokenClearCookieOptions());
+      throw new ApiError(403, ACCOUNT_LOCKED_MESSAGE);
+    }
+
+    // An address that is no longer confirmed (an admin un-confirmed it) does
+    // not renew a session either; sign-in would refuse it, so refreshing must.
+    // Only an explicit false counts.
+    if (user.emailVerified === false) {
+      await sessionService.revokeAllUserSessions(user.id, { reason: 'revoked' });
+      res.clearCookie('refreshToken', getRefreshTokenClearCookieOptions());
+      throw new ApiError(403, EMAIL_NOT_VERIFIED_MESSAGE);
     }
 
     // Generate new tokens
@@ -2010,18 +2735,23 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
         req.ip
       );
     } catch (err: any) {
+      // Two requests held the same token and the other one won. The session
+      // is fine and so is she; the loser asks again.
+      if (err instanceof RefreshConflictError) {
+        refreshInProgressResponse(res);
+        return;
+      }
       logger.error('Failed to rotate refresh token', { error: err?.message || err, stack: err?.stack });
       return next(err);
     }
 
-    // Rotate refresh token cookie
-    res.cookie('refreshToken', newRefreshToken, {
-      ...getRefreshTokenCookieOptions(newRefreshToken),
-    });
+    // The rotated refresh token: the cookie for a browser, the body for a
+    // native app.
+    const refreshTokenForBody = deliverRefreshToken(req, res, newRefreshToken);
 
     res.json({
       success: true,
-      data: buildAuthResponseData(newAccessToken),
+      data: buildAuthResponseData(newAccessToken, undefined, refreshTokenForBody),
     });
   } catch (error) {
     next(error);
@@ -2096,9 +2826,12 @@ router.post(
         throw new ApiError(400, errors.array()[0].msg);
       }
 
+      const principal = signedIn(req);
+      await refuseLockedCredentialChecks(principal.id);
+
       const { currentPassword, newPassword } = req.body;
       const user = await prisma.user.findUnique({
-        where: { id: req.user!.id },
+        where: { id: principal.id },
         select: { id: true, passwordHash: true },
       });
 
@@ -2108,8 +2841,16 @@ router.post(
 
       const isCurrentPasswordValid = await comparePassword(currentPassword, user.passwordHash);
       if (!isCurrentPasswordValid) {
-        throw new ApiError(401, 'Current password is incorrect');
+        // A 403 and not a 401, like the two-factor routes and requireStepUp.
+        // Neither the web app nor the phone app lists this route among the
+        // ones a 401 means "wrong password" for, so a 401 here was read as an
+        // expired session: the client refreshed and sent the same wrong
+        // password again, which spent two of the five attempts the
+        // credential-check lockout allows for one slip of the fingers, and
+        // rotated her refresh token for nothing.
+        throw await failedCredentialCheck(user.id, new ApiError(403, 'Current password is incorrect'));
       }
+      await clearCredentialChecks(user.id);
 
       const nextPasswordHash = await hashPassword(newPassword);
       await prisma.user.update({
@@ -2120,7 +2861,7 @@ router.post(
       // Every other device is signed out, sockets included; this one stays.
       await sessionService.revokeAllUserSessions(user.id, {
         reason: 'password-changed',
-        exceptSessionId: req.user!.sessionId,
+        exceptSessionId: principal.sessionId,
       });
 
       res.json({
@@ -2218,6 +2959,11 @@ router.post(
   '/2fa/enable',
   authenticate,
   [
+    // Asked for, like turning it off, because a session on its own must not be
+    // enough to put somebody else's authenticator on her account: whoever held
+    // a stolen token could enrol their own phone, take the ten recovery codes,
+    // and leave the owner unable to sign in until an administrator reset it.
+    body('currentPassword').optional().isString().isLength({ min: 1, max: PASSWORD_MAX_LENGTH }),
     body('code')
       .isString()
       .isLength({ min: 6, max: 32 })
@@ -2230,10 +2976,14 @@ router.post(
         throw new ApiError(400, errors.array()[0].msg);
       }
 
+      const userId = signedIn(req).id;
+      await refuseLockedCredentialChecks(userId);
+
       const user = await prisma.user.findUnique({
-        where: { id: req.user!.id },
+        where: { id: userId },
         select: {
           id: true,
+          passwordHash: true,
           twoFactorSecret: true,
         },
       });
@@ -2246,10 +2996,24 @@ router.post(
         throw new ApiError(400, 'Start two-factor setup before enabling it');
       }
 
+      // An account that signs in only with Google or Facebook has no password
+      // to give; its session is all there is to ask. See requireStepUp for why
+      // this is a 403 and not a 401.
+      if (user.passwordHash) {
+        const currentPassword = String(req.body.currentPassword ?? '');
+        if (!currentPassword) {
+          throw new ApiError(400, 'Current password is required');
+        }
+        if (!(await comparePassword(currentPassword, user.passwordHash))) {
+          throw await failedCredentialCheck(user.id, new ApiError(403, 'Current password is incorrect'));
+        }
+      }
+
       const code = normalizeTotpCode(req.body.code);
       if (!code || !(await verifyAuthenticatorCode(user.id, user.twoFactorSecret, code))) {
-        throw new ApiError(400, 'Invalid two-factor code');
+        throw await failedCredentialCheck(user.id, new ApiError(400, 'Invalid two-factor code'));
       }
+      await clearCredentialChecks(user.id);
 
       const enabledAt = new Date();
       await prisma.user.update({
@@ -2293,8 +3057,11 @@ router.post(
         throw new ApiError(400, errors.array()[0].msg);
       }
 
+      const userId = signedIn(req).id;
+      await refuseLockedCredentialChecks(userId);
+
       const user = await prisma.user.findUnique({
-        where: { id: req.user!.id },
+        where: { id: userId },
         select: {
           id: true,
           passwordHash: true,
@@ -2316,13 +3083,17 @@ router.post(
 
         const isCurrentPasswordValid = await comparePassword(currentPassword, user.passwordHash);
         if (!isCurrentPasswordValid) {
-          throw new ApiError(401, 'Current password is incorrect');
+          // A 403 and not a 401, as on enable: the clients answer a 401 by
+          // refreshing the session and sending the request again, which counted
+          // one mistyped password twice against the five this budget allows.
+          throw await failedCredentialCheck(user.id, new ApiError(403, 'Current password is incorrect'));
         }
       }
 
       if (user.twoFactorEnabled && !(await verifySecondFactor(user, req.body.code))) {
-        throw new ApiError(400, 'Invalid two-factor code');
+        throw await failedCredentialCheck(user.id, new ApiError(400, 'Invalid two-factor code'));
       }
+      await clearCredentialChecks(user.id);
 
       await prisma.user.update({
         where: { id: user.id },
@@ -2368,8 +3139,11 @@ router.post(
         throw new ApiError(400, errors.array()[0].msg);
       }
 
+      const userId = signedIn(req).id;
+      await refuseLockedCredentialChecks(userId);
+
       const user = await prisma.user.findUnique({
-        where: { id: req.user!.id },
+        where: { id: userId },
         select: {
           id: true,
           passwordHash: true,
@@ -2395,13 +3169,15 @@ router.post(
 
         const isCurrentPasswordValid = await comparePassword(currentPassword, user.passwordHash);
         if (!isCurrentPasswordValid) {
-          throw new ApiError(401, 'Current password is incorrect');
+          // A 403 and not a 401: see /2fa/disable.
+          throw await failedCredentialCheck(user.id, new ApiError(403, 'Current password is incorrect'));
         }
       }
 
       if (!(await verifySecondFactor(user, req.body.code))) {
-        throw new ApiError(400, 'Invalid two-factor code');
+        throw await failedCredentialCheck(user.id, new ApiError(400, 'Invalid two-factor code'));
       }
+      await clearCredentialChecks(user.id);
 
       const recoveryCodes = await issueRecoveryCodes(user.id);
 
@@ -2511,39 +3287,23 @@ router.post(
 
       // Always return success to prevent email enumeration
       if (user) {
-        // Delete any existing password reset tokens
-        await prisma.verificationToken.deleteMany({
-          where: { userId: user.id, type: 'PASSWORD_RESET' },
-        });
-
-        // Generate new reset token
-        const resetToken = generateSecureToken();
-
-        await prisma.verificationToken.create({
-          data: {
-            userId: user.id,
-            token: hashOpaqueToken(resetToken),
-            type: 'PASSWORD_RESET',
-            expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1 hour
-          },
-        });
-
-        // The email goes after the answer, so the reply takes the same time
-        // whether or not the address has an account; the mail provider's
-        // round trip would otherwise say which. A token whose mail the
-        // provider refused is withdrawn.
+        // All of the work for a real account, the token's two writes as well
+        // as the mail, happens after the answer. The only thing done before it
+        // is the one lookup an unknown address gets too, so the reply takes the
+        // same time either way; writing the token first made a known address
+        // measurably slower than an unknown one.
         sendAfterResponse(res, async () => {
-          const sent = await sendPasswordResetEmail(email, user.firstName, resetToken);
-          if (!sent) {
-            logger.error('Password reset email was not accepted by the email provider', {
-              userId: user.id,
-              email,
-            });
-            await prisma.verificationToken.deleteMany({
-              where: { userId: user.id, type: 'PASSWORD_RESET' },
-            });
-          }
-        }, { userId: user.id, email });
+          // One live reset link: the new one replaces the older ones once its
+          // mail has gone, and a refused mail withdraws only itself, so the
+          // link she already holds keeps working.
+          await mailFreshLink({
+            account: { id: user.id, email },
+            type: 'PASSWORD_RESET',
+            lifetimeMs: 60 * 60 * 1000, // 1 hour
+            kind: 'password_reset',
+            send: (resetToken) => sendPasswordResetEmail(email, user.firstName, resetToken),
+          });
+        }, { userId: user.id });
       }
 
       res.json({
@@ -2575,6 +3335,35 @@ function sendAfterResponse(res: Response, task: () => Promise<void>, context: Au
     res.once('finish', run);
     res.once('close', run);
   }
+}
+
+/**
+ * A new confirmation link for an account whose address has not been confirmed:
+ * a new one is made and mailed, the older ones are retired once it has gone, and
+ * all of it happens after the reply, so the reply says nothing about whether
+ * there was an account to send it to. A mail the provider refuses withdraws the
+ * new link and leaves the old one alone.
+ * Shared by the resend route and by a registration for an unconfirmed address.
+ */
+function sendFreshVerificationAfterResponse(
+  res: Response,
+  account: { id: string; email: string; firstName: string }
+): void {
+  sendAfterResponse(
+    res,
+    async () => {
+      // The older links are retired only once this one's mail has gone, so a
+      // refused mail leaves her the link she already had.
+      await mailFreshLink({
+        account,
+        type: 'EMAIL_VERIFICATION',
+        lifetimeMs: 24 * 60 * 60 * 1000, // 24 hours
+        kind: 'resend_verification',
+        send: (verificationToken) => sendVerificationEmail(account.email, account.firstName, verificationToken),
+      });
+    },
+    { userId: account.id }
+  );
 }
 
 // ===========================================
@@ -2658,6 +3447,8 @@ router.get('/verify-email', async (req: Request, res: Response, next: NextFuncti
   }
 });
 
+// validated: token goes through ensureSecureToken, which requires text matching
+//   SECURE_TOKEN_PATTERN.
 router.post('/verify-email', async (req: Request, res: Response, next: NextFunction) => {
   try {
     await handleVerifyEmailToken(
@@ -2698,37 +3489,10 @@ router.post(
       return;
     }
 
-    // Delete existing verification tokens
-    await prisma.verificationToken.deleteMany({
-      where: { userId: user.id, type: 'EMAIL_VERIFICATION' },
-    });
-
-    // Generate new token
-    const verificationToken = generateSecureToken();
-
-    await prisma.verificationToken.create({
-      data: {
-        userId: user.id,
-        token: hashOpaqueToken(verificationToken),
-        type: 'EMAIL_VERIFICATION',
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
-      },
-    });
-
-    // Sent after the answer, so the reply's timing says nothing about whether
-    // the address has an unverified account. A refused mail withdraws the token.
-    sendAfterResponse(res, async () => {
-      const sent = await sendVerificationEmail(user.email, user.firstName, verificationToken);
-      if (!sent) {
-        logger.error('Resent verification email was not accepted by the email provider', {
-          userId: user.id,
-          email: user.email,
-        });
-        await prisma.verificationToken.deleteMany({
-          where: { userId: user.id, type: 'EMAIL_VERIFICATION' },
-        });
-      }
-    }, { userId: user.id, email: user.email });
+    // The token's writes and the mail both go after the answer, so the reply
+    // takes the same time for an address with an unverified account as for
+    // one without.
+    sendFreshVerificationAfterResponse(res, user);
 
     res.json({
       success: true,
@@ -2810,5 +3574,195 @@ router.post('/logout-all', authenticate, async (req: AuthRequest, res, next) => 
     next(error);
   }
 });
+
+// ===========================================
+// LOCK MY ACCOUNT
+// ===========================================
+
+/**
+ * Locking is the step beyond "sign out everywhere". Signing out ends the
+ * sessions that exist, and anyone who holds her password signs straight back
+ * in. A lock ends them and then refuses every way of signing in (password,
+ * Google, Facebook, refresh) until she unlocks it from the link mailed to her
+ * address. See services/account-lock.service.ts for what it does and why it is
+ * not the staff-only suspension.
+ *
+ * Three ways in, because she may or may not still have a session:
+ *   POST /lock           from her security settings, signed in.
+ *   POST /lock-by-token  from the "this was not me" link in a new-device
+ *                        sign-in email; the one-time token is the proof.
+ * And two ways out, neither of which needs a session:
+ *   POST /unlock         the link in the lock email, spent once.
+ *   POST /request-unlock a new link, for the one that expired or was lost.
+ *
+ * The three that take no session share one budget in the same shared store as
+ * the other sign-in limits, so a script cannot spray tokens at them, and none
+ * of them says whether an address has an account.
+ */
+const accountLockLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: process.env.NODE_ENV === 'production' ? 10 : 100,
+  message: { success: false, message: 'Too many attempts from here. Please try again in an hour.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { xForwardedForHeader: false },
+  store: new SharedRateLimitStore('rl:account-lock:'),
+});
+const accountLockLimit = (req: Request, res: Response, next: NextFunction) =>
+  socialAuthLimitEnabled ? accountLockLimiter(req, res, next) : next();
+
+const ACCOUNT_LINK_INVALID_MESSAGE = 'This link is not valid, has expired, or has already been used.';
+
+/**
+ * What a lock tells the member about the way back, and only what is true. The
+ * unlock link is mailed by the lock itself, so the answer depends on whether
+ * that mail was accepted, and on whether this request did the locking at all:
+ * an account that was already locked sends no second email.
+ */
+function lockedMessage(outcome: { alreadyLocked: boolean; unlockEmailSent: boolean }): string {
+  if (outcome.unlockEmailSent) {
+    return 'Your account is locked and every device is signed out. We have emailed you a link to unlock it.';
+  }
+  if (outcome.alreadyLocked) {
+    return 'Your account was already locked, and every device is signed out. The link to unlock it is in the email we sent when it was locked. If you cannot find it, ask for a new one from the sign-in page.';
+  }
+  return 'Your account is locked and every device is signed out. We could not send the unlock email just now, so ask for a new one from the sign-in page.';
+}
+
+router.post('/lock', authenticate, accountLockLimit, async (req: AuthRequest, res, next) => {
+  try {
+    const outcome = await lockAccount(signedIn(req).id, 'settings', {
+      ipAddress: req.ip ?? null,
+      userAgent: req.get('user-agent') || null,
+    });
+    if (!outcome) {
+      throw new ApiError(404, 'User not found');
+    }
+    if (!outcome.alreadyLocked) {
+      noteAuthEmail('account_unlock', outcome.unlockEmailSent);
+    }
+
+    // This device is signed out with the rest.
+    res.clearCookie('refreshToken', getRefreshTokenClearCookieOptions());
+
+    res.json({
+      success: true,
+      message: lockedMessage(outcome),
+      data: { locked: true, unlockEmailSent: outcome.unlockEmailSent },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post(
+  '/lock-by-token',
+  accountLockLimit,
+  [body('token').isString().matches(SECURE_TOKEN_PATTERN).withMessage(ACCOUNT_LINK_INVALID_MESSAGE)],
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
+      const outcome = await lockAccountByLink(req.body.token as string, {
+        ipAddress: req.ip ?? null,
+        userAgent: req.get('user-agent') || null,
+      });
+      if (!outcome) {
+        throw new ApiError(400, ACCOUNT_LINK_INVALID_MESSAGE);
+      }
+      if (!outcome.alreadyLocked) {
+        noteAuthEmail('account_unlock', outcome.unlockEmailSent);
+      }
+
+      // If she opened the link in the browser that was signed in, that session
+      // is already ended; the cookie is cleared so the page does not keep one.
+      res.clearCookie('refreshToken', getRefreshTokenClearCookieOptions());
+
+      res.json({
+        success: true,
+        message: lockedMessage(outcome),
+        data: { locked: true, unlockEmailSent: outcome.unlockEmailSent },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+router.post(
+  '/unlock',
+  accountLockLimit,
+  [body('token').isString().matches(SECURE_TOKEN_PATTERN).withMessage(ACCOUNT_LINK_INVALID_MESSAGE)],
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
+      const unlocked = await unlockAccount(req.body.token as string, {
+        ipAddress: req.ip ?? null,
+        userAgent: req.get('user-agent') || null,
+      });
+      if (!unlocked) {
+        throw new ApiError(400, ACCOUNT_LINK_INVALID_MESSAGE);
+      }
+
+      // No session is issued: unlocking is not signing in. She signs in again
+      // with her password, and her second factor if she has one.
+      res.json({
+        success: true,
+        message: 'Your account is unlocked. Sign in again to continue.',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+router.post(
+  '/request-unlock',
+  accountLockLimit,
+  [body('email').isEmail().isLength({ max: 254 }).normalizeEmail()],
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
+      const { email } = req.body as { email: string };
+      const account = await prisma.user.findUnique({
+        where: { email },
+        select: { id: true, email: true, firstName: true, lockedAt: true },
+      });
+
+      // The same answer whether or not the address has an account, or the
+      // account is locked, and the work for one that is locked goes after the
+      // reply, so the answer's timing says nothing either. The link goes to the
+      // address on the account, never to one typed here.
+      if (account?.lockedAt) {
+        sendAfterResponse(
+          res,
+          async () => {
+            const sent = await mailUnlockLink(account);
+            noteAuthEmail('account_unlock', sent);
+          },
+          { userId: account.id }
+        );
+      }
+
+      res.json({
+        success: true,
+        message: 'If that account is locked, a link to unlock it is on its way.',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 export default router;

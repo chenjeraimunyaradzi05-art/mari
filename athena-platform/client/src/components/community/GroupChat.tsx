@@ -14,13 +14,14 @@ import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { format, isToday } from 'date-fns';
-import { FileText, Loader2, Paperclip, Pin, PinOff, Reply, Send, Trash2, X } from 'lucide-react';
+import { FileText, Flag, Loader2, Paperclip, Pin, PinOff, Reply, Send, Trash2, X } from 'lucide-react';
 import { groupsApi } from '@/lib/api';
 import { useAuthStore, useUploadChatAttachment, type OutgoingAttachment } from '@/lib/hooks';
 import { useSocket } from '@/lib/hooks/use-socket';
 import { renderSocialText } from '@/lib/social-text';
 import { Avatar } from '@/components/ui/avatar';
 import { MessageAttachment, toMessageAttachments } from '@/components/social/MessageAttachment';
+import { ReportDialog } from '@/components/safety/ReportDialog';
 import { cn } from '@/lib/utils';
 
 type ChatMessage = {
@@ -37,8 +38,9 @@ type ChatMessage = {
 };
 
 // The same picker the direct-message thread offers: pictures, clips and
-// voice notes, which the media service serves publicly to the room. Other
-// files would land in a private folder the rest of the room cannot open.
+// voice notes. A file goes to this room's own private folder, where only its
+// members can open it, through a link the API mints for each of them
+// (lib/chat-attachments); it used to be served publicly to anyone with the link.
 const ATTACHMENT_ACCEPT = 'image/*,video/*,audio/*';
 const MAX_ATTACHMENTS = 4;
 
@@ -102,10 +104,12 @@ export function GroupChat({ groupId, canModerate }: { groupId: string; canModera
   const [draft, setDraft] = useState('');
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   const [files, setFiles] = useState<File[]>([]);
+  // The message being reported, if the dialog is open.
+  const [reporting, setReporting] = useState<string | null>(null);
   const [held, setHeld] = useState<Held>({ groupId, messages: [], hasEarlier: null });
   const endRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const uploadAttachment = useUploadChatAttachment();
+  const uploadAttachment = useUploadChatAttachment({ groupId });
 
   const latest = useQuery({
     queryKey: ['group-chat', groupId],
@@ -353,10 +357,23 @@ export function GroupChat({ groupId, canModerate }: { groupId: string; canModera
                       <p className="whitespace-pre-wrap break-words">{renderSocialText(message.content)}</p>
                     )}
                   </div>
-                  <div className={cn('mt-0.5 flex gap-2 text-xs text-slate-400 opacity-0 group-hover:opacity-100 focus-within:opacity-100', mine && 'justify-end')}>
+                  <div className={cn('mt-0.5 flex gap-2 text-xs text-slate-400 opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100', mine && 'justify-end')}>
                     <button type="button" onClick={() => setReplyTo(message)} className="inline-flex items-center gap-1 hover:text-slate-700">
                       <Reply className="h-3 w-3" /> Reply
                     </button>
+                    {/* Reporting what someone said to the room. The report keeps a
+                        copy of the message and the few before it, so a moderator
+                        can still read it after it is removed. */}
+                    {!mine && (
+                      <button
+                        type="button"
+                        onClick={() => setReporting(message.id)}
+                        className="inline-flex items-center gap-1 py-1 hover:text-red-600"
+                        aria-label={`Report this message from ${name}`}
+                      >
+                        <Flag className="h-3 w-3" /> Report
+                      </button>
+                    )}
                     {canModerate && (
                       <button
                         type="button"
@@ -468,6 +485,16 @@ export function GroupChat({ groupId, canModerate }: { groupId: string; canModera
           </button>
         </div>
       </form>
+
+      {reporting && (
+        <ReportDialog
+          open
+          onClose={() => setReporting(null)}
+          targetType="group_message"
+          targetId={reporting}
+          targetLabel="this message"
+        />
+      )}
     </div>
   );
 }

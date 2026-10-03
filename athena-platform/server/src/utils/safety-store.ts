@@ -1,4 +1,5 @@
 import { prisma } from './prisma';
+import { DEFAULT_MESSAGE_AUDIENCE } from '../services/message-permissions.service';
 
 export interface BlockedUserRecord {
   id: string;
@@ -95,8 +96,12 @@ export async function blockUser(userId: string, blockedUserId: string): Promise<
       data: { blockedUsers: { push: blockedUserId } },
     });
   } else {
+    // The audience is named, not left to the column default: a member who blocks
+    // someone has not chosen who else may write to her, and the default of the
+    // column ('connections') is not what the server does for a member with no
+    // row (message-permissions.service).
     await prisma.userSafetySettings.create({
-      data: { userId, blockedUsers: [blockedUserId] },
+      data: { userId, blockedUsers: [blockedUserId], allowMessagesFrom: DEFAULT_MESSAGE_AUDIENCE },
     });
   }
 
@@ -107,8 +112,11 @@ export async function blockUser(userId: string, blockedUserId: string): Promise<
 
 /**
  * Blocking ends the relationship in both directions: neither follows the
- * other, no follow request stays pending, and neither is on the other's
- * close-friends list. Best-effort, so a failure here never undoes the block.
+ * other, no follow request stays pending, neither is on the other's
+ * close-friends list, and neither is on the guest list of an event the other
+ * hosts (the list names each registrant to the host, and a registration is what
+ * gives a member the joining link of a member's event). Best-effort, so a
+ * failure here never undoes the block.
  */
 export async function severTies(userId: string, otherUserId: string): Promise<void> {
   const pair = [
@@ -126,24 +134,51 @@ export async function severTies(userId: string, otherUserId: string): Promise<vo
       prisma.closeFriend.deleteMany({
         where: { OR: pair.map(({ a, b }) => ({ userId: a, friendId: b })) },
       }),
+      prisma.eventRegistration.deleteMany({
+        where: { OR: pair.map(({ a, b }) => ({ userId: a, event: { hostUserId: b } })) },
+      }),
     ]);
   } catch {
     // The block itself is already recorded; the rest is hygiene.
   }
 }
 
+/**
+ * Lifts a block from both places a block can be written.
+ *
+ * The Safety Centre writes the platform-wide list (UserSafetySettings), and the
+ * DV safety page writes it too and then mirrors the member into her DV safety
+ * profile (DvSafetyProfile.blockedUserIds). Unblocking used to edit only the
+ * first. The second kept the person: search, the feeds, reels and profiles went
+ * on hiding her from the woman who had unblocked her, and anything that read
+ * only the platform list let her back in, so the two answered differently about
+ * the same pair of people. A block she has lifted is lifted in both, and the
+ * second half runs even when the first found nothing to do, so a block left in
+ * the DV list alone (a mirror that was written and a platform write that was not)
+ * can still be lifted from here and a retry after a failure finishes the job.
+ */
 export async function unblockUser(userId: string, blockedUserId: string): Promise<void> {
   const settings = await prisma.userSafetySettings.findUnique({
     where: { userId },
     select: { blockedUsers: true },
   });
 
-  if (!settings || !settings.blockedUsers.includes(blockedUserId)) {
-    return;
+  if (settings?.blockedUsers.includes(blockedUserId)) {
+    await prisma.userSafetySettings.update({
+      where: { userId },
+      data: { blockedUsers: { set: settings.blockedUsers.filter((id) => id !== blockedUserId) } },
+    });
   }
 
-  await prisma.userSafetySettings.update({
+  const dv = await prisma.dvSafetyProfile.findUnique({
     where: { userId },
-    data: { blockedUsers: { set: settings.blockedUsers.filter((id) => id !== blockedUserId) } },
+    select: { blockedUserIds: true },
   });
+
+  if (dv?.blockedUserIds.includes(blockedUserId)) {
+    await prisma.dvSafetyProfile.update({
+      where: { userId },
+      data: { blockedUserIds: { set: dv.blockedUserIds.filter((id) => id !== blockedUserId) } },
+    });
+  }
 }

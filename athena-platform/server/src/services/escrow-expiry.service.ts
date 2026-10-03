@@ -43,6 +43,18 @@ import { startStripeReconciler, stopStripeReconciler } from './stripe-reconcilia
 // There was no such screen, so those buyers were never asked and nothing but an
 // admin could move the money.
 import { FLOW_OWNED_SESSION_TYPES, GENERIC_HOLDS_SCREEN } from './escrow-holds.service';
+// Stripe's own deadline for a hold when it was recorded, the seven-day
+// assumption when it was not; and the nudge to a buyer whose order's hold is
+// about to go, which is the one action that keeps a long job paid for.
+import { holdDeadlineOf } from './escrow-deadline';
+import { LIVE_ORDER_STATUSES, askBuyerToRenew } from './escrow-renewal.service';
+// A mentor session the mentor closed is charged by this sweep once the mentee's
+// window to object has ended; see mentor-payment-release.service.
+import { releaseDueMentorSessions } from './mentor-payment-release.service';
+// A paid mentoring request whose card step was never finished is called off here,
+// and one whose card is held but whose webhook never landed is caught up.
+import { cancelUnpaidMentorRequests } from './mentor-session-authorisation.service';
+import { isPaymentsPausedError } from './feature-flags.service';
 
 /** How long a card authorisation is assumed to last. */
 const AUTHORISATION_LIFETIME_DAYS = 7;
@@ -105,6 +117,11 @@ export interface EscrowExpirySweep {
   /** Mentors asked to accept or complete the session a hold is waiting on. */
   mentorsReminded: number;
   /**
+   * Buyers asked to renew the card hold behind a marketplace order whose work is
+   * not finished and whose hold is within two days of running out.
+   */
+  renewalsRequested: number;
+  /**
    * Holds whose order, booking or session had been cancelled, given back to
    * the buyer instead of being left on her card or captured early.
    */
@@ -122,6 +139,14 @@ export interface EscrowExpirySweep {
   adopted: number;
   /** Legacy mentor sessions this run tried to give a row and could not. */
   adoptFailed: number;
+  /** Mentor sessions whose card was charged because the mentee's window to object ended without one. */
+  sessionsReleased: number;
+  /** Mentor sessions whose window ended and whose card could not be charged. */
+  sessionReleaseFailed: number;
+  /** Paid mentoring requests called off because the mentee never authorised the payment. */
+  unpaidSessionsCancelled: number;
+  /** Paid mentoring requests whose card turned out to be held after all, so the mentor has now been told. */
+  unpaidSessionsAuthorised: number;
 }
 
 type HeldEscrow = {
@@ -137,6 +162,8 @@ type HeldEscrow = {
   sessionType: string | null;
   metadata: Prisma.JsonValue;
   serviceOrder: { id: string; status?: string } | null;
+  serviceBooking?: { id: string; status: string; scheduledAt: Date; durationMinutes: number } | null;
+  serviceProposal?: { id: string; status: string } | null;
   vehiclePurchase?: { id: string; status: string } | null;
   vehicleInspection?: { id: string; status: string; listingId: string } | null;
   mechanicBooking?: { id: string; status: string } | null;
@@ -144,9 +171,11 @@ type HeldEscrow = {
 
 type MentorSessionState = {
   id: string;
-  status: 'REQUESTED' | 'CONFIRMED' | 'CANCELED' | 'COMPLETED';
+  status: 'REQUESTED' | 'CONFIRMED' | 'CANCELED' | 'COMPLETED' | 'DISPUTED';
   scheduledAt: Date | null;
   durationMinutes: number;
+  /** When the mentee's window to object ends, for a session the mentor closed. Null when it has none. */
+  paymentReleaseAt?: Date | null;
   mentorProfile: { userId: string } | null;
 };
 
@@ -162,6 +191,8 @@ type MentorSessionState = {
  */
 type HoldFlow =
   | { kind: 'service_order'; id: string; status: string | null }
+  | { kind: 'service_booking'; id: string; status: string; endsAt: Date }
+  | { kind: 'custom_request'; id: string; status: string }
   | { kind: 'vehicle_purchase'; id: string; status: string }
   | { kind: 'vehicle_inspection'; id: string; status: string }
   | { kind: 'car_service'; id: string; status: string }
@@ -172,6 +203,18 @@ type HoldFlow =
 async function holdFlowFor(escrow: HeldEscrow): Promise<HoldFlow> {
   if (escrow.serviceOrder) {
     return { kind: 'service_order', id: escrow.serviceOrder.id, status: escrow.serviceOrder.status ?? null };
+  }
+  if (escrow.serviceBooking) {
+    const { scheduledAt, durationMinutes } = escrow.serviceBooking;
+    return {
+      kind: 'service_booking',
+      id: escrow.serviceBooking.id,
+      status: escrow.serviceBooking.status,
+      endsAt: new Date(scheduledAt.getTime() + durationMinutes * 60 * 1000),
+    };
+  }
+  if (escrow.serviceProposal) {
+    return { kind: 'custom_request', id: escrow.serviceProposal.id, status: escrow.serviceProposal.status };
   }
   if (escrow.vehiclePurchase) {
     return { kind: 'vehicle_purchase', id: escrow.vehiclePurchase.id, status: escrow.vehiclePurchase.status };
@@ -194,6 +237,7 @@ async function holdFlowFor(escrow: HeldEscrow): Promise<HoldFlow> {
         status: true,
         scheduledAt: true,
         durationMinutes: true,
+        paymentReleaseAt: true,
         mentorProfile: { select: { userId: true } },
       },
     });
@@ -219,8 +263,7 @@ function formatHoldAmount(escrow: Pick<HeldEscrow, 'amount' | 'currency'>): stri
 }
 
 /** The day a hold's authorisation runs out, in Queensland time. */
-function formatLapseDate(createdAt: Date): string {
-  const lapses = new Date(createdAt.getTime() + AUTHORISATION_LIFETIME_DAYS * 24 * 60 * 60 * 1000);
+function formatLapseDate(lapses: Date): string {
   return lapses.toLocaleDateString('en-AU', {
     timeZone: 'Australia/Brisbane',
     weekday: 'long',
@@ -250,6 +293,12 @@ function releaseScreenFor(escrow: HeldEscrow): string | null {
   switch (escrow.sessionType) {
     case 'service_order':
       return escrow.serviceOrder ? `/skills-marketplace/orders/${escrow.serviceOrder.id}` : null;
+    case 'service_booking':
+      return escrow.serviceBooking ? '/skills-marketplace/bookings' : null;
+    case 'custom_request':
+      // No page for a brief exists in the web app yet; the marketplace is where
+      // she finds her way back to it.
+      return escrow.serviceProposal ? '/skills-marketplace' : null;
     case 'car_service':
       return '/dashboard/cars/bookings';
     case 'vehicle_inspection': {
@@ -320,9 +369,30 @@ function captureVerdictFor(flow: HoldFlow, now: Date): CaptureVerdict {
         reason: 'a car purchase is released by its buyer or by ATHENA’s team, never early',
       };
     case 'service_order':
+      // A delivery the buyer says was not what she paid for is held for ATHENA's
+      // team to decide, never taken early.
+      if (flow.status === 'DISPUTED') return { action: 'wait', sessionId: null, reason: 'the order is in dispute' };
       if (flow.status === 'DELIVERED' || flow.status === 'COMPLETED') return { action: 'capture', sessionId: null };
       if (flow.status === 'CANCELLED') return { action: 'release', sessionId: null, reason: 'Order cancelled' };
       return { action: 'wait', sessionId: null, reason: 'the work has not been delivered' };
+    case 'service_booking':
+      // The same rule as a mentor session: the hour has to have been given. A
+      // booking the provider confirmed whose time is over is, and one still
+      // waiting on her, or in dispute, is not.
+      if (flow.status === 'COMPLETED') return { action: 'capture', sessionId: null };
+      if (flow.status === 'CANCELLED') return { action: 'release', sessionId: null, reason: 'Booking cancelled' };
+      if (flow.status === 'DISPUTED') return { action: 'wait', sessionId: null, reason: 'the booking is in dispute' };
+      if ((flow.status === 'CONFIRMED' || flow.status === 'IN_PROGRESS') && flow.endsAt <= now) {
+        return { action: 'capture', sessionId: null };
+      }
+      return { action: 'wait', sessionId: null, reason: 'the booked time has not been given' };
+    case 'custom_request':
+      // A brief has no delivery step: the buyer says the work is done by
+      // releasing the hold, so it is never taken early.
+      if (flow.status === 'DECLINED' || flow.status === 'WITHDRAWN') {
+        return { action: 'release', sessionId: null, reason: 'Proposal no longer accepted' };
+      }
+      return { action: 'wait', sessionId: null, reason: 'only the buyer releases money for a brief' };
     case 'vehicle_inspection':
       if (flow.status === 'COMPLETED') return { action: 'capture', sessionId: null };
       if (flow.status === 'CANCELLED') return { action: 'release', sessionId: null, reason: 'Inspection cancelled' };
@@ -339,7 +409,15 @@ function captureVerdictFor(flow: HoldFlow, now: Date): CaptureVerdict {
         case 'CANCELED':
           return { action: 'release', sessionId: session.id, reason: 'Session canceled' };
         case 'COMPLETED':
+          // The mentor closed it and the mentee still has time to say it did not
+          // happen; the money is taken when that window ends, by the release
+          // step at the top of the sweep, not early because the hold is short.
+          if (session.paymentReleaseAt && session.paymentReleaseAt > now) {
+            return { action: 'wait', sessionId: session.id, reason: 'the mentee still has time to say the session did not take place' };
+          }
           return { action: 'capture', sessionId: session.id };
+        case 'DISPUTED':
+          return { action: 'wait', sessionId: session.id, reason: 'the session is in dispute' };
         case 'REQUESTED':
           return { action: 'wait', sessionId: session.id, reason: 'the mentor has not accepted the session' };
         case 'CONFIRMED':
@@ -401,7 +479,7 @@ async function chaseBuyer(escrow: HeldEscrow, link: string): Promise<boolean> {
     escrow.buyerId,
     BUYER_CHASE_TITLE,
     `You paid ${formatHoldAmount(escrow)} for "${escrow.description ?? 'your order'}" and ATHENA is holding it until you confirm. ` +
-      `If you have received what you paid for, please release it by ${formatLapseDate(escrow.createdAt)}. ` +
+      `If you have received what you paid for, please release it by ${formatLapseDate(holdDeadlineOf(escrow))}. ` +
       'After that the hold on your card expires, the payment can no longer be released, and the seller is not paid.',
     link,
     { kind: 'ESCROW_RELEASE_REMINDER', escrowId: escrow.id }
@@ -429,7 +507,7 @@ async function chaseMentor(
   const mentorUserId = session.mentorProfile?.userId ?? escrow.sellerId;
   const link = `/dashboard/mentors/sessions?session=${session.id}`;
   const amount = formatHoldAmount(escrow);
-  const lapses = formatLapseDate(escrow.createdAt);
+  const lapses = formatLapseDate(holdDeadlineOf(escrow));
 
   if (session.status === 'REQUESTED') {
     return notifyOncePerHold(
@@ -466,6 +544,17 @@ async function chaseMentor(
 async function tellPartiesHoldExpired(escrow: HeldEscrow): Promise<void> {
   const amount = formatHoldAmount(escrow);
   const what = escrow.description ?? 'an order';
+  // An order that is still being worked on has a way forward: the buyer renews
+  // the hold from the order page. Saying "ATHENA's team has been told" and
+  // nothing else left both people waiting on a person for something she can do
+  // in a minute.
+  const renewable = Boolean(escrow.serviceOrder && LIVE_ORDER_STATUSES.includes(escrow.serviceOrder.status ?? ''));
+  const buyerNext = renewable
+    ? 'Please renew it from the order page so the provider can be paid when the work is done; nothing is taken until you approve it.'
+    : "ATHENA's team has been told about the order.";
+  const sellerNext = renewable
+    ? 'We have asked the buyer to renew it. Please wait for that before you hand the work over, so you are sure to be paid.'
+    : "ATHENA's team has been told about the order.";
 
   await Promise.all([
     bestEffort(
@@ -476,7 +565,7 @@ async function tellPartiesHoldExpired(escrow: HeldEscrow): Promise<void> {
             userId: escrow.buyerId,
             type: 'SYSTEM',
             title: BUYER_EXPIRED_TITLE,
-            message: `The hold of ${amount} on your card for "${what}" expired before it was released, so you have not been charged for it. ATHENA's team has been told about the order.`,
+            message: `The hold of ${amount} on your card for "${what}" expired before it was released, so you have not been charged for it. ${buyerNext}`,
             link: releaseScreenFor(escrow),
             data: { kind: 'ESCROW_EXPIRED', escrowId: escrow.id } as Prisma.InputJsonValue,
           },
@@ -491,7 +580,7 @@ async function tellPartiesHoldExpired(escrow: HeldEscrow): Promise<void> {
             userId: escrow.sellerId,
             type: 'SYSTEM',
             title: SELLER_EXPIRED_TITLE,
-            message: `The buyer's card hold of ${amount} for "${what}" expired before it was released, so this payment has not reached you. ATHENA's team has been told about the order.`,
+            message: `The buyer's card hold of ${amount} for "${what}" expired before it was released, so this payment has not reached you. ${sellerNext}`,
             data: { kind: 'ESCROW_EXPIRED', escrowId: escrow.id } as Prisma.InputJsonValue,
           },
         }),
@@ -783,6 +872,8 @@ async function adoptUnledgeredSessions(
 export async function runEscrowExpirySweep(now = new Date()): Promise<EscrowExpirySweep> {
   const lapsesAt = new Date(now.getTime() - AUTHORISATION_LIFETIME_DAYS * 24 * 60 * 60 * 1000);
   const warnFrom = new Date(lapsesAt.getTime() + WARN_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const warnUntil = new Date(now.getTime() + WARN_WINDOW_DAYS * 24 * 60 * 60 * 1000);
 
   const result: EscrowExpirySweep = {
     checked: 0,
@@ -795,12 +886,48 @@ export async function runEscrowExpirySweep(now = new Date()): Promise<EscrowExpi
     neverPaid: 0,
     buyersReminded: 0,
     mentorsReminded: 0,
+    renewalsRequested: 0,
     released: 0,
     releaseFailed: 0,
     awaitingSession: 0,
     adopted: 0,
     adoptFailed: 0,
+    sessionsReleased: 0,
+    sessionReleaseFailed: 0,
+    unpaidSessionsCancelled: 0,
+    unpaidSessionsAuthorised: 0,
   };
+
+  // A session its mentor closed is charged once the mentee's window to object has
+  // ended. Done first, so that the hold is already captured when the loop below
+  // reads the held rows and nothing here asks a buyer to release it. Not allowed
+  // to stop the rest of the sweep: the holds below are on a clock too.
+  try {
+    const released = await releaseDueMentorSessions(now);
+    result.sessionsReleased = released.released;
+    result.sessionReleaseFailed = released.failed;
+  } catch (error) {
+    recordFailure('escrow_expiry.session_release', error);
+    logger.error('Could not look for mentor sessions whose confirmation window has ended', {
+      error: (error as Error).message,
+    });
+  }
+
+  // A paid request whose card step was never finished is called off, so it does
+  // not hold a mentor's hour for good; one whose card is held but whose webhook
+  // never landed is caught up and its mentor told. Done before the holds are read
+  // so a request just called off is not warned about below. Not allowed to stop
+  // the rest of the sweep.
+  try {
+    const unpaid = await cancelUnpaidMentorRequests(now);
+    result.unpaidSessionsCancelled = unpaid.cancelled;
+    result.unpaidSessionsAuthorised = unpaid.authorised;
+  } catch (error) {
+    recordFailure('escrow_expiry.unpaid_requests', error);
+    logger.error('Could not look for mentoring requests whose payment was never authorised', {
+      error: (error as Error).message,
+    });
+  }
 
   // Mentor sessions booked before mentoring moved onto the shared escrow path
   // hold real money against a PaymentIntent with no EscrowPayment row behind
@@ -809,7 +936,11 @@ export async function runEscrowExpirySweep(now = new Date()): Promise<EscrowExpi
   const stillUnledgered = await adoptUnledgeredSessions(warnFrom, result);
 
   const held: HeldEscrow[] = await prisma.escrowPayment.findMany({
-    where: { status: { in: HELD_STATUSES }, createdAt: { lte: warnFrom } },
+    // Not only holds old enough for the seven-day assumption to put them in the
+    // warning window: a hold whose real deadline Stripe reported as shorter is
+    // found too, and sorted out by its own deadline below. No authorisation
+    // lasts less than a day, so nothing younger than that can be close.
+    where: { status: { in: HELD_STATUSES }, createdAt: { lte: oneDayAgo } },
     select: {
       id: true,
       paymentIntentId: true,
@@ -823,6 +954,8 @@ export async function runEscrowExpirySweep(now = new Date()): Promise<EscrowExpi
       sessionType: true,
       metadata: true,
       serviceOrder: { select: { id: true, status: true } },
+      serviceBooking: { select: { id: true, status: true, scheduledAt: true, durationMinutes: true } },
+      serviceProposal: { select: { id: true, status: true } },
       vehiclePurchase: { select: { id: true, status: true } },
       vehicleInspection: { select: { id: true, status: true, listingId: true } },
       mechanicBooking: { select: { id: true, status: true } },
@@ -850,7 +983,17 @@ export async function runEscrowExpirySweep(now = new Date()): Promise<EscrowExpi
   const capturing = captureEnabled();
 
   for (const escrow of held) {
-    const lapsed = escrow.createdAt <= lapsesAt;
+    // Stripe's own deadline for this authorisation when it was recorded, the
+    // seven-day assumption otherwise.
+    const deadline = holdDeadlineOf(escrow);
+    const lapsed = deadline <= now;
+
+    // Not close enough yet. The query above lets in everything a day old so that
+    // a hold with a short real deadline is found; this is where the rest wait.
+    if (!lapsed && deadline > warnUntil) {
+      result.checked -= 1;
+      continue;
+    }
 
     if (lapsed) {
       // Asked at Stripe first, because "lapsed" is a guess from the row's age
@@ -950,6 +1093,25 @@ export async function runEscrowExpirySweep(now = new Date()): Promise<EscrowExpi
       continue;
     }
 
+    // A marketplace order whose work is not finished and whose hold is about to
+    // run out: the buyer is asked to renew it, whatever the capture setting.
+    // Early capture never takes money for work that has not been delivered, so
+    // for a long job this is the only thing that keeps the provider paid; she is
+    // told what it does and does not do, and that nothing is taken by it.
+    if (flow?.kind === 'service_order' && escrow.status === 'AUTHORIZED' && verdict?.action === 'wait') {
+      const asked = await askBuyerToRenew(
+        {
+          id: flow.id,
+          clientId: escrow.buyerId,
+          packageName: null,
+          service: { title: escrow.description ?? 'your order' },
+        },
+        'lapsing',
+        deadline
+      );
+      if (asked) result.renewalsRequested += 1;
+    }
+
     // A mentor who has not answered a request is asked whatever the capture
     // setting, because early capture never takes a session nobody accepted.
     if (
@@ -969,7 +1131,13 @@ export async function runEscrowExpirySweep(now = new Date()): Promise<EscrowExpi
           if (flow.session.status === 'CONFIRMED' && (await chaseMentor(escrow, flow.session, now))) {
             result.mentorsReminded += 1;
           }
-        } else if (flow.kind !== 'orphaned' && flow.kind !== 'vehicle_purchase') {
+        } else if (
+          flow.kind !== 'orphaned' &&
+          flow.kind !== 'vehicle_purchase' &&
+          // An order not yet delivered is asked to renew, above, not to "release"
+          // money for work she has not received.
+          !(flow.kind === 'service_order' && verdict?.action === 'wait')
+        ) {
           const releaseScreen = releaseScreenFor(escrow);
           if (releaseScreen && (await chaseBuyer(escrow, releaseScreen))) {
             result.buyersReminded += 1;
@@ -1049,6 +1217,19 @@ export async function runEscrowExpirySweep(now = new Date()): Promise<EscrowExpi
         );
       }
     } catch (error) {
+      if (isPaymentsPausedError(error)) {
+        // A pause is a decision, not a capture that failed: it is not counted as
+        // a failure, which would raise the alarm on a deliberate state. The hold
+        // is left as it is, and is looked at again on the next sweep. A pause
+        // that outlasts the hold is the operator's to weigh, and the hold then
+        // lapses and is reported as one that has.
+        logger.warn('An escrow hold was left uncaptured because payments are paused', {
+          escrowId: escrow.id,
+          amount: escrow.amount,
+          currency: escrow.currency,
+        });
+        continue;
+      }
       result.failed += 1;
       // The hold will lapse in under two days and this was the last chance to
       // save it, so the reason Stripe gave is worth keeping where an operator
@@ -1204,7 +1385,11 @@ export function startEscrowExpirySweeper(intervalMs = 6 * 60 * 60 * 1000): void 
             r.released ||
             r.releaseFailed ||
             r.adopted ||
-            r.adoptFailed)
+            r.adoptFailed ||
+            r.sessionsReleased ||
+            r.sessionReleaseFailed ||
+            r.unpaidSessionsCancelled ||
+            r.unpaidSessionsAuthorised)
         ) {
           logger.info('Escrow expiry sweep', r);
         }

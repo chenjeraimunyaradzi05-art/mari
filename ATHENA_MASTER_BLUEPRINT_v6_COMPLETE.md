@@ -13,7 +13,7 @@
 > **🚀 Super App Integration Complete**
 > 
 > This blueprint now incorporates the comprehensive super app strategy from **ATHENA_SuperApp_Features_Algorithms.md**, including:
-> - WhatsApp-style encrypted messaging layer
+> - WhatsApp-style messaging layer (encrypted in transit and at rest; end-to-end encryption is **not planned for launch**, see 6.1)
 > - TikTok/Instagram-style short-form video with OpportunityVerse algorithm
 > - Facebook-style communities and marketplace
 > - 6 proprietary AI algorithms (CareerCompass, OpportunityScan, SalaryEquity, MentorMatch, SafetyScore, IncomeStream)
@@ -329,7 +329,7 @@ ATHENA's architecture uniquely segments users into **9 distinct personas**, each
 - B2B marketplace for services
 
 **Revenue Model:**
-- Formation service: AU$499-$999 one-time
+- Formation service: one-time, by structure: A$49 sole trader, A$99 partnership, A$499 company, A$699 trust (the amounts the platform charges today, held in its price book; the AU$499-$999 range this line used to carry was a planning figure)
 - Premium subscription: AU$24.99/month
 - Successful funding: 1-3% finders fee
 - LTV: AU$720 (AU$500 formation + AU$24.99/mo × 9 months)
@@ -575,7 +575,7 @@ ATHENA drives value through three integrated economic engines, each solving a cr
   - ABN/ACN registration guidance
   - Tax structure optimization
   - Result: Reduce business setup time from 5-8 weeks to 2-3 days
-  - Revenue: AU$499-AU$999 per entity
+  - Revenue: A$49 to A$699 per registration, by structure (what the platform charges today; see the revenue model above)
 
 - **Tax Optimization Dashboard:**
   - Quarterly tax planning
@@ -1802,7 +1802,8 @@ ATHENA measures success through **concrete economic outcomes** for women users.
 #### Core Messaging Features
 
 **Real-Time Messaging:**
-- End-to-end encrypted 1:1 and group conversations (120+ participants initially, 5,000+ for enterprise)
+- 1:1 and group conversations, encrypted in transit and at rest on ATHENA's servers. **End-to-end encryption is not planned for launch** and no member-facing copy may claim it: messages are stored as text the server can read, so that a reported message can be shown to the team that reviews it and its words can be checked for abuse before they are stored, and client-side keys would remove both. If it is ever pursued it would be DM-only, behind a feature flag, with a reported-message escrow so reports still carry evidence.
+- Group size is capped per group (1,000 members by default); an enterprise tier of 5,000+ is not built.
 - Message status: sent, delivered, read
 - Typing indicators and presence
 - Message search and organization
@@ -1840,7 +1841,7 @@ ATHENA measures success through **concrete economic outcomes** for women users.
 - On-device translation (Spanish, Arabic, Portuguese, Hindi, Russian)
 - Message disappearing (timers: 24 hours, 7 days, 90 days)
 - DV-safe hidden chat rooms (for domestic violence survivors)
-- Confidential mentorship conversations (encrypted end-to-end)
+- Confidential mentorship conversations (the same encryption in transit and at rest as every message; not end-to-end encrypted, see the note above)
 - Harassment reporting with automatic evidence preservation
 
 **Business Features (WhatsApp Business API Model):**
@@ -1965,7 +1966,7 @@ ATHENA measures success through **concrete economic outcomes** for women users.
 #### Groups & Community
 
 **Core Features:**
-- Public and private groups (up to 5,000 members)
+- Public and private groups (1,000 members by default per group; the 5,000-member size and the enterprise tier in earlier drafts are not built)
 - Group discovery and recommendation
 - Moderation tools (admins, moderators, members)
 - Events (scheduling, RSVP, virtual events)
@@ -3003,9 +3004,8 @@ Organization Page Layout:
 8. Documents stored in ATHENA (accessible anytime)
 
 **Cost & Revenue:**
-- Sole trader setup: AU$0 (no ATHENA fee)
-- Partnership/Pty Ltd: AU$499-999 (ATHENA margin 40% = AU$200-400)
-- Trust setup: AU$1,500-2,500 (ATHENA refers to accountant, 20% referral)
+- What the platform charges today, one-time: sole trader A$49, partnership A$99, company A$499, trust A$699. These replace the earlier planning figures (sole trader free, partnership or company AU$499-999, trust AU$1,500-2,500 by accountant referral).
+- What the fee covers and what it leaves out (ATHENA's review against any fee a government register charges), the turnaround, and who lodges with ASIC and the ABR are for the owner to decide and sign off; the public pages say only what the platform does today.
 
 ---
 

@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { Eye, Gift, Radio, Send, Trophy, Users } from 'lucide-react';
+import { Eye, Flag, Gift, Radio, Send, Trophy, Users } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { livestreamApi, type LiveChatMessage, type LiveStream } from '@/lib/api-extensions';
 import { useAuthStore } from '@/lib/store';
 import { useSocket } from '@/lib/hooks/use-socket';
 import { LivePlayer } from '@/components/live/LivePlayer';
 import { TopUpModal } from '@/components/creator/TopUpModal';
+import { ReportDialog } from '@/components/safety/ReportDialog';
 import { Avatar } from '@/components/ui/avatar';
 import { renderSocialText } from '@/lib/social-text';
 import { cn } from '@/lib/utils';
@@ -30,6 +31,31 @@ type Row =
 
 const POLL_MS = 15000;
 const MAX_ROWS = 300;
+
+// What a host can choose for slow mode and for a mute. Short, and a handful: the
+// point is a quick answer while she is on camera, not a settings page.
+const SLOW_MODE_CHOICES = [
+  { seconds: 0, label: 'Off' },
+  { seconds: 5, label: '5 seconds' },
+  { seconds: 10, label: '10 seconds' },
+  { seconds: 30, label: '30 seconds' },
+  { seconds: 60, label: '1 minute' },
+];
+const MUTE_CHOICES = [
+  { minutes: 5, label: '5 minutes' },
+  { minutes: 10, label: '10 minutes' },
+  { minutes: 30, label: '30 minutes' },
+  { minutes: 60, label: '1 hour' },
+];
+
+/** "10 seconds" or "1 minute", for the line that explains slow mode to viewers. */
+function paceLabel(seconds: number): string {
+  if (seconds % 60 === 0) {
+    const minutes = seconds / 60;
+    return minutes === 1 ? '1 minute' : `${minutes} minutes`;
+  }
+  return `${seconds} seconds`;
+}
 
 function initials(name: string | null | undefined): string {
   return (name || 'A')
@@ -62,6 +88,13 @@ export default function LiveWatchPage() {
   const [gifting, setGifting] = useState<string | null>(null);
   const [leaderboard, setLeaderboard] = useState<Array<{ rank: number; user: { id: string; displayName: string | null }; points: number }>>([]);
   const [ending, setEnding] = useState(false);
+  // Moderation. `reporting` is the thing the report dialog is open on; a viewer
+  // the host has muted is told when, and her chat box says so until it runs out.
+  const [reporting, setReporting] = useState<{ type: 'livestream' | 'live_message'; id: string; label: string } | null>(null);
+  const [mutedUntil, setMutedUntil] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const [muteMinutes, setMuteMinutes] = useState(10);
+  const [savingSlowMode, setSavingSlowMode] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
 
   const append = useCallback((row: Row) => {
@@ -144,15 +177,41 @@ export default function LiveWatchPage() {
         setStream((current) => (current ? { ...current, totalGiftPoints: payload.totalGiftPoints as number } : current));
       }
     };
-    const onStatus = (payload: { streamId?: string; status?: LiveStream['status'] }) => {
+    const onStatus = (payload: { streamId?: string; status?: LiveStream['status']; suspended?: boolean }) => {
       if (payload?.streamId !== streamId || !payload.status) return;
       setStream((current) => (current ? { ...current, status: payload.status as LiveStream['status'] } : current));
       append({
         kind: 'system',
         id: `status-${payload.status}-${Date.now()}`,
-        text: payload.status === 'LIVE' ? 'The stream has started' : 'The stream has ended',
+        text:
+          payload.status === 'LIVE'
+            ? 'The stream has started'
+            : payload.suspended
+              ? 'This stream was ended by the ATHENA team'
+              : 'The stream has ended',
       });
       void loadStream();
+    };
+    // Said to her alone, by the server, the moment the host mutes her: her chat
+    // box then explains itself rather than seeming to break.
+    const onMuted = (payload: { streamId?: string; until?: string }) => {
+      if (payload?.streamId !== streamId || !payload.until) return;
+      const until = new Date(payload.until).getTime();
+      if (Number.isNaN(until)) return;
+      setMutedUntil(until);
+      setNow(Date.now());
+    };
+    const onUnmuted = (payload: { streamId?: string }) => {
+      if (payload?.streamId === streamId) setMutedUntil(null);
+    };
+    const onSlowMode = (payload: { streamId?: string; seconds?: number | null }) => {
+      if (payload?.streamId !== streamId) return;
+      setStream((current) => (current ? { ...current, slowModeSeconds: payload.seconds ?? null } : current));
+      append({
+        kind: 'system',
+        id: `slow-${payload.seconds ?? 0}-${Date.now()}`,
+        text: payload.seconds ? `Slow mode is on: one message every ${paceLabel(payload.seconds)}` : 'Slow mode is off',
+      });
     };
     const onError = (payload: { message?: string }) => {
       if (payload?.message) toast.error(payload.message);
@@ -163,6 +222,9 @@ export default function LiveWatchPage() {
     socket.on('live:message_removed', onMessageRemoved);
     socket.on('live:gift', onGift);
     socket.on('live:status', onStatus);
+    socket.on('live:muted', onMuted);
+    socket.on('live:unmuted', onUnmuted);
+    socket.on('live:slow_mode', onSlowMode);
     socket.on('live:error', onError);
     socket.emit('live:join', streamId);
 
@@ -172,6 +234,9 @@ export default function LiveWatchPage() {
       socket.off('live:message_removed', onMessageRemoved);
       socket.off('live:gift', onGift);
       socket.off('live:status', onStatus);
+      socket.off('live:muted', onMuted);
+      socket.off('live:unmuted', onUnmuted);
+      socket.off('live:slow_mode', onSlowMode);
       socket.off('live:error', onError);
       if (socket.connected) socket.emit('live:leave', streamId);
     };
@@ -180,6 +245,21 @@ export default function LiveWatchPage() {
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [rows.length]);
+
+  // A mute ends by itself, so the chat box has to come back by itself too.
+  useEffect(() => {
+    if (!mutedUntil) return;
+    const wait = mutedUntil - Date.now();
+    if (wait <= 0) {
+      setMutedUntil(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setNow(Date.now());
+      setMutedUntil(null);
+    }, wait + 250);
+    return () => clearTimeout(timer);
+  }, [mutedUntil]);
 
   const send = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -236,6 +316,34 @@ export default function LiveWatchPage() {
     }
   };
 
+  // The lighter answer than removing someone: she stays in the room and can
+  // watch, her chat comes back by itself. Her lines stay, because a nuisance is
+  // not always an abuser and the host can delete any of them herself.
+  const muteViewer = async (userId: string, displayName?: string | null) => {
+    if (!streamId) return;
+    const who = displayName || 'That viewer';
+    try {
+      await livestreamApi.muteViewer(streamId, userId, muteMinutes);
+      toast.success(`${who} is muted for ${MUTE_CHOICES.find((choice) => choice.minutes === muteMinutes)?.label ?? `${muteMinutes} minutes`}`);
+    } catch (error) {
+      toast.error(errorMessage(error, 'That viewer could not be muted'));
+    }
+  };
+
+  const changeSlowMode = async (seconds: number) => {
+    if (!streamId) return;
+    setSavingSlowMode(true);
+    try {
+      const res = await livestreamApi.setSlowMode(streamId, seconds);
+      if (res.data?.data) setStream(res.data.data);
+      toast.success(seconds ? `Slow mode: one message every ${paceLabel(seconds)}` : 'Slow mode is off');
+    } catch (error) {
+      toast.error(errorMessage(error, 'Could not change slow mode'));
+    } finally {
+      setSavingSlowMode(false);
+    }
+  };
+
   const sendGift = async (gift: GiftOption) => {
     if (!streamId) return;
     setGifting(gift.id);
@@ -278,11 +386,15 @@ export default function LiveWatchPage() {
 
   const isLive = stream?.status === 'LIVE';
   const hostName = stream?.host.displayName || 'ATHENA member';
-  const canChat = isAuthenticated && (isLive || stream?.isHost);
+  const suspended = Boolean(stream?.suspended);
+  const canChat = isAuthenticated && !suspended && (isLive || stream?.isHost);
+  const muted = !stream?.isHost && mutedUntil !== null && mutedUntil > now;
+  const slowSeconds = stream?.slowModeSeconds ?? 0;
 
   const playerMessage = useMemo(() => {
     if (!stream) return undefined;
     if (stream.status === 'SCHEDULED') return `${hostName} has not started yet. Stay here and it will begin on its own.`;
+    if (stream.suspended) return 'This stream was ended by the ATHENA team.';
     if (stream.status === 'ENDED') return 'This stream has ended.';
     return 'Waiting for the host to start streaming...';
   }, [stream, hostName]);
@@ -356,11 +468,29 @@ export default function LiveWatchPage() {
                   {ending ? 'Ending...' : 'End stream'}
                 </button>
               )}
+              {/* Anyone signed in who is not the host can tell us about the
+                  stream itself, as distinct from one line of its chat. */}
+              {isAuthenticated && stream && !stream.isHost && (
+                <button
+                  type="button"
+                  onClick={() => setReporting({ type: 'livestream', id: stream.id, label: 'this stream' })}
+                  className="inline-flex min-h-[32px] items-center gap-1 rounded-md px-2 py-1 text-xs text-slate-500 hover:text-red-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+                >
+                  <Flag className="h-3.5 w-3.5" /> Report
+                </button>
+              )}
             </div>
           </div>
 
           {stream?.description && (
             <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{renderSocialText(stream.description)}</p>
+          )}
+
+          {stream?.isHost && suspended && (
+            <p role="status" className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-900 dark:bg-rose-900/20 dark:text-rose-200">
+              This stream was ended by the ATHENA team because it did not meet the community guidelines, and it cannot be
+              restarted. If you think this was a mistake, please contact support.
+            </p>
           )}
 
           {stream?.isHost && (
@@ -371,6 +501,59 @@ export default function LiveWatchPage() {
               </Link>
               .
             </p>
+          )}
+
+          {/* The host's tools for her own chat. Slow mode slows everyone at once;
+              the length chosen here is what the Mute button on a line uses. */}
+          {stream?.isHost && !suspended && stream.status !== 'ENDED' && (
+            <div className="grid gap-3 rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700 sm:grid-cols-2">
+              <div>
+                <label htmlFor="live-slow-mode" className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                  Slow mode
+                </label>
+                <select
+                  id="live-slow-mode"
+                  aria-describedby="live-slow-mode-help"
+                  value={slowSeconds}
+                  onChange={(event) => void changeSlowMode(Number(event.target.value))}
+                  disabled={savingSlowMode}
+                  className="input mt-1 w-full text-sm"
+                >
+                  {SLOW_MODE_CHOICES.map((choice) => (
+                    <option key={choice.seconds} value={choice.seconds}>
+                      {choice.label}
+                    </option>
+                  ))}
+                  {!SLOW_MODE_CHOICES.some((choice) => choice.seconds === slowSeconds) && (
+                    <option value={slowSeconds}>{paceLabel(slowSeconds)}</option>
+                  )}
+                </select>
+                <span id="live-slow-mode-help" className="mt-1 block text-xs text-slate-500">
+                  One message per viewer in that time. Your own messages are never held back.
+                </span>
+              </div>
+              <div>
+                <label htmlFor="live-mute-length" className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                  Mute a viewer for
+                </label>
+                <select
+                  id="live-mute-length"
+                  aria-describedby="live-mute-length-help"
+                  value={muteMinutes}
+                  onChange={(event) => setMuteMinutes(Number(event.target.value))}
+                  className="input mt-1 w-full text-sm"
+                >
+                  {MUTE_CHOICES.map((choice) => (
+                    <option key={choice.minutes} value={choice.minutes}>
+                      {choice.label}
+                    </option>
+                  ))}
+                </select>
+                <span id="live-mute-length-help" className="mt-1 block text-xs text-slate-500">
+                  Use Mute beside a message. They can keep watching; their chat comes back by itself.
+                </span>
+              </div>
+            </div>
           )}
         </div>
 
@@ -426,28 +609,55 @@ export default function LiveWatchPage() {
                   {/* The host's answer to someone spoiling her stream. Shown on
                       hover and focus so the chat stays readable, but reachable
                       by keyboard rather than hover-only. */}
-                  {stream?.isHost && !row.message.isHost && (
-                    <span className="flex shrink-0 gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-                      <button
-                        type="button"
-                        onClick={() => removeMessage(row.message.id)}
-                        className="rounded px-1 text-xs text-slate-500 hover:text-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
-                        title="Delete this message"
-                      >
-                        Delete
-                      </button>
-                      {row.message.user?.id && (
+                  {(isAuthenticated && row.message.user?.id !== user?.id) || (stream?.isHost && !row.message.isHost) ? (
+                    <span className="flex shrink-0 gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+                      {/* Anyone can report a line that is not her own. The report
+                          keeps the words, because the host can delete the row. */}
+                      {isAuthenticated && row.message.user?.id !== user?.id && (
                         <button
                           type="button"
-                          onClick={() => removeFromStream(row.message.user!.id!, row.message.user?.displayName)}
-                          className="rounded px-1 text-xs text-slate-500 hover:text-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
-                          title="Remove from the stream and block"
+                          onClick={() => setReporting({ type: 'live_message', id: row.message.id, label: 'this chat message' })}
+                          className="inline-flex min-h-[28px] items-center rounded px-1 text-xs text-slate-500 hover:text-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+                          title="Report this message"
+                          aria-label="Report this message"
                         >
-                          Remove
+                          <Flag className="h-3.5 w-3.5" aria-hidden />
                         </button>
                       )}
+                      {stream?.isHost && !row.message.isHost && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => removeMessage(row.message.id)}
+                            className="min-h-[28px] rounded px-1 text-xs text-slate-500 hover:text-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+                            title="Delete this message"
+                          >
+                            Delete
+                          </button>
+                          {row.message.user?.id && (
+                            <button
+                              type="button"
+                              onClick={() => void muteViewer(row.message.user!.id!, row.message.user?.displayName)}
+                              className="min-h-[28px] rounded px-1 text-xs text-slate-500 hover:text-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+                              title="Mute them in this chat for a while. They can keep watching."
+                            >
+                              Mute
+                            </button>
+                          )}
+                          {row.message.user?.id && (
+                            <button
+                              type="button"
+                              onClick={() => removeFromStream(row.message.user!.id!, row.message.user?.displayName)}
+                              className="min-h-[28px] rounded px-1 text-xs text-slate-500 hover:text-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+                              title="Remove from the stream and block"
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </>
+                      )}
                     </span>
-                  )}
+                  ) : null}
                 </div>
               ) : row.kind === 'gift' ? (
                 <div key={row.id} className="rounded-lg bg-amber-50 px-3 py-1.5 text-center text-xs font-medium text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
@@ -500,7 +710,19 @@ export default function LiveWatchPage() {
           )}
 
           <div className="border-t border-slate-200 p-3 dark:border-slate-800">
-            {canChat ? (
+            {slowSeconds > 0 && canChat && !muted && !stream?.isHost && (
+              <p id="slow-mode-note" className="mb-2 text-center text-xs text-slate-500">
+                Slow mode is on: one message every {paceLabel(slowSeconds)}.
+              </p>
+            )}
+            {suspended ? (
+              <p className="text-center text-xs text-slate-500">This stream was ended by the ATHENA team.</p>
+            ) : canChat && muted ? (
+              <p role="status" className="text-center text-xs text-slate-600 dark:text-slate-300">
+                The host has muted you in this chat until {new Date(mutedUntil as number).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.
+                You can keep watching.
+              </p>
+            ) : canChat ? (
               <form onSubmit={send} className="flex items-center gap-2">
                 {!stream?.isHost && (
                   <button
@@ -518,6 +740,7 @@ export default function LiveWatchPage() {
                   onChange={(e) => setDraft(e.target.value)}
                   maxLength={500}
                   placeholder={`Message as ${user?.displayName || 'you'}`}
+                  aria-describedby={slowSeconds && !stream?.isHost ? 'slow-mode-note' : undefined}
                   className="input flex-1 text-sm"
                 />
                 <button type="submit" disabled={!draft.trim() || sending} className="btn-primary p-2" aria-label="Send">
@@ -534,6 +757,16 @@ export default function LiveWatchPage() {
           </div>
         </div>
       </div>
+
+      {reporting && (
+        <ReportDialog
+          open
+          onClose={() => setReporting(null)}
+          targetType={reporting.type}
+          targetId={reporting.id}
+          targetLabel={reporting.label}
+        />
+      )}
 
       {showTopUp && (
         <TopUpModal

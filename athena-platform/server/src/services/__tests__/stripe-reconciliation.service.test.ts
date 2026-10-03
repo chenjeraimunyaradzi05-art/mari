@@ -20,6 +20,7 @@ jest.mock('../../utils/prisma', () => ({
     subscription: { findMany: jest.fn(async () => []) },
     user: { findMany: jest.fn(async () => []) },
     notification: { findFirst: jest.fn(async () => null), create: jest.fn(async () => ({})) },
+    paymentDispute: { findMany: jest.fn(async () => []) },
   },
 }));
 
@@ -31,6 +32,7 @@ const stripe = {
   paymentIntents: { list: jest.fn() },
   transfers: { list: jest.fn(), retrieve: jest.fn() },
   subscriptions: { list: jest.fn() },
+  disputes: { list: jest.fn() },
 };
 
 jest.mock('../../utils/stripe', () => ({
@@ -96,6 +98,8 @@ beforeEach(() => {
   stripe.paymentIntents.list.mockResolvedValue(onePage([]));
   stripe.transfers.list.mockResolvedValue(onePage([]));
   stripe.subscriptions.list.mockResolvedValue(onePage([]));
+  stripe.disputes.list.mockResolvedValue(onePage([]));
+  prisma.paymentDispute.findMany.mockResolvedValue([]);
   prisma.escrowPayment.findMany.mockResolvedValue([]);
   prisma.escrowPayment.updateMany.mockResolvedValue({ count: 1 });
   prisma.payment.findMany.mockResolvedValue([]);
@@ -306,6 +310,172 @@ describe('Memberships', () => {
     const report = await runStripeReconciliation(NOW);
 
     expect(report.findings).toHaveLength(0);
+  });
+});
+
+describe('How much of a sale has gone back', () => {
+  // A part refund leaves the hold CAPTURED and records the figure beside it. A
+  // row whose figure is behind Stripe's missed the charge.refunded event.
+  const capturedIntent = (amountRefunded: number | undefined) =>
+    escrowIntent({
+      status: 'succeeded',
+      latest_charge: { refunded: false, ...(amountRefunded === undefined ? {} : { amount_refunded: amountRefunded }) },
+    });
+  const capturedRow = (refundedAmount: number) => ({
+    id: 'escrow-1',
+    paymentIntentId: 'pi_1',
+    status: 'CAPTURED',
+    capturedAt: new Date(NOW.getTime() - 24 * 60 * 60 * 1000),
+    refundedAmount,
+  });
+
+  it('brings a hold that missed a part refund up to what Stripe says, and says so', async () => {
+    stripe.paymentIntents.list.mockResolvedValue(onePage([capturedIntent(1000)]));
+    prisma.escrowPayment.findMany.mockResolvedValue([capturedRow(0)]);
+
+    const report = await runStripeReconciliation(NOW);
+
+    // Conditional on the figure it read, so a webhook landing at the same moment is not overwritten.
+    expect(prisma.escrowPayment.updateMany).toHaveBeenCalledWith({
+      where: { id: 'escrow-1', refundedAmount: { lt: 1000 } },
+      data: { refundedAmount: 1000 },
+    });
+    expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'REFUND_AMOUNT_CONFLICT', outcome: 'repaired', localId: 'escrow-1' }));
+    expect(report.findings[0].detail).toContain('10.00 AUD');
+  });
+
+  it('is quiet when the two agree, and when Stripe gave no figure', async () => {
+    stripe.paymentIntents.list.mockResolvedValue(onePage([capturedIntent(1000)]));
+    prisma.escrowPayment.findMany.mockResolvedValue([capturedRow(1000)]);
+    expect((await runStripeReconciliation(NOW)).findings).toHaveLength(0);
+
+    stripe.paymentIntents.list.mockResolvedValue(onePage([capturedIntent(undefined)]));
+    prisma.escrowPayment.findMany.mockResolvedValue([capturedRow(1000)]);
+    expect((await runStripeReconciliation(NOW)).findings).toHaveLength(0);
+    expect(prisma.escrowPayment.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('reports, and does not lower, a row that claims more came back than Stripe knows of', async () => {
+    stripe.paymentIntents.list.mockResolvedValue(onePage([capturedIntent(500)]));
+    prisma.escrowPayment.findMany.mockResolvedValue([capturedRow(2500)]);
+
+    const report = await runStripeReconciliation(NOW);
+
+    expect(needing(report)[0]).toMatchObject({ kind: 'REFUND_AMOUNT_CONFLICT', localId: 'escrow-1' });
+    expect(prisma.escrowPayment.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('writes the refunded figure with the status when a full refund is the repair, so it is not reported next run', async () => {
+    stripe.paymentIntents.list.mockResolvedValue(
+      onePage([escrowIntent({ status: 'succeeded', latest_charge: { refunded: true, amount_refunded: 25000 } })])
+    );
+    prisma.escrowPayment.findMany.mockResolvedValue([capturedRow(0)]);
+
+    await runStripeReconciliation(NOW);
+
+    const [args] = prisma.escrowPayment.updateMany.mock.calls.at(-1);
+    expect(args.data).toMatchObject({ status: 'REFUNDED', refundedAmount: 25000 });
+  });
+
+  it('reports a Payment row behind a part refund and leaves it for the refund event to repair', async () => {
+    // A refund also takes back gift points and credits the invoice; only the
+    // webhook for the refund does those, so the cure is to resend it.
+    stripe.paymentIntents.list.mockResolvedValue(
+      onePage([
+        {
+          id: 'pi_pay',
+          status: 'succeeded',
+          amount: 4900,
+          amount_received: 4900,
+          currency: 'aud',
+          created: Math.floor(NOW.getTime() / 1000) - 2 * 24 * 60 * 60,
+          metadata: { type: 'business_formation', userId: 'member-1' },
+          latest_charge: { refunded: false, amount_refunded: 1000 },
+        },
+      ])
+    );
+    prisma.payment.findMany.mockResolvedValue([{ id: 'payment-1', stripePaymentIntentId: 'pi_pay', status: 'COMPLETED', refundedAmount: '0' }]);
+    prisma.invoice.findMany.mockResolvedValue([{ paymentId: 'payment-1' }]);
+
+    const report = await runStripeReconciliation(NOW);
+
+    expect(needing(report)[0]).toMatchObject({ kind: 'REFUND_AMOUNT_CONFLICT', localId: 'payment-1' });
+    expect(needing(report)[0].detail).toMatch(/Resend the charge.refunded event/);
+    expect(prisma.payment.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('Card disputes', () => {
+  const longAgo = Math.floor(NOW.getTime() / 1000) - 5 * 24 * 60 * 60;
+  const dispute = (over: Record<string, unknown> = {}) => ({
+    id: 'dp_1',
+    amount: 12000,
+    currency: 'aud',
+    reason: 'fraudulent',
+    status: 'needs_response',
+    created: longAgo,
+    ...over,
+  });
+
+  it('reports a dispute Stripe has that ATHENA never heard of, because its evidence deadline is running', async () => {
+    stripe.disputes.list.mockResolvedValue(onePage([dispute()]));
+
+    const report = await runStripeReconciliation(NOW);
+
+    expect(needing(report)[0]).toMatchObject({ kind: 'DISPUTE_MISSING', stripeId: 'dp_1', localId: null });
+    expect(needing(report)[0].detail).toContain('120.00 AUD');
+    expect(needing(report)[0].detail).toMatch(/Resend the charge.dispute.created event/);
+    expect(report.checked.disputes).toBe(1);
+  });
+
+  it('reads Stripe far enough back to catch a dispute that opened weeks ago', async () => {
+    await runStripeReconciliation(NOW);
+
+    const [args] = stripe.disputes.list.mock.calls[0];
+    // Ninety days: a dispute is decided long after the charge it is about.
+    expect(args.created.gte).toBe(Math.floor((NOW.getTime() - 90 * 24 * 60 * 60 * 1000) / 1000));
+  });
+
+  it('does not call a dispute that opened a moment ago missing: its webhook may be on the way', async () => {
+    stripe.disputes.list.mockResolvedValue(onePage([dispute({ created: Math.floor(NOW.getTime() / 1000) - 60 })]));
+
+    const report = await runStripeReconciliation(NOW);
+
+    expect(report.findings).toHaveLength(0);
+  });
+
+  it('reports a dispute ATHENA still has open that Stripe has decided', async () => {
+    stripe.disputes.list.mockResolvedValue(onePage([dispute({ status: 'lost' })]));
+    prisma.paymentDispute.findMany.mockResolvedValue([{ id: 'pd-1', stripeDisputeId: 'dp_1', outcome: 'OPEN' }]);
+
+    const report = await runStripeReconciliation(NOW);
+
+    expect(needing(report)[0]).toMatchObject({ kind: 'DISPUTE_STATUS_CONFLICT', localId: 'pd-1' });
+    expect(needing(report)[0].detail).toMatch(/Resend the charge.dispute.closed event/);
+  });
+
+  it('is quiet when the two agree, and when a decided dispute is reported with a status that has moved on', async () => {
+    stripe.disputes.list.mockResolvedValue(onePage([dispute({ status: 'under_review' }), dispute({ id: 'dp_2', status: 'won' })]));
+    prisma.paymentDispute.findMany.mockResolvedValue([
+      { id: 'pd-1', stripeDisputeId: 'dp_1', outcome: 'OPEN' },
+      { id: 'pd-2', stripeDisputeId: 'dp_2', outcome: 'WON' },
+    ]);
+
+    const report = await runStripeReconciliation(NOW);
+
+    expect(report.findings).toHaveLength(0);
+    expect(report.checked.disputes).toBe(2);
+  });
+
+  it('says it could not read the disputes, and still reconciles everything else', async () => {
+    // A key that may not read disputes must not take the rest of the run down.
+    stripe.disputes.list.mockRejectedValue(new Error('This API key does not have the required permissions'));
+    stripe.paymentIntents.list.mockResolvedValue(onePage([escrowIntent()]));
+
+    const report = await runStripeReconciliation(NOW);
+
+    expect(report.incomplete).toContainEqual(expect.stringMatching(/disputes: Stripe would not list them/));
+    expect(needing(report)[0]).toMatchObject({ kind: 'ESCROW_ROW_MISSING' });
   });
 });
 

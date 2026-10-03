@@ -12,6 +12,7 @@
  */
 
 import { api } from '@/lib/api';
+import { announceAgeGateCleared } from '@/lib/age-gate-refusal';
 
 export type WomanGateStatus = 'UNVERIFIED' | 'PENDING' | 'VERIFIED' | 'REJECTED';
 
@@ -21,6 +22,8 @@ export type WomanGateEvidence = {
   documentCheckPassedAt: string | null;
   documentName: string | null;
   documentType: string | null;
+  /** Set when the document's own date of birth did not clear the age check. */
+  documentAgeFlag?: 'BELOW_MINIMUM_AGE' | 'IMPLAUSIBLE_DATE' | null;
   statement: string | null;
   evidenceUrl: string | null;
   submittedAt: string | null;
@@ -121,5 +124,7 @@ export const womanGateApi = {
 /** Save a date of birth on an account that predates the column. Set once. */
 export async function saveDateOfBirth(dateOfBirth: string) {
   const response = await api.post('/users/me/date-of-birth', { dateOfBirth });
+  // A notice that was asking for it (AgeGateRefusalNotice) is out of date now.
+  announceAgeGateCleared();
   return response.data;
 }

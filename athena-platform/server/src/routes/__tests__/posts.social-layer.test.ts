@@ -5,14 +5,16 @@ jest.mock('../../utils/prisma', () => ({
   prisma: {
     // The block checks read the DV safety profile's list as well as the
     // platform one, in both directions; nobody is blocked here.
-    dvSafetyProfile: { findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => null) },
+    dvSafetyProfile: { findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
     post: { findUnique: jest.fn(), findMany: jest.fn(), create: jest.fn(), update: jest.fn(), updateMany: jest.fn(), count: jest.fn() },
     like: { findUnique: jest.fn(), findMany: jest.fn(async () => []), groupBy: jest.fn(async () => []), create: jest.fn(), update: jest.fn() },
     postSave: { findMany: jest.fn(async () => []) },
     pollVote: { upsert: jest.fn(), groupBy: jest.fn(async () => []), findMany: jest.fn(async () => []) },
     comment: { findUnique: jest.fn(), update: jest.fn() },
     commentLike: { findUnique: jest.fn(), create: jest.fn(), deleteMany: jest.fn(), findMany: jest.fn(async () => []) },
-    user: { findMany: jest.fn(async () => []), findUnique: jest.fn() },
+    // Whether a member is in Safe Mode is asked of the user table with findFirst
+    // (audience.service isDiscreet); nobody is in it here.
+    user: { findFirst: jest.fn(async () => null), findMany: jest.fn(async () => []), findUnique: jest.fn() },
     notification: { create: jest.fn() },
     userSafetySettings: { findMany: jest.fn(async () => []), findUnique: jest.fn(async () => null) },
     userFeedPreferences: { findUnique: jest.fn(async () => null) },
@@ -44,6 +46,7 @@ jest.mock('../../services/moderation.service', () => ({
 
 import { app } from '../../index';
 import { prisma as prismaTyped } from '../../utils/prisma';
+import * as cache from '../../utils/cache';
 
 const prisma: any = prismaTyped;
 const VIEWER = 'viewer-1';
@@ -237,6 +240,114 @@ describe('Scheduling, mentions, pins and comment likes', () => {
     const notice = prisma.notification.create.mock.calls[0][0].data;
     expect(notice).toMatchObject({ userId: MEI, type: 'MENTION', link: '/posts/p4' });
     expect(notice.message).toBe('Sarah D. mentioned you in a post');
+  });
+
+  // A post she keeps to herself is for nobody else to open: the link in a "you
+  // were mentioned" notice would lead the person named to a post that answers as
+  // if it did not exist, and the notice would have told her it was there.
+  it('a post she keeps to herself tells nobody it names them', async () => {
+    prisma.user.findMany.mockResolvedValue([{ id: MEI }]);
+    prisma.post.create.mockImplementation(async ({ data }: any) => ({ id: 'p5', ...data, author: { id: AUTHOR } }));
+
+    await request(app)
+      .post('/api/posts')
+      .set(as(AUTHOR))
+      .send({ content: 'Note to self about @[Mei Chen](11111111-1111-4111-8111-111111111111)', isPublic: false })
+      .expect(201);
+
+    expect(prisma.post.create.mock.calls[0][0].data.isPublic).toBe(false);
+    expect(prisma.notification.create).not.toHaveBeenCalled();
+  });
+
+  it('editing a private post to name someone tells nobody either', async () => {
+    prisma.user.findMany.mockResolvedValue([{ id: MEI }]);
+    prisma.post.findUnique.mockResolvedValue({ authorId: AUTHOR, content: 'Hello', mentionedUserIds: [], isHidden: false, scheduledFor: null });
+    prisma.post.update.mockImplementation(async ({ data }: any) => ({ id: 'p1', isPublic: false, ...data }));
+
+    await request(app)
+      .patch('/api/posts/p1')
+      .set(as(AUTHOR))
+      .send({ content: 'Hello @[Mei Chen](11111111-1111-4111-8111-111111111111)', isPublic: false })
+      .expect(200);
+
+    expect(prisma.notification.create).not.toHaveBeenCalled();
+  });
+
+  // A mention is how somebody else's post reaches a woman who has closed her own
+  // door, so naming her was a way round a block. The mention is not made: it is
+  // not stored on the post (so it is not in her "posts mentioning me" list) and
+  // nothing is sent. The text is left as the author wrote it.
+  it('does not record or announce a mention of someone on either side of a block with the author', async () => {
+    prisma.user.findMany.mockResolvedValue([{ id: MEI }]);
+    prisma.userSafetySettings.findUnique.mockResolvedValue({ blockedUsers: [MEI] });
+    prisma.post.create.mockImplementation(async ({ data }: any) => ({ id: 'p6', ...data, author: { id: AUTHOR } }));
+
+    await request(app)
+      .post('/api/posts')
+      .set(as(AUTHOR))
+      .send({ content: 'Thanks @[Mei Chen](11111111-1111-4111-8111-111111111111)' })
+      .expect(201);
+
+    const data = prisma.post.create.mock.calls[0][0].data;
+    expect(data.mentionedUserIds).toEqual([]);
+    expect(data.content).toContain('@[Mei Chen](11111111-1111-4111-8111-111111111111)');
+    expect(prisma.notification.create).not.toHaveBeenCalled();
+    prisma.userSafetySettings.findUnique.mockResolvedValue(null);
+  });
+
+  it('does not announce a mention in a comment of someone who blocked the commenter, from the DV safety page alone', async () => {
+    prisma.user.findMany.mockResolvedValue([{ id: MEI }]);
+    prisma.dvSafetyProfile.findMany.mockResolvedValue([{ userId: MEI }]);
+    prisma.post.findUnique.mockResolvedValue(post({ authorId: AUTHOR }));
+    prisma.comment.create = jest.fn(async ({ data }: any) => ({ id: 'c9', ...data, author: { id: VIEWER } }));
+    prisma.comment.findUnique.mockResolvedValue(null);
+    const comment = () =>
+      request(app)
+        .post('/api/posts/p1/comments')
+        .set(as(VIEWER))
+        .send({ content: 'Agree with @[Mei Chen](11111111-1111-4111-8111-111111111111)' })
+        .expect(201);
+    const noticesTo = () => prisma.notification.create.mock.calls.map((call: any[]) => call[0].data.userId);
+
+    // Held back across the block, in the DV profile that names the commenter...
+    await comment();
+    expect(noticesTo()).not.toContain(MEI);
+
+    // ...and sent when there is no block, so the silence above is the block's doing.
+    prisma.dvSafetyProfile.findMany.mockResolvedValue([]);
+    await comment();
+    expect(noticesTo()).toContain(MEI);
+  });
+
+  it('making a post private drops it from the trending list now, not when the five minutes expire', async () => {
+    const invalidate = jest.spyOn(cache, 'invalidateTrendingFeedCache').mockResolvedValue(undefined);
+    prisma.post.findUnique.mockResolvedValue({ authorId: AUTHOR, content: 'Hello', mentionedUserIds: [], isHidden: false, scheduledFor: null });
+    prisma.post.update.mockImplementation(async ({ data }: any) => ({ id: 'p1', ...data }));
+
+    await request(app).patch('/api/posts/p1').set(as(AUTHOR)).send({ isPublic: false }).expect(200);
+    expect(invalidate).toHaveBeenCalledTimes(1);
+
+    // Making it public again, or editing something else, leaves the list alone.
+    await request(app).patch('/api/posts/p1').set(as(AUTHOR)).send({ isPublic: true }).expect(200);
+    await request(app).patch('/api/posts/p1').set(as(AUTHOR)).send({ isSensitive: true }).expect(200);
+    expect(invalidate).toHaveBeenCalledTimes(1);
+    invalidate.mockRestore();
+  });
+
+  it('deleting a post drops it from the trending list now too, and only when it really was deleted', async () => {
+    const invalidate = jest.spyOn(cache, 'invalidateTrendingFeedCache').mockResolvedValue(undefined);
+    prisma.post.findUnique.mockResolvedValue({ authorId: AUTHOR, repostOfId: null });
+    prisma.post.deleteMany = jest.fn(async () => ({ count: 0 }));
+    prisma.post.delete = jest.fn(async () => ({}));
+
+    // A stranger is refused and the list is left alone.
+    await request(app).delete('/api/posts/p1').set(as(VIEWER)).expect(403);
+    expect(invalidate).not.toHaveBeenCalled();
+
+    await request(app).delete('/api/posts/p1').set(as(AUTHOR)).expect(200);
+    expect(prisma.post.delete).toHaveBeenCalledWith({ where: { id: 'p1' } });
+    expect(invalidate).toHaveBeenCalledTimes(1);
+    invalidate.mockRestore();
   });
 
   it('pinning a post unpins the previous one and only the author may', async () => {
