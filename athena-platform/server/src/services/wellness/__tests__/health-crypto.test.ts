@@ -13,8 +13,15 @@ jest.mock('../../../utils/logger', () => ({
   logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
 
+// A record nobody can open is counted where the operations screen reads, so a
+// lost or skipped key shows up before a member finds it.
+jest.mock('../../../utils/ops-metrics', () => ({ recordFailure: jest.fn() }));
+
 import { sealText } from '../../../utils/encryption-key';
+import { recordFailure } from '../../../utils/ops-metrics';
 import { decryptJson, encryptJson } from '../health-crypto';
+
+const unreadableCount = () => (recordFailure as jest.Mock).mock.calls.filter((call) => call[0] === 'health.record_unreadable').length;
 
 const KEY = '21c983cb1baec38efae62af1e84dc644fdc9306f8b190a8e76dd98eed44be44b';
 const OTHER_KEY = '1e7668712a2dfacf98da6906a9b348287f7013dbba1cd6f6421e36f7273132e1';
@@ -22,6 +29,7 @@ const OTHER_KEY = '1e7668712a2dfacf98da6906a9b348287f7013dbba1cd6f6421e36f727313
 describe('health records at rest', () => {
   const env = { ...process.env };
   beforeEach(() => {
+    jest.clearAllMocks();
     process.env = { ...env, NODE_ENV: 'production', DV_ENCRYPTION_KEY: KEY };
     delete process.env.HEALTH_ENCRYPTION_KEY;
     delete process.env.HEALTH_ENCRYPTION_KEY_PREVIOUS;
@@ -38,6 +46,7 @@ describe('health records at rest', () => {
     expect(sealed).not.toContain('mood');
     expect(sealed).not.toContain('hard week');
     expect(decryptJson(sealed)).toEqual({ mood: 4, note: 'a hard week' });
+    expect(unreadableCount()).toBe(0);
   });
 
   it('refuses to write a record in production without a real key, and never as plain text', () => {
@@ -67,7 +76,7 @@ describe('health records at rest', () => {
     expect(decryptJson(marked.slice('enc:v1:'.length))).toEqual({ mood: 5 });
   });
 
-  it('answers null, not an error, for a record it cannot open', () => {
+  it('answers null, not an error, for a record it cannot open, and counts each one for the operations screen', () => {
     const sealed = encryptJson({ mood: 3 });
 
     expect(decryptJson(sealed.slice(0, -4) + 'AAAA')).toBeNull();
@@ -75,11 +84,16 @@ describe('health records at rest', () => {
 
     process.env.DV_ENCRYPTION_KEY = OTHER_KEY;
     expect(decryptJson(sealed)).toBeNull();
+
+    expect(unreadableCount()).toBe(3);
+    // Nothing of the record, and no id, goes into the count.
+    for (const call of (recordFailure as jest.Mock).mock.calls) expect(String((call[1] as Error).message)).not.toContain(sealed);
   });
 
   it('answers null for a value that opens but is not JSON, rather than throwing', () => {
     // Sealed correctly, under the right key, but not a record.
     expect(decryptJson(sealText('health', 'plain words, not json'))).toBeNull();
+    expect(unreadableCount()).toBe(1);
   });
 
   it('opens a record the previous key sealed once the key has rotated', () => {

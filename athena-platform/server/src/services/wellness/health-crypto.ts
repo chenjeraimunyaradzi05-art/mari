@@ -13,17 +13,31 @@
  */
 
 import { openText, sealText } from '../../utils/encryption-key';
+import { recordFailure } from '../../utils/ops-metrics';
 
 export function encryptJson(value: unknown): string {
   return sealText('health', JSON.stringify(value));
 }
 
+/**
+ * The record a sealed value holds, or null when it cannot be read. Null is the
+ * answer, not an error: the member is shown "unreadable" and the page goes on.
+ * But a record nobody can open is also the first sign that the key on this host
+ * is not the key the records were sealed under (a rotation that skipped the
+ * `_PREVIOUS` step, a restore onto a host with a different key), so each one is
+ * counted where the operations screen reads (utils/ops-metrics), with no id
+ * and no content. A quiet null used to be the only trace.
+ */
 export function decryptJson<T = Record<string, unknown>>(payload: string): T | null {
   const text = openText('health', payload);
-  if (text === null) return null;
+  if (text === null) {
+    if (payload) recordFailure('health.record_unreadable', new Error('a health record could not be opened under the keys this host holds'));
+    return null;
+  }
   try {
     return JSON.parse(text) as T;
   } catch {
+    recordFailure('health.record_unreadable', new Error('a health record opened but did not hold JSON'));
     return null;
   }
 }

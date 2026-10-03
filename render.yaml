@@ -157,6 +157,19 @@ services:
       - key: DV_ENCRYPTION_KEY
         sync: false
 
+      # The key that seals health records (what a member logs, her medications,
+      # her health notes and booking reasons), kept apart from the safe-chat key
+      # so that one key leaking or rotating does not touch the other's data. A
+      # different 64 random hex characters (`openssl rand -hex 32`), backed up
+      # in the same place as DV_ENCRYPTION_KEY. Set it before launch, while no
+      # member has health records: on a service that already holds health data
+      # sealed under the DV key, setting this is a rotation, and the present
+      # DV_ENCRYPTION_KEY has to go into HEALTH_ENCRYPTION_KEY_PREVIOUS first or
+      # every existing record reads as unreadable (docs/runbooks/ENCRYPTION.md,
+      # "Giving health records a key of their own").
+      - key: HEALTH_ENCRYPTION_KEY
+        sync: false
+
       # The key the list of banned people is hashed with. Unset, it is derived
       # from JWT_SECRET, and rotating JWT_SECRET would then unban everyone with
       # nothing to say so. `openssl rand -hex 32`, set once and kept with the
