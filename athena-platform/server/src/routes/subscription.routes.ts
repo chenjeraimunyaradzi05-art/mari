@@ -3,6 +3,7 @@ import Stripe from 'stripe';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { getStripe } from '../utils/stripe';
+import { idempotencyWindow } from '../utils/idempotency';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
@@ -226,13 +227,19 @@ router.post('/checkout', authenticate, startingAPayment, async (req: AuthRequest
     let customerId = user.subscription?.stripeCustomerId;
 
     if (!customerId) {
-      const customer = await getStripe().customers.create({
-        email: user.email,
-        name: `${user.firstName} ${user.lastName}`,
-        metadata: {
-          userId: user.id,
+      const customer = await getStripe().customers.create(
+        {
+          email: user.email,
+          name: `${user.firstName} ${user.lastName}`,
+          metadata: {
+            userId: user.id,
+          },
         },
-      });
+        // Two taps on Upgrade from a member with no customer yet both get
+        // here before either has written the id back; keyed on her and the
+        // minute, Stripe gives both the one record.
+        { idempotencyKey: `membership-customer-${user.id}-${idempotencyWindow()}` }
+      );
       customerId = customer.id;
 
       // Save customer ID
@@ -294,45 +301,53 @@ router.post('/checkout', authenticate, startingAPayment, async (req: AuthRequest
     // charged on the day the trial ends unless she cancels first. Stripe's own
     // checkout page shows the trial and the price after it; the sentence under
     // the button repeats it in ATHENA's words so the charge is never a surprise.
-    const session = await getStripe().checkout.sessions.create({
-      customer: customerId,
-      mode: 'subscription',
-      payment_method_types: ['card'],
-      payment_method_collection: 'always',
-      line_items: [
-        {
-          price: priceId,
-          quantity: 1,
+    const session = await getStripe().checkout.sessions.create(
+      {
+        customer: customerId,
+        mode: 'subscription',
+        payment_method_types: ['card'],
+        payment_method_collection: 'always',
+        line_items: [
+          {
+            price: priceId,
+            quantity: 1,
+          },
+        ],
+        custom_text: {
+          submit: {
+            message: isFirstSubscription
+              ? `Your ${TRIAL_DAYS}-day free trial starts today and nothing is charged now. Your card is charged the price shown on the day the trial ends, and then on each renewal, unless you cancel first. You can cancel any time from Settings, then Billing, and we will email you a few days before the first charge.`
+              : 'Your card is charged the price shown today, and then on each renewal, until you cancel. You can cancel any time from Settings, then Billing.',
+          },
         },
-      ],
-      custom_text: {
-        submit: {
-          message: isFirstSubscription
-            ? `Your ${TRIAL_DAYS}-day free trial starts today and nothing is charged now. Your card is charged the price shown on the day the trial ends, and then on each renewal, unless you cancel first. You can cancel any time from Settings, then Billing, and we will email you a few days before the first charge.`
-            : 'Your card is charged the price shown today, and then on each renewal, until you cancel. You can cancel any time from Settings, then Billing.',
+        ...(isFirstSubscription
+          ? {
+              subscription_data: {
+                trial_period_days: TRIAL_DAYS,
+                metadata: { userId: user.id, tier },
+              },
+            }
+          : {}),
+        // Both used to name /subscription/success and /subscription/cancel, and
+        // neither page exists: a member who had just paid landed on a 404 with no
+        // word on whether it had worked. The billing page reads the flag and
+        // says what happened.
+        success_url: `${process.env.CLIENT_URL}/dashboard/settings/billing?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.CLIENT_URL}/dashboard/settings/billing?checkout=cancelled`,
+        metadata: {
+          userId: user.id,
+          tier,
+          currency,
+          trialGranted: String(isFirstSubscription),
         },
       },
-      ...(isFirstSubscription
-        ? {
-            subscription_data: {
-              trial_period_days: TRIAL_DAYS,
-              metadata: { userId: user.id, tier },
-            },
-          }
-        : {}),
-      // Both used to name /subscription/success and /subscription/cancel, and
-      // neither page exists: a member who had just paid landed on a 404 with no
-      // word on whether it had worked. The billing page reads the flag and
-      // says what happened.
-      success_url: `${process.env.CLIENT_URL}/dashboard/settings/billing?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.CLIENT_URL}/dashboard/settings/billing?checkout=cancelled`,
-      metadata: {
-        userId: user.id,
-        tier,
-        currency,
-        trialGranted: String(isFirstSubscription),
-      },
-    });
+      // The guard above refuses a second membership, but not a second
+      // checkout opened before the first is paid: two tabs in the same minute
+      // each got a session, and whichever was completed second became the
+      // duplicate the webhook has to settle. Keyed on her, the tier, the
+      // currency and the minute, the two tabs share one session.
+      { idempotencyKey: `membership-checkout-${user.id}-${tier}-${currency}-${idempotencyWindow()}` }
+    );
 
     res.json({
       success: true,

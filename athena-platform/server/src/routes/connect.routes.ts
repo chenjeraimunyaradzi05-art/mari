@@ -24,6 +24,7 @@ import { ApiError } from '../middleware/errorHandler';
 import { payoutCeiling, startingAPayment } from '../middleware/moneyLimits';
 import { zodBody } from '../middleware/validate';
 import { clampLimit } from '../utils/pagination';
+import { idempotencyWindow } from '../utils/idempotency';
 
 const router = Router();
 
@@ -167,14 +168,21 @@ router.post('/escrow', authenticate, startingAPayment, async (req: AuthRequest, 
       throw new ApiError(400, 'reference must be text of at most 200 characters');
     }
 
+    const buyerId = req.user!.id;
     const escrowPayment = await stripeConnectService.createEscrowPayment({
-      buyerId: req.user!.id,
+      buyerId,
       sellerId: recipientId,
       amount,
       currency: chargeCurrency,
       description: description?.trim() || 'Payment',
       metadata: reference ? { reference } : undefined,
       sessionType: sessionType as 'course_purchase' | 'creator_content',
+      // This route writes no row of its own to key from, so, as the payout
+      // below does, it keys on the request itself inside a minute: the same
+      // hold asked for twice by the same buyer in that time is a double-submit
+      // and Stripe hands back the one intent, where it used to hold her card
+      // twice.
+      idempotencyKey: `connect-escrow-${buyerId}-${recipientId}-${sessionType}-${chargeCurrency}-${amount}-${idempotencyWindow()}`,
     });
 
     res.json({

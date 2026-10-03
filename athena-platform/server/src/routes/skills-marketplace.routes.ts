@@ -20,6 +20,7 @@ import { parsePagination } from '../utils/pagination';
 import { startingAPayment } from '../middleware/moneyLimits';
 import { askBuyerToRenew, describeOrderHold, startOrderReauthorisation } from '../services/escrow-renewal.service';
 import { holdDeadlineOf } from '../services/escrow-deadline';
+import { idempotencyWindow } from '../utils/idempotency';
 
 const router = Router();
 
@@ -36,6 +37,11 @@ const BROWSE_PAGE_MAX = 50;
 function signedIn(req: AuthRequest): NonNullable<AuthRequest['user']> {
   if (!req.user) throw new ApiError(401, 'Sign in to continue');
   return req.user;
+}
+
+/** A row refused because another already holds the unique value it carries. */
+function isUniqueViolation(error: unknown): boolean {
+  return !!error && typeof error === 'object' && (error as { code?: unknown }).code === 'P2002';
 }
 
 /**
@@ -488,6 +494,12 @@ router.post(
           description: `${service.title} (${durationMinutes} minute booking)`,
           sessionType: 'service_booking',
           metadata: { serviceId: id },
+          // The check above catches a second ask that arrives after the first
+          // is saved; two that arrive together both read nothing and both
+          // reach Stripe. Keyed on the buyer, the listing, the time asked for
+          // and the minute, those two are handed one hold, and the one whose
+          // insert loses below is answered with the booking the other saved.
+          idempotencyKey: `service-booking-hold-${me.id}-${id}-${scheduledAt.getTime()}-${idempotencyWindow()}`,
         });
       } catch (error) {
         if (error instanceof ApiError && error.statusCode === 400) {
@@ -519,13 +531,26 @@ router.post(
           },
         });
       } catch (error) {
-        // The hold exists at Stripe and no booking points at it. Given back at
-        // once, so a card is never left holding money for a booking that was
-        // not made.
-        await cancelEscrowPayment(hold.paymentIntentId, { id: me.id, role: me.role }, 'The booking could not be saved').catch(
-          () => undefined
-        );
-        throw error;
+        // Two requests that shared a key were handed one hold, and the first
+        // to save its booking owns it: the second's insert is refused on the
+        // escrowPaymentId the first already wrote. That is this buyer's own
+        // booking, made a moment ago, so it is answered with that booking —
+        // and the hold is not cancelled, because it is the hold behind the
+        // booking that was saved.
+        const twin = isUniqueViolation(error)
+          ? await prisma.serviceBooking.findFirst({ where: { clientId: me.id, escrowPaymentId: hold.escrowId } })
+          : null;
+        if (twin) {
+          booking = twin;
+        } else {
+          // The hold exists at Stripe and no booking points at it. Given back at
+          // once, so a card is never left holding money for a booking that was
+          // not made.
+          await cancelEscrowPayment(hold.paymentIntentId, { id: me.id, role: me.role }, 'The booking could not be saved').catch(
+            () => undefined
+          );
+          throw error;
+        }
       }
 
       res.status(201).json({
@@ -1309,7 +1334,8 @@ router.post(
         throw new ApiError(404, 'Service not available');
       }
 
-      if (service.providerId === req.user!.id) {
+      const me = signedIn(req);
+      if (service.providerId === me.id) {
         throw new ApiError(400, 'You cannot order your own service');
       }
 
@@ -1335,13 +1361,18 @@ router.post(
       let hold: Awaited<ReturnType<typeof createEscrowPayment>>;
       try {
         hold = await createEscrowPayment({
-          buyerId: req.user!.id,
+          buyerId: me.id,
           sellerId: service.providerId,
           amount: totalAmount * 100,
           currency: 'aud',
           description: `${service.title}${selected.name ? ` — ${selected.name}` : ''}`,
           sessionType: 'service_order',
           metadata: { serviceId: id, packageIndex: String(packageIndex) },
+          // No order row exists yet to key from, so the buyer, the listing,
+          // the package and the minute: two taps on Order are one hold, where
+          // each used to hold her card again. A second order of the same
+          // package a minute later is a new one.
+          idempotencyKey: `service-order-hold-${me.id}-${id}-${packageIndex}-${idempotencyWindow()}`,
         });
       } catch (error) {
         if (error instanceof ApiError && error.statusCode === 400) {
@@ -1351,24 +1382,36 @@ router.post(
       }
       const platformFee = Math.round(hold.platformFee / 100);
 
-      const order = await prisma.serviceOrder.create({
-        data: {
-          serviceId: id,
-          clientId: req.user!.id,
-          escrowPaymentId: hold.escrowId,
-          packageIndex,
-          packageName: selected.name ?? null,
-          requirements: typeof req.body.requirements === 'string' ? req.body.requirements : null,
-          attachments: Array.isArray(req.body.attachments)
-            ? req.body.attachments.filter((a: unknown): a is string => typeof a === 'string')
-            : [],
-          totalAmount,
-          platformFee,
-          providerPayout: totalAmount - platformFee,
-          deliveryDays,
-          dueAt: deliveryDays ? new Date(Date.now() + deliveryDays * 24 * 60 * 60 * 1000) : null,
-        },
-      });
+      let order;
+      try {
+        order = await prisma.serviceOrder.create({
+          data: {
+            serviceId: id,
+            clientId: me.id,
+            escrowPaymentId: hold.escrowId,
+            packageIndex,
+            packageName: selected.name ?? null,
+            requirements: typeof req.body.requirements === 'string' ? req.body.requirements : null,
+            attachments: Array.isArray(req.body.attachments)
+              ? req.body.attachments.filter((a: unknown): a is string => typeof a === 'string')
+              : [],
+            totalAmount,
+            platformFee,
+            providerPayout: totalAmount - platformFee,
+            deliveryDays,
+            dueAt: deliveryDays ? new Date(Date.now() + deliveryDays * 24 * 60 * 60 * 1000) : null,
+          },
+        });
+      } catch (error) {
+        // The twin of this request saved the order behind the shared hold
+        // first, and the unique escrowPaymentId refuses a second. That order
+        // is this buyer's own, so it is what she is answered with.
+        const twin = isUniqueViolation(error)
+          ? await prisma.serviceOrder.findFirst({ where: { clientId: me.id, escrowPaymentId: hold.escrowId } })
+          : null;
+        if (!twin) throw error;
+        order = twin;
+      }
 
       res.status(201).json({
         success: true,

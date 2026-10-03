@@ -117,6 +117,15 @@ describe('processPayment metadata', () => {
     });
   });
 
+  it('keys the customer it has to create on the member and the minute, so two payments started together make one', async () => {
+    prisma.subscription.findUnique.mockResolvedValue({ stripeCustomerId: null });
+
+    await processPayment({ userId: 'member-1', amount: 1, currency: 'AUD', description: 'A dollar' });
+
+    const [, options] = stripeClient.customers.create.mock.calls[0] as any[];
+    expect(options.idempotencyKey).toMatch(/^payment-customer-member-1-\d+$/);
+  });
+
   it('charges in the currency\'s own smallest unit, so a zero-decimal currency is not charged a hundred times over', async () => {
     await processPayment({ userId: 'member-1', amount: 1000, currency: 'JPY' as any, description: 'Yen' });
     expect(createdIntent().amount).toBe(1000);

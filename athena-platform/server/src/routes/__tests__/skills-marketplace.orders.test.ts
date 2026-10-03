@@ -4,7 +4,7 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 jest.mock('../../utils/prisma', () => ({
   prisma: {
     skillService: { findUnique: jest.fn(), update: jest.fn(async () => ({})) },
-    serviceOrder: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn(async () => ({})) },
+    serviceOrder: { create: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn(async () => null), update: jest.fn(async () => ({})) },
     $transaction: jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
   },
 }));
@@ -95,10 +95,39 @@ describe('Escrow-backed marketplace orders', () => {
       amount: 12000,
       currency: 'aud',
       sessionType: 'service_order',
+      // Her, the listing, the package and the minute: two taps on Order are
+      // one hold at the processor, where each used to hold her card again.
+      idempotencyKey: expect.stringMatching(/^service-order-hold-buyer-s1-0-\d+$/),
     });
     const created = prisma.serviceOrder.create.mock.calls[0][0].data;
     expect(created).toMatchObject({ escrowPaymentId: 'e1', totalAmount: 120, platformFee: 18, providerPayout: 102 });
     expect(res.body.data.payment).toMatchObject({ clientSecret: 'pi_1_secret', amount: 12000 });
+  });
+
+  /**
+   * Two taps on Order that arrive together share a key, so the processor hands
+   * both one hold; the first to save its order owns it and the unique
+   * escrowPaymentId refuses the second. That order is hers, made a moment ago,
+   * and is what she is answered with rather than a 500.
+   */
+  it('when a twin request has already saved the order behind the shared hold, answers with that order', async () => {
+    (createEscrowPayment as any).mockResolvedValue({ escrowId: 'e1', paymentIntentId: 'pi_1', clientSecret: 'pi_1_secret', amount: 12000, platformFee: 1800 });
+    prisma.serviceOrder.create.mockRejectedValueOnce(Object.assign(new Error('Unique constraint failed on the fields: (`escrowPaymentId`)'), { code: 'P2002' }));
+    prisma.serviceOrder.findFirst.mockResolvedValueOnce({ id: 'o-twin', clientId: 'buyer', serviceId: 's1', escrowPaymentId: 'e1', totalAmount: 120, platformFee: 18, providerPayout: 102 });
+
+    const res = await request(app).post('/api/skills-marketplace/services/s1/order').set(as('buyer')).send({ packageIndex: 0 }).expect(201);
+
+    expect(res.body.data.id).toBe('o-twin');
+    expect(res.body.data.payment).toMatchObject({ clientSecret: 'pi_1_secret', amount: 12000 });
+    expect(prisma.serviceOrder.findFirst.mock.calls[0][0].where).toEqual({ clientId: 'buyer', escrowPaymentId: 'e1' });
+  });
+
+  it('any other failure to save the order is still an error', async () => {
+    (createEscrowPayment as any).mockResolvedValue({ escrowId: 'e1', paymentIntentId: 'pi_1', clientSecret: 'pi_1_secret', amount: 12000, platformFee: 1800 });
+    prisma.serviceOrder.create.mockRejectedValueOnce(new Error('connection reset'));
+
+    await request(app).post('/api/skills-marketplace/services/s1/order').set(as('buyer')).send({ packageIndex: 0 }).expect(500);
+    expect(prisma.serviceOrder.findFirst).not.toHaveBeenCalled();
   });
 
   it('a provider who has not set up payouts cannot be ordered from', async () => {

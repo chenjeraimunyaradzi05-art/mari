@@ -69,6 +69,7 @@ import {
   type Ledger, type Receipt, type ReceiptExportRow,
 } from '../services/automotive/referral-ledger.service';
 import { isStripeConfigured } from '../utils/stripe';
+import { idempotencyWindow } from '../utils/idempotency';
 import {
   DEFAULT_INSPECTION_FEE, INSPECTION_FEE_PERCENT, PURCHASE_FEE_PERCENT, SERVICE_FEE_PERCENT, assessListingRisk, emptyInspectionReport, historyChecks, inspectionDays, inspectionEnds, inspectionOutcome, isValidVin, maskRego, maskVin,
   normaliseInspectionReport, purchaseFee, purchaseTransition, withinInspection, type Party, type PurchaseStatus,
@@ -1331,7 +1332,8 @@ router.post('/inspections/:id/pay', authenticate, async (req: AuthRequest, res: 
     if (!i.inspector?.ownerUserId) throw new ApiError(400, 'No workshop has taken this inspection on yet');
     if (i.escrowPaymentId) { const secret = i.escrow ? await getEscrowClientSecret((await prisma.escrowPayment.findUnique({ where: { id: i.escrowPaymentId }, select: { paymentIntentId: true } }))?.paymentIntentId ?? '') : null; ok(res, { alreadyHeld: true, clientSecret: secret }); return; }
     let hold;
-    try { hold = await createEscrowPayment({ buyerId: req.user!.id, sellerId: i.inspector.ownerUserId, amount: i.fee * 100, currency: 'aud', description: `Pre-purchase inspection: ${i.listing.title}`, sessionType: 'vehicle_inspection', platformFeePercent: INSPECTION_FEE_PERCENT, metadata: { inspectionId: i.id, listingId: i.listing.id } }); }
+    // Keyed on the inspection and the minute: two taps on Pay before either has written the escrow id back are one hold at Stripe, not two against her card.
+    try { hold = await createEscrowPayment({ buyerId: req.user!.id, sellerId: i.inspector.ownerUserId, amount: i.fee * 100, currency: 'aud', description: `Pre-purchase inspection: ${i.listing.title}`, sessionType: 'vehicle_inspection', platformFeePercent: INSPECTION_FEE_PERCENT, metadata: { inspectionId: i.id, listingId: i.listing.id }, idempotencyKey: `car-inspection-hold-${i.id}-${idempotencyWindow()}` }); }
     catch (error) { if (error instanceof ApiError && error.statusCode === 400) throw new ApiError(409, 'This workshop has not finished setting up payouts, so the fee is paid to them directly for now'); throw error; }
     await prisma.vehicleInspection.update({ where: { id: i.id }, data: { escrowPaymentId: hold.escrowId } });
     ok(res, { paymentIntentId: hold.paymentIntentId, clientSecret: hold.clientSecret, amount: hold.amount, platformFee: hold.platformFee, currency: 'aud' }, 201);
@@ -1394,6 +1396,35 @@ function transition(action: Parameters<typeof purchaseTransition>[0], p: { statu
   const t = purchaseTransition(action, p.status as PurchaseStatus, party);
   if (!t.ok) throw new ApiError(400, t.reason);
   return t.to;
+}
+
+/**
+ * Move a purchase on from the status it was read at, and only from there.
+ *
+ * `prisma.vehiclePurchase.update` moved the row whatever it held by then. Two
+ * requests that read HANDED_OVER together — a double tap on Release, a dispute
+ * opened in one tab while Release was pressed in another, the sweep releasing
+ * at the end of the period as a dispute arrived — both passed transition()
+ * and both wrote, so a release could write over a dispute and the seller was
+ * told twice. The move is now conditional on the status that was read, the
+ * way settlePurchaseHold's is, and the row is read back afterwards.
+ *
+ * Returns the fresh row and whether this request is the one that moved it. A
+ * twin that made the same move a moment earlier is answered with the row as
+ * it stands and nothing more: no second notification, no second audit row. A
+ * row that went somewhere else is a 409 that says where, so the page is
+ * reloaded rather than acted on. Whatever the processor was asked before the
+ * move (a capture, a cancel) has already happened and is on the escrow row
+ * either way; a disputed purchase whose hold was captured in that race is
+ * what the admin's RELEASE and REFUND both handle.
+ */
+async function movePurchase(req: AuthRequest, p: { id: string; status: string }, to: PurchaseStatus, data: Omit<Prisma.VehiclePurchaseUpdateManyMutationInput, 'status'>) {
+  const moved = await prisma.vehiclePurchase.updateMany({ where: { id: p.id, status: p.status as PurchaseStatus }, data: { ...data, status: to } });
+  const { p: fresh } = await loadPurchase(req, p.id);
+  if (moved.count > 0) return { fresh, movedHere: true as const };
+  if (fresh.status === to) return { fresh, movedHere: false as const };
+  logger.warn('A car purchase moved under a request that had read it at another status', { purchaseId: p.id, readAs: p.status, asked: to, now: fresh.status, escrowStatus: fresh.escrow?.status ?? null });
+  throw new ApiError(409, `This purchase has moved on since the page was loaded: it is now ${fresh.status.toLowerCase().replace('_', ' ')}. Reload the page to see where it stands.`);
 }
 
 router.post('/listings/:id/offers', authenticate, offerCeiling, async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -1497,7 +1528,13 @@ router.post('/purchases/:id/pay', authenticate, async (req: AuthRequest, res: Re
       }
     }
     let hold;
-    try { hold = await createEscrowPayment({ buyerId: p.buyerId, sellerId: p.sellerId, amount: amount * 100, currency: 'aud', description: `${p.listing.title} (buyer protection)`, sessionType: 'vehicle_purchase', platformFeePercent: PURCHASE_FEE_PERCENT[p.listing.sellerKind], metadata: { purchaseId: p.id, listingId: p.listingId } }); }
+    // The resume above catches a second Pay that arrives after the first has
+    // written its escrow id back; two that arrive together both read none and
+    // both reach Stripe. Keyed on the purchase, the hold it is replacing (none,
+    // the first time) and the minute, they are one hold, while a fresh hold
+    // after one that ended is always a new key: Stripe would otherwise hand
+    // back the intent that ended.
+    try { hold = await createEscrowPayment({ buyerId: p.buyerId, sellerId: p.sellerId, amount: amount * 100, currency: 'aud', description: `${p.listing.title} (buyer protection)`, sessionType: 'vehicle_purchase', platformFeePercent: PURCHASE_FEE_PERCENT[p.listing.sellerKind], metadata: { purchaseId: p.id, listingId: p.listingId }, idempotencyKey: `car-purchase-hold-${p.id}-${p.escrowPaymentId ?? 'first'}-${idempotencyWindow()}` }); }
     catch (error) { if (error instanceof ApiError && error.statusCode === 400) throw new ApiError(409, 'The seller has not finished setting up payouts, so the money cannot be held yet. Ask them to finish that from their payouts page.'); throw error; }
     const updated = await prisma.vehiclePurchase.update({ where: { id: p.id }, data: { escrowPaymentId: hold.escrowId, platformFee: Math.round(hold.platformFee / 100) }, include: purchaseInclude });
     ok(res, { ...purchaseCard(updated, req.user!.id, isAdmin(req)), alreadyHeld: false, payment: { paymentIntentId: hold.paymentIntentId, clientSecret: hold.clientSecret, amount: hold.amount, platformFee: hold.platformFee, currency: 'aud' } });
@@ -1548,14 +1585,17 @@ router.post('/purchases/:id/handover', authenticate, async (req: AuthRequest, re
     const data = parse(z.object({ note: z.string().trim().max(1000).optional() }), req.body ?? {});
     const now = new Date();
     const ends = inspectionEnds(now);
-    const updated = await prisma.vehiclePurchase.update({ where: { id: p.id }, data: { status: to, handedOverAt: now, inspectionEndsAt: ends, transferNote: data.note ?? null }, include: purchaseInclude });
-    await prisma.vehicleListing.update({ where: { id: p.listingId }, data: { status: 'SOLD', soldAt: now } });
-    await prisma.vehiclePurchase.updateMany({ where: { listingId: p.listingId, id: { not: p.id }, status: { in: ['OFFERED', 'ACCEPTED'] } }, data: { status: 'CANCELLED', cancelledAt: now, cancelReason: 'The car was sold to another buyer' } });
-    const lapses = holdLapsesAt(p);
-    const lapseWords = lapses && lapses.getTime() < ends.getTime()
-      ? ` The hold on her card runs out around ${lapses.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Australia/Brisbane' })}, before the period ends; unless she releases it first, ATHENA's team is warned beforehand and settles the payment with you both.`
-      : ' The money is released to you when it ends, or sooner if she releases it.';
-    await note(p.sellerId, 'The buyer has confirmed she has the car', `The ${inspectionDays()}-day inspection period on "${p.listing.title}" has started.${lapseWords}`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_HANDED_OVER', id: p.id });
+    const { fresh: updated, movedHere } = await movePurchase(req, p, to, { handedOverAt: now, inspectionEndsAt: ends, transferNote: data.note ?? null });
+    // A twin handover that got there first has done all of this; nothing is said twice.
+    if (movedHere) {
+      await prisma.vehicleListing.update({ where: { id: p.listingId }, data: { status: 'SOLD', soldAt: now } });
+      await prisma.vehiclePurchase.updateMany({ where: { listingId: p.listingId, id: { not: p.id }, status: { in: ['OFFERED', 'ACCEPTED'] } }, data: { status: 'CANCELLED', cancelledAt: now, cancelReason: 'The car was sold to another buyer' } });
+      const lapses = holdLapsesAt(p);
+      const lapseWords = lapses && lapses.getTime() < ends.getTime()
+        ? ` The hold on her card runs out around ${lapses.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Australia/Brisbane' })}, before the period ends; unless she releases it first, ATHENA's team is warned beforehand and settles the payment with you both.`
+        : ' The money is released to you when it ends, or sooner if she releases it.';
+      await note(p.sellerId, 'The buyer has confirmed she has the car', `The ${inspectionDays()}-day inspection period on "${p.listing.title}" has started.${lapseWords}`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_HANDED_OVER', id: p.id });
+    }
     ok(res, purchaseCard(updated, req.user!.id));
   } catch (error) { next(error); }
 });
@@ -1583,9 +1623,16 @@ router.post('/purchases/:id/release', authenticate, async (req: AuthRequest, res
       if (await readHoldState(p.escrow) !== 'HELD') throw new ApiError(409, 'No money was ever authorised for this purchase, so there is nothing to release. Tell us what happened and ATHENA will sort it out with the seller.');
       await captureEscrowPayment(p.escrow.paymentIntentId, { id: p.buyerId, role: party === 'admin' ? 'ADMIN' : undefined });
     }
-    const updated = await prisma.vehiclePurchase.update({ where: { id: p.id }, data: { status: to, releasedAt: new Date() }, include: purchaseInclude });
-    await note(p.sellerId, 'The money has been released to you', `The buyer released $${(p.agreedAmount ?? p.offerAmount).toLocaleString('en-AU')} for "${p.listing.title}". It is on its way to your payout account.`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_PURCHASE_RELEASED', id: p.id });
-    if (party === 'admin') await auditCarAdmin(req, 'CAR_PURCHASE_RELEASED_BY_ADMIN', { resourceType: 'VehiclePurchase', resourceId: p.id, targetUserId: p.buyerId, sellerId: p.sellerId, amount: p.agreedAmount ?? p.offerAmount, status: changed(p.status, to) });
+    // Conditional on the status read above. A twin Release that got there
+    // first is answered with the released purchase and the seller is told
+    // once; a dispute that got there first keeps the row, with the hold
+    // captured behind it for the admin's decision, and this request is told
+    // so rather than writing RELEASED over her dispute.
+    const { fresh: updated, movedHere } = await movePurchase(req, p, to, { releasedAt: new Date() });
+    if (movedHere) {
+      await note(p.sellerId, 'The money has been released to you', `The buyer released $${(p.agreedAmount ?? p.offerAmount).toLocaleString('en-AU')} for "${p.listing.title}". It is on its way to your payout account.`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_PURCHASE_RELEASED', id: p.id });
+      if (party === 'admin') await auditCarAdmin(req, 'CAR_PURCHASE_RELEASED_BY_ADMIN', { resourceType: 'VehiclePurchase', resourceId: p.id, targetUserId: p.buyerId, sellerId: p.sellerId, amount: p.agreedAmount ?? p.offerAmount, status: changed(p.status, to) });
+    }
     ok(res, purchaseCard(updated, req.user!.id));
   } catch (error) { next(error); }
 });
@@ -1596,13 +1643,15 @@ router.post('/purchases/:id/dispute', authenticate, async (req: AuthRequest, res
     const to = transition('dispute', p, party);
     if (!withinInspection(p.inspectionEndsAt)) throw new ApiError(400, 'The inspection period has ended');
     const data = parse(z.object({ reason: z.string().trim().min(20).max(4000) }), req.body);
-    const updated = await prisma.vehiclePurchase.update({ where: { id: p.id }, data: { status: to, disputeReason: data.reason, disputeOpenedAt: new Date() }, include: purchaseInclude });
+    const { fresh: updated, movedHere } = await movePurchase(req, p, to, { disputeReason: data.reason, disputeOpenedAt: new Date() });
     // "The money stays held" was not something ATHENA could say: a hold on a
     // card runs out after about a week whether or not anyone is looking at
     // it. What is true, and what the seller needs, is that nothing reaches
     // anyone until the dispute is decided.
-    await note(p.sellerId, 'The buyer has opened a dispute', `On "${p.listing.title}": ${data.reason.slice(0, 200)}. Nothing is released while ATHENA looks at it; you will be asked for your side.`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_DISPUTE', id: p.id });
-    await noteAdmins('A car purchase is in dispute', `"${p.listing.title}", $${(p.agreedAmount ?? p.offerAmount).toLocaleString('en-AU')}: ${data.reason.slice(0, 200)}`, `/dashboard/cars/admin`, { kind: 'CAR_DISPUTE', id: p.id });
+    if (movedHere) {
+      await note(p.sellerId, 'The buyer has opened a dispute', `On "${p.listing.title}": ${data.reason.slice(0, 200)}. Nothing is released while ATHENA looks at it; you will be asked for your side.`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_DISPUTE', id: p.id });
+      await noteAdmins('A car purchase is in dispute', `"${p.listing.title}", $${(p.agreedAmount ?? p.offerAmount).toLocaleString('en-AU')}: ${data.reason.slice(0, 200)}`, `/dashboard/cars/admin`, { kind: 'CAR_DISPUTE', id: p.id });
+    }
     ok(res, purchaseCard(updated, req.user!.id));
   } catch (error) { next(error); }
 });
@@ -1613,12 +1662,14 @@ router.post('/purchases/:id/cancel', authenticate, offerCeiling, async (req: Aut
     const to = transition('cancel', p, party);
     const data = parse(z.object({ reason: z.string().trim().max(1000).optional() }), req.body ?? {});
     if (p.escrow?.paymentIntentId && !['CANCELED', 'REFUNDED', 'FAILED'].includes(p.escrow.status)) await cancelEscrowPayment(p.escrow.paymentIntentId, { id: req.user!.id, role: req.user!.role }, data.reason);
-    const updated = await prisma.vehiclePurchase.update({ where: { id: p.id }, data: { status: to, cancelledAt: new Date(), cancelReason: data.reason ?? null }, include: purchaseInclude });
-    const others = await prisma.vehiclePurchase.count({ where: { listingId: p.listingId, status: { in: ['ACCEPTED', 'PAID_HELD', 'HANDED_OVER', 'DISPUTED'] } } });
-    if (others === 0 && p.listing.status === 'UNDER_OFFER') await prisma.vehicleListing.update({ where: { id: p.listingId }, data: { status: 'ACTIVE' } });
-    const other = party === 'buyer' ? p.sellerId : p.buyerId;
-    await note(other, 'A purchase was cancelled', `"${p.listing.title}"${data.reason ? `: ${data.reason.slice(0, 200)}` : ''}. ${p.escrow ? 'Any held money goes back to the buyer\'s card.' : ''}`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_PURCHASE_CANCELLED', id: p.id });
-    if (party === 'admin') await auditCarAdmin(req, 'CAR_PURCHASE_CANCELLED_BY_ADMIN', { resourceType: 'VehiclePurchase', resourceId: p.id, targetUserId: p.buyerId, sellerId: p.sellerId, amount: p.agreedAmount ?? p.offerAmount, heldMoneyReturned: Boolean(p.escrow?.paymentIntentId), status: changed(p.status, to) });
+    const { fresh: updated, movedHere } = await movePurchase(req, p, to, { cancelledAt: new Date(), cancelReason: data.reason ?? null });
+    if (movedHere) {
+      const others = await prisma.vehiclePurchase.count({ where: { listingId: p.listingId, status: { in: ['ACCEPTED', 'PAID_HELD', 'HANDED_OVER', 'DISPUTED'] } } });
+      if (others === 0 && p.listing.status === 'UNDER_OFFER') await prisma.vehicleListing.update({ where: { id: p.listingId }, data: { status: 'ACTIVE' } });
+      const other = party === 'buyer' ? p.sellerId : p.buyerId;
+      await note(other, 'A purchase was cancelled', `"${p.listing.title}"${data.reason ? `: ${data.reason.slice(0, 200)}` : ''}. ${p.escrow ? 'Any held money goes back to the buyer\'s card.' : ''}`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_PURCHASE_CANCELLED', id: p.id });
+      if (party === 'admin') await auditCarAdmin(req, 'CAR_PURCHASE_CANCELLED_BY_ADMIN', { resourceType: 'VehiclePurchase', resourceId: p.id, targetUserId: p.buyerId, sellerId: p.sellerId, amount: p.agreedAmount ?? p.offerAmount, heldMoneyReturned: Boolean(p.escrow?.paymentIntentId), status: changed(p.status, to) });
+    }
     ok(res, purchaseCard(updated, req.user!.id));
   } catch (error) { next(error); }
 });
@@ -1640,12 +1691,17 @@ router.post('/purchases/:id/resolve', authenticate, requireRole('ADMIN'), async 
       if (data.outcome === 'RELEASE' && (p.escrow.status === 'PENDING' || p.escrow.status === 'AUTHORIZED')) await captureEscrowPayment(p.escrow.paymentIntentId, { id: req.user!.id, role: 'ADMIN' });
       if (data.outcome === 'REFUND' && !['CANCELED', 'REFUNDED', 'FAILED'].includes(p.escrow.status)) await cancelEscrowPayment(p.escrow.paymentIntentId, { id: req.user!.id, role: 'ADMIN' }, data.note);
     }
-    const updated = await prisma.vehiclePurchase.update({ where: { id: p.id }, data: { status: to, disputeResolution: data.note, resolvedAt: new Date(), resolvedById: req.user!.id, ...(to === 'RELEASED' ? { releasedAt: new Date() } : {}) }, include: purchaseInclude });
-    const words = data.outcome === 'RELEASE' ? 'The money has been released to the seller.' : holdOver ? 'Nothing was taken from the buyer\'s card: the hold on it had already ended.' : 'The money has been returned to the buyer.';
-    await Promise.all([p.buyerId, p.sellerId].map((u) => note(u, 'The dispute has been decided', `${words} ${data.note.slice(0, 300)}`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_DISPUTE_RESOLVED', id: p.id })));
-    // resolvedById is on the row, but the row is overwritten by whatever
-    // happens to the purchase next; the audit row is the record that stays.
-    await auditCarAdmin(req, 'CAR_PURCHASE_DISPUTE_RESOLVED', { resourceType: 'VehiclePurchase', resourceId: p.id, targetUserId: p.buyerId, sellerId: p.sellerId, outcome: data.outcome, amount: p.agreedAmount ?? p.offerAmount, status: changed(p.status, to) });
+    // Two staff deciding the same dispute together: the second decision is
+    // answered with the first's purchase when it agrees, and refused with
+    // where the purchase now stands when it does not.
+    const { fresh: updated, movedHere } = await movePurchase(req, p, to, { disputeResolution: data.note, resolvedAt: new Date(), resolvedById: req.user!.id, ...(to === 'RELEASED' ? { releasedAt: new Date() } : {}) });
+    if (movedHere) {
+      const words = data.outcome === 'RELEASE' ? 'The money has been released to the seller.' : holdOver ? 'Nothing was taken from the buyer\'s card: the hold on it had already ended.' : 'The money has been returned to the buyer.';
+      await Promise.all([p.buyerId, p.sellerId].map((u) => note(u, 'The dispute has been decided', `${words} ${data.note.slice(0, 300)}`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_DISPUTE_RESOLVED', id: p.id })));
+      // resolvedById is on the row, but the row is overwritten by whatever
+      // happens to the purchase next; the audit row is the record that stays.
+      await auditCarAdmin(req, 'CAR_PURCHASE_DISPUTE_RESOLVED', { resourceType: 'VehiclePurchase', resourceId: p.id, targetUserId: p.buyerId, sellerId: p.sellerId, outcome: data.outcome, amount: p.agreedAmount ?? p.offerAmount, status: changed(p.status, to) });
+    }
     ok(res, purchaseCard(updated, req.user!.id, true));
   } catch (error) { next(error); }
 });
@@ -1847,7 +1903,8 @@ router.post('/bookings/:id/pay', authenticate, async (req: AuthRequest, res: Res
     if (!b.mechanic.ownerUserId) throw new ApiError(400, 'This workshop is paid directly');
     if (b.escrowPaymentId) { const e = await prisma.escrowPayment.findUnique({ where: { id: b.escrowPaymentId }, select: { paymentIntentId: true } }); ok(res, { alreadyHeld: true, clientSecret: e?.paymentIntentId ? await getEscrowClientSecret(e.paymentIntentId) : null }); return; }
     let hold;
-    try { hold = await createEscrowPayment({ buyerId: req.user!.id, sellerId: b.mechanic.ownerUserId, amount: Math.round(amount * 100), currency: 'aud', description: `${serviceKind(b.kind)?.label ?? b.kind} at ${b.mechanic.name}`, sessionType: 'car_service', platformFeePercent: SERVICE_FEE_PERCENT, metadata: { bookingId: b.id } }); }
+    // Keyed on the booking and the minute, for the same reason as the purchase above.
+    try { hold = await createEscrowPayment({ buyerId: req.user!.id, sellerId: b.mechanic.ownerUserId, amount: Math.round(amount * 100), currency: 'aud', description: `${serviceKind(b.kind)?.label ?? b.kind} at ${b.mechanic.name}`, sessionType: 'car_service', platformFeePercent: SERVICE_FEE_PERCENT, metadata: { bookingId: b.id }, idempotencyKey: `car-service-hold-${b.id}-${idempotencyWindow()}` }); }
     catch (error) { if (error instanceof ApiError && error.statusCode === 400) throw new ApiError(409, 'This workshop has not finished setting up payouts; pay them directly on the day'); throw error; }
     const updated = await prisma.mechanicBooking.update({ where: { id: b.id }, data: { escrowPaymentId: hold.escrowId, paidAt: new Date(), ...(b.status === 'QUOTED' ? { status: 'CONFIRMED', quoteAcceptedAt: new Date() } : {}) }, include: bookingInclude });
     await note(b.mechanic.ownerUserId, 'A job has been paid into holding', `$${amount.toLocaleString('en-AU')} for ${serviceKind(b.kind)?.label ?? b.kind} is held and released when the member confirms the work is done.`, '/dashboard/cars/workshop', { kind: 'CAR_BOOKING_PAID', id: b.id });

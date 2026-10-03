@@ -100,6 +100,26 @@ describe('POST /api/subscriptions/checkout', () => {
     expect(stripeClient.checkout.sessions.create).toHaveBeenCalled();
   });
 
+  it('keys the customer and the session on the member, so two taps on Upgrade make one of each at Stripe', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'member-1',
+      email: 'mei@example.com',
+      firstName: 'Mei',
+      lastName: 'Chen',
+      country: 'Australia',
+      subscription: { stripeCustomerId: null },
+    });
+
+    await request(app).post('/api/subscriptions/checkout').send({ tier: 'PREMIUM_CAREER' }).expect(200);
+
+    const customerOptions = (stripeClient.customers.create.mock.calls[0] as any[])[1];
+    expect(customerOptions.idempotencyKey).toMatch(/^membership-customer-member-1-\d+$/);
+    const sessionOptions = (stripeClient.checkout.sessions.create.mock.calls[0] as any[])[1];
+    // Her, the tier, the currency and the minute: a second tab in the same
+    // minute shares the session; another tier is another session.
+    expect(sessionOptions.idempotencyKey).toMatch(/^membership-checkout-member-1-PREMIUM_CAREER-[A-Z]{3}-\d+$/);
+  });
+
   it('refuses a tier the server does not sell, without touching Stripe', async () => {
     // 'ENTERPRISE' is the one the billing page's own button still sends.
     await request(app).post('/api/subscriptions/checkout').send({ tier: 'ENTERPRISE' }).expect(400);

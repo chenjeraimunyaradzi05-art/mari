@@ -8,6 +8,7 @@ import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import Stripe from 'stripe';
 import { getStripe } from '../utils/stripe';
+import { idempotencyWindow } from '../utils/idempotency';
 import { ApiError } from '../middleware/errorHandler';
 import { sendNotification } from './socket.service';
 import {
@@ -481,16 +482,23 @@ export async function purchaseGiftBalance(userId: string, amount: number) {
   const giftPoints = giftPointsForCents(amountCents);
 
   // Create Stripe payment intent
-  const paymentIntent = await getStripe().paymentIntents.create({
-    amount: amountCents,
-    currency: GIFT_CURRENCY.toLowerCase(),
-    metadata: {
-      userId,
-      type: 'gift_balance_purchase',
-      giftPoints: giftPoints.toString(),
-      currency: GIFT_CURRENCY,
+  const paymentIntent = await getStripe().paymentIntents.create(
+    {
+      amount: amountCents,
+      currency: GIFT_CURRENCY.toLowerCase(),
+      metadata: {
+        userId,
+        type: 'gift_balance_purchase',
+        giftPoints: giftPoints.toString(),
+        currency: GIFT_CURRENCY,
+      },
     },
-  });
+    // There is no row to key from until the payment succeeds, so the member,
+    // the amount and the minute: two taps on Buy are one intent, and buying
+    // the same amount again a minute later is a new one. Without this, every
+    // tap minted a fresh intent against her card.
+    { idempotencyKey: `gift-purchase-${userId}-${amountCents}-${idempotencyWindow()}` }
+  );
 
   return {
     // The id travels with the secret so the browser can confirm the purchase

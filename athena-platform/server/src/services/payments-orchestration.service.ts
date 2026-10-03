@@ -8,6 +8,7 @@ import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import { ApiError } from '../middleware/errorHandler';
 import { getStripe, isStripeConfigured } from '../utils/stripe';
+import { idempotencyWindow } from '../utils/idempotency';
 import { getPriceIdForTier, SubscriptionTierKey } from '../config/regions';
 import { minorUnitScale } from './stripe-connect.service';
 import { assertPaymentsOpen } from './feature-flags.service';
@@ -1156,11 +1157,19 @@ async function resolveStripeCustomerId(userId: string): Promise<string> {
     select: { email: true, displayName: true },
   });
 
-  const customer = await getStripe().customers.create({
-    email: user?.email || undefined,
-    name: user?.displayName || undefined,
-    metadata: { userId },
-  });
+  const customer = await getStripe().customers.create(
+    {
+      email: user?.email || undefined,
+      name: user?.displayName || undefined,
+      metadata: { userId },
+    },
+    // Two payments started together by a member with no customer yet both
+    // reach this create; keyed on her and the minute, Stripe gives both the
+    // same record instead of two. Scoped apart from the membership checkout's
+    // key, which sends different details for the same member and would be
+    // refused by Stripe as a reused key with other parameters.
+    { idempotencyKey: `payment-customer-${userId}-${idempotencyWindow()}` }
+  );
 
   // updateMany, because a member who has never had a membership has no
   // Subscription row at all and an update would throw on her. She still gets a

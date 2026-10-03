@@ -148,7 +148,15 @@ async function stopTryingToRelease(p: SweptPurchase, now: Date, attempted: boole
       ? 'The buyer\'s card was never authorised for this purchase, so there is no money held to release.'
       : 'The money held for this purchase could not be taken from the card when the inspection period ended.';
   const tried = attempted ? ' Three days of automatic attempts did not clear it.' : '';
-  await prisma.vehiclePurchase.update({ where: { id: p.id }, data: { status: 'DISPUTED', disputeOpenedAt: now, disputeReason: `Opened by ATHENA: ${why}${tried}` } });
+  // Only from HANDED_OVER, which is what the sweep read. A buyer who opened a
+  // dispute of her own while this ran has her reason on the row and her
+  // dispute's own notifications out; ATHENA's would be written over hers and
+  // say the wrong thing to all three.
+  const parked = await prisma.vehiclePurchase.updateMany({ where: { id: p.id, status: 'HANDED_OVER' }, data: { status: 'DISPUTED', disputeOpenedAt: now, disputeReason: `Opened by ATHENA: ${why}${tried}` } });
+  if (parked.count === 0) {
+    logger.info('A car purchase the sweep could not release was moved by someone else meanwhile; left as it stands', { purchaseId: p.id });
+    return;
+  }
   await notify(p.sellerId, 'The payment for your car could not be released', `${why} ${attempted ? 'ATHENA has stopped trying and is' : 'ATHENA is'} looking at "${p.listing.title}" now. Do not hand anything else over, and reply here with anything that helps.`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_RELEASE_FAILED', id: p.id });
   await notify(p.buyerId, 'There is a problem with the payment for your car', `${why} Nothing has been taken from your card. ATHENA is looking at "${p.listing.title}" and will be in touch; please do not pay the seller outside ATHENA.`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_RELEASE_FAILED', id: p.id });
   await notifyAdmins('A car purchase could not be released', `"${p.listing.title}", $${(p.agreedAmount ?? p.offerAmount).toLocaleString('en-AU')}: ${why} The car has been handed over. Both sides have been told and it is waiting on a decision.`, '/dashboard/cars/admin', { kind: 'CAR_RELEASE_FAILED', id: p.id });
@@ -203,7 +211,16 @@ export async function sweepPurchases(now = new Date()): Promise<{ released: numb
       }
     }
 
-    await prisma.vehiclePurchase.update({ where: { id: p.id }, data: { status: 'RELEASED', releasedAt: now } });
+    // Only from HANDED_OVER, which is what was read. A dispute the buyer opened
+    // between that read and this write keeps the row: the hold is captured
+    // behind it, which is a case the admin's RELEASE and REFUND both handle,
+    // and nobody is told the money was released, because it was not.
+    const moved = await prisma.vehiclePurchase.updateMany({ where: { id: p.id, status: 'HANDED_OVER' }, data: { status: 'RELEASED', releasedAt: now } });
+    if (moved.count === 0) {
+      logger.warn(`automotive.purchase-release.${p.id}: the purchase was moved by someone else while its hold was being captured; left for a person`, { purchaseId: p.id, escrowId: p.escrow?.id ?? null });
+      stuck += 1;
+      continue;
+    }
     // Kept off the capture's own failure path deliberately: by this line the
     // escrow has been captured and the purchase already says RELEASED, so
     // letting a failed listing update count as "could not be released" would

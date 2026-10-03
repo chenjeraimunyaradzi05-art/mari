@@ -99,6 +99,9 @@ describe('POST /api/connect/escrow', () => {
     // The webhook reads `type` and `registrationId` as what was paid for, so a
     // body that could set them could mark somebody's registration as paid.
     expect(input.metadata).toEqual({ reference: 'Term 3' });
+    // No row of its own to key from, so the request inside a minute: the same
+    // hold asked for twice by the same buyer is one intent, not two holds.
+    expect(input.idempotencyKey).toMatch(/^connect-escrow-buyer-1-seller-1-course_purchase-aud-5000-\d+$/);
   });
 
   it('refuses to make a hold that claims to be a mentor session, an order or a car payment, or names nothing', async () => {

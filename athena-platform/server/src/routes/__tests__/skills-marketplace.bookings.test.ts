@@ -101,6 +101,9 @@ describe('Booking an hour of someone’s time', () => {
       amount: 24000,
       currency: 'aud',
       sessionType: 'service_booking',
+      // Keyed on her, the listing, the time asked for and the minute, so two
+      // asks that arrive together are one hold at the processor.
+      idempotencyKey: expect.stringMatching(/^service-booking-hold-client-s1-\d+-\d+$/),
     });
     // No fee of its own: a booking costs what any marketplace sale costs.
     expect((createEscrowPayment as any).mock.calls[0][0].platformFeePercent).toBeUndefined();
@@ -148,6 +151,35 @@ describe('Booking an hour of someone’s time', () => {
     prisma.skillService.findUnique.mockResolvedValue(service);
     await request(app).post('/api/skills-marketplace/services/s1/book').set(as('seller')).send({ scheduledAt: startingIn(24), durationMinutes: 60 }).expect(400);
     expect(createEscrowPayment).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Two asks that arrive together both pass the check above and both reach
+   * the processor; the shared key means they are handed one hold, and the one
+   * whose insert loses must be answered with the booking the other saved. What
+   * it must not do is cancel the hold, which is the hold behind that booking.
+   */
+  it('when a twin request has already saved the booking behind the shared hold, answers with that booking and leaves the hold alone', async () => {
+    const at = startingIn(24);
+    prisma.serviceBooking.create.mockRejectedValueOnce(Object.assign(new Error('Unique constraint failed on the fields: (`escrowPaymentId`)'), { code: 'P2002' }));
+    prisma.serviceBooking.findFirst
+      .mockResolvedValueOnce(null) // the "already asked" check, before the hold
+      .mockResolvedValueOnce({ id: 'b-twin', clientId: 'client', serviceId: 's1', escrowPaymentId: 'e1', stripePaymentIntentId: 'pi_1', totalAmount: 240, platformFee: 36, providerPayout: 204 });
+
+    const res = await request(app).post('/api/skills-marketplace/services/s1/book').set(as('client')).send({ scheduledAt: at, durationMinutes: 60 }).expect(201);
+
+    expect(res.body.data.id).toBe('b-twin');
+    expect(res.body.data.payment).toMatchObject({ clientSecret: 'pi_1_secret', amount: 24000 });
+    expect(prisma.serviceBooking.findFirst.mock.calls[1][0].where).toEqual({ clientId: 'client', escrowPaymentId: 'e1' });
+    expect(cancelEscrowPayment).not.toHaveBeenCalled();
+  });
+
+  it('still gives the hold back when the booking cannot be saved for any other reason', async () => {
+    prisma.serviceBooking.create.mockRejectedValueOnce(new Error('connection reset'));
+
+    await request(app).post('/api/skills-marketplace/services/s1/book').set(as('client')).send({ scheduledAt: startingIn(24), durationMinutes: 60 }).expect(500);
+
+    expect(cancelEscrowPayment).toHaveBeenCalledWith('pi_1', expect.objectContaining({ id: 'client' }), 'The booking could not be saved');
   });
 
   it('a provider who has not set up payouts cannot be booked yet', async () => {
