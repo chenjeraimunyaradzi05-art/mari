@@ -721,7 +721,8 @@ function HousingContent() {
                           Share my details with the lister
                         </button>
                       )}
-                      {!['APPLICATION_SUBMITTED', 'APPROVED'].includes(inquiry.status) && (
+                      {/* Offered once the lister has been in touch, which is when the server allows it: saying so is one of the states that releases the address, so it cannot be the asker's move alone. */}
+                      {['CONTACTED', 'VIEWING_SCHEDULED'].includes(inquiry.status) && (
                         <button type="button" disabled={savingId === inquiry.id} onClick={() => updateMyInquiry(inquiry.id, 'APPLICATION_SUBMITTED')} className="text-primary-600 hover:underline">
                           I have applied
                         </button>

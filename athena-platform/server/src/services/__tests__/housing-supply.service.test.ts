@@ -23,9 +23,13 @@ jest.mock('../../utils/ops-metrics', () => ({ recordFailure: jest.fn() }));
 import { prisma as prismaTyped } from '../../utils/prisma';
 import { recordFailure } from '../../utils/ops-metrics';
 import {
+  MAX_LISTING_IMAGES,
   SAFETY_CHECK_QUEUE_WHERE,
   alertOverdueSafetyChecks,
   checkRequestedAt,
+  cleanListingImages,
+  confidentialTextProblem,
+  listingImagesProblem,
   planHousingImport,
   publicFeatures,
   safetyCheckClock,
@@ -131,6 +135,75 @@ describe('a listing staff enter', () => {
 
   it('never marks checked a listing that does not claim to be DV-safe', () => {
     expect(staffListingData(base, 'lister', { safetyVerified: true, now })).toMatchObject({ safetyVerified: false, status: 'ACTIVE' });
+  });
+});
+
+/**
+ * The words on a confidential listing: every eligible member reads them before
+ * the lister has answered anyone, which is when the address is withheld, so
+ * they carry neither the street address nor a phone number to ring for it.
+ */
+describe('the words on a confidential listing', () => {
+  it.each([
+    'Secure unit at 12 Example Street, Ashgrove',
+    'Flat 3/12 Example St',
+    'Unit 4, 12 Example Street',
+    'No. 7 Hidden Lane, behind the shops',
+    'Lot 15 Settlers Rd',
+    'Level 2, 45 Example Ave',
+  ])('reads "%s" as a street address', (text) => {
+    expect(confidentialTextProblem(text)).toMatchObject({ found: 'a street address', message: expect.stringContaining('Leave the street address out') });
+  });
+
+  it.each([
+    'Two bedrooms, 5 min walk to the shops and 10 min drive to the city',
+    '2 bedrooms close to transport, 3 beds, 1 bath',
+    'Ten minutes to the station on Oxford St',
+    '100m to the park',
+    'Available for 6 weeks from March, $450 a week',
+    'Lifts, 4 levels, and a quiet way in',
+  ])('does not read "%s" as one', (text) => {
+    expect(confidentialTextProblem(text)).toBeNull();
+  });
+
+  it.each(['Ring 0400 000 000 for the address', 'Call (07) 3123 4567', 'Text +61 400 000 000', 'Phone 1800 123 456 any time'])('reads "%s" as a phone number', (text) => {
+    expect(confidentialTextProblem(text)).toMatchObject({ found: 'a phone number', message: expect.stringContaining('Leave phone numbers out') });
+  });
+
+  it('leaves a rent, a bond, a postcode and a date alone', () => {
+    expect(confidentialTextProblem('$450 a week, bond $1800, Ashgrove 4060, free from 02/11/2026')).toBeNull();
+  });
+
+  it('reads the title and the description together, and nothing when both are empty', () => {
+    expect(confidentialTextProblem('Quiet unit', 'at 12 Example Street')).toMatchObject({ found: 'a street address' });
+    expect(confidentialTextProblem('', null, undefined)).toBeNull();
+  });
+
+  it("holds a partner's sheet to the same rule, on confidential rows only", () => {
+    const row = { title: 'Unit', description: 'Secure unit at 12 Example Street', type: 'EMERGENCY' };
+    const refused = staffListingSchema.safeParse(row);
+    expect(refused.success).toBe(false);
+    if (!refused.success) expect(refused.error.issues[0]).toMatchObject({ path: ['description'], message: expect.stringContaining('carries a street address') });
+    expect(staffListingSchema.safeParse({ ...row, type: 'RENTAL' }).success).toBe(true);
+  });
+});
+
+describe('the pictures on a listing', () => {
+  it('takes nothing, or a short list of http(s) links, and says what is wrong otherwise', () => {
+    expect(listingImagesProblem(undefined)).toBeNull();
+    expect(listingImagesProblem(null)).toBeNull();
+    expect(listingImagesProblem(['https://cdn.example.com/a.jpg'])).toBeNull();
+    expect(listingImagesProblem('https://cdn.example.com/a.jpg')).toContain('list of links');
+    expect(listingImagesProblem(['javascript:alert(1)'])).toContain('http or https');
+    expect(listingImagesProblem(['data:image/png;base64,AAAA'])).toContain('http or https');
+    expect(listingImagesProblem([{ url: 'https://cdn.example.com/a.jpg' }])).toContain('http or https');
+    expect(listingImagesProblem([`https://cdn.example.com/${'a'.repeat(600)}.jpg`])).toContain('http or https');
+    expect(listingImagesProblem(Array.from({ length: MAX_LISTING_IMAGES + 1 }, () => 'https://cdn.example.com/a.jpg'))).toContain(`at most ${MAX_LISTING_IMAGES}`);
+  });
+
+  it('stores the links trimmed, and nothing when none were given', () => {
+    expect(cleanListingImages([' https://cdn.example.com/a.jpg '])).toEqual(['https://cdn.example.com/a.jpg']);
+    expect(cleanListingImages(undefined)).toBeUndefined();
   });
 });
 

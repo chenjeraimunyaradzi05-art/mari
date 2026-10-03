@@ -73,6 +73,15 @@ jest.mock('../../utils/logger', () => ({
   logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
 
+// The screen a post goes through, which a listing's words now go through too.
+// Allowed unless a test says otherwise; what matters here is that it is asked,
+// and that its refusal stops the write.
+const assertContentAllowed = jest.fn(async (..._args: unknown[]) => undefined);
+jest.mock('../../services/moderation.service', () => ({
+  ...(jest.requireActual('../../services/moderation.service') as object),
+  assertContentAllowed: (...args: unknown[]) => assertContentAllowed(...args),
+}));
+
 import { app } from '../../index';
 import { prisma as prismaTyped } from '../../utils/prisma';
 
@@ -1265,5 +1274,78 @@ describe('DELETE /api/housing/inquiries/:id', () => {
     await request(app).delete('/api/housing/inquiries/inq-1').expect(401);
 
     expect(prisma.housingInquiry.delete).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * What a listing may say and show. The words on a confidential listing reach
+ * every eligible member before the lister has answered anyone, which is exactly
+ * when the address is withheld; so they carry neither the street address nor a
+ * phone number, and every listing's words go through the screen a post goes
+ * through. The pictures are links a browser may follow, and no more than ten.
+ */
+describe('What a listing may say and show', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    assertContentAllowed.mockResolvedValue(undefined);
+    prisma.user.findUnique.mockResolvedValue({ womanVerificationStatus: 'VERIFIED', dvSafetyProfile: null });
+    prisma.user.findMany.mockResolvedValue([{ id: 'admin-1' }]);
+    prisma.housingListing.create.mockImplementation(async ({ data }: any) => ({ id: 'new', ...data }));
+  });
+
+  const post = (body: Record<string, unknown>) =>
+    request(app).post('/api/housing/listings').set(as('lister')).send({ title: 'Quiet unit', description: 'Secure entry, close to transport.', type: 'RENTAL', ...body });
+
+  it('refuses a street address or a phone number on a confidential listing, and writes nothing', async () => {
+    const withAddress = await post({ dvSafe: true, dvSafeNote: 'I live upstairs', description: 'Secure unit at 12 Example Street, Ashgrove.' }).expect(400);
+    expect(withAddress.body.message).toContain('street address');
+
+    const withPhone = await post({ type: 'EMERGENCY', title: 'Bed tonight, ring 0400 000 000' }).expect(400);
+    expect(withPhone.body.message).toContain('phone number');
+
+    expect(prisma.housingListing.create).not.toHaveBeenCalled();
+    expect(prisma.notification.create).not.toHaveBeenCalled();
+  });
+
+  it('lets an ordinary listing say where it is: its lister chooses, and the address column is withheld as everywhere', async () => {
+    await post({ description: 'Secure unit at 12 Example Street, Ashgrove.' }).expect(201);
+    expect(prisma.housingListing.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('puts the words through the same screen as a post, and a refusal stops the write', async () => {
+    await post({}).expect(201);
+    expect(assertContentAllowed).toHaveBeenCalledWith('Quiet unit\nSecure entry, close to transport.', { kind: 'housing_listing', userId: 'lister' });
+
+    const { ApiError } = jest.requireActual('../../middleware/errorHandler') as typeof import('../../middleware/errorHandler');
+    assertContentAllowed.mockRejectedValueOnce(new ApiError(400, 'This content violates our community guidelines'));
+    await post({ title: 'Something the screen refuses' }).expect(400);
+    expect(prisma.housingListing.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('screens new words on a change too: the address rule on a confidential listing, the gate on any, and not a saved form that repeats them', async () => {
+    prisma.housingListing.findUnique.mockResolvedValue({ ...safeHouse, description: 'Secure entry.', status: 'PENDING', safetyVerified: false });
+    prisma.housingListing.update.mockImplementation(async ({ data }: any) => ({ ...safeHouse, description: 'Secure entry.', ...data }));
+
+    const res = await request(app).patch('/api/housing/listings/l-safe').set(as('lister')).send({ description: 'Ring me on (07) 3123 4567 for the address.' }).expect(400);
+    expect(res.body.message).toContain('phone number');
+    expect(prisma.housingListing.update).not.toHaveBeenCalled();
+
+    await request(app).patch('/api/housing/listings/l-safe').set(as('lister')).send({ description: 'Secure entry and a quiet street.' }).expect(200);
+    expect(assertContentAllowed).toHaveBeenCalledWith(`${safeHouse.title}\nSecure entry and a quiet street.`, { kind: 'housing_listing', userId: 'lister' });
+
+    assertContentAllowed.mockClear();
+    await request(app).patch('/api/housing/listings/l-safe').set(as('lister')).send({ rentWeekly: 410, description: 'Secure entry.' }).expect(200);
+    expect(assertContentAllowed).not.toHaveBeenCalled();
+  });
+
+  it('takes pictures only as a short list of http(s) links, and stores them trimmed', async () => {
+    await post({ images: 'https://cdn.example.com/a.jpg' }).expect(400);
+    await post({ images: ['javascript:alert(1)'] }).expect(400);
+    await post({ images: [{ url: 'https://cdn.example.com/a.jpg' }] }).expect(400);
+    await post({ images: Array.from({ length: 11 }, (_v, i) => `https://cdn.example.com/${i}.jpg`) }).expect(400);
+    expect(prisma.housingListing.create).not.toHaveBeenCalled();
+
+    await post({ images: [' https://cdn.example.com/a.jpg ', 'http://cdn.example.com/b.jpg'] }).expect(201);
+    expect(prisma.housingListing.create.mock.calls[0][0].data.images).toEqual(['https://cdn.example.com/a.jpg', 'http://cdn.example.com/b.jpg']);
   });
 });

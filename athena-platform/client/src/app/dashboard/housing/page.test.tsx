@@ -227,6 +227,34 @@ describe('Removing an inquiry', () => {
   });
 });
 
+/**
+ * Saying "I have applied" is one of the states that releases the address, so
+ * the server allows it only once the lister has been in touch. The page offers
+ * it then and not before, rather than offering a button the server refuses.
+ */
+describe('Saying the member has applied', () => {
+  const inquiry = (status: string, id = `inq-${status.toLowerCase()}`) => ({
+    id,
+    listingId: 'l-1',
+    status,
+    createdAt: '2026-09-20T00:00:00.000Z',
+    listing: listing(),
+    confidential: false,
+    contactShared: false,
+    thread: [],
+  });
+
+  it('is offered once the lister has been in touch, and not while the inquiry is pending', async () => {
+    api.getListings.mockResolvedValue({ data: { data: [], confidential: { hidden: false, reason: null } } });
+    api.getMyInquiries.mockResolvedValue({ data: { data: [inquiry('PENDING'), inquiry('CONTACTED'), inquiry('VIEWING_SCHEDULED'), inquiry('APPLICATION_SUBMITTED')] } });
+    render(<HousingPage />);
+
+    // Four open inquiries, each with a Withdraw; two of them answered by the lister.
+    expect(await screen.findAllByRole('button', { name: 'Withdraw' })).toHaveLength(4);
+    expect(screen.getAllByRole('button', { name: 'I have applied' })).toHaveLength(2);
+  });
+});
+
 describe('Arriving from the safety page', () => {
   it('keeps the DV-safe filter on and takes the word off the address, so it is not left in the history', async () => {
     mockSearchParams = new URLSearchParams('dvSafe=true');

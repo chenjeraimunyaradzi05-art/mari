@@ -315,6 +315,12 @@ export type ModeratedSurface =
   // groups publish. These were screened under 'profile', so a flag on a
   // company page read in the log as though a member's own bio had tripped it.
   | 'organization'
+  // The title and description of a housing listing, which every eligible member
+  // reads, and the comment on a review of a practitioner, which the directory
+  // shows beside the rating. Neither went through the gate; a listing is the
+  // one surface where the words reach a woman looking for somewhere safe.
+  | 'housing_listing'
+  | 'health_review'
   | 'message'
   | 'group_message'
   | 'channel_message'

@@ -17,8 +17,11 @@ import {
   adminRecipients,
   byWaitingLongest,
   checkDueLine,
+  cleanListingImages,
+  confidentialTextProblem,
   dvSafeNoteOf,
   isConfidentialListing,
+  listingImagesProblem,
   planHousingImport,
   publicFeatures,
   safetyCheckClock,
@@ -49,6 +52,7 @@ import {
 } from '../services/housing-provider.service';
 import { formatAbn } from '../services/abr.service';
 import { safeNotificationFor } from '../services/dv-safe.service';
+import { assertContentAllowed } from '../services/moderation.service';
 
 /**
  * Housing: listings, inquiries, and the safety rules around them.
@@ -87,6 +91,13 @@ import { safeNotificationFor } from '../services/dv-safe.service';
  *   The conversation is carried on the inquiry rather than in messages, and
  *   her details are shared only once the lister has approved her and she has
  *   chosen to share them.
+ * - The address is released by the lister's answer and nothing else. The asker
+ *   may withdraw, or say "I have applied" once the lister has been in touch;
+ *   no move the asker makes alone reaches a state that releases the address
+ *   (ASKER_MOVES). The words on a confidential listing carry neither its
+ *   street address nor a phone number (housing-supply confidentialTextProblem),
+ *   the pictures are http(s) links and no more than ten, and the title and
+ *   description go through the same screen as a post.
  *
  * - Supply does not depend on members alone. Staff can list a housing
  *   partner's places, singly or from the partner's spreadsheet, each attached
@@ -126,6 +137,21 @@ const LISTING_STATUSES = ['ACTIVE', 'PENDING', 'LEASED', 'WITHDRAWN'] as const;
 const CONFIDENTIAL_TYPES: string[] = [...CONFIDENTIAL_LISTING_TYPES];
 /** The inquiry states at which the lister has answered, and the address may be shown to the asker. */
 const ADDRESS_RELEASED_AT = ['CONTACTED', 'VIEWING_SCHEDULED', 'APPLICATION_SUBMITTED', 'APPROVED'];
+/**
+ * Where the asker may move an inquiry from, for each move the asker's route
+ * offers. Saying "I have applied" is allowed only once the lister has answered
+ * (CONTACTED or later): APPLICATION_SUBMITTED is one of the states that releases
+ * the address, so a move the asker could make alone from PENDING handed over the
+ * street address of a DV-safe place with the lister never having said a word,
+ * to any account with Safe Mode switched on. A closed inquiry (DECLINED,
+ * WITHDRAWN) is not reopened by either side.
+ */
+const ASKER_MOVES: Record<string, readonly string[]> = {
+  APPLICATION_SUBMITTED: ['CONTACTED', 'VIEWING_SCHEDULED', 'APPROVED'],
+  WITHDRAWN: ['PENDING', 'CONTACTED', 'VIEWING_SCHEDULED', 'APPLICATION_SUBMITTED', 'APPROVED'],
+};
+const CLOSED_INQUIRY = 'This inquiry is closed';
+const APPLY_AFTER_ANSWER = 'You can say you have applied once the lister has been in touch with you.';
 
 const ANONYMOUS_REASON = 'Safe housing listings are shown to signed-in members only.';
 const MEMBER_REASON = 'Safe housing listings are shown to members who have Safe Mode on or a verified account. Safe Mode is free and one switch away, under Safety.';
@@ -649,10 +675,19 @@ router.patch(
       if (!inquiry) throw new ApiError(404, 'Inquiry not found');
       if (inquiry.userId !== userId) throw new ApiError(403, 'Not authorized to update this inquiry');
 
+      const closed = ['WITHDRAWN', 'DECLINED'].includes(inquiry.status);
+      // The status used to be written as sent, so the asker could move a pending
+      // inquiry to APPLICATION_SUBMITTED, and this route's own answer then
+      // carried the street address (presentForAsker releases it at that state),
+      // or move a declined one back to open. See ASKER_MOVES.
+      if (status && !(ASKER_MOVES[status] ?? []).includes(inquiry.status)) {
+        throw new ApiError(409, closed ? CLOSED_INQUIRY : status === 'APPLICATION_SUBMITTED' ? APPLY_AFTER_ANSWER : 'That change cannot be made from where this inquiry stands');
+      }
+
       const text = typeof reply === 'string' ? reply.trim() : '';
+      if (closed && (text || viewingDate)) throw new ApiError(400, CLOSED_INQUIRY);
       let notes: string | undefined;
       if (text) {
-        if (['WITHDRAWN', 'DECLINED'].includes(inquiry.status)) throw new ApiError(400, 'This inquiry is closed');
         const priv = readPrivate(inquiry.notes, inquiry.updatedAt);
         priv.thread.push({ from: 'ASKER', text, at: new Date().toISOString() });
         notes = writePrivate(priv);
@@ -820,6 +855,22 @@ router.post(
       // so a lister cannot write her own check clock or somebody else's note.
       const cleanFeatures = publicFeatures(features);
 
+      // The pictures were stored as typed, whatever they were. Each is a link
+      // a member's page will render, so each has to be one a browser may follow.
+      const imagesProblem = listingImagesProblem(images);
+      if (imagesProblem) throw new ApiError(400, imagesProblem);
+
+      // On a confidential place the words carry neither the street address nor
+      // a phone number: every eligible member reads them before the lister has
+      // answered anyone, which is exactly when the address is withheld.
+      const wordsProblem = needsCheck ? confidentialTextProblem(title, description) : null;
+      if (wordsProblem) throw new ApiError(400, wordsProblem.message);
+
+      // Then the same screen a post goes through. A listing was the one public
+      // surface that skipped it, and its words reach a woman looking for
+      // somewhere safe.
+      await assertContentAllowed(`${String(title).trim()}\n${String(description).trim()}`, { kind: 'housing_listing', userId });
+
       const listing = await prisma.housingListing.create({
         data: {
           agentId: userId,
@@ -845,7 +896,7 @@ router.post(
           availableFrom: availableFrom ? new Date(availableFrom) : undefined,
           minLeaseTerm: minLeaseTerm ? Number(minLeaseTerm) : undefined,
           flexibleLease: flexibleLease === true,
-          images,
+          images: cleanListingImages(images),
           status: needsCheck ? 'PENDING' : 'ACTIVE',
         },
       });
@@ -975,12 +1026,14 @@ router.patch(
     try {
       failOnErrors(req);
       const { id } = req.params;
+      const userId = req.user?.id;
+      if (!userId) throw new ApiError(401, 'Authentication required');
       const listing = await prisma.housingListing.findUnique({
         where: { id },
         select: { id: true, agentId: true, title: true, description: true, rentWeekly: true, type: true, city: true, dvSafe: true, safetyVerified: true, status: true, features: true },
       });
       if (!listing) throw new ApiError(404, 'Housing listing not found');
-      if (listing.agentId !== req.user!.id && !isAdmin(req)) {
+      if (listing.agentId !== userId && !isAdmin(req)) {
         throw new ApiError(403, 'Only the person who listed this place can change it');
       }
 
@@ -1054,6 +1107,19 @@ router.patch(
 
       const claimsDvSafe = typeof data.dvSafe === 'boolean' ? data.dvSafe : listing.dvSafe;
       const staysConfidential = isConfidential({ dvSafe: claimsDvSafe, type: listing.type });
+
+      // New words are screened as they are on the way in (POST /listings): on a
+      // confidential place for a street address or a phone number, and on any
+      // listing by the gate a post goes through. Only when they changed; a saved
+      // form that repeats them is not a new publication.
+      const titleAfter = typeof data.title === 'string' ? data.title.trim() : String(listing.title).trim();
+      const descriptionAfter = typeof data.description === 'string' ? data.description.trim() : String(listing.description).trim();
+      const wordsChanged = titleAfter !== String(listing.title).trim() || descriptionAfter !== String(listing.description).trim();
+      if (wordsChanged) {
+        const wordsProblem = staysConfidential ? confidentialTextProblem(titleAfter, descriptionAfter) : null;
+        if (wordsProblem) throw new ApiError(400, wordsProblem.message);
+        await assertContentAllowed(`${titleAfter}\n${descriptionAfter}`, { kind: 'housing_listing', userId });
+      }
 
       // A check is a check of what was there. Changing the title, the
       // description or the rent afterwards leaves "Checked by ATHENA staff" on
