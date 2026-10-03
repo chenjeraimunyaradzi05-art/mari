@@ -50,6 +50,17 @@ import { maskLegalNames, maskLegalNamesInResponses, parseDisplayName, publicName
 
 const router = Router();
 
+/**
+ * The signed-in member's id, for the routes that sit behind `authenticate`.
+ * A missing one means the route was wired without it, so it is refused rather
+ * than asserted away.
+ */
+function memberId(req: AuthRequest): string {
+  const id = req.user?.id;
+  if (!id) throw new ApiError(401, 'Authentication required');
+  return id;
+}
+
 const REGION_KEYS = ['ANZ', 'US', 'SEA', 'MEA', 'UK', 'EU', 'ROW'] as const;
 const CONSENT_FIELDS = [
   'consentMarketing',
@@ -1291,6 +1302,7 @@ router.patch(
       if (!errors.isEmpty()) {
         throw new ApiError(400, errors.array()[0].msg);
       }
+      const userId = memberId(req);
 
       const allowedFields = [
         'firstName', 'lastName', 'displayName', 'bio', 'headline',
@@ -1322,7 +1334,7 @@ router.patch(
           const first =
             typeof updateData.firstName === 'string'
               ? updateData.firstName.trim()
-              : (await prisma.user.findUnique({ where: { id: req.user!.id }, select: { firstName: true } }))?.firstName?.trim();
+              : (await prisma.user.findUnique({ where: { id: userId }, select: { firstName: true } }))?.firstName?.trim();
           updateData.displayName = first || null;
         } else {
           updateData.displayName = chosen.value;
@@ -1330,7 +1342,7 @@ router.patch(
       }
 
       const user = await prisma.user.update({
-        where: { id: req.user!.id },
+        where: { id: userId },
         data: updateData,
         select: {
           id: true,
@@ -1607,7 +1619,7 @@ router.patch(
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       const data = parseStrict(extendedProfileSchema, req.body);
-      const userId = req.user!.id;
+      const userId = memberId(req);
 
       const profile = await prisma.profile.upsert({
         where: { userId },
@@ -1855,8 +1867,9 @@ router.post(
 router.post('/:id/follow', authenticate, followLimiter, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
+    const followerId = memberId(req);
 
-    if (id === req.user!.id) {
+    if (id === followerId) {
       throw new ApiError(400, 'Cannot follow yourself');
     }
 
@@ -1874,7 +1887,7 @@ router.post('/:id/follow', authenticate, followLimiter, async (req: AuthRequest,
     // member who had blocked it, which created the row and rang her phone. The
     // check fails the request if the block lists cannot be read, rather than
     // answering "not blocked" on a guess.
-    if (await isBlockedEitherWay(req.user!.id, id)) {
+    if (await isBlockedEitherWay(followerId, id)) {
       throw new ApiError(404, 'User not found');
     }
 
@@ -1882,7 +1895,7 @@ router.post('/:id/follow', authenticate, followLimiter, async (req: AuthRequest,
     const existingFollow = await prisma.follow.findUnique({
       where: {
         followerId_followingId: {
-          followerId: req.user!.id,
+          followerId,
           followingId: id,
         },
       },
@@ -1900,23 +1913,23 @@ router.post('/:id/follow', authenticate, followLimiter, async (req: AuthRequest,
     // time round, and the per-member limit above allows sixty a window. Only a
     // press that would create something is counted, so pressing a button that
     // is already on costs nothing.
-    if (!(await withinTargetLimit('follow', req.user!.id, id))) {
+    if (!(await withinTargetLimit('follow', followerId, id))) {
       throw new ApiError(429, 'You have asked to follow this member several times in the last hour. Please wait a while before trying again.');
     }
 
     // Members who approve their followers get a request instead of a follow.
     if (await approvesFollowers(id)) {
       const request = await prisma.followRequest.upsert({
-        where: { requesterId_targetId: { requesterId: req.user!.id, targetId: id } },
+        where: { requesterId_targetId: { requesterId: followerId, targetId: id } },
         update: { status: 'PENDING' },
-        create: { requesterId: req.user!.id, targetId: id },
+        create: { requesterId: followerId, targetId: id },
         select: { id: true, status: true, updatedAt: true, createdAt: true },
       });
       // Only a fresh request rings the bell; a re-press of the button does not.
       if (request.createdAt.getTime() === request.updatedAt.getTime() || Date.now() - request.updatedAt.getTime() < 1500) {
         await notifySocial({
           recipientId: id,
-          actorId: req.user!.id,
+          actorId: followerId,
           type: 'FOLLOW_REQUEST',
           title: 'Follow request',
           message: (name) => `${name} asked to follow you`,
@@ -1929,7 +1942,7 @@ router.post('/:id/follow', authenticate, followLimiter, async (req: AuthRequest,
 
     await prisma.follow.create({
       data: {
-        followerId: req.user!.id,
+        followerId,
         followingId: id,
       },
     });
@@ -1938,11 +1951,11 @@ router.post('/:id/follow', authenticate, followLimiter, async (req: AuthRequest,
     // public profile rather than a /users route the web client has never had.
     await notifySocial({
       recipientId: id,
-      actorId: req.user!.id,
+      actorId: followerId,
       type: 'FOLLOW',
       title: 'New follower',
       message: (name) => `${name} started following you`,
-      link: socialLinks.profile(req.user!.id),
+      link: socialLinks.profile(followerId),
     });
 
     res.json({

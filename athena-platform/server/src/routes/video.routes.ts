@@ -23,6 +23,16 @@ import { commentLimiter, postLimiter, reactionLimiter, withinTargetLimit } from 
 
 const router = Router();
 
+/**
+ * The member behind a request on a route mounted behind `authenticate`. The
+ * middleware has always set her, so the refusal is never reached in practice;
+ * the check is what lets a handler read her without a `req.user!` assertion.
+ */
+function member(req: AuthRequest) {
+  if (!req.user) throw new ApiError(401, 'Authentication required');
+  return req.user;
+}
+
 // How long one member's watch of one reel stands for a single counted view
 // lives with the creator dashboard, which replays the same rule over the stored
 // watches to say how many views fell on each day. One constant keeps the view
@@ -376,7 +386,7 @@ router.get('/trending', optionalAuth, async (req: AuthRequest, res, next) => {
 // ===========================================
 router.get('/bookmarked', authenticate, async (req: AuthRequest, res, next) => {
   try {
-    const viewerId = req.user!.id;
+    const viewerId = member(req).id;
     const page = parsePage(req.query.page);
     const limit = parseLimit(req.query.limit, 20, 50);
     // A reel she saved stays in her list only while she may still be shown its
@@ -563,6 +573,7 @@ router.post(
       if (!errors.isEmpty()) {
         throw new ApiError(400, errors.array()[0].msg);
       }
+      const author = member(req);
 
       const title = normalizeOptionalUserText(req.body.title, {
         field: 'title',
@@ -596,7 +607,7 @@ router.post(
         // her, is in Safe Mode, or has a private or connections-only profile she
         // is outside of) is not one she may re-publish, and the answer is the one
         // for a reel that is not there.
-        if (!(await canViewAuthor(req.user!.id, original.authorId))) {
+        if (!(await canViewAuthor(author.id, original.authorId))) {
           throw new ApiError(400, 'That reel cannot be duetted');
         }
       }
@@ -616,12 +627,12 @@ router.post(
       // because they are read as one caption.
       const caption = [title, description].filter(Boolean).join('\n');
       if (caption) {
-        await assertContentAllowed(caption, { kind: 'caption', userId: req.user!.id });
+        await assertContentAllowed(caption, { kind: 'caption', userId: author.id });
       }
 
       const created = await prisma.video.create({
         data: {
-          authorId: req.user!.id,
+          authorId: author.id,
           title,
           description,
           type: req.body.type,
@@ -656,7 +667,7 @@ router.post(
       if (duetOfVideoId) {
         await prisma.video.update({ where: { id: duetOfVideoId }, data: { duetCount: { increment: 1 } } });
       }
-      enqueueVideoProcessing(created.id, req.user!.id);
+      enqueueVideoProcessing(created.id, author.id);
 
       res.status(201).json({ success: true, data: created });
     } catch (error) {
@@ -937,12 +948,13 @@ router.post(
       }
 
       const { id } = req.params;
-      const video = await loadPublicVideo(id, req.user);
+      const viewer = member(req);
+      const video = await loadPublicVideo(id, viewer);
 
       // The per-member limit above is across everything a member does; this is
       // across what she does to one member. Her own reel is never limited, and
       // the count is the one comments under that member's posts share.
-      if (video.authorId !== req.user!.id && !(await withinTargetLimit('comment', req.user!.id, video.authorId))) {
+      if (video.authorId !== viewer.id && !(await withinTargetLimit('comment', viewer.id, video.authorId))) {
         throw new ApiError(429, 'You have commented a lot on reels by this member in the last hour. Please give the conversation a rest for a while.');
       }
 
@@ -978,12 +990,12 @@ router.post(
       // Screened once the reel and the parent comment are known to be real, and
       // before the row exists, so a comment a provider refuses is never shown
       // under somebody's reel and never notifies her that it arrived.
-      await assertContentAllowed(content, { kind: 'comment', userId: req.user!.id });
+      await assertContentAllowed(content, { kind: 'comment', userId: viewer.id });
 
       const comment = await prisma.videoComment.create({
         data: {
           videoId: id,
-          authorId: req.user!.id,
+          authorId: viewer.id,
           content,
           parentId: resolvedParentId,
         },
@@ -997,7 +1009,7 @@ router.post(
 
       await notifySocial({
         recipientId: video.authorId,
-        actorId: req.user!.id,
+        actorId: viewer.id,
         type: 'COMMENT',
         title: 'New comment',
         message: (name) => `${name} commented on your reel`,
@@ -1007,7 +1019,7 @@ router.post(
       if (parentAuthorId && parentAuthorId !== video.authorId) {
         await notifySocial({
           recipientId: parentAuthorId,
-          actorId: req.user!.id,
+          actorId: viewer.id,
           type: 'COMMENT',
           title: 'New reply',
           message: (name) => `${name} replied to your comment`,

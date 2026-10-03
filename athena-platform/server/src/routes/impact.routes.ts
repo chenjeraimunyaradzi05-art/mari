@@ -23,6 +23,16 @@ import { planColumnValue, presentSafetyPlan } from '../utils/safety-plan-seal';
 
 const router = Router();
 
+/**
+ * The signed-in member. Used only behind `authenticate`, which has already
+ * answered 401 before a handler runs, so this never refuses in practice: it
+ * narrows `req.user` for the compiler in place of a `!`.
+ */
+function member(req: AuthRequest) {
+  if (!req.user) throw new ApiError(401, 'Authentication required');
+  return req.user;
+}
+
 // ===========================================
 // INPUT
 // ===========================================
@@ -590,7 +600,7 @@ router.get('/dv-services', async (req: Request, res: Response, next: NextFunctio
 // which is what the page words its promise from.
 router.get('/safety-plan', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const userId = req.user!.id;
+    const userId = member(req).id;
 
     const safetyPlan = await prisma.safetyPlan.findUnique({
       where: { userId },
@@ -622,7 +632,7 @@ const safetyPlanSchema = z.object({
 // POST /api/impact/safety-plan - Create/update safety plan
 router.post('/safety-plan', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const userId = req.user!.id;
+    const userId = member(req).id;
     const plan = parse(safetyPlanSchema, req.body);
 
     // A part she sent is sealed before it is written; one she left out is
@@ -657,7 +667,7 @@ router.post('/safety-plan', authenticate, async (req: AuthRequest, res: Response
 // kept for years saying she had a plan is the thing she is asking to be rid of.
 router.delete('/safety-plan', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const userId = req.user!.id;
+    const userId = member(req).id;
 
     const { count } = await prisma.safetyPlan.deleteMany({ where: { userId } });
     logger.info('Safety plan deleted', { userId, hadPlan: count > 0 });

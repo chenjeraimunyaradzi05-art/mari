@@ -34,6 +34,16 @@ import {
 
 const router = Router();
 
+/**
+ * The member `authenticate` put on the request. Every route in this file is
+ * mounted behind that middleware, so a request with no principal never reaches
+ * a handler; the check is here so the type says so too, with no non-null assertion.
+ */
+function member(req: AuthRequest) {
+  if (!req.user) throw new ApiError(401, 'Authentication required');
+  return req.user;
+}
+
 // Identity checks run through Stripe Identity when a key is configured: the
 // member photographs her document and a selfie on Stripe's hosted page, and
 // the webhook approves the badge when the check passes. Without a key the
@@ -146,7 +156,7 @@ router.get('/badges', authenticate, async (req: AuthRequest, res: Response, next
       // review read as "Identity: Verified" on the verification page while
       // nothing had set the verified tick on her profile, and its evidence (the
       // name on a document) came back in a list built for the badges.
-      where: { userId: req.user!.id, NOT: womanGateBadgeFilter },
+      where: { userId: member(req).id, NOT: womanGateBadgeFilter },
       orderBy: { submittedAt: 'desc' },
     });
 
@@ -220,7 +230,7 @@ router.get('/badges/:id/checks', authenticate, requireRole('ADMIN'), async (req:
 // only.
 router.get('/eligibility', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    res.json({ success: true, data: { creator: await creatorEligibility(req.user!.id) } });
+    res.json({ success: true, data: { creator: await creatorEligibility(member(req).id) } });
   } catch (error) {
     next(error);
   }
@@ -529,6 +539,7 @@ router.post(
         throw new ApiError(400, errors.array()[0].msg);
       }
 
+      const userId = member(req).id;
       const type = req.body.type as BadgeType;
 
       // Asked of what was sent, before anything is dropped: only an employer or
@@ -552,7 +563,7 @@ router.post(
       // a woman who runs two of them can apply for both.
       const waiting = await prisma.verificationBadge.findFirst({
         where: {
-          userId: req.user!.id,
+          userId,
           type,
           status: 'PENDING',
           NOT: womanGateBadgeFilter,
@@ -566,7 +577,7 @@ router.post(
 
       if (type === 'IDENTITY') {
         const approved = await prisma.verificationBadge.findFirst({
-          where: { userId: req.user!.id, type: 'IDENTITY', status: 'APPROVED', NOT: womanGateBadgeFilter },
+          where: { userId, type: 'IDENTITY', status: 'APPROVED', NOT: womanGateBadgeFilter },
           select: { id: true },
         });
         if (approved) {
@@ -578,7 +589,7 @@ router.post(
       // count both, so it does not queue an application it already knows the
       // answer to.
       if (type === 'CREATOR') {
-        const eligibility = await creatorEligibility(req.user!.id);
+        const eligibility = await creatorEligibility(userId);
         if (!eligibility.eligible) {
           throw new ApiError(409, `${creatorRefusal(eligibility)} You can apply once you get there.`);
         }
@@ -588,7 +599,7 @@ router.post(
       // unless the applicant runs it; otherwise she would wait on a review
       // that could never verify the organisation.
       if (organizationId) {
-        const { allowed, organization } = await canVerifyOrganisation(organizationId, req.user!.id);
+        const { allowed, organization } = await canVerifyOrganisation(organizationId, userId);
         if (!organization || !allowed) {
           throw new ApiError(403, 'Only an owner or admin of the organisation can apply for its verification');
         }
@@ -599,7 +610,7 @@ router.post(
 
       const badge = await prisma.verificationBadge.create({
         data: {
-          userId: req.user!.id,
+          userId,
           type,
           status: 'PENDING',
           metadata: metadata ?? undefined,
@@ -786,8 +797,9 @@ async function organisationOwnerIds(organizationId: string): Promise<string[]> {
 router.get('/host-safety/:orgId', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { orgId } = req.params;
-    const membership = await acceptedMembership(orgId, req.user!.id);
-    const isStaff = req.user!.role === 'ADMIN';
+    const user = member(req);
+    const membership = await acceptedMembership(orgId, user.id);
+    const isStaff = user.role === 'ADMIN';
     // To someone who is not on the organisation's team it does not exist, so
     // the route cannot be used to find out which organisations are hosts.
     if (!membership && !isStaff) throw new ApiError(404, 'Organisation not found');
@@ -831,19 +843,20 @@ router.get('/host-safety/:orgId', authenticate, async (req: AuthRequest, res: Re
 router.post('/host-safety/:orgId', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { orgId } = req.params;
-    const membership = await acceptedMembership(orgId, req.user!.id);
+    const userId = member(req).id;
+    const membership = await acceptedMembership(orgId, userId);
     if (!membership) throw new ApiError(404, 'Organisation not found');
     if (!ORGANISATION_VERIFYING_ROLES.has(membership.role)) {
       throw new ApiError(403, 'Only an owner or admin of the organisation can send its safety attestation');
     }
 
     const input = parseHostInput(hostAttestationSchema, req.body);
-    const row = await submitHostAttestation(orgId, req.user!.id, input);
+    const row = await submitHostAttestation(orgId, userId, input);
 
     await logAudit({
       action: 'USER_VERIFICATION_SUBMIT',
-      actorUserId: req.user!.id,
-      targetUserId: req.user!.id,
+      actorUserId: userId,
+      targetUserId: userId,
       ipAddress: req.ip,
       userAgent: req.get('user-agent') || undefined,
       metadata: { type: 'HOST_SAFETY_ATTESTATION', organizationId: orgId, attestationId: row.id },
@@ -927,6 +940,7 @@ router.get('/host-safety-queue', authenticate, requireRole('ADMIN'), async (_req
 router.patch('/host-safety-attestations/:id', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
+    const reviewerId = member(req).id;
     const decision = parseHostInput(hostDecisionSchema, req.body);
 
     const existing = await prisma.hostEmployerSafetyAttestation.findUnique({ where: { id }, select: { organizationId: true } });
@@ -935,7 +949,7 @@ router.patch('/host-safety-attestations/:id', authenticate, requireRole('ADMIN')
     // Staff do not decide the attestation of an organisation they belong to: a
     // check the checked party can pass for itself is not a check.
     const reviewerMembership = await prisma.organizationMember.findUnique({
-      where: { organizationId_userId: { organizationId: existing.organizationId, userId: req.user!.id } },
+      where: { organizationId_userId: { organizationId: existing.organizationId, userId: reviewerId } },
       select: { id: true },
     });
     if (reviewerMembership) {
@@ -943,7 +957,7 @@ router.patch('/host-safety-attestations/:id', authenticate, requireRole('ADMIN')
     }
 
     const now = new Date();
-    const { before, after } = await decideHostAttestation(id, decision, req.user!.id, now);
+    const { before, after } = await decideHostAttestation(id, decision, reviewerId, now);
     const organization = await prisma.organization.findUnique({ where: { id: after.organizationId }, select: { name: true, isVerified: true } });
     const orgName = organization?.name ?? 'Your organisation';
     const approved = decision.decision === 'APPROVE';

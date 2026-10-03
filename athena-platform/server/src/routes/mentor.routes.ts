@@ -21,6 +21,17 @@ import { startingAPayment } from '../middleware/moneyLimits';
 
 const router = Router();
 
+/**
+ * The signed-in member's id, for the routes that sit behind `authenticate`.
+ * A missing one means the route was wired without it, so it is refused rather
+ * than asserted away.
+ */
+function memberId(req: AuthRequest): string {
+  const id = req.user?.id;
+  if (!id) throw new ApiError(401, 'Authentication required');
+  return id;
+}
+
 // ==========================================
 // PUBLIC / SEMI-PUBLIC ENDPOINTS
 // ==========================================
@@ -418,7 +429,7 @@ router.post(
       if (!errors.isEmpty()) {
         throw new ApiError(400, errors.array()[0].msg);
       }
-      const session = await openSessionDispute(req.params.sessionId, req.user!.id, req.body.reason);
+      const session = await openSessionDispute(req.params.sessionId, memberId(req), req.body.reason);
       res.status(201).json({ success: true, data: forMember(session) });
     } catch (error) {
       next(error);
@@ -440,7 +451,7 @@ router.post(
       if (!errors.isEmpty()) {
         throw new ApiError(400, errors.array()[0].msg);
       }
-      const session = await answerSessionDispute(req.params.sessionId, req.user!.id, req.body.response);
+      const session = await answerSessionDispute(req.params.sessionId, memberId(req), req.body.response);
       res.json({ success: true, data: forMember(session) });
     } catch (error) {
       next(error);

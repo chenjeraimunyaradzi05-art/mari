@@ -75,6 +75,20 @@ describe('check-debt-ratchet', () => {
       expect(ratchet.countDebt('src/routes/b.routes.ts', withExpressValidator)['unvalidated-route-handlers']).toBe(0);
     });
 
+    it('does not count a handler that never reads its request, since it has nothing to validate', () => {
+      const source = `
+        import { Router } from 'express';
+        const router = Router();
+        router.get('/', (_req, res, next) => { res.json(schedule()); });
+        router.get('/probe', (req, res) => { res.json({ ok: true }); });
+        router.post('/pay', (req, res) => { pay(req.body); });
+        router.post('/helper', (req, res) => { pay(parse(req)); });
+        router.patch('/:id', ({ params }, res) => { update(params.id); });
+        export default router;
+      `;
+      expect(ratchet.countDebt('src/routes/fees.routes.ts', source)['unvalidated-route-handlers']).toBe(3);
+    });
+
     it('counts handlers only in route files', () => {
       const source = `router.get('/', handler);`;
       expect(ratchet.countDebt('src/services/not-a-route.ts', source)['unvalidated-route-handlers']).toBe(0);

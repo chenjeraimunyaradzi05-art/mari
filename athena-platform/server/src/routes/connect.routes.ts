@@ -28,6 +28,16 @@ import { idempotencyWindow } from '../utils/idempotency';
 
 const router = Router();
 
+/**
+ * The signed-in member. Every route here sits behind `authenticate`, which has
+ * already answered 401 before a handler runs, so this never refuses in
+ * practice: it narrows `req.user` for the compiler in place of a `!`.
+ */
+function member(req: AuthRequest) {
+  if (!req.user) throw new ApiError(401, 'Authentication required');
+  return req.user;
+}
+
 // A ceiling so a typo or a tampered request cannot ask Stripe to move an
 // implausible sum. Well above any real ATHENA balance today; it exists to make
 // a wrong number fail here rather than at the bank.
@@ -55,15 +65,16 @@ const connectedAccountBody = z.object({
 router.post('/account', authenticate, requireAdultAccount, zodBody(connectedAccountBody), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { businessType, type } = req.body as z.output<typeof connectedAccountBody>;
+    const user = member(req);
 
     if (type === 'creator') {
-      const refusal = await creatorTermsRefusal(req.user!.id);
+      const refusal = await creatorTermsRefusal(user.id);
       if (refusal) return res.status(403).json(refusal);
     }
 
     const account = await stripeConnectService.createConnectedAccount({
-      userId: req.user!.id,
-      email: req.user!.email,
+      userId: user.id,
+      email: user.email,
       country: 'AU', // Default to Australia
       type,
       businessType,
@@ -137,11 +148,12 @@ const MAX_ESCROW_AMOUNT_MINOR = 10_000_000; // A$100,000 in cents
 router.post('/escrow', authenticate, startingAPayment, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { recipientId, amount, currency, description, sessionType, reference } = req.body ?? {};
+    const buyerId = member(req).id;
 
     if (typeof recipientId !== 'string' || !recipientId.trim()) {
       throw new ApiError(400, 'Say who the payment is for');
     }
-    if (recipientId === req.user!.id) {
+    if (recipientId === buyerId) {
       throw new ApiError(400, 'You cannot hold a payment to yourself');
     }
     // In the currency's smallest unit, as createEscrowPayment and Stripe take it.
@@ -168,7 +180,6 @@ router.post('/escrow', authenticate, startingAPayment, async (req: AuthRequest, 
       throw new ApiError(400, 'reference must be text of at most 200 characters');
     }
 
-    const buyerId = req.user!.id;
     const escrowPayment = await stripeConnectService.createEscrowPayment({
       buyerId,
       sellerId: recipientId,

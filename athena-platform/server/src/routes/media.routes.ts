@@ -46,6 +46,16 @@ import { CHAT_FOLDER, CHAT_LINK_SECONDS, chatObjectKey, parseChatKey } from '../
 
 const router = Router();
 
+/**
+ * The member behind a request on a route mounted behind `authenticate`. The
+ * middleware has always set her, so the refusal is never reached in practice;
+ * the check is what lets a handler read her without a `req.user!` assertion.
+ */
+function member(req: AuthRequest) {
+  if (!req.user) throw new ApiError(401, 'Authentication required');
+  return req.user;
+}
+
 /** Enough of the start of a file for every signature checkFileContent knows. */
 const SIGNATURE_BYTES = 4096;
 
@@ -708,7 +718,7 @@ const onlyForChat =
 
 async function chatAudience(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    res.locals.chatScopeId = await resolveChatUploadScope(req.user!.id, req.query);
+    res.locals.chatScopeId = await resolveChatUploadScope(member(req).id, req.query);
     next();
   } catch (error) {
     next(error);
@@ -785,7 +795,7 @@ router.post(
 
       await assertContentMatches(file);
 
-      const userId = req.user!.id;
+      const userId = member(req).id;
 
       // Looked inside before anything is rewritten, moderated or stored, and as
       // received: a video is scanned from its temporary file, ahead of the
@@ -930,7 +940,8 @@ router.delete('/delete', authenticate, async (req: AuthRequest, res, next) => {
       throw new ApiError(400, 'File key is required');
     }
 
-    const { normalizedKey, folder } = validateOwnedUploadKey(key, req.user!.id);
+    const userId = member(req).id;
+    const { normalizedKey, folder } = validateOwnedUploadKey(key, userId);
 
     // A file sent in a conversation goes with its message, and with nothing
     // else: unsending the message removes it, and the sweep and an erasure do
@@ -979,7 +990,7 @@ router.delete('/delete', authenticate, async (req: AuthRequest, res, next) => {
       throw new ApiError(404, 'File not found');
     }
 
-    logger.info(`File deleted: ${normalizedKey} by user ${req.user!.id}`);
+    logger.info(`File deleted: ${normalizedKey} by user ${userId}`);
 
     res.json({
       success: true,
@@ -1015,7 +1026,7 @@ router.post('/download-url', authenticate, async (req: AuthRequest, res, next) =
       throw new ApiError(400, 'File key is required');
     }
 
-    const { normalizedKey, folder } = await resolveReadableUploadKey(key, req.user!);
+    const { normalizedKey, folder } = await resolveReadableUploadKey(key, member(req));
     const visibility = PRIVATE_UPLOAD_FOLDERS.has(folder) ? 'private' : 'public';
     const fileName = path.basename(normalizedKey);
 
@@ -1062,7 +1073,7 @@ router.get('/local/*', authenticate, async (req: AuthRequest, res, next) => {
       throw new ApiError(400, 'File key is required');
     }
 
-    const { normalizedKey, folder } = await resolveReadableUploadKey(key, req.user!);
+    const { normalizedKey, folder } = await resolveReadableUploadKey(key, member(req));
 
     if (!PRIVATE_UPLOAD_FOLDERS.has(folder)) {
       throw new ApiError(404, 'File not found');
@@ -1123,19 +1134,20 @@ router.post('/resume', authenticate, uploadLimiter, receiveUpload(() => FILE_CON
     // is refused in production (see services/malware-scan.service).
     await screenUpload({ buffer: file.buffer }, { folder: config.folder, userId: req.user?.id, contentType: file.mimetype });
 
+    const userId = member(req).id;
     const fileExtension = getSafeExtensionForContentType(file.mimetype);
-    const key = `${config.folder}/${req.user!.id}/${randomUUID()}${fileExtension}`;
+    const key = `${config.folder}/${userId}/${randomUUID()}${fileExtension}`;
 
     const publicUrl = await storeUploadedBuffer({
       key,
       body: file.buffer,
       contentType: file.mimetype,
       visibility: config.visibility,
-      userId: req.user!.id,
+      userId,
       originalName: file.originalname,
     });
 
-    logger.info(`Resume uploaded: ${key} by user ${req.user!.id}`);
+    logger.info(`Resume uploaded: ${key} by user ${userId}`);
 
     res.json({
       success: true,
@@ -1164,6 +1176,7 @@ router.post('/post-images', authenticate, uploadLimiter, receiveUpload(() => FIL
     }
 
     const config = FILE_CONFIGS.post;
+    const userId = member(req).id;
     const uploadedFiles = [];
 
     // Every picture is looked inside before the first is stored, so a refusal
@@ -1216,14 +1229,14 @@ router.post('/post-images', authenticate, uploadLimiter, receiveUpload(() => FIL
         contentType === 'image/webp'
           ? '.webp'
           : getSafeExtensionForContentType(contentType);
-      const key = `${config.folder}/${req.user!.id}/${randomUUID()}${fileExtension}`;
+      const key = `${config.folder}/${userId}/${randomUUID()}${fileExtension}`;
 
       const fileUrl = await storeUploadedBuffer({
         key,
         body: processedBuffer,
         contentType,
         visibility: config.visibility,
-        userId: req.user!.id,
+        userId,
         originalName: file.originalname,
       });
 
@@ -1235,7 +1248,7 @@ router.post('/post-images', authenticate, uploadLimiter, receiveUpload(() => FIL
       });
     }
 
-    logger.info(`${uploadedFiles.length} post images uploaded by user ${req.user!.id}`);
+    logger.info(`${uploadedFiles.length} post images uploaded by user ${userId}`);
 
     res.json({
       success: true,

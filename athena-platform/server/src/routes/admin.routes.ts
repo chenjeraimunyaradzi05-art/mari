@@ -908,8 +908,10 @@ const twoFactorResetSchema = z
 router.post('/users/:id/two-factor/reset', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { reason } = parseOr400(twoFactorResetSchema, req.body);
+    const actorId = req.user?.id;
+    if (!actorId) throw new ApiError(401, 'Authentication required');
 
-    const result = await resetTwoFactor({ targetUserId: req.params.id, actorId: req.user!.id });
+    const result = await resetTwoFactor({ targetUserId: req.params.id, actorId });
 
     await recordAdminAction(req, 'USER_TWO_FACTOR_RESET', {
       resourceType: 'User',
@@ -2955,7 +2957,9 @@ const adminGroupFields = z.object({
 
 router.post('/groups', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { name = '', description = '', createdById = req.user!.id } = parseOr400(adminGroupFields, req.body ?? {});
+    const actorId = req.user?.id;
+    if (!actorId) throw new ApiError(401, 'Authentication required');
+    const { name = '', description = '', createdById = actorId } = parseOr400(adminGroupFields, req.body ?? {});
     const privacy = normalizeGroupPrivacy(req.body?.privacy ?? 'public') ?? 'PUBLIC';
 
     if (!name || name.length < 3) return res.status(400).json({ error: 'Group name is required' });

@@ -175,7 +175,8 @@ function countDebt(fileName, text) {
         ROUTER_NAME.test(node.expression.expression.text) &&
         first &&
         (ts.isStringLiteral(first) || ts.isNoSubstitutionTemplateLiteral(first)) &&
-        first.text.startsWith('/')
+        first.text.startsWith('/') &&
+        readsItsRequest(node)
       ) {
         routeHandlers += 1;
       }
@@ -186,6 +187,35 @@ function countDebt(fileName, text) {
 
   if (/\.routes\.ts$/.test(fileName) && !validated) counts['unvalidated-route-handlers'] = routeHandlers;
   return counts;
+}
+
+/**
+ * Whether any handler passed to this route registration reads its request.
+ *
+ * A handler that never touches `req` — a fee schedule, a health probe, a
+ * public list with no filters — has no input, so there is nothing a validator
+ * could check, and counting it told the author to import zod for a parameter
+ * named `_req`. The test is deliberately narrow: the first parameter is unused
+ * in the body (or carries the `_` prefix that says so). A handler that hands
+ * `req` to a helper still counts, because the helper may be reading the body.
+ */
+function readsItsRequest(call) {
+  const handlers = call.arguments.filter((arg) => ts.isArrowFunction(arg) || ts.isFunctionExpression(arg));
+  if (handlers.length === 0) return true; // handlers named elsewhere: nothing to inspect, keep counting
+  return handlers.some((fn) => {
+    const [reqParam] = fn.parameters;
+    if (!reqParam || !ts.isIdentifier(reqParam.name)) return true; // destructured request: it reads something
+    const name = reqParam.name.text;
+    if (name.startsWith('_')) return false;
+    let used = false;
+    const look = (node) => {
+      if (used) return;
+      if (ts.isIdentifier(node) && node.text === name && node !== reqParam.name) used = true;
+      else ts.forEachChild(node, look);
+    };
+    if (fn.body) look(fn.body);
+    return used;
+  });
 }
 
 /** { metric: { 'src/relative/path.ts': count } }, with files at zero left out. */

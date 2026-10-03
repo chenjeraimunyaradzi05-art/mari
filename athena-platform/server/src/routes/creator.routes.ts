@@ -24,6 +24,17 @@ import { GIFT_POINT_VALUE_AUD, MINIMUM_PAYOUT_AUD } from '../config/price-book';
 
 const router = Router();
 
+/**
+ * The signed-in member. Used only behind `authenticate`, which has already
+ * answered 401 before a handler runs, so this never refuses in practice: it
+ * narrows `req.user` for the compiler in place of a `!`. The optionalAuth
+ * routes read `req.user` directly, because there she may be absent.
+ */
+function member(req: AuthRequest) {
+  if (!req.user) throw new ApiError(401, 'Authentication required');
+  return req.user;
+}
+
 // ==========================================
 // CREATOR PROFILE
 // ==========================================
@@ -120,7 +131,7 @@ router.post(
         throw new ApiError(400, errors.array()[0].msg);
       }
 
-      const profile = await creatorService.enableCreatorMode(req.user!.id, undefined, CREATOR_TERMS_VERSION);
+      const profile = await creatorService.enableCreatorMode(member(req).id, undefined, CREATOR_TERMS_VERSION);
 
       res.status(201).json({
         success: true,
@@ -150,7 +161,7 @@ router.post(
       if (!errors.isEmpty()) {
         throw new ApiError(400, errors.array()[0].msg);
       }
-      const result = await creatorService.acceptCreatorTerms(req.user!.id, req.body.version);
+      const result = await creatorService.acceptCreatorTerms(member(req).id, req.body.version);
       res.json({ success: true, message: 'Thank you. You have accepted the Creator Terms Addendum.', data: result });
     } catch (error) {
       next(error);

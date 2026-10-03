@@ -677,6 +677,16 @@ async function clearCredentialChecks(userId: string): Promise<void> {
 }
 
 /**
+ * The account `authenticate` put on the request. The routes that call this are
+ * mounted behind that middleware, so a request with no principal never reaches
+ * them; the check is here so the type says so too, with no non-null assertion.
+ */
+function signedIn(req: AuthRequest) {
+  if (!req.user) throw new ApiError(401, 'Authentication required');
+  return req.user;
+}
+
+/**
  * Asks a signed-in member to prove it is her at the keyboard, for an action a
  * stolen session or an unlocked phone must not be enough for: her password when
  * the account has one, and a live second factor (an authenticator code or an
@@ -2816,11 +2826,12 @@ router.post(
         throw new ApiError(400, errors.array()[0].msg);
       }
 
-      await refuseLockedCredentialChecks(req.user!.id);
+      const principal = signedIn(req);
+      await refuseLockedCredentialChecks(principal.id);
 
       const { currentPassword, newPassword } = req.body;
       const user = await prisma.user.findUnique({
-        where: { id: req.user!.id },
+        where: { id: principal.id },
         select: { id: true, passwordHash: true },
       });
 
@@ -2850,7 +2861,7 @@ router.post(
       // Every other device is signed out, sockets included; this one stays.
       await sessionService.revokeAllUserSessions(user.id, {
         reason: 'password-changed',
-        exceptSessionId: req.user!.sessionId,
+        exceptSessionId: principal.sessionId,
       });
 
       res.json({
@@ -2965,10 +2976,11 @@ router.post(
         throw new ApiError(400, errors.array()[0].msg);
       }
 
-      await refuseLockedCredentialChecks(req.user!.id);
+      const userId = signedIn(req).id;
+      await refuseLockedCredentialChecks(userId);
 
       const user = await prisma.user.findUnique({
-        where: { id: req.user!.id },
+        where: { id: userId },
         select: {
           id: true,
           passwordHash: true,
@@ -3045,10 +3057,11 @@ router.post(
         throw new ApiError(400, errors.array()[0].msg);
       }
 
-      await refuseLockedCredentialChecks(req.user!.id);
+      const userId = signedIn(req).id;
+      await refuseLockedCredentialChecks(userId);
 
       const user = await prisma.user.findUnique({
-        where: { id: req.user!.id },
+        where: { id: userId },
         select: {
           id: true,
           passwordHash: true,
@@ -3126,10 +3139,11 @@ router.post(
         throw new ApiError(400, errors.array()[0].msg);
       }
 
-      await refuseLockedCredentialChecks(req.user!.id);
+      const userId = signedIn(req).id;
+      await refuseLockedCredentialChecks(userId);
 
       const user = await prisma.user.findUnique({
-        where: { id: req.user!.id },
+        where: { id: userId },
         select: {
           id: true,
           passwordHash: true,
@@ -3617,7 +3631,7 @@ function lockedMessage(outcome: { alreadyLocked: boolean; unlockEmailSent: boole
 
 router.post('/lock', authenticate, accountLockLimit, async (req: AuthRequest, res, next) => {
   try {
-    const outcome = await lockAccount(req.user!.id, 'settings', {
+    const outcome = await lockAccount(signedIn(req).id, 'settings', {
       ipAddress: req.ip ?? null,
       userAgent: req.get('user-agent') || null,
     });

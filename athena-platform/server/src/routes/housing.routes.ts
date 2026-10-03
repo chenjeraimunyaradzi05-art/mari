@@ -971,7 +971,9 @@ router.get('/my/listings', authenticate, async (req: AuthRequest, res: Response,
 // GET /api/housing/my/provider-check - Where the member's check stands, and what asking involves
 router.get('/my/provider-check', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const row = await prisma.housingProviderVerification.findUnique({ where: { userId: req.user!.id } });
+    const userId = req.user?.id;
+    if (!userId) throw new ApiError(401, 'Authentication required');
+    const row = await prisma.housingProviderVerification.findUnique({ where: { userId } });
     res.json({
       success: true,
       data: {
@@ -989,16 +991,18 @@ router.get('/my/provider-check', authenticate, async (req: AuthRequest, res: Res
 router.post('/my/provider-check', authenticate, requireWomanMember, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const input = parseProviderInput(providerApplicationSchema, req.body);
-    const row = await submitProviderCheck(req.user!.id, input);
+    const userId = req.user?.id;
+    if (!userId) throw new ApiError(401, 'Authentication required');
+    const row = await submitProviderCheck(userId, input);
 
     await noteAdmins(
       'A housing provider asks to be checked',
       `${input.providerName} asks to be checked as a provider of safe housing. Any of their DV-safe, emergency or transitional places that need the badge wait on it.`,
       '/admin/housing#provider-checks',
-      { kind: 'HOUSING_PROVIDER_CHECK', userId: req.user!.id }
+      { kind: 'HOUSING_PROVIDER_CHECK', userId }
     );
 
-    logger.info(`User ${req.user!.id} asked to be checked as a housing provider`);
+    logger.info(`User ${userId} asked to be checked as a housing provider`);
     res.status(201).json({
       success: true,
       data: presentProviderCheck(row),
@@ -1220,6 +1224,14 @@ router.patch(
       if (inquiry.listing.agentId !== req.user!.id && !isAdmin(req)) {
         throw new ApiError(403, 'Only the person who listed this place can answer inquiries');
       }
+      // A closed inquiry is closed for both sides (ASKER_MOVES). The asker's
+      // route refused to reopen one; this one wrote whatever it was sent, so a
+      // lister could set CONTACTED or APPROVED on an inquiry the woman had
+      // withdrawn and keep writing to her through the thread, each line ringing
+      // her bell. Her withdrawal is the end of the contact she agreed to, and a
+      // decline is the lister's own answer; the housing page offers no button on
+      // either, and the API now says the same.
+      if (['WITHDRAWN', 'DECLINED'].includes(inquiry.status)) throw new ApiError(409, CLOSED_INQUIRY);
       if (status === 'VIEWING_SCHEDULED' && !viewingDate) throw new ApiError(400, 'A viewing needs a date');
 
       let notes: string | undefined;
@@ -1568,14 +1580,16 @@ router.patch('/admin/provider-checks/:userId', authenticate, requireRole('ADMIN'
   try {
     const { userId } = req.params;
     const decision = parseProviderInput(providerDecisionSchema, req.body);
+    const reviewerId = req.user?.id;
+    if (!reviewerId) throw new ApiError(401, 'Authentication required');
     // A check decided by the person it is about is not a check. Another member
     // of staff has to decide it.
-    if (userId === req.user!.id) {
+    if (userId === reviewerId) {
       throw new ApiError(403, 'You cannot decide your own provider check. Ask another member of staff to.');
     }
 
     const now = new Date();
-    const { before, after } = await decideProviderCheck(userId, decision, req.user!.id, now);
+    const { before, after } = await decideProviderCheck(userId, decision, reviewerId, now);
 
     if (decision.decision === 'REJECT') {
       // The badge on this member's listings was resting on the check that has
