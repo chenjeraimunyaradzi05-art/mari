@@ -96,6 +96,8 @@ jest.mock('../../utils/prisma', () => ({
         if (where.id === 'b-unv' && where.userId === 'member') return { ...bookingRow('b-unv', 'pr-unv', -7), status: 'COMPLETED', practitioner: unverified };
         if (where.id === 'b-future' && where.practitionerId === 'pr1') return bookingRow('b-future', 'pr1', 3);
         if (where.id === 'b-past' && where.practitionerId === 'pr1') return { ...bookingRow('b-past', 'pr1', -1), status: 'CONFIRMED' };
+        // A booking the member cancelled, for a visit still ahead.
+        if (where.id === 'b-cancelled' && where.practitionerId === 'pr1') return { ...bookingRow('b-cancelled', 'pr1', 3), status: 'CANCELLED' };
         return null;
       }),
       create: jest.fn(async ({ data }: any) => ({ id: 'b1', status: 'REQUESTED', createdAt: new Date(), practitionerNote: null, meetingLink: null, shareId: null, followUpOfId: null, ...data, practitioner: { id: 'pr1', slug: 'dr-k', name: 'Dr K', kind: 'GP', headline: 'GP', telehealth: true, inPerson: false, ownerUserId: 'doctor' }, review: null })),
@@ -416,6 +418,18 @@ describe('The wellness routes', () => {
     await request(app).patch('/api/wellness/practice/bookings/b-future').set(as('doctor')).send({ status: 'CONFIRMED', meetingLink: 'https://meet.example.com/x' }).expect(200);
     await request(app).patch('/api/wellness/practice/bookings/b-past').set(as('doctor')).send({ status: 'COMPLETED' }).expect(200);
     expect(prisma.healthBooking.update).toHaveBeenLastCalledWith(expect.objectContaining({ where: { id: 'b-past' }, data: { status: 'COMPLETED' } }));
+  });
+
+  // A booking the member cancelled is closed on her side. The route wrote
+  // whatever status it was sent, so a practitioner could confirm a visit the
+  // member had cancelled, back into her upcoming list with a notice saying so.
+  it('does not let a practitioner confirm, complete or mark as missed a booking the member cancelled', async () => {
+    for (const status of ['CONFIRMED', 'COMPLETED', 'NO_SHOW', 'DECLINED']) {
+      const res = await request(app).patch('/api/wellness/practice/bookings/b-cancelled').set(as('doctor')).send({ status }).expect(400);
+      expect(res.body.message).toContain('The member cancelled this booking');
+    }
+    expect(prisma.healthBooking.update).not.toHaveBeenCalled();
+    expect(prisma.notification.create).not.toHaveBeenCalled();
   });
 
   it('puts a review comment through the same screen as a post, and files a bare rating without asking', async () => {

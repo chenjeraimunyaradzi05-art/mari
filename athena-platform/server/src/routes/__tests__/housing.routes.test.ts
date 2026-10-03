@@ -466,6 +466,24 @@ describe('Housing safety rules', () => {
       expect(told.message).toContain('Applicant 4F2A');
       expect(told.message).not.toContain('Jane');
     });
+
+    // The asker's route refuses to reopen a closed inquiry; the lister's used to
+    // write whatever it was sent, so a lister could set CONTACTED or APPROVED on
+    // an inquiry the woman had withdrawn, and keep writing to her through the
+    // thread with each line ringing her bell.
+    it('once she has withdrawn, or the lister has declined, the lister can neither reopen the inquiry nor write to her', async () => {
+      for (const status of ['WITHDRAWN', 'DECLINED']) {
+        prisma.housingInquiry.findUnique.mockResolvedValue({ id: 'inq-4f2a', userId: 'survivor', listingId: 'l-safe', status, notes: null, listing: { id: 'l-safe', title: 'Quiet unit', agentId: 'lister', dvSafe: true, type: 'RENTAL' } });
+        for (const body of [{ status: 'CONTACTED' }, { status: 'APPROVED' }, { message: 'Are you still looking?' }]) {
+          const res = await request(app).patch('/api/housing/listings/l-safe/inquiries/inq-4f2a').set(as('lister')).send(body).expect(409);
+          expect(res.body.message).toBe('This inquiry is closed');
+          // Staff answering for the lister are held to the same rule.
+          await request(app).patch('/api/housing/listings/l-safe/inquiries/inq-4f2a').set(as('staff', 'ADMIN')).send(body).expect(409);
+        }
+      }
+      expect(prisma.housingInquiry.update).not.toHaveBeenCalled();
+      expect(prisma.notification.create).not.toHaveBeenCalled();
+    });
   });
 
   describe('when the asker sees the address', () => {

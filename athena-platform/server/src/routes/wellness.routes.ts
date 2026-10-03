@@ -1554,6 +1554,14 @@ router.patch('/practice/bookings/:id', authenticate, async (req: AuthRequest, re
     const booking = await prisma.healthBooking.findFirst({ where: { id: req.params.id, practitionerId: p.id } });
     if (!booking) throw new ApiError(404, 'Booking not found');
     const data = parse(z.object({ status: z.enum(['CONFIRMED', 'DECLINED', 'COMPLETED', 'NO_SHOW']).optional(), meetingLink: httpUrl(300).nullable().optional(), practitionerNote: z.string().max(1000).nullable().optional() }), req.body);
+    // A booking the member cancelled is closed on her side. The route wrote
+    // whatever status it was sent, so a practitioner could confirm a visit the
+    // member had cancelled: it went back into her upcoming list with a notice
+    // saying it was confirmed, and once confirmed inside twenty-four hours it
+    // was no longer hers to cancel again from here.
+    if (data.status && booking.status === 'CANCELLED') {
+      throw new ApiError(400, 'The member cancelled this booking, so it cannot be confirmed, completed or marked as missed.');
+    }
     // A visit is done, or missed, once its time has passed and not before. A
     // completed booking is what lets a member leave a review, and bookings are
     // free, so a practitioner could mark a booking made for next month as done
