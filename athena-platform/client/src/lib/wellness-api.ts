@@ -91,8 +91,12 @@ export const wellnessApi = {
   book: (id: string, data: Body) => api.post(`/wellness/practitioners/${id}/bookings`, data),
   // Admin: the profiles waiting to be checked, and the decision on one.
   // `isActive: false` hides a profile from the queue as well as the directory.
+  // Verifying says where the admin looked the practitioner up (AHPRA, or the
+  // professional body by name) and what they found; the server refuses a
+  // verification without that record.
   pendingPractitioners: () => api.get('/wellness/practitioners/pending'),
-  verifyPractitioner: (id: string, data: { isVerified: boolean; isActive?: boolean }) => api.patch(`/wellness/practitioners/${id}/verify`, data),
+  verifyPractitioner: (id: string, data: { isVerified: boolean; isActive?: boolean; checkedAgainst?: 'AHPRA' | 'PROFESSIONAL_BODY'; registerName?: string; checkNote?: string }) =>
+    api.patch(`/wellness/practitioners/${id}/verify`, data),
 
   practice: () => api.get('/wellness/practice'),
   savePractice: (data: Body) => api.put('/wellness/practice', data),
@@ -106,6 +110,8 @@ export const wellnessApi = {
   bookingIcs: (id: string) => api.get(`/wellness/bookings/${id}/ics`, { responseType: 'text' }),
   circleIcs: (id: string) => api.get(`/wellness/circles/${id}/ics`, { responseType: 'text' }),
   moderateReview: (id: string, isHidden: boolean) => api.patch(`/wellness/reviews/${id}`, { isHidden }),
+  // A review of a practitioner goes to the same queue as a forum post or reply.
+  reportReview: (id: string, data: Body) => api.post(`/wellness/reviews/${id}/report`, data),
 
   badges: () => api.get('/wellness/badges'),
 

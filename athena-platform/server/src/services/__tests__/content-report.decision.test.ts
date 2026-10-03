@@ -22,6 +22,13 @@ jest.mock('../../utils/prisma', () => ({
     housingListing: { findUnique: jest.fn(async () => ({ features: ['Garden'] })), updateMany: jest.fn(async () => ({ count: 1 })) },
     wellnessPost: { updateMany: jest.fn(async () => ({ count: 1 })) },
     wellnessReply: { updateMany: jest.fn(async () => ({ count: 1 })) },
+    // A review of a practitioner, and the average its practitioner carries.
+    healthReview: {
+      findUnique: jest.fn(async ({ where }: any) => (where.id === 'review-1' ? { id: 'review-1', practitionerId: 'pr-1' } : null)),
+      update: jest.fn(async ({ where, data }: any) => ({ id: where.id, isHidden: data.isHidden })),
+      aggregate: jest.fn(async () => ({ _avg: { rating: 4 }, _count: { rating: 2 } })),
+    },
+    healthPractitioner: { update: jest.fn(async () => ({})) },
     bannedIdentity: { upsert: jest.fn(), deleteMany: jest.fn() },
   },
 }));
@@ -177,6 +184,31 @@ describe('Deciding a report', () => {
     prismaAny.contentReport.findUnique.mockResolvedValue({ ...REPORT, contentType: 'WELLNESS_POST', contentId: 'thing-1' });
     await processReportById('report-1', 'dismiss', 'moderator-1');
     expect(prismaAny.wellnessPost.updateMany).not.toHaveBeenCalled();
+  });
+
+  // A review of a practitioner can now be reported from the practitioner's page.
+  // Removing it hides it and brings the practitioner's average level with what
+  // still shows, the same two writes a moderator's Hide makes; the directory
+  // sorts on that average, so a hidden review left in it would still rank her.
+  it('hides a reported review when a moderator removes it, brings the average level, and tells its author', async () => {
+    prismaAny.contentReport.findUnique.mockResolvedValue({ ...REPORT, contentType: 'HEALTH_REVIEW', contentId: 'review-1' });
+
+    await processReportById('report-1', 'remove', 'moderator-1');
+
+    expect(prismaAny.healthReview.update).toHaveBeenCalledWith({ where: { id: 'review-1' }, data: { isHidden: true } });
+    expect(prismaAny.healthReview.aggregate).toHaveBeenCalledWith(expect.objectContaining({ where: { practitionerId: 'pr-1', isHidden: false } }));
+    expect(prismaAny.healthPractitioner.update).toHaveBeenCalledWith({ where: { id: 'pr-1' }, data: { ratingAvg: 4, ratingCount: 2 } });
+    const toAuthor = prismaAny.notification.create.mock.calls.map((c: any[]) => c[0].data).find((d: any) => d.userId === 'reported-1');
+    expect(toAuthor.message).toContain('your review of a practitioner');
+  });
+
+  it('records the decision on a review that has since gone, rather than failing it', async () => {
+    prismaAny.contentReport.findUnique.mockResolvedValue({ ...REPORT, contentType: 'HEALTH_REVIEW', contentId: 'review-gone' });
+
+    const outcome = await processReportById('report-1', 'remove', 'moderator-1');
+
+    expect(outcome.status).toBe('RESOLVED');
+    expect(prismaAny.healthReview.update).not.toHaveBeenCalled();
   });
 
   it('gives a suspension without notes the report it was decided on as its reason', async () => {
@@ -376,6 +408,19 @@ describe('Reversing enforcement on a successful appeal', () => {
 
     expect(result.contentRestored).toBe(true);
     expect(prismaAny[model].updateMany).toHaveBeenCalledWith({ where: { id: 'thing-1' }, data });
+  });
+
+  it('puts a hidden review back on an upheld appeal, and says nothing came back when the review is gone', async () => {
+    prismaAny.contentReport.findUnique.mockResolvedValue(null);
+    prismaAny.user.findUnique.mockResolvedValue({ isSuspended: false });
+
+    const result = await reverseEnforcement({ userId: 'author-1', contentType: 'HEALTH_REVIEW', contentId: 'review-1' });
+    expect(result.contentRestored).toBe(true);
+    expect(prismaAny.healthReview.update).toHaveBeenCalledWith({ where: { id: 'review-1' }, data: { isHidden: false } });
+    expect(prismaAny.healthPractitioner.update).toHaveBeenCalledWith({ where: { id: 'pr-1' }, data: { ratingAvg: 4, ratingCount: 2 } });
+
+    const gone = await reverseEnforcement({ userId: 'author-1', contentType: 'HEALTH_REVIEW', contentId: 'review-gone' });
+    expect(gone.contentRestored).toBe(false);
   });
 
   it('does not claim to have lifted a suspension that was not there', async () => {

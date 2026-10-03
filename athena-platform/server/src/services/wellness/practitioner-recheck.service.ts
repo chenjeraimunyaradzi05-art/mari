@@ -65,6 +65,8 @@ const VERIFIED_WINDOW = 2000;
 export interface VerificationCheck {
   checkedAt: Date;
   checkedById: string | null;
+  /** The register the admin looked her up on ("AHPRA", or the professional body's name), when the row says. */
+  checkedAgainst?: string | null;
 }
 
 const PRACTITIONER_APPROVAL = {
@@ -93,9 +95,14 @@ export async function lastVerificationChecks(ids: string[]): Promise<Map<string,
 
   for (const row of rows) {
     const meta = row.metadata;
-    const id = meta && typeof meta === 'object' && !Array.isArray(meta) ? (meta as Record<string, unknown>).resourceId : undefined;
+    const fields = meta && typeof meta === 'object' && !Array.isArray(meta) ? (meta as Record<string, unknown>) : {};
+    const id = fields.resourceId;
     if (typeof id !== 'string' || !wanted.has(id) || checks.has(id)) continue;
-    checks.set(id, { checkedAt: row.createdAt, checkedById: row.actorUserId });
+    // Rows from before the register was recorded carry no `check`; they are
+    // still a check, with nothing to say about where the admin looked.
+    const check = fields.check && typeof fields.check === 'object' && !Array.isArray(fields.check) ? (fields.check as Record<string, unknown>) : null;
+    const checkedAgainst = check && typeof check.registerName === 'string' && check.registerName ? check.registerName : null;
+    checks.set(id, { checkedAt: row.createdAt, checkedById: row.actorUserId, ...(checkedAgainst ? { checkedAgainst } : {}) });
   }
   return checks;
 }
@@ -106,6 +113,8 @@ export interface RecheckState {
   /** When an admin last approved her, or null when no record of it exists. */
   checkedAt: string | null;
   checkedById: string | null;
+  /** Where the admin looked her up, when the record says; absent on rows from before it was recorded. */
+  checkedAgainst?: string;
   /** True when the date the clock runs from is her profile's creation, for want of a record. */
   recordMissing: boolean;
   dueAt: string;
@@ -122,6 +131,7 @@ export function recheckState(check: VerificationCheck | undefined, createdAt: Da
   return {
     checkedAt: check ? check.checkedAt.toISOString() : null,
     checkedById: check?.checkedById ?? null,
+    ...(check?.checkedAgainst ? { checkedAgainst: check.checkedAgainst } : {}),
     recordMissing: !check,
     dueAt: due.toISOString(),
     lapsesAt: lapses.toISOString(),

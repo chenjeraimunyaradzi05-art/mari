@@ -26,6 +26,7 @@ import { notifyAdmins } from './admin-notify.service';
 import { recordBannedIdentity } from './banned-identity.service';
 import { sessionService } from './session.service';
 import { takenDownByStaff, withStaffTakedown, withoutStaffTakedown } from './housing-supply.service';
+import { setReviewHidden } from './wellness/health-review.service';
 import { captureMessageForEvidence } from './report-context.service';
 import { IMMEDIATE_HIDE_ACTION } from './moderation-threshold.service';
 
@@ -1157,6 +1158,13 @@ async function removeContent(
     case 'wellness_reply':
       await prisma.wellnessReply.updateMany({ where: { id: contentId }, data: { isHidden: true } });
       break;
+    case 'health_review':
+      // A review of a practitioner. Hidden, and the practitioner's average and
+      // count brought level with what still shows, which is the same pair of
+      // writes a moderator's Hide makes on the practitioner's page. A review
+      // already gone (the visit it came from was erased) is not an error.
+      await setReviewHidden(contentId, true);
+      break;
     case 'profile':
       // A profile is not content that can be taken down on its own. Saying so
       // here stops the decision looking as though it was carried out.
@@ -1195,6 +1203,8 @@ async function restoreContent(contentType: string, contentId: string): Promise<b
     case 'wellness_reply':
       await prisma.wellnessReply.updateMany({ where: { id: contentId }, data: { isHidden: false } });
       return true;
+    case 'health_review':
+      return (await setReviewHidden(contentId, false)) !== null;
     case 'event':
       await prisma.event.updateMany({ where: { id: contentId }, data: { isHidden: false } });
       return true;
@@ -1310,6 +1320,7 @@ const REMOVED_THING: Record<string, string> = {
   housing_listing: 'housing listing',
   wellness_post: 'forum post',
   wellness_reply: 'forum reply',
+  health_review: 'review of a practitioner',
 };
 
 /**

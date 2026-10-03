@@ -28,6 +28,8 @@ import { notifyAdmins } from '../services/admin-notify.service';
 import { awardAchievement, getUserAchievements } from '../services/engagement.service';
 import { openReportIntake, runReportIntakeConsequences } from '../services/content-report.service';
 import { handleUserReport } from '../services/safety-score.service';
+import { assertContentAllowed } from '../services/moderation.service';
+import { practitionerRating, setReviewHidden } from '../services/wellness/health-review.service';
 import { answerSharedWords, privateCrisisAnswer, screenText } from '../services/wellness/wellness-crisis.service';
 import { encryptJson, decryptJson } from '../services/wellness/health-crypto';
 import { buildBookingIcs, buildCircleIcs } from '../services/wellness/wellness-calendar';
@@ -870,8 +872,8 @@ const FORUM_REPORT_REASONS = { HARASSMENT: 'harassment', HATE_SPEECH: 'hate_spee
 const forumReportSchema = z.object({ reason: z.enum(Object.keys(FORUM_REPORT_REASONS) as [keyof typeof FORUM_REPORT_REASONS, ...Array<keyof typeof FORUM_REPORT_REASONS>]), description: z.string().max(1000).optional() });
 
 /**
- * File a report on a forum post or reply through the same intake as every other
- * report on the platform (POST /api/safety/reports): a reference she can quote,
+ * File a report on a forum post, a reply or a review of a practitioner through
+ * the same intake as every other report on the platform (POST /api/safety/reports): a reference she can quote,
  * a priority, the review clock the Online Safety Act sets, and the alert to
  * Trust and Safety for what is urgent.
  *
@@ -883,7 +885,7 @@ const forumReportSchema = z.object({ reason: z.enum(Object.keys(FORUM_REPORT_REA
  * The report is saved before anything that follows, and nothing that follows may
  * turn it into an error: she would file it again and the queue would hold two.
  */
-async function fileForumReport(req: AuthRequest, target: { contentType: 'WELLNESS_POST' | 'WELLNESS_REPLY'; contentId: string; reportedUserId: string }, data: z.infer<typeof forumReportSchema>) {
+async function fileWellnessReport(req: AuthRequest, target: { contentType: 'WELLNESS_POST' | 'WELLNESS_REPLY' | 'HEALTH_REVIEW'; contentId: string; reportedUserId: string }, data: z.infer<typeof forumReportSchema>) {
   const reason = FORUM_REPORT_REASONS[data.reason];
   // Self-harm is rated critical by the intake, and a report of it is urgent as a
   // reporter marking it so would be: the shorter of the two review clocks, 24 hours,
@@ -901,7 +903,7 @@ async function fileForumReport(req: AuthRequest, target: { contentType: 'WELLNES
       status: 'PENDING',
       reviewDeadline: intake.reviewDeadline,
       priority: intake.priorityLevel,
-      evidence: { ticketId: intake.ticketId, reviewDeadline: intake.reviewDeadline.toISOString(), reviewHours: intake.reviewHours, priority: intake.priority, source: 'WELLNESS_FORUM_REPORT', reportedAs: data.reason },
+      evidence: { ticketId: intake.ticketId, reviewDeadline: intake.reviewDeadline.toISOString(), reviewHours: intake.reviewHours, priority: intake.priority, source: target.contentType === 'HEALTH_REVIEW' ? 'WELLNESS_REVIEW_REPORT' : 'WELLNESS_FORUM_REPORT', reportedAs: data.reason },
     },
   });
   // The same signal every other door gives the safety score: one voice per
@@ -923,7 +925,7 @@ router.post('/forum-posts/:id/report', authenticate, reportLimiter, async (req: 
     if (!post) throw new ApiError(404, 'Post not found');
     const data = parse(forumReportSchema, req.body);
     if (post.authorId === req.user!.id) throw new ApiError(400, 'You can delete your own post instead');
-    ok(res, await fileForumReport(req, { contentType: 'WELLNESS_POST', contentId: post.id, reportedUserId: post.authorId }, data), 201);
+    ok(res, await fileWellnessReport(req, { contentType: 'WELLNESS_POST', contentId: post.id, reportedUserId: post.authorId }, data), 201);
   } catch (error) { next(error); }
 });
 
@@ -936,7 +938,7 @@ router.post('/forum-replies/:id/report', authenticate, reportLimiter, async (req
     if (!reply) throw new ApiError(404, 'Reply not found');
     const data = parse(forumReportSchema, req.body);
     if (reply.authorId === req.user!.id) throw new ApiError(400, 'You can delete your own reply instead');
-    ok(res, await fileForumReport(req, { contentType: 'WELLNESS_REPLY', contentId: reply.id, reportedUserId: reply.authorId }, data), 201);
+    ok(res, await fileWellnessReport(req, { contentType: 'WELLNESS_REPLY', contentId: reply.id, reportedUserId: reply.authorId }, data), 201);
   } catch (error) { next(error); }
 });
 
@@ -1300,10 +1302,25 @@ router.get('/practitioners/:slug', authenticate, async (req: AuthRequest, res: R
   } catch (error) { next(error); }
 });
 
+/**
+ * Whether this member may read a practitioner's page at all: the directory shows
+ * verified profiles, and an unverified one exists only for its owner and for
+ * staff (the detail route above). The slots and the reviews used to answer for
+ * any active profile, so a practitioner whose registration had lapsed, or whom
+ * an admin had never checked, could still have her times and her ratings read
+ * by anyone who knew her id.
+ */
+const mayReadPractitioner = (req: AuthRequest, p: { isVerified: boolean; ownerUserId: string | null }) => {
+  if (p.isVerified) return true;
+  const viewer = req.user;
+  if (!viewer) return false;
+  return p.ownerUserId === viewer.id || isModeratorRole(viewer.role);
+};
+
 router.get('/practitioners/:id/slots', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const p = await prisma.healthPractitioner.findUnique({ where: { id: req.params.id } });
-    if (!p || !p.isActive || !p.acceptsBookings) throw new ApiError(404, 'This practitioner does not take bookings here');
+    if (!p || !p.isActive || !p.acceptsBookings || !mayReadPractitioner(req, p)) throw new ApiError(404, 'This practitioner does not take bookings here');
     const { day } = parse(z.object({ day: isoDaySchema }), req.query);
     const booked = await prisma.healthBooking.findMany({ where: { practitionerId: p.id, status: { in: ['REQUESTED', 'CONFIRMED'] }, scheduledAt: { gte: dayDate(addDays(day, -1)), lte: dayDate(addDays(day, 2)) } }, select: { scheduledAt: true, durationMinutes: true } });
     const tz = p.ownerUserId ? await memberTimezone(p.ownerUserId) : undefined;
@@ -1313,6 +1330,8 @@ router.get('/practitioners/:id/slots', authenticate, async (req: AuthRequest, re
 
 router.get('/practitioners/:id/reviews', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    const p = await prisma.healthPractitioner.findUnique({ where: { id: req.params.id }, select: { id: true, isActive: true, isVerified: true, ownerUserId: true } });
+    if (!p || !p.isActive || !mayReadPractitioner(req, p)) throw new ApiError(404, 'Practitioner not found');
     const page = pageParam(req.query.page, 1, 1, MAX_PAGE);
     const [reviews, total] = await Promise.all([
       prisma.healthReview.findMany({ where: { practitionerId: req.params.id, isHidden: false }, orderBy: { createdAt: 'desc' }, skip: (page - 1) * 20, take: 20, include: { user: { select: { firstName: true } } } }),
@@ -1375,9 +1394,32 @@ router.post('/practitioners/:id/bookings', authenticate, async (req: AuthRequest
 // listed as verified to women booking a psychologist could not be traced to
 // anybody's check, or to what had been checked. An unknown id is a 404 rather
 // than Prisma's P2025 escaping as a 500.
+//
+// Verifying also says what the admin looked her up on and what they found. The
+// row used to hold the profile's snapshot and nothing else, so it recorded what
+// was claimed and not what was checked: a badge a woman trusts, with no record
+// of the register that backed it. AHPRA offers no lookup API, so this is a
+// person's word, written down.
+const VERIFY_CHECK_NOTE_REQUIRED = 'Say what you checked, in a sentence or two: where you looked the practitioner up and what you found. It is kept in the record of this decision.';
+const verifyBodySchema = z.object({
+  isVerified: z.boolean(),
+  isActive: z.boolean().optional(),
+  /** AHPRA for the kinds it registers; the professional body for the rest. */
+  checkedAgainst: z.enum(['AHPRA', 'PROFESSIONAL_BODY']).optional(),
+  /** The body's name when it is not AHPRA (PACFA, ACA, DAA, the midwifery college). */
+  registerName: z.string().trim().max(120).optional(),
+  checkNote: z.string().trim().max(1000).optional(),
+});
+
 router.patch('/practitioners/:id/verify', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { isVerified, isActive } = parse(z.object({ isVerified: z.boolean(), isActive: z.boolean().optional() }), req.body);
+    const { isVerified, isActive, checkedAgainst, registerName, checkNote } = parse(verifyBodySchema, req.body);
+    if (isVerified) {
+      if (!checkedAgainst) throw new ApiError(400, 'Say which register you checked: AHPRA, or the professional body.');
+      if (checkedAgainst === 'PROFESSIONAL_BODY' && !registerName) throw new ApiError(400, 'Name the professional body you checked with.');
+      if (!checkNote || checkNote.length < 10) throw new ApiError(400, VERIFY_CHECK_NOTE_REQUIRED);
+    }
+    const check = isVerified ? { register: checkedAgainst!, registerName: checkedAgainst === 'AHPRA' ? 'AHPRA' : registerName!, note: checkNote! } : null;
     let p;
     try {
       p = await prisma.healthPractitioner.update({ where: { id: req.params.id }, data: { isVerified, ...(isActive === undefined ? {} : { isActive }) } });
@@ -1398,6 +1440,9 @@ router.patch('/practitioners/:id/verify', authenticate, requireRole('ADMIN'), as
           isVerified,
           ...(isActive === undefined ? {} : { isActive }),
           checked: { name: p.name, kind: p.kind, ahpraNumber: p.ahpraNumber, qualifications: p.qualifications },
+          // Where the admin looked and what they found; the re-check list reads
+          // it back (practitioner-recheck.service). A note on a refusal is kept too.
+          ...(check ? { check } : checkNote ? { check: { note: checkNote } } : {}),
         },
       })
     );
@@ -1509,6 +1554,13 @@ router.patch('/practice/bookings/:id', authenticate, async (req: AuthRequest, re
     const booking = await prisma.healthBooking.findFirst({ where: { id: req.params.id, practitionerId: p.id } });
     if (!booking) throw new ApiError(404, 'Booking not found');
     const data = parse(z.object({ status: z.enum(['CONFIRMED', 'DECLINED', 'COMPLETED', 'NO_SHOW']).optional(), meetingLink: httpUrl(300).nullable().optional(), practitionerNote: z.string().max(1000).nullable().optional() }), req.body);
+    // A visit is done, or missed, once its time has passed and not before. A
+    // completed booking is what lets a member leave a review, and bookings are
+    // free, so a practitioner could mark a booking made for next month as done
+    // today and have a "verified visit" rated before anyone had met.
+    if ((data.status === 'COMPLETED' || data.status === 'NO_SHOW') && booking.scheduledAt.getTime() > Date.now()) {
+      throw new ApiError(400, 'This appointment has not happened yet. Mark it as done or missed once its time has passed.');
+    }
     const updated = await prisma.healthBooking.update({ where: { id: booking.id }, data, include: bookingInclude });
     if (data.status && data.status !== booking.status) {
       const words: Record<string, string> = { CONFIRMED: 'confirmed', DECLINED: 'declined', COMPLETED: 'marked as done', NO_SHOW: 'marked as missed' };
@@ -1573,39 +1625,54 @@ router.get('/bookings/:id/ics', authenticate, async (req: AuthRequest, res: Resp
   } catch (error) { next(error); }
 });
 
-/**
- * The practitioner's average, asked of the database rather than assembled by
- * pulling every review row into memory and reducing over it. A practitioner
- * with nothing showing aggregates to _avg.rating === null; ratingAvg is a
- * non-null Decimal that the schema defaults to 0, so 0 is how "no ratings
- * yet" is stored, and ratingCount being 0 is what tells a page there is no
- * average to show.
- */
-async function practitionerRating(practitionerId: string): Promise<{ ratingAvg: number; ratingCount: number }> {
-  const agg = await prisma.healthReview.aggregate({ where: { practitionerId, isHidden: false }, _avg: { rating: true }, _count: { rating: true } });
-  return { ratingAvg: agg._avg.rating === null ? 0 : Math.round(agg._avg.rating * 10) / 10, ratingCount: agg._count.rating };
-}
+// A review comes out of a practitioner's average when a moderator hides it here
+// and when the moderation queue decides a report of it; both writes live in
+// health-review.service so neither place can forget the average.
 
 /** A moderator can take a review out of the average without deleting the visit it came from. */
 router.patch('/reviews/:id', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     if (!isModeratorRole(req.user!.role)) throw new ApiError(403, 'Only a moderator can hide a review');
     const { isHidden } = parse(z.object({ isHidden: z.boolean() }), req.body);
-    const existing = await prisma.healthReview.findUnique({ where: { id: req.params.id }, select: { id: true, practitionerId: true } });
-    if (!existing) throw new ApiError(404, 'Review not found');
-    const review = await prisma.healthReview.update({ where: { id: existing.id }, data: { isHidden } });
-    await prisma.healthPractitioner.update({ where: { id: existing.practitionerId }, data: await practitionerRating(existing.practitionerId) });
+    const review = await setReviewHidden(req.params.id, isHidden);
+    if (!review) throw new ApiError(404, 'Review not found');
     ok(res, { id: review.id, isHidden: review.isHidden });
+  } catch (error) { next(error); }
+});
+
+/**
+ * Report a review of a practitioner. A review had no report button: a forum
+ * post or reply could be reported and a review, which the directory shows beside
+ * a practitioner's name and which only a moderator could remove, could not. It
+ * goes through the same intake as the forum reports above, and the queue's
+ * "remove" hides it and recomputes the average (content-report.service).
+ */
+router.post('/reviews/:id/report', authenticate, reportLimiter, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const reporterId = req.user?.id;
+    if (!reporterId) throw new ApiError(401, 'Authentication required');
+    const review = await prisma.healthReview.findUnique({ where: { id: req.params.id }, select: { id: true, userId: true, isHidden: true } });
+    if (!review || review.isHidden) throw new ApiError(404, 'Review not found');
+    const data = parse(forumReportSchema, req.body);
+    if (review.userId === reporterId) throw new ApiError(400, 'You can change your own review from your appointments instead');
+    ok(res, await fileWellnessReport(req, { contentType: 'HEALTH_REVIEW', contentId: review.id, reportedUserId: review.userId }, data), 201);
   } catch (error) { next(error); }
 });
 
 router.post('/bookings/:id/review', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const booking = await prisma.healthBooking.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
+    const userId = req.user?.id;
+    if (!userId) throw new ApiError(401, 'Authentication required');
+    const booking = await prisma.healthBooking.findFirst({ where: { id: req.params.id, userId } });
     if (!booking) throw new ApiError(404, 'Booking not found');
     if (booking.status !== 'COMPLETED') throw new ApiError(400, 'Only a completed visit can be rated. That is what makes the ratings mean something.');
     const data = parse(z.object({ rating: scale, comment: z.string().max(1000).optional() }), req.body);
-    const review = await prisma.healthReview.upsert({ where: { bookingId: booking.id }, create: { practitionerId: booking.practitionerId, userId: req.user!.id, bookingId: booking.id, rating: data.rating, comment: data.comment?.trim() || null }, update: { rating: data.rating, comment: data.comment?.trim() || null } });
+    const comment = data.comment?.trim() || null;
+    // The comment is shown on the practitioner's page to every member who opens
+    // it, so it goes through the gate a forum post goes through. The rating
+    // alone is a number and is not screened.
+    if (comment) await assertContentAllowed(comment, { kind: 'health_review', userId });
+    const review = await prisma.healthReview.upsert({ where: { bookingId: booking.id }, create: { practitionerId: booking.practitionerId, userId, bookingId: booking.id, rating: data.rating, comment }, update: { rating: data.rating, comment } });
     await prisma.healthPractitioner.update({ where: { id: booking.practitionerId }, data: await practitionerRating(booking.practitionerId) });
     ok(res, review, 201);
   } catch (error) { next(error); }
@@ -1616,7 +1683,11 @@ router.post('/bookings/:id/follow-up', authenticate, async (req: AuthRequest, re
     const original = await prisma.healthBooking.findFirst({ where: { id: req.params.id, userId: req.user!.id }, include: { practitioner: true } });
     if (!original) throw new ApiError(404, 'Booking not found');
     const p = original.practitioner;
-    if (!p.isActive || !p.acceptsBookings) throw new ApiError(400, 'This practitioner is no longer taking bookings here');
+    // The same gate as a first booking (POST /practitioners/:id/bookings). A
+    // follow-up used to check only that the practice was active and taking
+    // bookings, so a practitioner whose registration had lapsed, or whose badge
+    // an admin had withdrawn, could still be booked by anyone she had seen once.
+    if (!p.isActive || !p.isVerified || !p.acceptsBookings) throw new ApiError(404, 'This practitioner does not take bookings here');
     const data = parse(z.object({ scheduledAt: z.string().datetime(), mode: z.enum(['TELEHEALTH', 'IN_PERSON']).optional() }), req.body);
     const start = new Date(data.scheduledAt);
     const tz = p.ownerUserId ? await memberTimezone(p.ownerUserId) : undefined;

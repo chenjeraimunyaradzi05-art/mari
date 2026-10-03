@@ -82,18 +82,28 @@ jest.mock('../../utils/prisma', () => ({
     wellnessChallenge: { findMany: jest.fn(async () => []) },
     healthPractitioner: {
       findMany: jest.fn(async ({ where }: any) => (where?.acceptsBookings === false ? [] : [practitioner])), count: jest.fn(async () => 1),
-      findUnique: jest.fn(async ({ where }: any) => (where.id === 'pr1' ? practitioner : where.ownerUserId === 'doctor' ? { ...practitioner, ownerUserId: 'doctor' } : null)),
+      // pr-unv is a practice nobody has verified, owned by "nurse".
+      findUnique: jest.fn(async ({ where }: any) => (where.id === 'pr1' ? practitioner : where.id === 'pr-unv' ? unverified : where.ownerUserId === 'doctor' ? { ...practitioner, ownerUserId: 'doctor' } : null)),
       findFirst: jest.fn(async ({ where }: any) => (where.OR?.some((o: any) => o.slug === 'dr-k' || o.id === 'pr1') ? practitioner : null)),
       update: jest.fn(async () => practitioner),
     },
     healthBooking: {
       findMany: jest.fn(async () => []), groupBy: jest.fn(async () => []),
-      findFirst: jest.fn(async ({ where }: any) => (where.id === 'b-ics' && where.userId === 'member' ? { id: 'b-ics', userId: 'member', scheduledAt: new Date('2026-09-15T23:00:00.000Z'), durationMinutes: 50, mode: 'TELEHEALTH', meetingLink: 'https://meet.example.com/x', practitioner: { name: 'Dr K, women\'s health', kind: 'GP', suburb: null, city: 'Brisbane', state: 'QLD' } } : null)),
+      // The member's own bookings (by id and userId) and the practitioner's (by id and practitionerId).
+      findFirst: jest.fn(async ({ where }: any) => {
+        if (where.id === 'b-ics' && where.userId === 'member') return { id: 'b-ics', userId: 'member', scheduledAt: new Date('2026-09-15T23:00:00.000Z'), durationMinutes: 50, mode: 'TELEHEALTH', meetingLink: 'https://meet.example.com/x', practitioner: { name: 'Dr K, women\'s health', kind: 'GP', suburb: null, city: 'Brisbane', state: 'QLD' } };
+        if (where.id === 'b-done' && where.userId === 'member') return { ...bookingRow('b-done', 'pr1', -7), status: 'COMPLETED' };
+        if (where.id === 'b-unv' && where.userId === 'member') return { ...bookingRow('b-unv', 'pr-unv', -7), status: 'COMPLETED', practitioner: unverified };
+        if (where.id === 'b-future' && where.practitionerId === 'pr1') return bookingRow('b-future', 'pr1', 3);
+        if (where.id === 'b-past' && where.practitionerId === 'pr1') return { ...bookingRow('b-past', 'pr1', -1), status: 'CONFIRMED' };
+        return null;
+      }),
       create: jest.fn(async ({ data }: any) => ({ id: 'b1', status: 'REQUESTED', createdAt: new Date(), practitionerNote: null, meetingLink: null, shareId: null, followUpOfId: null, ...data, practitioner: { id: 'pr1', slug: 'dr-k', name: 'Dr K', kind: 'GP', headline: 'GP', telehealth: true, inPerson: false, ownerUserId: 'doctor' }, review: null })),
-      update: jest.fn(async () => ({})),
+      update: jest.fn(async ({ where, data }: any) => ({ ...bookingRow(where.id, 'pr1', 1), ...data, practitioner: { id: 'pr1', slug: 'dr-k', name: 'Dr K', kind: 'GP', headline: 'GP', telehealth: true, inPerson: false, ownerUserId: 'doctor' }, review: null })),
     },
     healthReview: {
       findMany: jest.fn(async () => store.reviews.filter((r) => !r.isHidden).map((r) => ({ ...r, comment: null, createdAt: new Date(), user: { firstName: 'Ana' } }))),
+      upsert: jest.fn(async ({ create }: any) => ({ id: 'r-new', isHidden: false, createdAt: new Date(), ...create })),
       count: jest.fn(async () => store.reviews.filter((r) => !r.isHidden).length),
       // practitionerRating() asks the database for the average rather than
       // pulling every review row into memory, so the mock answers aggregate
@@ -112,6 +122,13 @@ jest.mock('../../utils/prisma', () => ({
 }));
 
 const practitioner = { id: 'pr1', slug: 'dr-k', name: 'Dr K', kind: 'GP', headline: 'A women\'s health GP', bio: 'Bio', qualifications: [], modalities: [], specialties: ['Menopause'], languages: ['English'], suburb: null, city: 'Brisbane', state: 'QLD', telehealth: true, inPerson: false, bulkBilling: false, medicareRebate: true, privateHealth: false, feeFrom: null, feeNote: null, ahpraNumber: null, website: null, phone: null, bookingUrl: null, availability: { '1': [['09:00', '12:00']], '2': [['09:00', '12:00']], '3': [['09:00', '12:00']], '4': [['09:00', '12:00']], '5': [['09:00', '12:00']] }, slotMinutes: 60, acceptsBookings: true, ownerUserId: 'doctor', isVerified: true, isActive: true, ratingAvg: 0, ratingCount: 0, createdAt: new Date() };
+/** A practice nobody has verified: created by a member, not yet checked by an admin, or lapsed. */
+const unverified = { ...practitioner, id: 'pr-unv', slug: 'dr-unv', name: 'Dr Unchecked', ownerUserId: 'nurse', isVerified: false };
+/** A booking row as Prisma returns it, `daysFromNow` days from now. */
+const bookingRow = (id: string, practitionerId: string, daysFromNow: number) => ({
+  id, userId: 'member', practitionerId, scheduledAt: new Date(Date.now() + daysFromNow * 86400000), durationMinutes: 50, mode: 'TELEHEALTH', reason: null, status: 'REQUESTED',
+  practitionerNote: null, meetingLink: null, shareId: null, followUpOfId: null, followUpCheckSentAt: null, createdAt: new Date(), updatedAt: new Date(),
+});
 
 jest.mock('../../middleware/auth', () => ({
   authenticate: (req: any, _res: any, next: any) => {
@@ -135,6 +152,14 @@ jest.mock('../../services/safety-score.service', () => ({
   handleUserReport: (...args: unknown[]) => handleUserReport(...args),
 }));
 
+// The screen a forum post goes through, which a review's comment now goes
+// through too. Allowed unless a test says otherwise.
+const assertContentAllowed = jest.fn(async (..._args: unknown[]) => undefined);
+jest.mock('../../services/moderation.service', () => ({
+  ...(jest.requireActual('../../services/moderation.service') as object),
+  assertContentAllowed: (...args: unknown[]) => assertContentAllowed(...args),
+}));
+
 import { app } from '../../index';
 import { prisma as prismaTyped } from '../../utils/prisma';
 import { decryptJson } from '../../services/wellness/health-crypto';
@@ -148,8 +173,9 @@ describe('The wellness routes', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     store.entries = []; store.settings = null; store.posts = []; store.replies = []; store.habits = []; store.logs = []; store.circles = []; store.members = [];
-    // Three showing reviews to start with; hiding one has to move the average.
-    store.reviews = [{ id: 'r1', practitionerId: 'pr1', rating: 5, isHidden: false }, { id: 'r2', practitionerId: 'pr1', rating: 4, isHidden: false }, { id: 'r3', practitionerId: 'pr1', rating: 3, isHidden: false }];
+    // Three showing reviews to start with, all by "ana"; hiding one has to move the average.
+    store.reviews = [{ id: 'r1', practitionerId: 'pr1', userId: 'ana', rating: 5, isHidden: false }, { id: 'r2', practitionerId: 'pr1', userId: 'ana', rating: 4, isHidden: false }, { id: 'r3', practitionerId: 'pr1', userId: 'ana', rating: 3, isHidden: false }];
+    assertContentAllowed.mockResolvedValue(undefined);
   });
 
   it('opens the reference, the library and the K10 to anyone', async () => {
@@ -360,6 +386,80 @@ describe('The wellness routes', () => {
     expect(prisma.healthReview.aggregate).toHaveBeenCalledWith(expect.objectContaining({ where: { practitionerId: 'pr1', isHidden: false } }));
     expect(prisma.healthPractitioner.update).toHaveBeenCalledWith(expect.objectContaining({ data: { ratingAvg: 3.5, ratingCount: 2 } }));
     await request(app).patch('/api/wellness/reviews/none').set(as('mod', 'MODERATOR')).send({ isHidden: true }).expect(404);
+  });
+
+  // The directory shows verified profiles, and an unverified one exists only for
+  // its owner and for staff. The slots, the reviews and a follow-up used to answer
+  // for any active profile, so a practitioner whose registration had lapsed could
+  // still be read, and booked again, by anyone who knew her id.
+  it('keeps a practitioner nobody has verified to her owner and a moderator: no follow-up, no slots, no reviews for a stranger', async () => {
+    await request(app).post('/api/wellness/bookings/b-unv/follow-up').set(as('member')).send({ scheduledAt: new Date(Date.now() + 7 * 86400000).toISOString() }).expect(404);
+    expect(prisma.healthBooking.create).not.toHaveBeenCalled();
+
+    await request(app).get('/api/wellness/practitioners/pr-unv/slots').set(as('member')).query({ day: TODAY }).expect(404);
+    await request(app).get('/api/wellness/practitioners/pr-unv/reviews').set(as('member')).expect(404);
+
+    await request(app).get('/api/wellness/practitioners/pr-unv/reviews').set(as('nurse')).expect(200);
+    await request(app).get('/api/wellness/practitioners/pr-unv/slots').set(as('mod', 'MODERATOR')).query({ day: TODAY }).expect(200);
+  });
+
+  // A completed booking is what lets a member leave a review, and bookings are
+  // free, so marking next month's booking as done today would manufacture a
+  // "verified visit" to rate before anyone had met.
+  it('lets a practitioner mark a visit done or missed only once its time has passed', async () => {
+    const early = await request(app).patch('/api/wellness/practice/bookings/b-future').set(as('doctor')).send({ status: 'COMPLETED' }).expect(400);
+    expect(early.body.message).toContain('has not happened yet');
+    await request(app).patch('/api/wellness/practice/bookings/b-future').set(as('doctor')).send({ status: 'NO_SHOW' }).expect(400);
+    expect(prisma.healthBooking.update).not.toHaveBeenCalled();
+
+    // Confirming it ahead of time, and the meeting link, are what the time before a visit is for.
+    await request(app).patch('/api/wellness/practice/bookings/b-future').set(as('doctor')).send({ status: 'CONFIRMED', meetingLink: 'https://meet.example.com/x' }).expect(200);
+    await request(app).patch('/api/wellness/practice/bookings/b-past').set(as('doctor')).send({ status: 'COMPLETED' }).expect(200);
+    expect(prisma.healthBooking.update).toHaveBeenLastCalledWith(expect.objectContaining({ where: { id: 'b-past' }, data: { status: 'COMPLETED' } }));
+  });
+
+  it('puts a review comment through the same screen as a post, and files a bare rating without asking', async () => {
+    await request(app).post('/api/wellness/bookings/b-done/review').set(as('member')).send({ rating: 5, comment: ' Kind, and listened. ' }).expect(201);
+    expect(assertContentAllowed).toHaveBeenCalledWith('Kind, and listened.', { kind: 'health_review', userId: 'member' });
+    expect(prisma.healthReview.upsert.mock.calls[0][0].create.comment).toBe('Kind, and listened.');
+
+    assertContentAllowed.mockClear();
+    await request(app).post('/api/wellness/bookings/b-done/review').set(as('member')).send({ rating: 4 }).expect(201);
+    expect(assertContentAllowed).not.toHaveBeenCalled();
+
+    const { ApiError } = jest.requireActual('../../middleware/errorHandler') as typeof import('../../middleware/errorHandler');
+    assertContentAllowed.mockRejectedValueOnce(new ApiError(400, 'This content violates our community guidelines'));
+    await request(app).post('/api/wellness/bookings/b-done/review').set(as('member')).send({ rating: 1, comment: 'something the screen refuses' }).expect(400);
+    expect(prisma.healthReview.upsert).toHaveBeenCalledTimes(2);
+  });
+
+  // A review had no report button: a forum post or reply could be reported and
+  // a review, which the directory shows beside a practitioner's name, could not.
+  describe('reporting a review of a practitioner', () => {
+    const intake = jest.requireActual('../../services/content-report.service') as typeof import('../../services/content-report.service');
+
+    it('goes through the same intake as a forum report, against the member who wrote it', async () => {
+      const consequences = jest.spyOn(intake, 'runReportIntakeConsequences').mockResolvedValue(undefined);
+
+      const res = await request(app).post('/api/wellness/reviews/r1/report').set(as('member')).send({ reason: 'HARASSMENT', description: 'Names the receptionist and insults her' }).expect(201);
+
+      const row = prisma.contentReport.create.mock.calls[0][0].data;
+      expect(row).toMatchObject({ reporterId: 'member', contentType: 'HEALTH_REVIEW', contentId: 'r1', reportedUserId: 'ana', reason: 'harassment', status: 'PENDING' });
+      expect(row.reviewDeadline).toBeInstanceOf(Date);
+      expect(row.evidence).toMatchObject({ source: 'WELLNESS_REVIEW_REPORT', reportedAs: 'HARASSMENT' });
+      expect(res.body.data.reference).toMatch(/^RPT-/);
+      expect(consequences).toHaveBeenCalledWith(expect.objectContaining({ contentType: 'HEALTH_REVIEW', contentId: 'r1' }));
+      expect(handleUserReport).toHaveBeenCalledWith('ana', 'member', 'harassment', 'r1', 'health_review');
+      consequences.mockRestore();
+    });
+
+    it('refuses her own review, and does not exist for a hidden one or one that is not there', async () => {
+      await request(app).post('/api/wellness/reviews/r1/report').set(as('ana')).send({ reason: 'SPAM' }).expect(400);
+      store.reviews[1].isHidden = true;
+      await request(app).post('/api/wellness/reviews/r2/report').set(as('member')).send({ reason: 'SPAM' }).expect(404);
+      await request(app).post('/api/wellness/reviews/nope/report').set(as('member')).send({ reason: 'SPAM' }).expect(404);
+      expect(prisma.contentReport.create).not.toHaveBeenCalled();
+    });
   });
 
   it('says when a bookable practitioner is next free, and filters on booking here', async () => {
