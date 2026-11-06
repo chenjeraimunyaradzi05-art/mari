@@ -94,10 +94,13 @@ Added `womanSelfAttested: true` to all test registration requests:
 ```javascript
 {
   email: string,              // Valid email
-  password: string,           // Min 8 chars, 1 uppercase, 1 lowercase, 1 number
+  password: string,           // 12 to 128 chars, with an uppercase letter, a lowercase letter,
+                              // a number and a special character
   firstName: string,          // Non-empty
   lastName: string,           // Non-empty
-  womanSelfAttested: true,    // REQUIRED - must be true (women-only platform)
+  womanSelfAttested: true,    // REQUIRED - exactly the boolean true (women-only platform)
+  dateOfBirth: string,        // REQUIRED - an ISO date (1990-05-04). ATHENA is for adults, and
+                              // an account with no date of birth is refused
 }
 ```
 
@@ -116,34 +119,36 @@ curl -X POST http://localhost:5000/api/auth/register \
   -H "Content-Type: application/json" \
   -d '{
     "email": "user@example.com",
-    "password": "Password123",
+    "password": "Str0ng!Passphrase26",
     "firstName": "Jane",
     "lastName": "Doe",
     "womanSelfAttested": true,
+    "dateOfBirth": "1990-05-04",
     "persona": "EARLY_CAREER"
   }'
 ```
 
 ### Success Response (201 Created)
+
+Registration opens **no session**. The reply has no account, no access token, no refresh token and no `Set-Cookie`; the link that finishes sign-up is in an email, and sign-in is refused until it is followed. (This section used to show an `accessToken` here. It has not been true since the 2026-08-19 snapshot, and `src/__tests__/auth.happy.test.ts` holds it: register never issues tokens.)
+
 ```json
 {
   "success": true,
-  "message": "Registration successful. Please check your email to verify your account.",
+  "message": "Registration received. If this address can be used, an email is on its way.",
   "data": {
-    "user": {
-      "id": "uuid",
-      "email": "user@example.com",
-      "firstName": "Jane",
-      "lastName": "Doe",
-      "role": "USER",
-      "persona": "EARLY_CAREER",
-      "referralCode": "ABC123"
-    },
-    "accessToken": "eyJhbGc...",
-    "refreshToken": "eyJhbGc..."
+    "verificationRequired": true
   }
 }
 ```
+
+The same status and body come back for an address that already has an account, so the form cannot be used to ask whether somebody has one; the owner of that address is told by email instead. If the account was saved but the confirmation email could not be sent, the answer is a 503 with `code: "VERIFICATION_EMAIL_FAILED"`, and the sign-up page offers a resend button rather than an empty form.
+
+Until she confirms the address:
+
+- `POST /api/auth/login` answers `403` with `Please verify your email before signing in.` (after the password has been checked, so the answer says nothing to someone who only has the address). The web and phone sign-in screens match that sentence and offer a new link, which is `POST /api/auth/resend-verification`.
+- She cannot hold a token, so she cannot post, message, book or pay.
+- She is not in people search, suggestions or mentions, `GET /api/users/:id` answers 404 for her, and she cannot be followed.
 
 ---
 
@@ -163,7 +168,7 @@ curl -X POST http://localhost:5000/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{
     "email": "user@example.com",
-    "password": "Password123"
+    "password": "Str0ng!Passphrase26"
   }'
 ```
 
@@ -184,10 +189,12 @@ curl -X POST http://localhost:5000/api/auth/login \
       "timezone": "Australia/Sydney"
     },
     "accessToken": "eyJhbGc...",
-    "refreshToken": "eyJhbGc..."
+    "expiresIn": 900
   }
 }
 ```
+
+A browser's refresh token travels in an HttpOnly `refreshToken` cookie and is not in the body. A phone app that sends `X-Athena-Client: mobile` is given the refresh token in the body (`"refreshToken": "eyJhbGc..."`) instead, because it has no cookie jar. A sign-in is also refused with a `403` while the address is unconfirmed, the account is suspended, or the member has locked it herself (`This account is locked...`, see `docs/security/authorisation-matrix.md`).
 
 ---
 
@@ -209,20 +216,22 @@ The client uses [athena-platform/client/src/lib/api.ts](athena-platform/client/s
 ```typescript
 import { authApi } from '@/lib/api';
 
-// Register
-const res = await authApi.register({
+// Register: no session comes back. The page asks her to check her email
+// (components/auth/CheckYourEmail.tsx) and she signs in once it is confirmed.
+await authApi.register({
   email: 'user@example.com',
-  password: 'Password123',
+  password: 'Str0ng!Passphrase26',
   firstName: 'Jane',
   lastName: 'Doe',
   womanSelfAttested: true,
+  dateOfBirth: '1990-05-04',
   persona: 'EARLY_CAREER',
 });
 
 // Login
 const res = await authApi.login({
   email: 'user@example.com',
-  password: 'Password123',
+  password: 'Str0ng!Passphrase26',
 });
 
 // Access token is stored in-memory (not localStorage). Refresh token is HttpOnly cookie.
@@ -282,15 +291,20 @@ npm test 2>&1 | grep -A5 "auth"
    - Go to http://localhost:3000/register
    - Fill in form with:
      - Email: test@example.com
-     - Password: TestPass123 (min 8 chars, upper, lower, number)
+     - Password: at least 12 characters with an uppercase letter, a lowercase letter, a number and a symbol
      - First Name: Test
      - Last Name: User
+     - Date of birth (required; adults only)
      - Checkbox: "I confirm I am a woman" (required)
-   - Click Register
+   - Click Create account. The page changes to "Check your email"; you are not signed in.
+   - In development the API only logs that a mail would be sent. Confirm the address
+     from the token handed to the email layer, or on a disposable database with
+     `node scripts/verify-e2e-member.js <address>` (test addresses only).
 
 4. Test login:
    - Go to http://localhost:3000/login
-   - Use registered email and password
+   - Use the confirmed email and password. Before the address is confirmed the page says to
+     verify your email and offers to send a new link.
 
 ---
 

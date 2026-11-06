@@ -36,7 +36,8 @@ Unlike competitors that bolt together features, ATHENA will develop **integrated
 ### 1.1 Core Messaging Features from WhatsApp
 
 #### **Real-Time Messaging**
-- End-to-end encrypted 1:1 and group conversations (120+ participants initially, 5,000+ for enterprise)
+- 1:1 and group conversations, encrypted in transit and at rest on ATHENA's servers. **End-to-end encryption is not planned for launch** and no member-facing copy may claim it: messages are stored as text the server can read, so that a reported message can be shown to the team that reviews it and its words can be checked for abuse before they are stored, and client-side keys would remove both. If it is ever pursued it would be DM-only, behind a feature flag, with a reported-message escrow so reports still carry evidence.
+- Group size is capped per group (1,000 members by default); the 120+ and 5,000+ figures in earlier drafts are not a feature: there is no enterprise tier.
 - Message status: sent, delivered, read
 - Typing indicators and presence
 - Message search and organization
@@ -104,12 +105,12 @@ Unlike competitors that bolt together features, ATHENA will develop **integrated
 - Message disappearing (timers: 24 hours, 7 days, 90 days)
 - Blocked users list
 - Report and block functionality
-- End-to-end encryption for all messages
+- Encryption in transit and at rest for all messages (end-to-end encryption is not planned for launch; see 1.1)
 
 **ATHENA Integration:**
 - DV-safe hidden chat rooms (for domestic violence survivors)
-- Confidential mentorship conversations (encrypted end-to-end)
-- Safe housing inquiry messages (encrypted, no metadata)
+- Confidential mentorship conversations (the same encryption in transit and at rest as every message; not end-to-end encrypted)
+- Safe housing inquiry messages (a confidential listing shows its lister an anonymous applicant label, not the member's name; the inquiry text itself is stored on ATHENA's servers like any other message, not end-to-end encrypted)
 - Harassment reporting with automatic evidence preservation
 
 #### **Business Features (WhatsApp Business API)**
@@ -928,7 +929,7 @@ Stage 4: Feed Construction & Serving
 ### 5.1 Phase 1: MVP (Months 1-3)
 
 **Features Included:**
-- WhatsApp-style messaging (1:1 + groups, encrypted, status)
+- WhatsApp-style messaging (1:1 + groups, encrypted in transit and at rest, status)
 - TikTok-style short-form video (15-60 sec, trending sounds, effects)
 - Instagram-style Reels (monetization, shopping, stories)
 - Facebook-style Groups (communities, events, discussion)
@@ -1001,7 +1002,7 @@ Stage 4: Feed Construction & Serving
 | **Career Networking** | ✓✓✓ | ✗ | ✓ | ✓ | ✓✓✓+ (AI-powered) |
 | **Video Content** | ✗ | ✓✓✓ | ✓✓ | ✓ | ✓✓✓ (career-focused) |
 | **Mentorship** | ✓ | ✗ | ✗ | ✗ | ✓✓✓ (AI-matched) |
-| **Messaging** | ✗ | ✗ | ✓ | ✓✓✓ | ✓✓✓ (encrypted, safety) |
+| **Messaging** | ✗ | ✗ | ✓ | ✓✓✓ | ✓✓ (reportable and moderated; encrypted in transit and at rest, not end-to-end) |
 | **Creator Monetization** | ✗ | ✓✓✓ | ✓✓ | ✓ | ✓✓✓ (multi-channel) |
 | **Job Matching** | ✓✓ | ✗ | ✓ | ✓ | ✓✓✓ (specialized) |
 | **Financial Tools** | ✗ | ✗ | ✗ | ✗ | ✓✓✓ (comprehensive) |

@@ -65,9 +65,13 @@ written to, and carrying production's row counts rather than an empty schema's.
 # or:
 neonctl branches create --name migration-rehearsal
 
-# From athena-platform/server, with the branch's connection string:
+# Inspect pending migrations first (no migrations or integrity checks run):
 STAGING_DATABASE_URL="postgresql://...neon.tech/athena?sslmode=require" \
   node scripts/migration-dry-run.js
+
+# Rehearse against that separate clone after reviewing the pending SQL:
+STAGING_DATABASE_URL="postgresql://...neon.tech/athena?sslmode=require" \
+  node scripts/migration-dry-run.js --apply
 
 # Delete the branch when you are done.
 ```
@@ -75,7 +79,13 @@ STAGING_DATABASE_URL="postgresql://...neon.tech/athena?sslmode=require" \
 `STAGING_DATABASE_URL` appears in no `.env.example` on purpose: it is not a
 standing value, it is the branch you made for that rehearsal. The script used to
 throw a bare "STAGING_DATABASE_URL is required", which sent people looking for
-an environment that does not exist; it now says this.
+an environment that does not exist. Both commands require the clone's direct
+connection string and reject a target matching the application's database.
+The script pins every database alias to the clone, so Prisma cannot inherit
+the production direct connection. Only `--apply` runs migrations, real
+before/after core row counts and a schema comparison. Read both reports in
+`server/migration-reports`: unchanged counts do not prove every field or table
+was preserved, and a passed rehearsal still needs production review.
 
 CI is the other half, and it runs on every push without anyone remembering to:
 the server job applies `prisma migrate deploy` to a throwaway Postgres and then
@@ -226,12 +236,14 @@ Workflows live in `.github/workflows/`:
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `ci.yml` | Push and pull request to `main` | Typechecks, builds and tests the server and the client; runs the ML service's pytest suite; checks and unit-tests the alert rules in `athena-platform/infrastructure/monitoring/` with promtool; applies the Prisma migrations to a throwaway database and checks they still match `schema.prisma`; runs the API-contract, doc-reference and dead-interaction checks. |
-| `build-and-deploy.yml` | **A successful `CI` run on `main`**, or manual | Migrates the Neon database, deploys the API, then builds and publishes the web app to Netlify. Each target runs only when its secrets are set. |
+| `ci.yml` | Push and pull request to `main` | Typechecks, builds and tests the server and the client; runs the ML service's pytest suite; checks and unit-tests the alert rules in `athena-platform/infrastructure/monitoring/` with promtool; applies the Prisma migrations to a throwaway database and checks they still match `schema.prisma`; runs the real-Postgres integration suite against a second throwaway database (`athena_test`); runs the API-contract, doc-reference, dead-interaction and workflow-pinning checks; and calls `e2e.yml` as its `E2E (full stack)` job, so the browser journey holds the release too. |
+| `build-and-deploy.yml` | **A successful `CI` run on `main`**, or manual | Migrates the Neon database, deploys the API, then builds and publishes the web app to Netlify. Each target runs only when its secrets are set. Then, once `PRODUCTION_API_URL` is set, waits for the API to report the released commit and runs `athena-platform/server/scripts/smoke-test.js` against the live stack — the public surface always, the member journey when `SMOKE_MEMBER_EMAIL` and `SMOKE_MEMBER_PASSWORD` are in the `production` environment — and opens an issue when a check fails. |
+| `loadtest.yml` | Manual only | Load tests against a base URL you name: the health endpoint, the authenticated autocannon run, the k6 mixed workload or the k6 socket test. Refuses `PRODUCTION_API_URL` unless the `confirm_production` input is also set. Accounts and tokens come from the `loadtest` environment. Results are uploaded as an artifact and written to `athena-platform/docs/runbooks/LOAD-TEST-RESULTS.md` by hand. |
 | `netlify-deploy.yml` | Pull request touching the client | Netlify preview deploy. |
-| `e2e.yml` | Push to `main`, or manual | The browser journey against a live stack: Postgres from the migrations, the API from this commit, fixtures from `server/scripts/seed-e2e.js`, then `tests/critical-paths.spec.ts` (register, find a mentor, request a session, search jobs). Separate from CI, so it does not gate releases until it has passed on `main` once; then move it into `ci.yml`. |
+| `e2e.yml` | Called by `ci.yml` on every push and pull request, or manual | The browser journey against a live stack: Postgres from the migrations, the API from this commit, fixtures from `server/scripts/seed-e2e.js`, then `tests/critical-paths.spec.ts` (register, confirm and sign in, sign out and back in, find a mentor, request a session, search jobs), without the `@perf` timing checks. Because `build-and-deploy.yml` waits for CI, a red journey holds the release. It has not yet had a run on record: GitHub Actions has been unable to start jobs for this repository (a billing lock), so the first run after the lock clears is the proof. |
 | `mobile-build.yml` | Manual, or push to `mobile/**` | EAS builds for iOS and Android; a manual `production` run also submits to the stores. |
-| `security-audit.yml` | Weekly | `npm audit` over server, client and mobile. |
+| `security-audit.yml` | Push and pull request to `main`, weekly, or manual | On every run: a TruffleHog scan for verified secrets (the whole history on the weekly run) and `scripts/check-workflows.js`, which fails on a tracked env file that is not a template and on a third-party action not pinned to a commit. On the weekly run and by hand: `npm audit` over server, client and mobile. |
+| `codeql.yml` | Push and pull request to `main`, weekly, or manual | CodeQL over the JavaScript/TypeScript and the Python, reporting to Security → Code scanning. |
 | `uptime.yml` | Every 15 minutes | Asks the API's `/readyz` and the site's `/api/health`; opens a "Production is down" issue after three failures and closes it on recovery. Skipped until `PRODUCTION_API_URL` is set. Not a pager — see `athena-platform/docs/runbooks/ONCALL.md`. |
 | `backup.yml` | Nightly at 02:40 Brisbane time, or manual | The off-platform copy of the production database: `pg_dump` inside a snapshot, restored into a throwaway Postgres and compared table by table, sealed with age to the key holders' public keys, uploaded to a bucket whose lifecycle rule enforces the retention period. Its settings live in the `production-backups` environment, not in the secrets below; until the owner has decided the retention period and the key holders and set that environment up, every run fails and opens one "Database backup failed" issue. Setup and restore: `athena-platform/docs/runbooks/ONCALL.md`, "Backups and restore". |
 
@@ -325,10 +337,16 @@ photographs written to a disk the next deploy wiped.
 PgBouncer in transaction mode cannot hold the advisory locks Prisma migrations
 take; putting the pooled URL in both is what makes a deploy hang.
 
-`DV_ENCRYPTION_KEY` encrypts the domestic-violence safe-chat messages and the
-wellness records, and `dv-safe.service.ts` refuses it in production unless it is
-64 hex characters. Back it up somewhere the API host cannot take with it:
-without this exact value, those rows cannot be read again.
+`DV_ENCRYPTION_KEY` seals the domestic-violence safe-chat messages, the
+wellness records, members' safety plans and two-factor seeds before they reach
+the database. Production refuses to start unless it is 64 hex characters and a
+random value: all zeros, a placeholder and a repeating pattern are refused, and
+so is the all-zero value the example env file used to ship. Back it up somewhere
+the API host cannot take with it: without this exact value, those rows cannot be
+read again. This is encryption at rest, not end-to-end: the servers decrypt a
+value to show it to the member. What it does and does not protect against, and
+how to rotate the key without losing anything, is in
+`athena-platform/docs/runbooks/ENCRYPTION.md`.
 
 `ALLOWED_ORIGINS` is the whole CORS allowlist; add a custom domain here when the
 site moves. Do not reach for `CORS_ALLOW_PREVIEW_ORIGINS=true` to make a Netlify
@@ -354,24 +372,96 @@ once `NODE_ENV=production`, so a deployment missing any of them answers 503 on
 that endpoint and is not launched.
 
 ```env
-SENDGRID_API_KEY=SG....          # verification and password-reset email
+SENDGRID_API_KEY=SG....          # verification and password-reset email; a key with Mail Send only
+SENDGRID_FROM_EMAIL=noreply@mail.<your-domain>  # on the domain authenticated in SendGrid; there is no default, see "Email" below
 STRIPE_SECRET_KEY=sk_live_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 STRIPE_CONNECT_WEBHOOK_SECRET=whsec_...  # the Connect endpoint's own secret; see below
-STRIPE_PRICE_CAREER=price_...    # and _PROFESSIONAL, _ENTREPRENEUR, _CREATOR
+STRIPE_PRICE_CAREER=price_...    # and _PROFESSIONAL, _ENTREPRENEUR, _CREATOR; each an AUD price with tax behaviour "Inclusive"
+ATHENA_LEGAL_NAME=               # who ATHENA is on an invoice; with the four below, see "Invoices and GST"
+ATHENA_ABN=
+ATHENA_GST_REGISTERED_FROM=      # YYYY-MM-DD, only once registered for GST
+ATHENA_BILLING_ADDRESS=          # lines separated by |
+ATHENA_BILLING_EMAIL=            # a mailbox ATHENA owns
 AI_OPENAI_API_KEY=sk-...         # read before OPENAI_API_KEY; also gates text moderation
 METRICS_TOKEN=<openssl rand -hex 32>
 HEALTH_DIAGNOSTICS_TOKEN=<openssl rand -hex 32>
 ```
 
 Two Stripe webhook endpoints, two secrets. The platform endpoint
-(`STRIPE_WEBHOOK_SECRET`) carries the platform's own events. Connected-account
+(`STRIPE_WEBHOOK_SECRET`) carries the platform's own events: `checkout.session.completed`,
+`customer.subscription.updated`, `customer.subscription.deleted`,
+`customer.subscription.trial_will_end` (the reminder before a trial's first charge),
+`invoice.paid`, `invoice.payment_failed`, `payment_intent.succeeded`,
+`payment_intent.payment_failed`, `payment_intent.canceled`,
+`payment_intent.amount_capturable_updated`, `charge.refunded`, `charge.dispute.created`,
+`charge.dispute.updated`, `charge.dispute.closed`, `charge.dispute.funds_withdrawn`,
+`charge.dispute.funds_reinstated`, `transfer.created`, `transfer.reversed` and
+`identity.verification_session.verified` / `.requires_input`. Connected-account
 events — `payout.paid`, `payout.failed`, `account.updated` — arrive on a
 second endpoint that you create in the Stripe dashboard with "Listen to events
 on Connected accounts" ticked, and that endpoint has its own signing secret,
 `STRIPE_CONNECT_WEBHOOK_SECRET`. Without it those events are refused, and a
 seller whose payout failed or whose account Stripe stopped paying is told
-nothing.
+nothing. The payments code has never been run against real Stripe: walk
+`athena-platform/docs/runbooks/STRIPE-CONNECT.md` in test mode, and then once
+live, before announcing payouts. It is also where the payout schedule is decided
+(`STRIPE_CONNECT_PAYOUT_SCHEDULE=manual` creates new accounts on a manual
+schedule, so a balance waits until the member presses Withdraw).
+
+A process with no `STRIPE_SECRET_KEY` starts and says so at every boot, and every
+payment, payout and Connect action answers 503; nothing is simulated in its place.
+`ALLOW_STRIPE_SIMULATION=true` in production stops the process starting, and
+`scripts/check-env.js` fails a file that carries it.
+
+Email. Nothing in the product works for a new member until a verification email
+can leave, so the API refuses to start in production without `SENDGRID_API_KEY`
+and a usable `SENDGRID_FROM_EMAIL`. There is no default sender: the old one was
+`noreply@athena.com`, a domain the venture does not own, and SendGrid refuses a
+sender it has not authenticated, so every email looked sent and none arrived.
+The address has to be a single plain mailbox on a domain you own and have
+authenticated in SendGrid; `athena.com`, `athena.app`, `example.com` and the
+template's `your-domain.com` are refused by name
+(`athena-platform/server/src/utils/sender-address.ts`), and the same rule is
+applied again at each send. Authenticating the domain is three CNAME records
+that SendGrid prints (Settings > Sender Authentication > Authenticate Your
+Domain), plus a DMARC record you publish yourself, starting at `p=none`; the
+records, the order to do them in and the end-to-end check (register a throwaway
+account and read SPF, DKIM and DMARC off the email's headers) are in
+`athena-platform/docs/launch/DNS_SSL_CONFIGURATION.md` ("Email records").
+A variable cannot prove the domain is authenticated, so that check is the one
+that counts. `/health/launch-readiness` reports both variables, and a send
+that SendGrid refuses is logged as `Failed to send email` with its status and
+SendGrid's own words.
+
+Invoices and GST. Every paid membership period and every one-off payment gets an
+ATHENA invoice (a PDF, numbered INV-YYYYMM-NNNNN). Who is invoicing comes from
+`ATHENA_LEGAL_NAME`, `ATHENA_ABN`, `ATHENA_BILLING_ADDRESS` and
+`ATHENA_BILLING_EMAIL`, which have no defaults: until all four are set no
+document is produced (a member's download answers 503 and the staff re-issue with
+an email is refused), and `/health/launch-readiness` fails in production. The
+invoice rows are still filed as sales happen, and the PDF is drawn from the row on
+every download, so each can be downloaded the day the four are set. The ABN has to
+pass its checksum and the billing mailbox has to be on a domain ATHENA owns. A
+document is titled "Tax invoice",
+shows the ABN and the GST amount, and says the total includes GST, only when
+`ATHENA_ABN` passes its checksum and `ATHENA_GST_REGISTERED_FROM` has arrived, and
+only for a sale in Australian dollars. Until then it is titled "Invoice" and says
+no GST is charged, and the pricing page says the same. GST is worked out as one
+eleventh of the amount charged, which is only right if the Stripe Prices were
+created tax-inclusive. Mentor and marketplace payments are receipts for the
+provider's own supply and show no GST. Registering for GST is compulsory once turnover
+reaches A$75,000 a year (optional before); confirm the date with the ATO or the
+accountant before setting it.
+
+Card holds. A hold on a card lasts about a week with a live processor. A
+marketplace order that takes longer asks its buyer to renew the hold in the last two
+days (nothing is taken by renewing); the provider cannot hand the work over against a
+hold that has ended. `ESCROW_CAPTURE_BEFORE_EXPIRY` (default off) lets the sweep take
+the money early for work its flow records as done, and
+`ESCROW_REQUEST_EXTENDED_AUTHORISATION` (default off) asks the card network for a
+longer authorisation where it is available; check both with the owner and with
+Stripe before turning them on.
 
 Moderation is a switch, and its production default is on. With no text
 moderation provider configured (`AI_OPENAI_API_KEY`), the server used to
@@ -396,6 +486,14 @@ reason: local media storage is not a mode this platform runs in. They are now
 required at boot, and set is not the same as working, so the API also asks S3
 at start whether the bucket answers; `/health/launch-readiness` reports that
 answer (`MEDIA_STORAGE`) rather than whether the variables are filled in.
+
+Two kinds of file live in the bucket. Avatars, covers, posts, videos, thumbnails,
+captions and sounds are public and are served through `CDN_URL`. Résumés and
+documents are private: they are addressed at the bucket, never the CDN, and read
+only through the API. So the bucket keeps Block Public Access on and the CDN may
+fetch the public folders only. `athena-platform/infrastructure/README.md` ("Media
+bucket") has the policy, and `GET /health/launch-readiness?probe=media` with the diagnostics
+token proves it from outside once it is set up.
 
 ### API Server (genuinely optional)
 
@@ -469,8 +567,15 @@ setting it needs a new Netlify deploy.
 ```env
 NEXT_PUBLIC_SOCKET_URL=https://api.your-domain.com   # defaults to NEXT_PUBLIC_API_URL
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_...
-NEXT_PUBLIC_SENTRY_DSN=https://...
+NEXT_PUBLIC_MEDIA_HOST=cdn.your-domain.com           # the API's CDN_URL host, so next/image loads avatars from it; build time
+NEXT_PUBLIC_SENTRY_DSN=https://...   # baked in at build time: set it, then deploy again
+SENTRY_ORG=your-org                  # build only: lets the build upload source maps
+SENTRY_PROJECT=your-web-project      # build only
+SENTRY_AUTH_TOKEN=...                # build only, a secret: a Sentry organisation token (Builds scope)
 ```
+
+With the DSN and no `SENTRY_AUTH_TOKEN`, errors are still reported but point at
+minified code, and `scripts/check-web-env.js` says so in the build log.
 
 ## Troubleshooting
 
@@ -537,11 +642,13 @@ mari/
 │       ├── build-and-deploy.yml   # Migrate Neon, publish to Netlify
 │       ├── netlify-deploy.yml     # PR preview deploys
 │       ├── mobile-build.yml       # EAS builds
-│       └── security-audit.yml     # Weekly npm audit
+│       ├── e2e.yml                # The full-stack browser journey, called from ci.yml
+│       ├── codeql.yml             # Code scanning
+│       └── security-audit.yml     # Secret scan and env-file guard on every push; weekly npm audit
 ├── athena-platform/
 │   ├── client/                    # Next.js web app (Netlify)
 │   │   ├── netlify.toml
-│   │   └── .env.netlify           # Netlify variable template
+│   │   └── .env.netlify.example   # Netlify variable template
 │   ├── server/                    # Express API (Render or Fly.io)
 │   │   ├── Dockerfile
 │   │   ├── fly.toml               # Fly.io config; beside the Dockerfile
